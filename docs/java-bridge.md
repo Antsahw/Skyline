@@ -114,8 +114,57 @@ saying something works.
   component (`json`), drawn styled by Horizon (Jade's blue italic mod name).
 - A click where the mouse wasn't at the last frame draws a frame there first (widgets that
   keep their hover from drawing).
+- Sprites with nine-slice or tile metadata are always split in Java (vanilla's drawing into
+  pieces of the headless sprite): Horizon's frame drawing stretches a `sprite` op whole.
+  Headless sprites asked for with no atlas get the GUI atlas's location (vanilla's nine-slice
+  blits it: a null one threw).
+- An atlas blitted with a sprite's own UVs (`blit(atlas, …, u0, u1, …)`: corelib's
+  `submitSprite`, its screens' backgrounds) resolves to the sprite by UV square too.
+- Text added to the render state itself (`GuiRenderState.addText(GuiTextRenderState)`:
+  corelib's `submitText`, Chunk Loaders' owner panel) is captured as a text op in its pose.
+- Scissors: `scissor`/`unscissor` ops nest (intersected, through their pose) and the game
+  clips what is drawn under them (`clip_since`): Tech Reborn's energy bars draw the whole bar
+  and scissor it to the level.
+- A mod's own payload sent as a raw packet (`player.connection.send(new
+  ClientboundCustomPayloadPacket(...))`: corelib's channels) goes to the mod's client code like
+  a Fabric one (`PacketListenerMixin.modPayload`; vanilla's and Fabric's own stay dropped).
+  What a client handler schedules (`Minecraft.schedule`: corelib queues its packets) runs
+  right after it, still inside `as(player)`: in their client level. Before, Chunk Loaders'
+  client copy never got its loaders, so no cell could be toggled.
+- The client's services resolve profiles of the players on the server (then usercache.json)
+  before Mojang: Chunk Loaders' owner name.
+- Jar-in-jar mods with textures (`META-INF/jars/`: RebornCore in Tech Reborn) are carried as
+  mods of their own by the content build (`content.rs`, `nested_jars`; FORMAT 10), so their GUI
+  textures join the atlas. Before, Tech Reborn's screens drew only vanilla's inventory.
 - `HORIZON_JAVA_DEBUG=loop` logs messages between the halves; `=screens` also logs each sent
-  screen frame (first 4000 chars); `=hud` logs the block looked at and its state.
+  screen frame (first 4000 chars) and the inventory overlay's input; `=hud` logs the block
+  looked at and its state.
+
+## Mods' overlay on Horizon's inventory (REI)
+
+- While Horizon's own inventory (or a container screen of its own) is open with no mod screen
+  in its place, the game sends window `-3` input: `open` (GUI size), mouse moves, `close`. Java
+  keeps a `HorizonOverlayScreen` per player (an `AbstractContainerScreen` of the player's
+  inventory menu that draws nothing itself; vanilla's InventoryScreen needs the player model
+  and recipe book) and draws it `modsOnly` each frame (`sendOverlay`, only when changed) to
+  `horizon:java_overlay`. The game draws it over the inventory (`draw_java_overlay`).
+- Presses outside the inventory's window with nothing carried go to the overlay (and their
+  drags and release), as does the wheel there; keys while REI's search box is focused
+  (`HorizonRecipeViewer.searchFocused` makes `typing`). R and U over one of Horizon's slots
+  send `recipes` with the slot's item (SNBT): REI's recipes/uses view, a client-only screen.
+  Escape there goes back to the inventory (`setScreen(HorizonOverlayScreen)` = close, and
+  the game returns to its inventory: `JavaOverlay.back`).
+- The server sends an empty overlay frame as a player joins: the game only talks to `-3` once
+  it knows the server has Java mods.
+- Screen input fires Architectury's `ClientScreenInputEvent` PRE/POST around the screen's
+  handler (`HorizonScreenEvents`; vanilla's MouseHandler/KeyboardHandler mixins fire them):
+  REI takes its clicks, keys and scrolls there, not from the screen.
+- REI's item list searched once as its overlay was made, before the displays were in: empty
+  (0/1). After its reload `HorizonRecipeViewer.refreshSearch` searches again.
+- `modsOnly`'s stack walk skips `dev.horizonlab.platform.generated.*` (the REI graphics
+  wrappers), or every REI draw counted as Horizon's.
+- The headless Minecraft has a `KeyboardHandler` (allocated): a focused text box resubmits
+  its IME preedit through it.
 
 ## Client HUD mods
 
@@ -596,10 +645,8 @@ Next (top failure of the pack, in order):
    Java): the stove placed by the scene was gone a few seconds later, its outline left. A
    chunk generated on the Java side landing after a block was set in it would do that: check
    that a finished proto never replaces a chunk Horizon already has.
-2. Chunk Loaders' grid shows (client level, chunk maps), but clicking a cell doesn't toggle
-   it yet: the screen takes the press, no cell's `onPress` runs and nothing is sent (the
-   cell's owner is the player; look at corelib's `BaseWidget.mousePressed` order and
-   `isClickable`). The owner's name next to the head is empty (profile lookup).
+2. Chunk Loaders: cells toggle (`SCENE=loader`), owner name and panel show. Its block
+   entity renderer fails headless (`ModelManager.getBlockStateModelSet` is null).
    No list of Java mods' settings in Horizon's own menus yet (`/modconfig` is the way in).
 3. Vanilla patches Horizon still does in Rust (the `Mixin table: Rust does …` lines): biome
    weather and snow (Serene Seasons' seasons in the sky), entity riding, the inventory's slot
@@ -720,9 +767,10 @@ through the mods with no failed chunk. Not available for 26.3 Fabric yet: EMI, P
 `/recipes [item]` and `/uses [item]` (the held item without one) open REI's recipe view
 (`HorizonRecipeViewer`): vanilla crafting, Farmer's Delight cooking, Tech Reborn's compressor,
 Energized Power's recipes draw. The first one reloads REI (~3 s).
-Left: REI's item list panel is empty (its creative tab collection fails); REI's overlay
-over Horizon's inventory and its R/U keys aren't wired (Horizon's inventory isn't a Java
-screen); sprites drawn under a scissor overflow it (Tech Reborn's energy bars); GraphLib logs
+REI's item list, search box and R/U keys work over Horizon's inventory (2026-10-31,
+`bridge-rei-overlay`). Left: REI's overlay isn't drawn over mod container screens (the
+screen frame is drawn whole, REI not in it); its craftable-filter button lacks its crafting
+table icon; GraphLib logs
 an error each tick per level (`ServerChunkCache.chunkMap` is null on the mirror); Glitchcore's
 client tick wants `LevelExtractor`; Traveler's Backpack's model
 reload listener fails.

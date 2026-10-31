@@ -39,6 +39,31 @@ pub(super) const HUD_CHANNEL: &str = "horizon:java_hud";
 /// The HUD's "window" for [`INPUT`]: its GUI size, which the mods' HUD lays out in.
 pub(super) const HUD_WINDOW: i32 = -2;
 
+/// What Java mods draw over Horizon's inventory (REI's item list and search box), server to
+/// client: a frame's operations (`[...]`), sent when they change. The first, empty, frame as the
+/// player joins says the server has the overlay.
+pub(super) const OVERLAY_CHANNEL: &str = "horizon:java_overlay";
+/// The inventory overlay's "window" for [`INPUT`]: `open` (with the GUI size) and `close` as
+/// Horizon's inventory opens and closes, `recipes` (R and U over a slot), mouse and keys.
+pub(super) const OVERLAY_WINDOW: i32 = -3;
+
+/// The mods' overlay on Horizon's inventory (HorizonClient's vanilla inventory screen under it).
+#[derive(Default)]
+pub(super) struct JavaOverlay {
+    /// The server draws one (its first frame came).
+    enabled: bool,
+    /// The server heard the inventory opened.
+    open: bool,
+    ops: Vec<Value>,
+    sent_mouse: Option<(i32, i32)>,
+    sent_size: Option<(i32, i32)>,
+    typing: bool,
+    /// A press went to the overlay: its drags and release go there too.
+    pressed: bool,
+    /// A client-only screen opened over the inventory (REI's recipes): closing it goes back.
+    back: bool,
+}
+
 /// Java mods' dynamic textures this game holds (`{"op":"image"}`): by name, their atlas slot
 /// and size, least recently stored first.
 #[derive(Default)]
@@ -183,6 +208,7 @@ impl Game<'_> {
         }
         // A client-only screen is a screen of its own, over the world (or what was open).
         if window == CLIENT_WINDOW && self.screen != Screen::JavaMod {
+            self.java_overlay.back = self.screen == Screen::Inventory;
             self.screen = Screen::JavaMod;
             self.capture(false);
         }
@@ -195,6 +221,132 @@ impl Game<'_> {
         };
         let ops = self.take_java_images(&ops);
         self.java_hud.get_or_insert_with(Default::default).ops = ops;
+    }
+
+    /// A frame of the mods' overlay on the inventory ([`OVERLAY_CHANNEL`]).
+    pub(super) fn remote_java_overlay(&mut self, data: &[u8]) {
+        let Ok(Value::Array(ops)) = serde_json::from_slice::<Value>(data) else {
+            return;
+        };
+        let ops = self.take_java_images(&ops);
+        let overlay = &mut self.java_overlay;
+        overlay.enabled = true;
+        overlay.typing = ops
+            .iter()
+            .any(|op| op.get("op").and_then(Value::as_str) == Some("typing"));
+        overlay.ops = ops;
+    }
+
+    /// Horizon's own inventory (or container) screen is open, with no mod screen in its place:
+    /// the mods' overlay shows on it.
+    fn java_overlay_on(&self) -> bool {
+        self.java_overlay.enabled
+            && self.remote.is_some()
+            && self.screen == Screen::Inventory
+            && self.java_screen_window().is_none()
+    }
+
+    /// Draws the mods' overlay over the inventory, each frame: the server hears the inventory
+    /// open and close, the GUI's size and the mouse.
+    pub(super) fn draw_java_overlay(&mut self, batch: &mut HudBatch) {
+        if !self.java_overlay.enabled {
+            return;
+        }
+        if !self.java_overlay_on() {
+            if self.java_overlay.open {
+                self.java_overlay.open = false;
+                self.java_overlay.ops.clear();
+                self.java_overlay.typing = false;
+                self.java_overlay.pressed = false;
+                self.send_java_screen_input(OVERLAY_WINDOW, json!({"kind": "close"}));
+            }
+            return;
+        }
+        let size = (batch.width as i32, batch.height as i32);
+        let mouse = (self.cursor.0 as i32, self.cursor.1 as i32);
+        let overlay = &mut self.java_overlay;
+        let open = !overlay.open;
+        let send_size = !open && overlay.sent_size != Some(size);
+        let send_mouse = overlay.sent_mouse != Some(mouse);
+        overlay.open = true;
+        overlay.sent_size = Some(size);
+        overlay.sent_mouse = Some(mouse);
+        if open {
+            self.send_java_screen_input(
+                OVERLAY_WINDOW,
+                json!({"kind": "open", "width": size.0, "height": size.1}),
+            );
+        }
+        if send_size {
+            self.send_java_screen_input(
+                OVERLAY_WINDOW,
+                json!({"kind": "size", "width": size.0, "height": size.1}),
+            );
+        }
+        if send_mouse {
+            self.send_java_screen_input(
+                OVERLAY_WINDOW,
+                json!({"kind": "move", "x": mouse.0, "y": mouse.1}),
+            );
+        }
+        let ops = std::mem::take(&mut self.java_overlay.ops);
+        if ops.is_empty() {
+            return;
+        }
+        let (tooltip, lines_tooltip) = self.draw_java_ops(batch, &ops);
+        self.java_overlay.ops = ops;
+        if let Some(stack) = tooltip {
+            let (x, y) = self.cursor;
+            self.draw_stack_tooltip(batch, &stack, x, y);
+        }
+        if let Some(lines) = lines_tooltip {
+            horizon_client::ui::tooltip(batch, &self.gui.atlas, &lines, self.cursor);
+        }
+    }
+
+    /// The window mouse input goes to: the open mod screen's, else the inventory overlay's for
+    /// a press outside the inventory's window with nothing carried (and that press's drags and
+    /// release).
+    fn java_mouse_window(&mut self, kind: &str) -> Option<i32> {
+        if let Some(window) = self.java_screen_window() {
+            return Some(window);
+        }
+        if !self.java_overlay_on() {
+            return None;
+        }
+        let take = match kind {
+            "press" => {
+                let outside = self.carried.is_none() && self.inventory_target().1;
+                self.java_overlay.pressed = outside;
+                outside
+            }
+            "release" => std::mem::take(&mut self.java_overlay.pressed),
+            "drag" => self.java_overlay.pressed,
+            _ => self.inventory_target().1,
+        };
+        take.then_some(OVERLAY_WINDOW)
+    }
+
+    /// R and U over one of the inventory's slots: the recipe viewer's recipes and uses of its
+    /// item (REI's, in the server's headless client). False when the key isn't that.
+    fn java_overlay_recipes(&mut self, key: KeyCode) -> bool {
+        let uses = match key {
+            KeyCode::KeyR => false,
+            KeyCode::KeyU => true,
+            _ => return false,
+        };
+        let Some(slot) = self.inventory_target().0 else {
+            return false;
+        };
+        let Some(stack) = self.slot_view(slot) else {
+            return false;
+        };
+        let item = horizon_client::snbt::to_snbt(&horizon_items::item_nbt::item_to_nbt(&stack));
+        self.send_java_screen_input(
+            OVERLAY_WINDOW,
+            json!({"kind": "recipes", "item": item, "uses": uses}),
+        );
+        true
     }
 
     /// Draws what Java mods draw on the HUD, over Horizon's own HUD; tells the server the HUD's
@@ -222,6 +374,10 @@ impl Game<'_> {
 
     /// Back to the world from a client-only screen.
     fn leave_java_screen(&mut self) {
+        if std::mem::take(&mut self.java_overlay.back) {
+            self.screen = Screen::Inventory;
+            return;
+        }
         self.screen = Screen::Playing;
         if self.player.is_some() || self.remote.is_some() {
             self.capture(true);
@@ -303,6 +459,9 @@ impl Game<'_> {
     ) -> (Option<ItemStack>, Option<Vec<horizon_client::text::Text>>) {
         let mut tooltip = None;
         let mut lines_tooltip = None;
+        // GuiGraphics' scissor stack (enableScissor intersects with the one under it): what is
+        // drawn while one is on is cut to it (Tech Reborn's energy and progress bars).
+        let mut scissors: Vec<[f32; 4]> = Vec::new();
         for o in ops {
             // The GUI pose (Matrix3x2f: m00 m01 m10 m11 m20 m21). A translation moves the op;
             // anything more (a scale: Tom's Storage's small counts) transforms what it drew.
@@ -463,6 +622,40 @@ impl Game<'_> {
                         );
                     }
                 }
+                "scissor" => {
+                    // Its corners through the pose, as ScreenRectangle.transformMaxBounds.
+                    let (x0, y0, x1, y1) = (int(o, "x0"), int(o, "y0"), int(o, "x1"), int(o, "y1"));
+                    let at = |x: f32, y: f32| {
+                        [
+                            pose[0] * x + pose[2] * y + pose[4],
+                            pose[1] * x + pose[3] * y + pose[5],
+                        ]
+                    };
+                    let corners = [at(x0, y0), at(x1, y0), at(x0, y1), at(x1, y1)];
+                    let mut r = [
+                        f32::INFINITY,
+                        f32::INFINITY,
+                        f32::NEG_INFINITY,
+                        f32::NEG_INFINITY,
+                    ];
+                    for [x, y] in corners {
+                        r = [r[0].min(x), r[1].min(y), r[2].max(x), r[3].max(y)];
+                    }
+                    if let Some(under) = scissors.last() {
+                        r = [
+                            r[0].max(under[0]),
+                            r[1].max(under[1]),
+                            r[2].min(under[2]),
+                            r[3].min(under[3]),
+                        ];
+                    }
+                    scissors.push(r);
+                    continue;
+                }
+                "unscissor" => {
+                    scissors.pop();
+                    continue;
+                }
                 "item_tooltip" => tooltip = stack(o),
                 "tooltip" => {
                     let lines: Vec<horizon_client::text::Text> = o
@@ -483,6 +676,11 @@ impl Game<'_> {
                     v.pos[0] = pose[0] * x + pose[2] * y + pose[4];
                     v.pos[1] = pose[1] * x + pose[3] * y + pose[5];
                 }
+            }
+            if let Some(&[x0, y0, x1, y1]) = scissors.last()
+                && batch.vertices.len() > start
+            {
+                batch.clip_since(start, x0, y0, x1, y1);
             }
         }
         (tooltip, lines_tooltip)
@@ -591,7 +789,7 @@ impl Game<'_> {
 
     /// Mouse and keys over the open mod screen go to it: false when none is open.
     pub(super) fn java_screen_mouse(&mut self, kind: &str, right: bool) -> bool {
-        let Some(window) = self.java_screen_window() else {
+        let Some(window) = self.java_mouse_window(kind) else {
             return false;
         };
         let (x, y) = self.cursor;
@@ -605,7 +803,7 @@ impl Game<'_> {
     }
 
     pub(super) fn java_screen_scroll(&mut self, h: f64, v: f64) -> bool {
-        let Some(window) = self.java_screen_window() else {
+        let Some(window) = self.java_mouse_window("scroll") else {
             return false;
         };
         let (x, y) = self.cursor;
@@ -622,6 +820,15 @@ impl Game<'_> {
     /// stay Horizon's (they close the menu) unless one of its text boxes is typed in, and none
     /// while Horizon's own recipe book search is.
     pub(super) fn java_screen_takes(&self, key: KeyCode) -> bool {
+        // The inventory overlay: every key but Escape while its search box is typed in; R and
+        // U (recipes and uses, over a slot or the overlay's entries) when not.
+        if self.java_screen_window().is_none() && self.java_overlay_on() {
+            return if self.java_overlay.typing {
+                key != KeyCode::Escape
+            } else {
+                matches!(key, KeyCode::KeyR | KeyCode::KeyU) && !self.recipe_search_focused()
+            };
+        }
         let Some(screen) = &self.java_screen else {
             return false;
         };
@@ -639,8 +846,15 @@ impl Game<'_> {
     /// A key press on a mod screen: `Screen.keyPressed` with 26.3's key code, then the
     /// typed characters (`charTyped`), as vanilla's keyboard handler sends both.
     pub(super) fn java_screen_key(&mut self, key: KeyCode, text: Option<&str>) -> bool {
-        let Some(window) = self.java_screen_window() else {
-            return false;
+        let window = match self.java_screen_window() {
+            Some(window) => window,
+            None if self.java_overlay_on() => {
+                if !self.java_overlay.typing && self.java_overlay_recipes(key) {
+                    return true;
+                }
+                OVERLAY_WINDOW
+            }
+            None => return false,
         };
         let mut mods = 0;
         if self.has_shift_down() {
@@ -670,6 +884,18 @@ impl Game<'_> {
             conn,
             &C::CustomPayload(CustomPayload {
                 channel: HUD_CHANNEL.into(),
+                data: frame.as_bytes().to_vec(),
+            }),
+        );
+    }
+
+    /// What Java mods draw over a player's inventory, from Java: to their game.
+    #[cfg_attr(not(feature = "java-mods"), allow(dead_code))]
+    pub(super) fn send_java_overlay_frame(host: &mut LanHost, conn: u32, frame: &str) {
+        host.hub.send_to(
+            conn,
+            &C::CustomPayload(CustomPayload {
+                channel: OVERLAY_CHANNEL.into(),
                 data: frame.as_bytes().to_vec(),
             }),
         );

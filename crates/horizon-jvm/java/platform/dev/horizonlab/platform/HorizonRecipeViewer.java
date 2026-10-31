@@ -43,7 +43,10 @@ public final class HorizonRecipeViewer {
         int[] displays = new int[1];
         try {
             HorizonClient.as(player, () -> {
-                if (!reloaded) reload(loader);
+                if (!reloaded) {
+                    reload(loader);
+                    refreshSearch();
+                }
                 Class<?> registry = Class.forName("me.shedaniel.rei.api.client.registry.display.DisplayRegistry", true, loader);
                 Object instance = registry.getMethod("getInstance").invoke(null);
                 displays[0] = (int) registry.getMethod("size").invoke(instance);
@@ -73,6 +76,75 @@ public final class HorizonRecipeViewer {
             return 0;
         }
         return 1;
+    }
+
+    /**
+     * REI's displays ready for the client (its first reload: ~3 s), when REI is there; called in
+     * the player's client (as()). Before an overlay that shows REI's item list.
+     */
+    public static void prepare() {
+        if (reloaded) return;
+        ClassLoader loader = HorizonRecipeViewer.class.getClassLoader();
+        try {
+            Class.forName("me.shedaniel.rei.api.client.view.ViewSearchBuilder", false, loader);
+        } catch (ClassNotFoundException e) {
+            return;
+        }
+        try {
+            reload(loader);
+        } catch (Throwable t) {
+            Natives.log("Horizon's recipe viewer: REI could not reload: " + t);
+        }
+    }
+
+    /**
+     * REI's item list searched again (REIRuntime's overlay: queueReloadSearch). Its list searches
+     * once as its overlay is made, which can be before the displays and entries are in: the list
+     * then stays empty (0/1) until the search text changes.
+     */
+    public static void refreshSearch() {
+        try {
+            ClassLoader loader = HorizonRecipeViewer.class.getClassLoader();
+            Class<?> overlay = Class.forName("me.shedaniel.rei.impl.client.gui.ScreenOverlayImpl", true, loader);
+            Object list = overlay.getMethod("getEntryListWidget").invoke(null);
+            if (list != null) list.getClass().getMethod("updateSearch", String.class, boolean.class).invoke(list, searchText(loader), true);
+        } catch (ClassNotFoundException e) {
+            // No REI.
+        } catch (Throwable t) {
+            Natives.log("Horizon's recipe viewer: REI's item list could not search: " + t);
+        }
+    }
+
+    private static java.lang.reflect.Method searchField, focused;
+    private static boolean noRei;
+
+    /** REI's search box has the keyboard (REIRuntimeImpl's search field, focused). */
+    public static boolean searchFocused() {
+        if (noRei) return false;
+        try {
+            if (searchField == null) {
+                ClassLoader loader = HorizonRecipeViewer.class.getClassLoader();
+                searchField = Class.forName("me.shedaniel.rei.impl.client.REIRuntimeImpl", true, loader).getMethod("getSearchField");
+                focused = Class.forName("me.shedaniel.rei.impl.client.gui.widget.basewidgets.TextFieldWidget", true, loader).getMethod("isFocused");
+            }
+            Object field = searchField.invoke(null);
+            return field != null && (boolean) focused.invoke(field);
+        } catch (ClassNotFoundException | NoSuchMethodException e) {
+            noRei = true;
+            return false;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    private static String searchText(ClassLoader loader) {
+        try {
+            Object field = Class.forName("me.shedaniel.rei.impl.client.REIRuntimeImpl", true, loader).getMethod("getSearchField").invoke(null);
+            if (field != null) return (String) field.getClass().getMethod("getText").invoke(field);
+        } catch (Throwable t) {
+            // The default: no search text.
+        }
+        return "";
     }
 
     /** REI's plugins, client and common, reloaded at once on this thread. */

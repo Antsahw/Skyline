@@ -1265,6 +1265,8 @@ mod run {
             });
             for conn in new {
                 told.insert(conn);
+                // The inventory overlay is there (REI's item list): its first, empty, frame.
+                Self::send_java_overlay_frame(host, conn, "[]");
                 if keys.is_empty() {
                     continue;
                 }
@@ -1411,6 +1413,20 @@ mod run {
                             .copied();
                         if let Some((conn, window)) = window {
                             Self::send_java_screen_frame(host, conn, window, &frame);
+                        }
+                    }
+                    horizon_jvm::events::Action::OverlayFrame { uuid, frame } => {
+                        let Some(host) = host.as_deref_mut().or(self.lan.as_mut()) else {
+                            continue;
+                        };
+                        if let Some(conn) = host
+                            .hub
+                            .guests
+                            .iter()
+                            .find(|g| uuid_string(g.uuid) == uuid)
+                            .map(|g| g.conn)
+                        {
+                            Self::send_java_overlay_frame(host, conn, &frame);
                         }
                     }
                     horizon_jvm::events::Action::HudFrame { uuid, frame } => {
@@ -2344,7 +2360,10 @@ mod run {
                 // A key of a Java mod's key binding, pressed or released while playing, and the
                 // HUD's size: the connection's player's, whatever window is open.
                 let bind = input.get("kind").and_then(Value::as_str) == Some("bind");
-                let uuid = if bind || window == super::super::java_screen::HUD_WINDOW {
+                let uuid = if bind
+                    || window == super::super::java_screen::HUD_WINDOW
+                    || window == super::super::java_screen::OVERLAY_WINDOW
+                {
                     host.hub
                         .guests
                         .iter()

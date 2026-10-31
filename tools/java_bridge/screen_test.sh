@@ -6,6 +6,7 @@
 #   MODS=~/toms SCENE=terminal tools/java_bridge/screen_test.sh '$C click-at 149 45'
 #   MODS=~/critters SCENE=entity tools/java_bridge/screen_test.sh '$C mouse left click'
 #   MODS=~/nat SCENE=entity ENTITY=naturalist:bear tools/java_bridge/screen_test.sh
+#   MODS=~/cl SCENE=loader tools/java_bridge/screen_test.sh '$C click-at 213 120'
 #   JAVA_ONLY=1 ... : after a Java-only change (no game rebuild; see java.sh)
 # Steps see S (the scratch folder) too: '$C state > $S/state.json' keeps what a check reads.
 R=$(cd "$(dirname "$0")/../.." && pwd)
@@ -74,6 +75,12 @@ case "$SCENE" in
     '$C key 1 tap >/dev/null; $C look-at $(p $X+2.5) $((Y+1)) $(p $Z+0.5) >/dev/null' '$C mouse right click >/dev/null' \
     '$C key 2 tap >/dev/null; $C look-at $(p $X+2.5) $(p $Y+0.06) $(p $Z+1.5) >/dev/null' '$C mouse right click >/dev/null' \
     '$C look-at $(p $X+2.5) $Y $(p $Z+0.9) >/dev/null' 'sleep 1' ;;
+  # Chunk Loaders: a single chunk loader placed by the player (its owner) on the floor ahead,
+  # then opened (its chunk grid).
+  loader) "$R/tools/java_bridge/around.sh" \
+    'q "gamemode survival"' 'q "give @s chunkloaders:single_chunk_loader"' \
+    '$C look-at-block $((X+2)) $((Y-1)) $Z >/dev/null' '$C mouse right click >/dev/null' \
+    '$C look-at-block $((X+2)) $Y $Z >/dev/null' '$C mouse right click >/dev/null' 'sleep 3' ;;
   none) ;;
 esac
 n=0; for step in "$@"; do eval "$step"; sleep 1; n=$((n+1)); $C screenshot "$S/s$n.png" >/dev/null; cp "$S/s$n.png" "$OUT/$SCENE-$n.png"; done

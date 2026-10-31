@@ -167,6 +167,9 @@ pub enum Action {
     /// What mods draw on a player's HUD (Jade, AppleSkin), drawn by their client code in the
     /// headless client each tick: operations as a screen frame's, sent when they change.
     HudFrame { uuid: String, frame: String },
+    /// What mods draw over a player's inventory (REI's item list), drawn in the headless
+    /// client's inventory screen while the player's is open: sent when it changes.
+    OverlayFrame { uuid: String, frame: String },
     /// A mod fed (or starved) a player: its `FoodData` now (a pie's slice).
     Food {
         uuid: String,

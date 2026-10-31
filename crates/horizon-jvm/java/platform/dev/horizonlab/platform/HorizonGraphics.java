@@ -36,12 +36,53 @@ public final class HorizonGraphics extends GuiGraphicsExtractor {
      * record: their vertices, built as vanilla would build them, become rectangles. Untextured
      * quads are fills (two colours down: gradients); textured ones have no texture name here.
      */
+    /** GuiTextRenderState's text, font, x, y, color and dropShadow. */
+    private static final java.lang.reflect.Field[] TEXT_FIELDS = textFields();
+
+    private static java.lang.reflect.Field[] textFields() {
+        var fields = new java.lang.reflect.Field[6];
+        String[] names = {"text", "font", "x", "y", "color", "dropShadow"};
+        try {
+            for (int i = 0; i < names.length; i++) {
+                fields[i] = net.minecraft.client.renderer.state.gui.GuiTextRenderState.class.getDeclaredField(names[i]);
+                fields[i].setAccessible(true);
+            }
+        } catch (ReflectiveOperationException e) {
+            dev.horizonlab.bridge.Natives.log("Horizon's client: render states' text can't be read: " + e);
+        }
+        return fields;
+    }
+
     private static final class Capture extends GuiRenderState {
         HorizonGraphics owner;
 
         @Override
         public void addGuiElement(net.minecraft.client.renderer.state.gui.GuiElementRenderState element) {
             capture(element);
+        }
+
+        /**
+         * Text added to the render state itself (corelib's submitText, not GuiGraphics.text):
+         * a text op, in the state's pose.
+         */
+        @Override
+        public void addText(net.minecraft.client.renderer.state.gui.GuiTextRenderState state) {
+            if (owner == null) return;
+            try {
+                var text = (FormattedCharSequence) TEXT_FIELDS[0].get(state);
+                var font = (Font) TEXT_FIELDS[1].get(state);
+                int x = TEXT_FIELDS[2].getInt(state), y = TEXT_FIELDS[3].getInt(state), color = TEXT_FIELDS[4].getInt(state);
+                boolean shadow = TEXT_FIELDS[5].getBoolean(state);
+                owner.pose().pushMatrix();
+                try {
+                    owner.pose().set(state.pose);
+                    owner.text(font, text, x, y, color, shadow);
+                } finally {
+                    owner.pose().popMatrix();
+                }
+            } catch (ReflectiveOperationException | RuntimeException e) {
+                // Not drawn.
+            }
         }
 
         /** Vanilla's blits of atlas sprites (blitSprite with a TextureAtlasSprite, nine-slices). */
@@ -433,7 +474,9 @@ public final class HorizonGraphics extends GuiGraphicsExtractor {
                 var frame = it.next();
                 Class<?> owner = frame.getDeclaringClass();
                 String name = owner.getName();
-                if (name.startsWith("dev.horizonlab.platform.HorizonGraphics")
+                // HorizonGraphicsWrappers' generated wrappers of mods' graphics (REI's) pass the
+                // draw on: the mod is further up.
+                if (name.startsWith("dev.horizonlab.platform.HorizonGraphics") || name.startsWith("dev.horizonlab.platform.generated.")
                         || owner == GuiGraphicsExtractor.class || name.startsWith("net.minecraft.client.gui.ActiveTextCollector")) {
                     continue;
                 }
@@ -542,8 +585,20 @@ public final class HorizonGraphics extends GuiGraphicsExtractor {
 
     @Override
     public void blit(Identifier texture, int x0, int y0, int x1, int y1, float u0, float u1, float v0, float v1) {
+        String name = texture.toString();
+        // An atlas blitted with a sprite's own UVs (corelib's submitSprite: its screens'
+        // backgrounds): the sprite's texture, by its UV square (HorizonSprites).
+        if (name.contains("textures/atlas/") && u1 > u0 && Math.floor(u0 + 1e-4) == Math.floor(u1 - 1e-4)) {
+            var sprite = HorizonSprites.at(u0 + (u1 - u0) / 2);
+            if (sprite != null) {
+                float k = (float) Math.floor(u0 + (u1 - u0) / 2);
+                name = sprite.texture();
+                u0 -= k;
+                u1 -= k;
+            }
+        }
         JsonObject o = op("blit");
-        o.addProperty("texture", texture.toString());
+        o.addProperty("texture", name);
         rect(o, x0, y0, x1, y1);
         o.addProperty("u0", u0);
         o.addProperty("u1", u1);
@@ -562,12 +617,11 @@ public final class HorizonGraphics extends GuiGraphicsExtractor {
     }
 
     /**
-     * Whether a sprite outside textures/gui/sprites/ (a mod's atlas source) is nine-sliced or
-     * tiled: Horizon knows only its own sprites' metadata, so vanilla's drawing splits it here
-     * (into pieces of the headless sprite: Capture).
+     * Whether a sprite is nine-sliced or tiled (its gui.scaling metadata): vanilla's drawing
+     * splits it here, into pieces of the headless sprite (Capture), as Horizon's frame drawing
+     * stretches a sprite op (RebornCore's 20x20 nine-sliced background over a whole screen).
      */
     private static boolean slicedHere(Identifier sprite) {
-        if (HorizonSprites.guiTexture(sprite).contains("/gui/sprites/")) return false;
         var made = HorizonSprites.get(null, sprite);
         if (made == null) return false;
         return made.contents().getAdditionalMetadata(net.minecraft.client.resources.metadata.gui.GuiMetadataSection.TYPE)

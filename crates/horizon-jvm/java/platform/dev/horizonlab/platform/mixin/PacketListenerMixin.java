@@ -60,9 +60,11 @@ public abstract class PacketListenerMixin {
         }
         if (packet instanceof net.minecraft.network.protocol.common.ClientboundCustomPayloadPacket custom
                 && self instanceof ServerGamePacketListenerImpl game && game.player != null
-                && custom.payload().getClass().getName().equals("net.fabricmc.fabric.impl.menu.Networking$OpenScreenPayload")) {
+                && modPayload(custom.payload())) {
             // Fabric API's ExtendedMenuProvider opens its menus with a payload of its own
-            // (the menu's data for the client's screen): shown as vanilla's are.
+            // (the menu's data for the client's screen): shown as vanilla's are. A mod's own
+            // payload sent as a packet (corelib's channels: Chunk Loaders' loaders) goes to the
+            // mod's client code, as one sent through Fabric's networking does.
             HorizonServer.payload(game.player, custom.payload());
             return;
         }
@@ -106,5 +108,13 @@ public abstract class PacketListenerMixin {
         if (packet instanceof net.minecraft.network.protocol.game.ClientboundContainerSetDataPacket p) return p.getContainerId();
         if (packet instanceof net.minecraft.network.protocol.game.ClientboundContainerClosePacket p) return p.getContainerId();
         return -1;
+    }
+
+    /** A mod's payload, or Fabric API's menu opening: not vanilla's or Fabric's own. */
+    @org.spongepowered.asm.mixin.Unique
+    private static boolean modPayload(net.minecraft.network.protocol.common.custom.CustomPacketPayload payload) {
+        String name = payload.getClass().getName();
+        return name.equals("net.fabricmc.fabric.impl.menu.Networking$OpenScreenPayload")
+                || !(name.startsWith("net.minecraft.") || name.startsWith("net.fabricmc."));
     }
 }

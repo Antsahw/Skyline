@@ -450,6 +450,13 @@ public final class HorizonClient {
                 set(net.minecraft.client.MouseHandler.class, mouse, "minecraft", minecraft);
                 set(Minecraft.class, minecraft, "mouseHandler", mouse);
             }
+            // Its keyboard handler too: text boxes focused by a click resubmit its IME preedit
+            // (none here).
+            if (minecraft.keyboardHandler == null) {
+                var keyboard = Natives.allocate(net.minecraft.client.KeyboardHandler.class);
+                set(net.minecraft.client.KeyboardHandler.class, keyboard, "minecraft", minecraft);
+                set(Minecraft.class, minecraft, "keyboardHandler", keyboard);
+            }
             set(net.minecraft.client.MouseHandler.class, minecraft.mouseHandler, "xpos", guiX * 3);
             set(net.minecraft.client.MouseHandler.class, minecraft.mouseHandler, "ypos", guiY * 3);
         } catch (ReflectiveOperationException e) {
@@ -671,6 +678,37 @@ public final class HorizonClient {
     }
 
     /** Runs {@code run} with the player's own client player as Minecraft.player. */
+    /**
+     * The server's services, with profiles of the players on it first: the server's resolver
+     * asks Mojang, which knows no offline (or Horizon) player, so a client screen naming one
+     * (Chunk Loaders' owner) would show no name. A client knows the players it sees.
+     */
+    private static net.minecraft.server.Services clientServices(net.minecraft.server.MinecraftServer server) {
+        var services = server.services();
+        var resolver = services.profileResolver();
+        var players = new net.minecraft.server.players.ProfileResolver() {
+            @Override
+            public java.util.Optional<com.mojang.authlib.GameProfile> fetchByName(String name) {
+                for (var online : HorizonServer.players()) {
+                    if (online.getGameProfile().name().equalsIgnoreCase(name)) return java.util.Optional.of(online.getGameProfile());
+                }
+                return resolver == null ? java.util.Optional.empty() : resolver.fetchByName(name);
+            }
+
+            @Override
+            public java.util.Optional<com.mojang.authlib.GameProfile> fetchById(java.util.UUID id) {
+                var online = HorizonServer.player(id);
+                if (online != null) return java.util.Optional.of(online.getGameProfile());
+                // One that was on (UserNameToIdResolver: usercache.json's names).
+                var cached = services.nameToIdCache() == null ? null : services.nameToIdCache().get(id).orElse(null);
+                if (cached != null) return java.util.Optional.of(new com.mojang.authlib.GameProfile(cached.id(), cached.name()));
+                return resolver == null ? java.util.Optional.empty() : resolver.fetchById(id);
+            }
+        };
+        return new net.minecraft.server.Services(services.sessionService(), services.servicesKeySet(),
+                services.profileRepository(), services.nameToIdCache(), players);
+    }
+
     static void as(net.minecraft.server.level.ServerPlayer player, ThrowingRunnable run) throws Throwable {
         var before = minecraft.player;
         var screenBefore = minecraft.gui.screen();
@@ -678,7 +716,7 @@ public final class HorizonClient {
         set(Minecraft.class, minecraft, "player", local);
         // The services (profiles by id: Chunk Loaders' owner names): the mirrored server's.
         if (minecraft.services() == null && player.level().getServer() != null) {
-            set(Minecraft.class, minecraft, "services", player.level().getServer().services());
+            set(Minecraft.class, minecraft, "services", clientServices(player.level().getServer()));
         }
         // Their client stands in their dimension's client level (Minecraft.level: what their
         // screens and client code read, Chunk Loaders' grid its loaders), as a client in a world.
@@ -690,6 +728,7 @@ public final class HorizonClient {
         // Their open screen is the GUI's (Minecraft.gui.screen()), which mods' client code looks at (a message
         // for the screen that is open: Tom's Storage's terminal's item list).
         var screen = SCREENS.get(player.getUUID());
+        if (screen == null) screen = OVERLAYS.get(player.getUUID());
         if (screen != null) set(net.minecraft.client.gui.Gui.class, minecraft.gui, "screen", screen);
         try {
             run.run();
@@ -781,6 +820,10 @@ public final class HorizonClient {
             return;
         }
         java.util.UUID id = player.getUUID();
+        // The screen under Horizon's inventory, as a screen's parent (REI's recipe view, closed:
+        // back to the screen it opened over): the client-only screen closes, and the player's
+        // game goes back to its inventory.
+        if (screen instanceof HorizonOverlayScreen) screen = null;
         var current = SCREENS.get(id);
         if (screen == current) return;
         boolean clientOnly = CLIENT_ONLY.contains(id);
@@ -1661,6 +1704,7 @@ public final class HorizonClient {
             for (StackTraceElement frame : root.getStackTrace()) Natives.log("    at " + frame);
         }
         var ops = graphics.ops();
+        if (DEBUG_INPUT && ops.isEmpty()) Natives.log("overlay: " + graphics.dropped + " operations dropped as vanilla's");
         if (typing(screen)) {
             var op = new com.google.gson.JsonObject();
             op.addProperty("op", "typing");
@@ -1680,6 +1724,8 @@ public final class HorizonClient {
             at = parent.getFocused();
         }
         if (at instanceof net.minecraft.client.gui.components.EditBox box && box.isFocused()) return true;
+        // REI's search box, over a container screen: not one of the screen's widgets.
+        if (screen instanceof net.minecraft.client.gui.screens.inventory.AbstractContainerScreen<?> && HorizonRecipeViewer.searchFocused()) return true;
         if (screen instanceof net.minecraft.client.gui.screens.inventory.AbstractRecipeBookScreen<?>) {
             try {
                 var book = field(net.minecraft.client.gui.screens.inventory.AbstractRecipeBookScreen.class, screen, "recipeBookComponent");
@@ -1718,6 +1764,174 @@ public final class HorizonClient {
         for (var id : new java.util.ArrayList<>(SCREENS.keySet())) {
             tickScreen(id);
             send(id);
+        }
+        for (var id : new java.util.ArrayList<>(OVERLAYS.keySet())) {
+            if (SCREENS.containsKey(id)) continue;
+            var screen = OVERLAYS.get(id);
+            var player = HorizonServer.player(id);
+            if (screen == null || player == null) continue;
+            try {
+                as(player, screen::tick);
+            } catch (Throwable t) {
+                if (TICK_FAILED.add(screen)) Natives.log("Horizon's client: the inventory overlay's tick failed: " + t);
+            }
+            sendOverlay(id);
+        }
+    }
+
+    // ---- Mods' overlays on Horizon's inventory (REI's item list) -----------------------------
+
+    /** The inventory overlay's "window": input and frames of the screen under Horizon's inventory. */
+    static final int OVERLAY_WINDOW = -3;
+    /**
+     * Each player's inventory screen while Horizon's inventory (or a container of its own) is
+     * open: a container screen in the headless client (HorizonOverlayScreen), which mods draw their overlays on
+     * (REI's item list, its search box). Only what mods draw goes to Horizon (modsOnly): the
+     * inventory itself is Horizon's.
+     */
+    private static final java.util.Map<java.util.UUID, net.minecraft.client.gui.screens.Screen> OVERLAYS =
+            new java.util.concurrent.ConcurrentHashMap<>();
+    private static final java.util.Map<java.util.UUID, String> OVERLAY_SENT = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final java.util.Map<java.util.UUID, double[]> OVERLAY_MOUSE = new java.util.concurrent.ConcurrentHashMap<>();
+
+    private static String overlayFrame(java.util.UUID id) {
+        var screen = OVERLAYS.get(id);
+        var player = HorizonServer.player(id);
+        if (screen == null || player == null) return null;
+        double[] mouse = OVERLAY_MOUSE.getOrDefault(id, new double[] {-1, -1});
+        HorizonGraphics graphics = new HorizonGraphics(width, height);
+        graphics.modsOnly = true;
+        graphics.imagesSent = imagesSent(id);
+        try {
+            as(player, () -> {
+                mouseAt(mouse[0], mouse[1]);
+                screen.extractRenderStateWithTooltipAndSubtitles(graphics, (int) mouse[0], (int) mouse[1], 0);
+            });
+        } catch (Throwable t) {
+            if (TICK_FAILED.add(String.valueOf(t))) {
+                Natives.log("Horizon's client: the inventory overlay failed to draw: " + t);
+                if (DEBUG_INPUT) for (StackTraceElement frame : t.getStackTrace()) Natives.log("    at " + frame);
+            }
+        }
+        var ops = graphics.ops();
+        if (DEBUG_INPUT && ops.isEmpty()) Natives.log("overlay: " + graphics.dropped + " operations dropped as vanilla's");
+        if (typing(screen)) {
+            var op = new com.google.gson.JsonObject();
+            op.addProperty("op", "typing");
+            ops.add(op);
+        }
+        return ops.toString();
+    }
+
+    private static void sendOverlay(java.util.UUID id) {
+        String frame = overlayFrame(id);
+        if (frame == null || frame.equals(OVERLAY_SENT.get(id))) return;
+        OVERLAY_SENT.put(id, frame);
+        if (DEBUG_INPUT) Natives.log("overlay frame: " + frame.length() + " chars");
+        Natives.overlayFrame(id.toString(), frame);
+    }
+
+    /**
+     * Input to a player's inventory overlay (window -3): {@code open} and {@code close} as
+     * Horizon's inventory opens and closes, {@code recipes} (R and U over one of Horizon's slots:
+     * the recipe viewer for {@code item}, SNBT), and the mouse and keys as a screen's.
+     */
+    private static void overlayInput(java.util.UUID id, com.google.gson.JsonObject in) {
+        var player = HorizonServer.player(id);
+        if (player == null) return;
+        String kind = in.get("kind").getAsString();
+        if (DEBUG_INPUT) Natives.log("overlay input " + in);
+        try {
+            switch (kind) {
+                case "open" -> {
+                    if (in.has("width")) {
+                        width = in.get("width").getAsInt();
+                        height = in.get("height").getAsInt();
+                        windowSize();
+                    }
+                    if (OVERLAYS.containsKey(id)) return;
+                    as(player, () -> {
+                        HorizonRecipeViewer.prepare();
+                        var screen = new HorizonOverlayScreen(player.inventoryMenu, player.getInventory());
+                        OVERLAYS.put(id, screen);
+                        set(net.minecraft.client.gui.Gui.class, minecraft.gui, "screen", screen);
+                        screen.added();
+                        screen.init(width, height);
+                        HorizonRecipeViewer.refreshSearch();
+                    });
+                    OVERLAY_SENT.remove(id);
+                }
+                case "close" -> {
+                    var screen = OVERLAYS.remove(id);
+                    OVERLAY_SENT.remove(id);
+                    if (screen != null) as(player, screen::removed);
+                    // An empty frame: nothing left over the next inventory before it draws.
+                    Natives.overlayFrame(id.toString(), "[]");
+                }
+                case "recipes" -> {
+                    var stack = parseStack(in.get("item").getAsString());
+                    if (stack != null) HorizonRecipeViewer.open(player.createCommandSourceStack(), stack, in.get("uses").getAsBoolean());
+                }
+                default -> {
+                    var screen = OVERLAYS.get(id);
+                    if (screen == null) return;
+                    double[] mouse = OVERLAY_MOUSE.getOrDefault(id, new double[] {-1, -1});
+                    double x = in.has("x") ? in.get("x").getAsDouble() : mouse[0];
+                    double y = in.has("y") ? in.get("y").getAsDouble() : mouse[1];
+                    OVERLAY_MOUSE.put(id, new double[] {x, y});
+                    mouseAt(x, y);
+                    int button = in.has("button") ? in.get("button").getAsInt() : 0;
+                    int mods = in.has("mods") ? in.get("mods").getAsInt() : 0;
+                    var event = new net.minecraft.client.input.MouseButtonEvent(x, y, new net.minecraft.client.input.MouseButtonInfo(button, mods));
+                    if (kind.equals("press") || kind.equals("release") || kind.equals("scroll")) overlayFrame(id);
+                    acting = player;
+                    try {
+                        as(player, () -> {
+                            switch (kind) {
+                                case "size" -> {
+                                    width = in.get("width").getAsInt();
+                                    height = in.get("height").getAsInt();
+                                    windowSize();
+                                    screen.resize(width, height);
+                                }
+                                case "move" -> screen.mouseMoved(x, y);
+                                case "press" -> HorizonScreenEvents.click(minecraft, screen, event, false);
+                                case "release" -> HorizonScreenEvents.release(minecraft, screen, event);
+                                case "drag" -> HorizonScreenEvents.drag(minecraft, screen, event,
+                                        in.has("dx") ? in.get("dx").getAsDouble() : 0, in.has("dy") ? in.get("dy").getAsDouble() : 0);
+                                case "scroll" -> HorizonScreenEvents.scroll(minecraft, screen, x, y, in.get("h").getAsDouble(), in.get("v").getAsDouble());
+                                case "key" -> {
+                                    int key = in.get("key").getAsInt();
+                                    HorizonScreenEvents.key(minecraft, screen, new net.minecraft.client.input.KeyEvent(key,
+                                            in.has("keycode") ? in.get("keycode").getAsInt() : key, mods));
+                                }
+                                case "char" -> HorizonScreenEvents.character(minecraft, screen, new net.minecraft.client.input.CharacterEvent(in.get("char").getAsInt()));
+                                default -> {}
+                            }
+                        });
+                    } finally {
+                        acting = null;
+                    }
+                    HorizonServer.afterScreenInput();
+                    sendOverlay(id);
+                }
+            }
+        } catch (Throwable t) {
+            Throwable root = t;
+            while (root.getCause() != null && root.getCause() != root) root = root.getCause();
+            Natives.log("Horizon's client: the inventory overlay's " + kind + " failed: " + root);
+            for (StackTraceElement frame : root.getStackTrace()) Natives.log("    at " + frame);
+        }
+    }
+
+    /** An item stack from SNBT (vanilla's item codec), or null. */
+    private static net.minecraft.world.item.ItemStack parseStack(String snbt) {
+        try {
+            var tag = net.minecraft.nbt.TagParser.parseCompoundFully(snbt);
+            var ops = HorizonServer.server().registryAccess().createSerializationContext(net.minecraft.nbt.NbtOps.INSTANCE);
+            return net.minecraft.world.item.ItemStack.CODEC.parse(ops, tag).result().orElse(null);
+        } catch (Exception e) {
+            return null;
         }
     }
 
@@ -1800,6 +2014,10 @@ public final class HorizonClient {
             }
             return;
         }
+        if (in.has("window") && in.get("window").getAsInt() == OVERLAY_WINDOW) {
+            overlayInput(id, in);
+            return;
+        }
         var screen = SCREENS.get(id);
         var player = OWNERS.get(id);
         if (screen == null || player == null) return;
@@ -1829,14 +2047,16 @@ public final class HorizonClient {
                         screen.resize(width, height);
                     }
                     case "move" -> screen.mouseMoved(x, y);
-                    case "press" -> screen.mouseClicked(event, in.has("double") && in.get("double").getAsBoolean());
-                    case "release" -> screen.mouseReleased(event);
-                    case "drag" -> screen.mouseDragged(event,
+                    case "press" -> {
+                        HorizonScreenEvents.click(minecraft, screen, event, in.has("double") && in.get("double").getAsBoolean());
+                    }
+                    case "release" -> HorizonScreenEvents.release(minecraft, screen, event);
+                    case "drag" -> HorizonScreenEvents.drag(minecraft, screen, event,
                             in.has("dx") ? in.get("dx").getAsDouble() : 0, in.has("dy") ? in.get("dy").getAsDouble() : 0);
-                    case "scroll" -> screen.mouseScrolled(x, y, in.get("h").getAsDouble(), in.get("v").getAsDouble());
+                    case "scroll" -> HorizonScreenEvents.scroll(minecraft, screen, x, y, in.get("h").getAsDouble(), in.get("v").getAsDouble());
                     case "key" -> {
                         int key = in.get("key").getAsInt();
-                        screen.keyPressed(new net.minecraft.client.input.KeyEvent(
+                        HorizonScreenEvents.key(minecraft, screen, new net.minecraft.client.input.KeyEvent(
                                 key, in.has("keycode") ? in.get("keycode").getAsInt() : key, mods));
                         // Escape (41) on a client-only screen: Screen.keyPressed closes it
                         // (onClose: setScreen(null), or its parent); one that took the key and
@@ -1848,7 +2068,7 @@ public final class HorizonClient {
                     }
                     // The window left a client-only screen (it closed it itself).
                     case "close" -> shut(id, player);
-                    case "char" -> screen.charTyped(new net.minecraft.client.input.CharacterEvent(in.get("char").getAsInt()));
+                    case "char" -> HorizonScreenEvents.character(minecraft, screen, new net.minecraft.client.input.CharacterEvent(in.get("char").getAsInt()));
                     default -> {}
                 }
             });

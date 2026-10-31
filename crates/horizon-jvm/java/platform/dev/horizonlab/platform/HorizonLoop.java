@@ -92,7 +92,13 @@ public final class HorizonLoop {
         if (handler == null) return false;
         Runnable delivery = () -> {
             try {
-                HorizonClient.as(player, () -> handler.receive(payload, clientContext(player)));
+                // What the handler schedules on the client's thread (Minecraft.schedule: corelib's
+                // queued packets, Chunk Loaders' loaders) runs now, still as this player: in
+                // their client level, where the packet is for.
+                HorizonClient.as(player, () -> {
+                    handler.receive(payload, clientContext(player));
+                    HorizonClient.tasks();
+                });
             } catch (Throwable t) {
                 log("the client of " + payload.type().id() + " failed", t);
             }

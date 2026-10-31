@@ -73,6 +73,48 @@ pub fn creative(cache: &Path) -> Option<PathBuf> {
     path.is_file().then_some(path)
 }
 
+/// The mods a jar carries inside it (Fabric's jar-in-jar, `META-INF/jars/`: RebornCore in Tech
+/// Reborn) that have textures, written into `mods` as mods of their own, so their assets are
+/// carried too (Tech Reborn's screens draw RebornCore's GUI sprites). Libraries and Fabric
+/// API's modules (no textures) stay inside. Nested ones are looked into `depth` levels down.
+fn nested_jars(jar: &Path, mods: &Path, depth: u32) {
+    use std::io::Read;
+    let Ok(file) = std::fs::File::open(jar) else {
+        return;
+    };
+    let Ok(mut zip) = zip::ZipArchive::new(file) else {
+        return;
+    };
+    let inner: Vec<String> = zip
+        .file_names()
+        .filter(|n| n.starts_with("META-INF/jars/") && n.ends_with(".jar"))
+        .map(str::to_owned)
+        .collect();
+    for name in inner {
+        let mut bytes = Vec::new();
+        let Ok(mut entry) = zip.by_name(&name) else {
+            continue;
+        };
+        if entry.read_to_end(&mut bytes).is_err() {
+            continue;
+        }
+        let Ok(nested) = zip::ZipArchive::new(std::io::Cursor::new(&bytes)) else {
+            continue;
+        };
+        let textures = nested
+            .file_names()
+            .any(|n| n.starts_with("assets/") && n.contains("/textures/") && n.ends_with(".png"));
+        let file_name = name.rsplit('/').next().unwrap_or(&name);
+        let out = mods.join(file_name);
+        if !textures || out.exists() {
+            continue;
+        }
+        if std::fs::write(&out, &bytes).is_ok() && depth > 1 {
+            nested_jars(&out, mods, depth - 1);
+        }
+    }
+}
+
 /// Builds the content mods of `jars` into `cache` (the JVM and Fabric running, with these
 /// jars as mods), for the prepared game at `resources`: the folders to load.
 pub fn build(
@@ -90,6 +132,7 @@ pub fn build(
     for jar in jars {
         let name = jar.file_name().ok_or("a jar without a name")?;
         std::fs::copy(jar, mods.join(name)).map_err(|e| format!("{}: {e}", jar.display()))?;
+        nested_jars(jar, &mods, 2);
     }
     let pack = serde_json::json!({
         "components": [

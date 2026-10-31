@@ -1797,6 +1797,7 @@ struct Game<'a> {
     java_binds: java_screen::JavaBinds,
     /// What Java mods last drew on the HUD (game/java_screen.rs).
     java_hud: Option<java_screen::JavaHud>,
+    java_overlay: java_screen::JavaOverlay,
     /// Java mods' dynamic textures in the atlas (game/java_screen.rs).
     java_images: java_screen::JavaImages,
     /// Java mods' entities the server last sent (game/java_entities.rs).
@@ -6320,6 +6321,8 @@ impl Game<'_> {
             }
             Screen::Playing | Screen::Options | Screen::Win => {}
         }
+        // Java mods' overlay on the inventory (REI's item list), over it.
+        self.draw_java_overlay(&mut batch);
         self.draw_saving_indicator(&mut batch);
         // ToastManager.extractRenderState: F1 hides the toasts too.
         self.draw_toasts(&mut batch, !show_hud);
@@ -14179,6 +14182,7 @@ impl<'a> Game<'a> {
             java_screen: None,
             java_binds: Default::default(),
             java_hud: None,
+            java_overlay: Default::default(),
             java_images: Default::default(),
             java_entities: Default::default(),
             mount_menu: Default::default(),

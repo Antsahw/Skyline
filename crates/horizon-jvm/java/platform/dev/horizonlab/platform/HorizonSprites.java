@@ -136,7 +136,9 @@ public final class HorizonSprites {
                 BY_INDEX.add(new Sprite(texture, sprite));
             }
             Class<?> owner = TextureAtlasSprite.class;
-            HorizonClient.set(owner, sprite, "atlasLocation", atlas);
+            // Asked for with no atlas: the GUI atlas's (its location is what vanilla's drawing
+            // blits, nine-slices included).
+            HorizonClient.set(owner, sprite, "atlasLocation", atlas != null ? atlas : Identifier.withDefaultNamespace("textures/atlas/gui.png"));
             HorizonClient.set(owner, sprite, "contents", contents);
             HorizonClient.set(owner, sprite, "u0", (float) k);
             HorizonClient.set(owner, sprite, "u1", (float) k + 1);
