@@ -125,6 +125,9 @@ public final class Natives {
     /** ServerLevel.setRespawnData on a mirrored level: Horizon's world spawn moves there. */
     public static native void worldSpawn(String dimension, int x, int y, int z, float yaw, float pitch);
 
+    /** A game rule a mod or a data pack set on the mirror (its id and serialized value): Horizon's follows. */
+    public static native void gameRule(String id, String value);
+
     /**
      * An instance of {@code type} made without running a constructor (JNI AllocObject): the
      * game objects Horizon's state is mirrored into. Every field starts at its default.

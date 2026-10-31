@@ -256,6 +256,33 @@ public final class HorizonServer {
         } catch (ReflectiveOperationException | RuntimeException e) {
             Natives.log("Horizon's server mirror has no debug subscribers: " + e);
         }
+        // Its notifications (MinecraftServer.onGameRuleChanged tells them): a game rule a mod
+        // or a data pack sets (Simply OneBlock's load function) goes to Horizon's rules.
+        try {
+            var notifications = new net.minecraft.server.notifications.NotificationManager();
+            notifications.registerService((net.minecraft.server.notifications.NotificationService) java.lang.reflect.Proxy.newProxyInstance(
+                    loader, new Class<?>[] {net.minecraft.server.notifications.NotificationService.class}, (proxy, method, args) -> {
+                        if (method.getName().equals("onGameRuleChanged") && args != null && args.length == 2
+                                && args[0] instanceof net.minecraft.world.level.gamerules.GameRule<?> rule) {
+                            @SuppressWarnings({"unchecked", "rawtypes"})
+                            String value = ((net.minecraft.world.level.gamerules.GameRule) rule).serialize(args[1]);
+                            Natives.gameRule(rule.id(), value);
+                        }
+                        if (method.getDeclaringClass() == Object.class) {
+                            return switch (method.getName()) {
+                                case "hashCode" -> System.identityHashCode(proxy);
+                                case "equals" -> proxy == args[0];
+                                default -> "Horizon's game rules";
+                            };
+                        }
+                        return null;
+                    }));
+            java.lang.reflect.Field field = MinecraftServer.class.getDeclaredField("notificationManager");
+            field.setAccessible(true);
+            field.set(server, notifications);
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            Natives.log("Horizon's server mirror has no notifications: " + e);
+        }
         // Its weather (ServerLevel.getWeatherData reads the server's: Serene Seasons): clear.
         try {
             java.lang.reflect.Field weather = MinecraftServer.class.getDeclaredField("weatherData");

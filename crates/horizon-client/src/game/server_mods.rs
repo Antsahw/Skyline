@@ -1133,6 +1133,21 @@ mod run {
                     horizon_jvm::events::Action::Overlay { uuid, text } => {
                         self.overlay_server_player(host.as_deref_mut(), &uuid, java_chat(&text));
                     }
+                    horizon_jvm::events::Action::GameRule { id, value } => {
+                        // GameRules.set from Java: Horizon's rule takes the value (as
+                        // `/gamerule` sets it), so the world plays by the pack's rules.
+                        use horizon_client::gamerules::{self, Value};
+                        if let Some(rule) = gamerules::rule(&id) {
+                            let parsed = match rule.default {
+                                Value::Bool(_) => value.parse().ok().map(Value::Bool),
+                                Value::Int(_) => value.parse().ok().map(Value::Int),
+                            };
+                            if let Some(v) = parsed {
+                                self.ui.rules.set(rule.name, v);
+                                self.sync_rules();
+                            }
+                        }
+                    }
                     horizon_jvm::events::Action::WorldSpawn {
                         dimension,
                         position,

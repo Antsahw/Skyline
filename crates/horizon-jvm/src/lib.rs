@@ -505,6 +505,11 @@ fn boot(env: &mut JNIEnv, jars: &[PathBuf]) -> jni::errors::Result<String> {
                 fn_ptr: native_broadcast as *mut c_void,
             },
             NativeMethod {
+                name: "gameRule".into(),
+                sig: "(Ljava/lang/String;Ljava/lang/String;)V".into(),
+                fn_ptr: native_game_rule as *mut c_void,
+            },
+            NativeMethod {
                 name: "worldSpawn".into(),
                 sig: "(Ljava/lang/String;IIIFF)V".into(),
                 fn_ptr: native_world_spawn as *mut c_void,
@@ -748,6 +753,18 @@ extern "system" fn native_tab_name(mut env: JNIEnv, _class: JClass, uuid: JStrin
             env.get_string(&json).ok().map(String::from)
         };
         events::push(events::Action::TabName { uuid, json });
+    }));
+}
+
+/// `Natives.gameRule(String id, String value)`.
+extern "system" fn native_game_rule(mut env: JNIEnv, _class: JClass, id: JString, value: JString) {
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        if let (Ok(id), Ok(value)) = (env.get_string(&id), env.get_string(&value)) {
+            events::push(events::Action::GameRule {
+                id: id.into(),
+                value: value.into(),
+            });
+        }
     }));
 }
 
