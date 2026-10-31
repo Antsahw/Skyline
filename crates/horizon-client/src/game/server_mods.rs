@@ -1133,6 +1133,34 @@ mod run {
                     horizon_jvm::events::Action::Overlay { uuid, text } => {
                         self.overlay_server_player(host.as_deref_mut(), &uuid, java_chat(&text));
                     }
+                    horizon_jvm::events::Action::GameRule { id, value } => {
+                        // GameRules.set from Java: Horizon's rule takes the value (as
+                        // `/gamerule` sets it), so the world plays by the pack's rules.
+                        use horizon_client::gamerules::{self, Value};
+                        if let Some(rule) = gamerules::rule(&id) {
+                            let parsed = match rule.default {
+                                Value::Bool(_) => value.parse().ok().map(Value::Bool),
+                                Value::Int(_) => value.parse().ok().map(Value::Int),
+                            };
+                            if let Some(v) = parsed {
+                                self.ui.rules.set(rule.name, v);
+                                self.sync_rules();
+                            }
+                        }
+                    }
+                    horizon_jvm::events::Action::WorldSpawn {
+                        dimension,
+                        position,
+                        yaw,
+                        pitch,
+                    } => {
+                        // LevelData.setRespawnData, as /setworldspawn sets it (the
+                        // overworld's: Horizon's world spawn is the overworld's).
+                        if dimension == "minecraft:overworld" {
+                            self.level.world_spawn = Some(position);
+                            self.level.world_spawn_angle = [yaw, pitch];
+                        }
+                    }
                     teleport @ horizon_jvm::events::Action::Teleport { .. } => {
                         if host.is_some() {
                             // The hub is out of `self.lan` (a connection's command): the

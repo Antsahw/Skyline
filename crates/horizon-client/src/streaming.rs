@@ -403,7 +403,8 @@ impl GenerationScan {
                     wanted.push((input.ranges.priority(x, z, input.loading), x, z));
                 }
             }
-            // Forced chunks and their generation neighbourhood.
+            // Forced chunks and their generation neighbourhood (as near as the player's
+            // own: `Ranges::priority`).
             let reach = margin - 1;
             for &(fx, fz) in input.ranges.forced {
                 for dz in -reach..=reach {
@@ -925,6 +926,14 @@ impl Streaming {
             .chain(self.ticketed.iter().filter(|c| !self.forced.contains(c)))
             .copied()
     }
+    /// The forced chunks the ranges use (`kept` while mods' tickets add to them).
+    fn kept_or_forced(&self) -> impl Iterator<Item = &(i32, i32)> + '_ {
+        if self.ticketed.is_empty() {
+            self.forced.iter()
+        } else {
+            self.kept.iter()
+        }
+    }
     /// `forced` changes outside Streaming (`/forceload`): the union follows each update.
     fn refresh_kept(&mut self) {
         self.kept.clear();
@@ -1184,8 +1193,21 @@ impl Streaming {
                 .collect();
             // Chunks no ticket reached (forced and extra areas) go last, nearest first.
             wanted.sort_unstable_by_key(|w| w.1);
+            // Ranked as vanilla's tickets would have them; but a forced chunk's
+            // neighbourhood is tried first: its rank is after the player's area (it came
+            // later), and only chunks within two of it can hold it back (`blocked`), so
+            // the order of overlapping decorations is the same.
+            let near_forced = |s: &Self, x: i32, z: i32| {
+                s.kept_or_forced()
+                    .any(|f| (x - f.0).abs() <= 2 && (z - f.1).abs() <= 2)
+            };
             for w in &mut wanted {
-                w.0 = self.decoration_order.rank_or_append(w.2, w.3);
+                let rank = self.decoration_order.rank_or_append(w.2, w.3);
+                w.0 = if near_forced(self, w.2, w.3) {
+                    rank
+                } else {
+                    rank | 1 << 62
+                };
             }
             wanted.sort_unstable();
             for (_, _, x, z) in wanted {
@@ -1761,11 +1783,24 @@ impl ExtraCover {
 impl Ranges<'_> {
     /// `distance`, or `rings` while the level loading screen is up.
     fn priority(&self, x: i32, z: i32, loading: bool) -> i64 {
-        let own = if loading {
+        let mut own = if loading {
             self.rings(x, z)
         } else {
             self.distance(x, z)
         };
+        // A forced chunk is as near as the player's own (vanilla's FORCED ticket is level
+        // 31, the player's chunk's), and so is the work around it: data packs forceload a
+        // chunk far away and use it at once (Skyblock Infinite's island at 0 0).
+        for f in self.forced {
+            let (dx, dz) = (i64::from(x - f.0), i64::from(z - f.1));
+            let near = if loading {
+                let ring = dx.abs().max(dz.abs());
+                (ring * ring) << 20 | (dx * dx + dz * dz)
+            } else {
+                dx * dx + dz * dz
+            };
+            own = own.min(near);
+        }
         match self.band {
             Some(band) if band.within(x, z, 4) => own.min(band.priority(x, z)),
             _ => own,
@@ -2098,7 +2133,7 @@ mod tests {
                         || input.ranges.near_finished(x, z, reach))
                         && missing(x, z)
                     {
-                        wanted.push((input.ranges.distance(x, z), x, z));
+                        wanted.push((input.ranges.priority(x, z, input.loading), x, z));
                     }
                 }
             }
@@ -2108,7 +2143,7 @@ mod tests {
                 for dx in -(margin - 1)..=(margin - 1) {
                     let (x, z) = (fx + dx, fz + dz);
                     if missing(x, z) {
-                        wanted.push((input.ranges.distance(x, z), x, z));
+                        wanted.push((input.ranges.priority(x, z, input.loading), x, z));
                     }
                 }
             }

@@ -129,7 +129,10 @@ public abstract class ServerChunkCacheMixin {
     /** ServerLevel.setChunkForced (a FORCED ticket, as /forceload's). */
     @Inject(method = "updateChunkForced", at = @At("HEAD"), cancellable = true)
     private void horizon$forced(ChunkPos pos, boolean forced, CallbackInfoReturnable<Boolean> cir) {
-        if (HorizonServer.isMirror(this)) cir.setReturnValue(horizon$tickets().updateChunkForced(pos, forced));
+        if (!HorizonServer.isMirror(this)) return;
+        cir.setReturnValue(horizon$tickets().updateChunkForced(pos, forced));
+        if (forced) dev.horizonlab.platform.HorizonFunctions.forced(
+                (net.minecraft.server.level.ServerLevel) horizon$level(), pos.x(), pos.z());
     }
 
     private net.minecraft.world.level.TicketStorage horizon$tickets() {
