@@ -233,8 +233,46 @@ public final class HorizonEntityRender {
         return out;
     }
 
+    /** Entities drawn at least once (a resting one's look is then kept by Horizon). */
+    private static final java.util.Set<Entity> DRAWN = java.util.Collections.newSetFromMap(new java.util.WeakHashMap<>());
+
+    /** A float sent each tick (a matrix, a pose): to 1e-4, which is all a model needs. */
+    static float round(float f) {
+        return Math.round(f * 10000.0F) / 10000.0F;
+    }
+
+    /**
+     * An entry of the snapshot as Horizon routes it: where it is and the model trees it draws
+     * (which players are sent it, which trees go with it), then the entry itself ("e"), passed
+     * on as it is.
+     */
+    private static JsonObject routed(JsonObject entry) {
+        JsonObject out = new JsonObject();
+        out.add("x", entry.get("x"));
+        out.add("y", entry.get("y"));
+        out.add("z", entry.get("z"));
+        JsonArray keys = new JsonArray();
+        if (entry.get("models") instanceof JsonArray models) {
+            for (var m : models) {
+                if (m instanceof JsonObject o && o.has("key")) keys.add(o.get("key"));
+            }
+        }
+        if (!keys.isEmpty()) out.add("keys", keys);
+        out.add("e", entry);
+        return out;
+    }
+
     /** The snapshot of every level's mods' entities (see the class), for Horizon. */
     public static String snapshot() {
+        long phase = HorizonProfile.start();
+        try {
+            return snapshotNow();
+        } finally {
+            HorizonProfile.add("snapshot", phase);
+        }
+    }
+
+    private static String snapshotNow() {
         JsonObject dims = new JsonObject();
         for (var e : HorizonEntities.all().entrySet()) {
             ServerLevel level = e.getKey();
@@ -247,10 +285,21 @@ public final class HorizonEntityRender {
                 o.addProperty("x", entity.getX());
                 o.addProperty("y", entity.getY());
                 o.addProperty("z", entity.getZ());
+                // It didn't tick (far and idle, HorizonEntities.active): it looks as it did,
+                // which the player's game keeps.
+                if (HorizonEntities.resting(entity) && DRAWN.contains(entity)) {
+                    o.addProperty("keep", true);
+                    list.add(routed(o));
+                    continue;
+                }
+                DRAWN.add(entity);
                 o.addProperty("w", entity.getBbWidth());
                 o.addProperty("h", entity.getBbHeight());
                 JsonArray items = new JsonArray();
+                long started = HorizonProfile.start();
                 o.add("models", models(entity, items));
+                if (HorizonProfile.ON) HorizonProfile.render(
+                        BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString(), System.nanoTime() - started);
                 if (!items.isEmpty()) o.add("items", items);
                 // Its custom name, when its renderer couldn't say (Horizon shows it as its own
                 // mobs': visible, or looked at).
@@ -268,7 +317,7 @@ public final class HorizonEntityRender {
                 }
                 float shadow = lastShadow;
                 if (shadow > 0.0F) o.addProperty("shadow", shadow);
-                list.add(o);
+                list.add(routed(o));
             }
             if (!list.isEmpty()) dims.add(level.dimension().identifier().toString(), list);
         }
@@ -279,7 +328,7 @@ public final class HorizonEntityRender {
             if (blocks.isEmpty()) continue;
             String key = level.dimension().identifier().toString();
             JsonArray list = dims.has(key) ? dims.getAsJsonArray(key) : new JsonArray();
-            list.addAll(blocks);
+            for (var b : blocks) list.add(routed(b.getAsJsonObject()));
             dims.add(key, list);
         }
         JsonObject out = new JsonObject();
@@ -288,7 +337,7 @@ public final class HorizonEntityRender {
         for (var t : NEW_TREES.entrySet()) trees.add(t.getKey(), t.getValue());
         NEW_TREES.clear();
         out.add("models", trees);
-        return out.toString();
+        return HorizonJson.write(out);
     }
 
     /**
@@ -317,12 +366,35 @@ public final class HorizonEntityRender {
         KEPT.remove(state);
     }
 
+    /** Items' SNBT by their stack (a held item is the same each tick): the last 256. */
+    private static final Map<Integer, Object[]> SNBT = new java.util.LinkedHashMap<>(256, 0.75F, true) {
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<Integer, Object[]> eldest) {
+            return size() > 256;
+        }
+    };
+
+    private static String snbt(net.minecraft.world.item.ItemStack stack) {
+        int hash = net.minecraft.world.item.ItemStack.hashItemAndComponents(stack) * 31 + stack.getCount();
+        synchronized (SNBT) {
+            Object[] kept = SNBT.get(hash);
+            if (kept != null && net.minecraft.world.item.ItemStack.matches((net.minecraft.world.item.ItemStack) kept[0], stack)) {
+                return (String) kept[1];
+            }
+        }
+        String snbt = HorizonServer.snbt(stack);
+        synchronized (SNBT) {
+            SNBT.put(hash, new Object[] {stack.copy(), snbt});
+        }
+        return snbt;
+    }
+
     /** A kept item submitted: its stack, context and the pose then. False for other items. */
     public static boolean submitItem(Object state, PoseStack pose) {
         Kept kept = KEPT.get(state);
         if (kept == null) return false;
         if (items == null) return true;
-        String snbt = HorizonServer.snbt(kept.stack());
+        String snbt = snbt(kept.stack());
         if (snbt == null) return true;
         JsonObject o = new JsonObject();
         o.addProperty("item", snbt);
@@ -330,7 +402,7 @@ public final class HorizonEntityRender {
         JsonArray matrix = new JsonArray();
         float[] m = new float[16];
         pose.last().pose().get(m);
-        for (float f : m) matrix.add(f);
+        for (float f : m) matrix.add(round(f));
         o.add("m", matrix);
         items.add(o);
         return true;
@@ -506,7 +578,7 @@ public final class HorizonEntityRender {
         JsonArray matrix = new JsonArray();
         float[] m = new float[16];
         pose.last().pose().get(m);
-        for (float f : m) matrix.add(f);
+        for (float f : m) matrix.add(round(f));
         o.add("m", matrix);
         o.addProperty("tint", tint);
         o.addProperty("overlay", overlay);
@@ -647,7 +719,7 @@ public final class HorizonEntityRender {
         float[] now = pose(part);
         if (!java.util.Arrays.equals(now, pose(part.getInitialPose()))) {
             JsonArray a = new JsonArray();
-            for (float f : now) a.add(f);
+            for (float f : now) a.add(round(f));
             poses.add(path, a);
         }
         String base = path.equals("root") ? "" : path;

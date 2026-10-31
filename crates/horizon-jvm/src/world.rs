@@ -34,6 +34,29 @@ pub trait Blocks {
     ) -> Option<Vec<String>> {
         None
     }
+    /// Horizon's state ids of the 16x16x16 section `cx sy cz` (`out[(y * 16 + z) * 16 + x]`),
+    /// named by [`Blocks::state_name`]: Some(false) where its chunk isn't loaded, None when
+    /// this view can't (Java then reads [`Blocks::column`]).
+    fn section_ids(
+        &self,
+        _dimension: &str,
+        _cx: i32,
+        _sy: i32,
+        _cz: i32,
+        _out: &mut [i32],
+    ) -> Option<bool> {
+        None
+    }
+    /// A number for chunk `cx cz`'s blocks as they are now (new when one changes, or the
+    /// chunk is another): what was read of it stays true while it stays. -2 where it isn't
+    /// loaded, -1 when this view can't say.
+    fn chunk_revision(&self, _dimension: &str, _cx: i32, _cz: i32) -> i64 {
+        -1
+    }
+    /// The state a [`Blocks::section_ids`] id is (`minecraft:oak_log[axis=y]`).
+    fn state_name(&self, _id: i32) -> Option<String> {
+        None
+    }
     /// The biomes of chunk `cx cz` as [`Blocks::column`] gives its blocks, one a quart (4x4x4
     /// blocks; `i` = `((qy - min_y / 4) * 4 + qz) * 4 + qx`), with a palette of biome ids.
     fn column_biomes(
@@ -69,6 +92,34 @@ pub(crate) fn column(
         .and_then(|view| unsafe { (*view).column(dimension, cx, cz, min_y, out) })
 }
 
+/// [`Blocks::section_ids`] of this thread's view; None outside one (or when it can't).
+pub(crate) fn section_ids(
+    dimension: &str,
+    cx: i32,
+    sy: i32,
+    cz: i32,
+    out: &mut [i32],
+) -> Option<bool> {
+    // SAFETY: a view in VIEW is alive (with_blocks).
+    VIEW.get()
+        .and_then(|view| unsafe { (*view).section_ids(dimension, cx, sy, cz, out) })
+}
+
+/// [`Blocks::chunk_revision`] of this thread's view; -1 outside one.
+pub(crate) fn chunk_revision(dimension: &str, cx: i32, cz: i32) -> i64 {
+    // SAFETY: a view in VIEW is alive (with_blocks).
+    VIEW.get().map_or(-1, |view| unsafe {
+        (*view).chunk_revision(dimension, cx, cz)
+    })
+}
+
+/// [`Blocks::state_name`] of this thread's view.
+pub(crate) fn state_name(id: i32) -> Option<String> {
+    // SAFETY: a view in VIEW is alive (with_blocks).
+    VIEW.get()
+        .and_then(|view| unsafe { (*view).state_name(id) })
+}
+
 /// [`Blocks::column_biomes`] of this thread's view; None outside one.
 pub(crate) fn column_biomes(
     dimension: &str,
@@ -87,6 +138,14 @@ type View = *const (dyn Blocks + 'static);
 thread_local! {
     /// The view of the call running on this thread (Java runs mods on the caller's thread).
     static VIEW: Cell<Option<View>> = const { Cell::new(None) };
+    /// This thread's view changes (a view lent, or one put back): Java's per-thread caches of
+    /// the world are good while it stays.
+    static THREAD_EPOCH: Cell<i64> = const { Cell::new(0) };
+}
+
+/// This thread's view changes so far ([`with_blocks`] counts one in, one out).
+pub(crate) fn thread_epoch() -> i64 {
+    THREAD_EPOCH.get()
 }
 
 /// Runs `f` (a call into Java) with `blocks` as what mods read of the world.
@@ -95,6 +154,7 @@ pub fn with_blocks<R>(blocks: &dyn Blocks, f: impl FnOnce() -> R) -> R {
     impl Drop for Reset {
         fn drop(&mut self) {
             VIEW.set(self.0);
+            THREAD_EPOCH.set(THREAD_EPOCH.get() + 1);
         }
     }
     let view: *const (dyn Blocks + '_) = blocks;
@@ -102,6 +162,7 @@ pub fn with_blocks<R>(blocks: &dyn Blocks, f: impl FnOnce() -> R) -> R {
     let view: View = unsafe { std::mem::transmute(view) };
     let _reset = Reset(VIEW.replace(Some(view)));
     EPOCH.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    THREAD_EPOCH.set(THREAD_EPOCH.get() + 1);
     f()
 }
 

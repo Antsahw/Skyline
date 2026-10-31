@@ -470,6 +470,26 @@ fn boot(env: &mut JNIEnv, jars: &[PathBuf]) -> jni::errors::Result<String> {
                 fn_ptr: native_chunk_biomes as *mut c_void,
             },
             NativeMethod {
+                name: "sectionIds".into(),
+                sig: "(Ljava/lang/String;III[I)I".into(),
+                fn_ptr: native_section_ids as *mut c_void,
+            },
+            NativeMethod {
+                name: "chunkRevision".into(),
+                sig: "(Ljava/lang/String;II)J".into(),
+                fn_ptr: native_chunk_revision as *mut c_void,
+            },
+            NativeMethod {
+                name: "stateName".into(),
+                sig: "(I)Ljava/lang/String;".into(),
+                fn_ptr: native_state_name as *mut c_void,
+            },
+            NativeMethod {
+                name: "threadEpoch".into(),
+                sig: "()J".into(),
+                fn_ptr: native_thread_epoch as *mut c_void,
+            },
+            NativeMethod {
                 name: "viewEpoch".into(),
                 sig: "()J".into(),
                 fn_ptr: native_view_epoch as *mut c_void,
@@ -1074,6 +1094,76 @@ fn chunk_palette<'local>(
         array.into_raw()
     }))
     .unwrap_or(std::ptr::null_mut())
+}
+
+/// `Natives.sectionIds(String dimension, int cx, int sy, int cz, int[] out)`: a section's
+/// state ids (`world::section_ids`): 1, 0 where its chunk isn't loaded, -1 when the view can't.
+extern "system" fn native_section_ids<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    dimension: JString<'local>,
+    cx: sys::jint,
+    sy: sys::jint,
+    cz: sys::jint,
+    out: jni::objects::JIntArray<'local>,
+) -> sys::jint {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let Ok(dimension) = env.get_string(&dimension).map(String::from) else {
+            return -1;
+        };
+        let mut ids = [0i32; 4096];
+        match world::section_ids(&dimension, cx, sy, cz, &mut ids) {
+            Some(true) => {
+                if env.set_int_array_region(&out, 0, &ids).is_err() {
+                    return -1;
+                }
+                1
+            }
+            Some(false) => 0,
+            None => -1,
+        }
+    }))
+    .unwrap_or(-1)
+}
+
+/// `Natives.chunkRevision(String dimension, int cx, int cz)`: `world::chunk_revision`.
+extern "system" fn native_chunk_revision<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    dimension: JString<'local>,
+    cx: sys::jint,
+    cz: sys::jint,
+) -> sys::jlong {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let Ok(dimension) = env.get_string(&dimension).map(String::from) else {
+            return -1;
+        };
+        world::chunk_revision(&dimension, cx, cz)
+    }))
+    .unwrap_or(-1)
+}
+
+/// `Natives.stateName(int id)`: the state a section id is (`world::state_name`), or null.
+extern "system" fn native_state_name<'local>(
+    env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    id: sys::jint,
+) -> sys::jstring {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        match world::state_name(id) {
+            Some(name) => env
+                .new_string(name)
+                .map(JString::into_raw)
+                .unwrap_or(std::ptr::null_mut()),
+            None => std::ptr::null_mut(),
+        }
+    }))
+    .unwrap_or(std::ptr::null_mut())
+}
+
+/// `Natives.threadEpoch()`: this thread's view changes so far (`world::thread_epoch`).
+extern "system" fn native_thread_epoch(_env: JNIEnv, _class: JClass) -> sys::jlong {
+    world::thread_epoch()
 }
 
 /// `Natives.viewEpoch()`: the number of the world view lent last (`world::epoch`).

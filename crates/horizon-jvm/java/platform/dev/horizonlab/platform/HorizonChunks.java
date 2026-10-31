@@ -62,20 +62,32 @@ public final class HorizonChunks {
         }
     }
 
+    /**
+     * Horizon's chunk as a LevelChunk, filled only when code reads its sections or heightmaps
+     * (fill): reads of a block or a fluid go to the level (HorizonServer.blockState, whole
+     * sections at a time). Mobs ask for their chunk every tick (their fluids, their paths, their
+     * shadows) and only read a few blocks of it; a full copy is 98k blocks.
+     */
     private static LevelChunk copy(ServerLevel level, int cx, int cz) {
+        if (!HorizonServer.loaded(level, cx << 4, level.getMinY(), cz << 4)) return null;
+        return new Copy(level, new ChunkPos(cx, cz));
+    }
+
+    private static void fill(Copy chunk) {
+        ServerLevel level = (ServerLevel) chunk.getLevel();
+        int cx = chunk.getPos().x(), cz = chunk.getPos().z();
         String dimension = level.dimension().identifier().toString();
         int minY = level.getMinY();
         int height = level.getHeight();
         int[] blocks = new int[height * 256];
         String[] palette = Natives.chunkBlocks(dimension, cx, cz, minY, blocks);
-        if (palette == null) return null;
-        Copy chunk = new Copy(level, new ChunkPos(cx, cz));
+        if (palette == null) return;
         BlockState[] states = new BlockState[palette.length];
         for (int i = 0; i < palette.length; i++) {
             BlockState state = HorizonServer.parseState(palette[i]);
             states[i] = state != null ? state : net.minecraft.world.level.block.Blocks.AIR.defaultBlockState();
         }
-        LevelChunkSection[] sections = chunk.getSections();
+        LevelChunkSection[] sections = chunk.rawSections();
         for (int i = 0; i < blocks.length; i++) {
             BlockState state = states[blocks[i]];
             if (state.isAir()) continue;
@@ -110,21 +122,103 @@ public final class HorizonChunks {
             });
         }
         Heightmap.primeHeightmaps(chunk, java.util.EnumSet.allOf(Heightmap.Types.class));
-        return chunk;
     }
 
-    /** A copied chunk: what is set on it goes to the level, as Level.setBlock. */
+    /**
+     * A copied chunk: blocks and fluids read from the level until something reads its sections,
+     * heightmaps or biomes, then filled; what is set on it goes to the level, as Level.setBlock.
+     */
     private static final class Copy extends LevelChunk {
+        private boolean filled;
+
         Copy(ServerLevel level, ChunkPos pos) {
             super(level, pos);
         }
 
+        private void ensure() {
+            if (filled) return;
+            filled = true;
+            fill(this);
+        }
+
+        LevelChunkSection[] rawSections() {
+            return super.getSections();
+        }
+
         void follow(BlockPos pos, BlockState state) {
-            LevelChunkSection section = getSection(getSectionIndex(pos.getY()));
+            if (!filled) return;
+            LevelChunkSection section = super.getSection(getSectionIndex(pos.getY()));
             section.setBlockState(pos.getX() & 15, pos.getY() & 15, pos.getZ() & 15, state, false);
-            for (var heightmap : getHeightmaps()) {
+            for (var heightmap : super.getHeightmaps()) {
                 heightmap.getValue().update(pos.getX() & 15, pos.getY(), pos.getZ() & 15, state);
             }
+        }
+
+        @Override
+        public BlockState getBlockState(BlockPos pos) {
+            if (filled) return super.getBlockState(pos);
+            return HorizonServer.blockState(getLevel(), pos);
+        }
+
+        @Override
+        public net.minecraft.world.level.material.FluidState getFluidState(BlockPos pos) {
+            if (filled) return super.getFluidState(pos);
+            return HorizonServer.blockState(getLevel(), pos).getFluidState();
+        }
+
+        @Override
+        public net.minecraft.world.level.material.FluidState getFluidState(int x, int y, int z) {
+            if (filled) return super.getFluidState(x, y, z);
+            return HorizonServer.blockState(getLevel(), new BlockPos(x, y, z)).getFluidState();
+        }
+
+        @Override
+        public LevelChunkSection[] getSections() {
+            ensure();
+            return super.getSections();
+        }
+
+        @Override
+        public LevelChunkSection getSection(int index) {
+            ensure();
+            return super.getSection(index);
+        }
+
+        @Override
+        public int getHeight(Heightmap.Types type, int x, int z) {
+            ensure();
+            return super.getHeight(type, x, z);
+        }
+
+        @Override
+        public java.util.Collection<Map.Entry<Heightmap.Types, Heightmap>> getHeightmaps() {
+            ensure();
+            return super.getHeightmaps();
+        }
+
+        @Override
+        public Heightmap getOrCreateHeightmapUnprimed(Heightmap.Types type) {
+            ensure();
+            return super.getOrCreateHeightmapUnprimed(type);
+        }
+
+        /** Not empty (PathNavigationRegion's quick check): the slower, exact way follows. */
+        @Override
+        public boolean isYSpaceEmpty(int from, int to) {
+            if (!filled) return false;
+            return super.isYSpaceEmpty(from, to);
+        }
+
+        @Override
+        public int getHighestSectionPosition() {
+            ensure();
+            return super.getHighestSectionPosition();
+        }
+
+        @Override
+        public Holder<Biome> getNoiseBiome(int x, int y, int z) {
+            ensure();
+            return super.getNoiseBiome(x, y, z);
         }
 
         @Override

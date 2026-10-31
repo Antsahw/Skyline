@@ -33,6 +33,83 @@ public final class HorizonProfile {
         return now;
     }
 
+    /** Per mod entity type: its entities' tick time and how many entity ticks (HorizonEntities). */
+    private static final Map<String, long[]> ENTITIES = new java.util.HashMap<>();
+    /** Per mod entity type: its renderer's time in the snapshot (HorizonEntityRender). */
+    private static final Map<String, long[]> RENDERS = new java.util.HashMap<>();
+    /** Block reads that went to Horizon (Natives.blockState): count, time. */
+    private static final long[] READS = new long[2];
+    /** Block reads answered by the tick's section copies (HorizonServer.blockState). */
+    private static final long[] CACHED = new long[1];
+
+    /** An entity of {@code type} ticked in {@code nanos}. */
+    public static void entity(String type, long nanos) {
+        if (!ON) return;
+        synchronized (ENTITIES) {
+            long[] t = ENTITIES.computeIfAbsent(type, k -> new long[2]);
+            t[0] += nanos;
+            t[1]++;
+        }
+    }
+
+    /** An entity of {@code type} drawn for the snapshot in {@code nanos}. */
+    public static void render(String type, long nanos) {
+        if (!ON) return;
+        synchronized (RENDERS) {
+            long[] t = RENDERS.computeIfAbsent(type, k -> new long[2]);
+            t[0] += nanos;
+            t[1]++;
+        }
+    }
+
+    /** A block read Horizon answered (a JNI call), in {@code nanos}. */
+    public static void read(long nanos) {
+        if (!ON) return;
+        synchronized (READS) {
+            READS[0]++;
+            READS[1] += nanos;
+        }
+    }
+
+    /** Sections kept from an earlier view, their chunk unchanged. */
+    private static final long[] REUSED = new long[1];
+
+    /** A section kept from an earlier view (its chunk unchanged) served this one. */
+    public static void reused() {
+        if (!ON) return;
+        synchronized (REUSED) {
+            REUSED[0]++;
+        }
+    }
+
+    /** A block read the section copies answered. */
+    public static void cached() {
+        if (!ON) return;
+        synchronized (CACHED) {
+            CACHED[0]++;
+        }
+    }
+
+    private static String perType(String what, Map<String, long[]> map, int ticks) {
+        StringBuilder line = new StringBuilder("Java profile (" + what + "):");
+        synchronized (map) {
+            long all = 0, n = 0;
+            for (long[] t : map.values()) {
+                all += t[0];
+                n += t[1];
+            }
+            line.append(String.format(" %.2f ms a tick, %.0f a tick;", all / 1e6 / ticks, (double) n / ticks));
+            map.entrySet().stream()
+                    .sorted((a, b) -> Long.compare(b.getValue()[0], a.getValue()[0]))
+                    .limit(12)
+                    .forEach(e -> line.append(String.format(" %s %.2f ms (%.0f, %.3f each)", e.getKey(),
+                            e.getValue()[0] / 1e6 / ticks, (double) e.getValue()[1] / ticks,
+                            e.getValue()[0] / 1e6 / Math.max(1, e.getValue()[1]))));
+            map.clear();
+        }
+        return line.toString();
+    }
+
     /** The end of a server tick: every 200, the report. */
     static void tick() {
         if (!ON || ++ticks < 200) return;
@@ -52,7 +129,17 @@ public final class HorizonProfile {
                             : String.format(" %s %.2f ms", e.getKey(), e.getValue()[0] / 1e6 / ticks)));
             PHASES.clear();
         }
-        ticks = 0;
         Natives.log(line.toString());
+        Natives.log(perType("entity ticks", ENTITIES, ticks));
+        Natives.log(perType("entity snapshot", RENDERS, ticks));
+        synchronized (READS) {
+            Natives.log(String.format("Java profile (block reads): %.0f section fetches a tick from Horizon, %.2f ms (%.2f us each); %.0f kept from earlier ticks; %.0f block reads a tick from them",
+                    (double) READS[0] / ticks, READS[1] / 1e6 / ticks, READS[1] / 1e3 / Math.max(1, READS[0]),
+                    (double) REUSED[0] / ticks, (double) CACHED[0] / ticks));
+            REUSED[0] = 0;
+            READS[0] = READS[1] = 0;
+            CACHED[0] = 0;
+        }
+        ticks = 0;
     }
 }

@@ -82,7 +82,7 @@ public final class HorizonEntities {
     }
 
     private static boolean loaded(ServerLevel level, double x, double y, double z) {
-        return Natives.blockState(dimension(level), (int) Math.floor(x), (int) Math.floor(y), (int) Math.floor(z)) != null;
+        return HorizonServer.loaded(level, (int) Math.floor(x), (int) Math.floor(y), (int) Math.floor(z));
     }
 
     /**
@@ -136,6 +136,7 @@ public final class HorizonEntities {
 
         @Override
         public void onRemove(Entity.RemovalReason reason) {
+            RESTING.remove(entity);
             synchronized (HorizonEntities.class) {
                 Map<UUID, Entity> live = LIVE.get(level);
                 if (live != null && live.get(entity.getUUID()) == entity) live.remove(entity.getUUID());
@@ -164,11 +165,63 @@ public final class HorizonEntities {
                 if (entity.isPassenger()) continue;
                 fire(entity, "Entity.checkDespawn", entity::checkDespawn);
                 if (entity.isRemoved()) continue;
+                if (!active(level, entity) && (ticks + entity.getId()) % FAR_EVERY != 0) {
+                    // Far from every player and idle: it ticks one tick in FAR_EVERY, and isn't
+                    // drawn again until it does (HorizonEntityRender keeps its last look).
+                    RESTING.add(entity);
+                    continue;
+                }
+                RESTING.remove(entity);
+                long started = HorizonProfile.start();
                 fire(entity, "Entity.tick", () -> tickNonPassenger(entity));
+                if (HorizonProfile.ON) HorizonProfile.entity(
+                        BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString(), System.nanoTime() - started);
             }
         }
         if (++ticks % SAVE_TICKS == 0) save();
         if (ticks % 20 == 0) restore();
+    }
+
+    /**
+     * Mods' entities farther than this from every player tick one tick in FAR_EVERY while idle
+     * (an entity activation range, as servers such as Paper's run theirs): a big pack's mobs
+     * spread around the players and most of them stand far away doing nothing.
+     * HORIZON_JAVA_ENTITY_RANGE sets it (0: every entity ticks every tick).
+     */
+    static final int ACTIVE_RANGE = Integer.getInteger("horizon.entityRange",
+            parseInt(System.getenv("HORIZON_JAVA_ENTITY_RANGE"), 32));
+    static final int FAR_EVERY = 4;
+    /** The entities that didn't tick this tick (far and idle): their last look stands. */
+    private static final java.util.Set<Entity> RESTING = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+
+    private static int parseInt(String text, int otherwise) {
+        try {
+            return text == null ? otherwise : Integer.parseInt(text.trim());
+        } catch (NumberFormatException e) {
+            return otherwise;
+        }
+    }
+
+    /** Whether the entity didn't tick this tick (HorizonEntityRender keeps its last look). */
+    static boolean resting(Entity entity) {
+        return RESTING.contains(entity);
+    }
+
+    /**
+     * Whether an entity ticks every tick: a player within ACTIVE_RANGE, or busy (hurt, dying,
+     * with a target, carrying or carried, moving faster than walking, in a fluid).
+     */
+    private static boolean active(ServerLevel level, Entity entity) {
+        if (ACTIVE_RANGE <= 0) return true;
+        double range = (double) ACTIVE_RANGE * ACTIVE_RANGE;
+        for (var player : level.players()) {
+            if (player.distanceToSqr(entity) < range) return true;
+        }
+        if (entity.isVehicle() || entity.isPassenger() || entity.isInWater() || entity.isInLava()) return true;
+        if (entity.getDeltaMovement().horizontalDistanceSqr() > 0.04 || entity.getDeltaMovement().y > 0.1) return true;
+        if (entity instanceof net.minecraft.world.entity.LivingEntity living
+                && (living.hurtTime > 0 || living.isDeadOrDying())) return true;
+        return entity instanceof net.minecraft.world.entity.Mob mob && mob.getTarget() != null;
     }
 
     private static void tickNonPassenger(Entity entity) {

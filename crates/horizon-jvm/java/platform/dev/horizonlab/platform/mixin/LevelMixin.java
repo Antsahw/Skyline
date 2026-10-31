@@ -27,7 +27,7 @@ public abstract class LevelMixin {
     public boolean hasChunk(int x, int z) {
         if (HorizonServer.isMirror(this)) {
             Level level = (Level) (Object) this;
-            return Natives.blockState(level.dimension().identifier().toString(), x << 4, 64, z << 4) != null;
+            return HorizonServer.loaded(level, x << 4, 64, z << 4);
         }
         return ((net.minecraft.world.level.LevelAccessor) (Object) this).getChunkSource().hasChunk(x, z);
     }
@@ -86,8 +86,7 @@ public abstract class LevelMixin {
     private void horizon$loaded(BlockPos pos, CallbackInfoReturnable<Boolean> cir) {
         if (HorizonServer.isMirror(this)) {
             Level level = (Level) (Object) this;
-            cir.setReturnValue(Natives.blockState(level.dimension().identifier().toString(),
-                    pos.getX(), pos.getY(), pos.getZ()) != null);
+            cir.setReturnValue(HorizonServer.loaded(level, pos.getX(), pos.getY(), pos.getZ()));
         }
     }
 

@@ -60,22 +60,6 @@ struct Mesh {
     colors: Vec<u32>,
 }
 
-fn mesh(v: &Value) -> Option<Mesh> {
-    let raw = v.get("v")?.as_array()?;
-    let mut vertices = Vec::with_capacity(raw.len() / 9);
-    let mut colors = Vec::with_capacity(raw.len() / 9);
-    for c in raw.chunks_exact(9) {
-        vertices.push(std::array::from_fn(|i| c[i].as_f64().unwrap_or(0.0) as f32));
-        colors.push(c[8].as_u64().unwrap_or(u64::from(u32::MAX)) as u32);
-    }
-    Some(Mesh {
-        sprite: sprite_key(v.get("tex")?.as_str()?),
-        overlay: v.get("overlay").and_then(Value::as_i64).unwrap_or(0) as u32,
-        vertices,
-        colors,
-    })
-}
-
 #[derive(Clone)]
 struct Shown {
     id: i32,
@@ -124,33 +108,6 @@ fn floats<const N: usize>(v: &Value) -> Option<[f32; N]> {
     (a.len() == N).then(|| std::array::from_fn(|i| a[i].as_f64().unwrap_or(0.0) as f32))
 }
 
-fn strings(v: &Value) -> Vec<String> {
-    v.as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|s| s.as_str().map(str::to_owned))
-        .collect()
-}
-
-fn drawn(v: &Value) -> Option<Drawn> {
-    Some(Drawn {
-        key: v.get("key")?.as_str()?.to_owned(),
-        sprite: sprite_key(v.get("tex")?.as_str()?),
-        matrix: floats(v.get("m")?)?,
-        tint: v.get("tint").and_then(Value::as_i64).unwrap_or(-1) as u32,
-        overlay: v.get("overlay").and_then(Value::as_i64).unwrap_or(0) as u32,
-        poses: v
-            .get("poses")
-            .and_then(Value::as_object)
-            .into_iter()
-            .flatten()
-            .filter_map(|(k, p)| Some((k.clone(), floats(p)?)))
-            .collect(),
-        hidden: v.get("hidden").map(strings).unwrap_or_default(),
-        skip: v.get("skip").map(strings).unwrap_or_default(),
-    })
-}
-
 fn item(v: &Value) -> Option<Item> {
     let (tag, _) = horizon_world::nbt::parse_snbt(v.get("item")?.as_str()?).ok()?;
     Some(Item {
@@ -160,50 +117,125 @@ fn item(v: &Value) -> Option<Item> {
     })
 }
 
-fn shown(v: &Value) -> Option<Shown> {
-    let f = |k: &str| v.get(k).and_then(Value::as_f64);
-    Some(Shown {
-        items: v
-            .get("items")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-            .filter_map(item)
-            .collect(),
-        name: v.get("tag").or_else(|| v.get("name")).map(|n| {
-            horizon_client::component::to_text(n, &mut |k| horizon_client::text::Text::literal(k))
-        }),
-        name_visible: v
-            .get(if v.get("tag").is_some() {
-                "tag_always"
+/// The payload as sent (read straight into these, not through a `Value` tree: it comes
+/// every tick).
+#[derive(serde::Deserialize)]
+struct RawPayload {
+    #[serde(default)]
+    entities: Vec<RawShown>,
+    #[serde(default)]
+    models: HashMap<String, Value>,
+}
+
+#[derive(serde::Deserialize)]
+struct RawShown {
+    id: i64,
+    x: f64,
+    y: f64,
+    z: f64,
+    w: Option<f64>,
+    h: Option<f64>,
+    #[serde(default)]
+    block: bool,
+    #[serde(default)]
+    models: Vec<RawModel>,
+    #[serde(default)]
+    items: Vec<Value>,
+    name: Option<Value>,
+    #[serde(default)]
+    name_visible: bool,
+    tag: Option<Value>,
+    #[serde(default)]
+    tag_always: bool,
+    tag_y: Option<f64>,
+    #[serde(default)]
+    shadow: f32,
+    /// It didn't tick (far and idle): it looks as it did, only its place is new.
+    #[serde(default)]
+    keep: bool,
+}
+
+#[derive(serde::Deserialize)]
+struct RawModel {
+    key: Option<String>,
+    tex: Option<String>,
+    m: Option<[f32; 16]>,
+    tint: Option<i64>,
+    overlay: Option<i64>,
+    #[serde(default)]
+    poses: HashMap<String, [f32; 9]>,
+    #[serde(default)]
+    hidden: Vec<String>,
+    #[serde(default)]
+    skip: Vec<String>,
+    /// Custom geometry (GeckoLib's): x, y, z, u, v, nx, ny, nz, colour per vertex.
+    v: Option<Vec<f64>>,
+}
+
+impl RawModel {
+    fn drawn(self) -> Option<Drawn> {
+        Some(Drawn {
+            key: self.key?,
+            sprite: sprite_key(self.tex.as_deref()?),
+            matrix: self.m?,
+            tint: self.tint.unwrap_or(-1) as u32,
+            overlay: self.overlay.unwrap_or(0) as u32,
+            poses: self.poses,
+            hidden: self.hidden,
+            skip: self.skip,
+        })
+    }
+
+    fn mesh(self) -> Option<Mesh> {
+        let raw = self.v?;
+        let mut vertices = Vec::with_capacity(raw.len() / 9);
+        let mut colors = Vec::with_capacity(raw.len() / 9);
+        for c in raw.chunks_exact(9) {
+            vertices.push(std::array::from_fn(|i| c[i] as f32));
+            colors.push(c[8] as u32);
+        }
+        Some(Mesh {
+            sprite: sprite_key(self.tex.as_deref()?),
+            overlay: self.overlay.unwrap_or(0) as u32,
+            vertices,
+            colors,
+        })
+    }
+}
+
+impl RawShown {
+    fn shown(self) -> Shown {
+        let (tag, visible) = match self.tag {
+            Some(tag) => (Some(tag), self.tag_always),
+            None => (self.name, self.name_visible),
+        };
+        let (mut models, mut meshes) = (Vec::new(), Vec::new());
+        for m in self.models {
+            if m.v.is_some() {
+                meshes.extend(m.mesh());
             } else {
-                "name_visible"
-            })
-            .and_then(Value::as_bool)
-            .unwrap_or(false),
-        name_y: f("tag_y"),
-        meshes: v
-            .get("models")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-            .filter(|m| m.get("v").is_some())
-            .filter_map(mesh)
-            .collect(),
-        shadow: f("shadow").unwrap_or(0.0) as f32,
-        block: v.get("block").and_then(Value::as_bool).unwrap_or(false),
-        id: v.get("id")?.as_i64()? as i32,
-        position: [f("x")?, f("y")?, f("z")?],
-        width: f("w").unwrap_or(0.6),
-        height: f("h").unwrap_or(1.8),
-        models: v
-            .get("models")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-            .filter_map(drawn)
-            .collect(),
-    })
+                models.extend(m.drawn());
+            }
+        }
+        Shown {
+            id: self.id as i32,
+            position: [self.x, self.y, self.z],
+            width: self.w.unwrap_or(0.6),
+            height: self.h.unwrap_or(1.8),
+            models,
+            meshes,
+            items: self.items.iter().filter_map(item).collect(),
+            name: tag.map(|n| {
+                horizon_client::component::to_text(&n, &mut |k| {
+                    horizon_client::text::Text::literal(k)
+                })
+            }),
+            name_visible: visible,
+            name_y: self.tag_y,
+            shadow: self.shadow,
+            block: self.block,
+        }
+    }
 }
 
 /// Java's ARGB as a vertex colour (ABGR).
@@ -237,24 +269,25 @@ fn lerp(a: f32, b: f32, t: f32) -> f32 {
 impl JavaEntities {
     /// A tick's entities from the server.
     fn receive(&mut self, data: &[u8]) {
-        let Ok(v) = serde_json::from_slice::<Value>(data) else {
+        let Ok(payload) = serde_json::from_slice::<RawPayload>(data) else {
             return;
         };
-        for (key, tree) in v
-            .get("models")
-            .and_then(Value::as_object)
-            .into_iter()
-            .flatten()
-        {
-            self.trees
-                .insert(key.clone(), Arc::new(Part::parse("root", tree)));
+        for (key, tree) in payload.models {
+            self.trees.insert(key, Arc::new(Part::parse("root", &tree)));
         }
-        let now: Vec<Shown> = v
-            .get("entities")
-            .and_then(Value::as_array)
+        let last: HashMap<i32, &Shown> = self.now.iter().map(|s| (s.id, s)).collect();
+        let now: Vec<Shown> = payload
+            .entities
             .into_iter()
-            .flatten()
-            .filter_map(shown)
+            .filter_map(|raw| {
+                if !raw.keep {
+                    return Some(raw.shown());
+                }
+                // A resting entity: its last look, where it is now (none yet: not drawn).
+                let mut kept = (*last.get(&(raw.id as i32))?).clone();
+                kept.position = [raw.x, raw.y, raw.z];
+                Some(kept)
+            })
             .collect();
         self.before = std::mem::replace(&mut self.now, now)
             .into_iter()
@@ -283,6 +316,7 @@ impl JavaEntities {
 impl Game<'_> {
     /// The server's Java entities of this tick ([`CHANNEL`]).
     pub(super) fn remote_java_entities(&mut self, data: &[u8]) {
+        let _timed = super::java_profile::Timed::named("(Rust) entities: the player's game reads");
         self.java_entities.receive(data);
     }
 

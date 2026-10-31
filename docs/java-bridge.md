@@ -571,6 +571,50 @@ Ecologics spawned around), the client tick 5–10 ms, level hooks ~2 ms; the res
 work done on the server thread's calls (proto 35–65 ms). Entities are the first thing to
 look at for a big pack.
 
+### Mod mobs' cost (2026-10-31, bridge-mob-perf)
+
+`HORIZON_JAVA_PROFILE=1` now also logs per entity type the tick and snapshot time
+(`Java profile (entity ticks)`, `(entity snapshot)`), the block reads (`(block reads)`: sections
+fetched from Horizon, kept from earlier ticks, reads served), and the snapshot's bytes
+(`Java profile (bytes)`). The load test: 100 critters (`horizon_critters:critter`) summoned on
+a grid around the player (dense: 3 blocks apart, all within 16; spread: 9 apart, within 48),
+`maxFps:10` so the software renderer leaves the 2 cores alone.
+
+Where the time went at first (dense, 100 mobs: 188 ms a tick):
+- AI and physics 130 ms, of which ~70% copying whole chunks: `EntityFluidInteraction.hasFluidAndLoaded`,
+  `PathNavigationRegion` and shadows asked for their chunk, and `HorizonChunks` copied all 98k
+  blocks of it, again each call (the copies were good for one view only).
+- Block reads ~23 ms: one JNI call and a state name string per block (1.9 us each, 13k a tick).
+- The snapshot 46 ms (shadows copying chunks again, reflection lookups per entity, Gson's float
+  formatting, a held stick's SNBT each tick), Rust 4.5 ms parsing it into a `Value` tree and
+  writing it out again per player, the player's game 3 ms parsing it.
+
+What changed:
+- Block reads go through whole sections (`HorizonServer.section`, `Natives.sectionIds`: Horizon's
+  state ids, unpacked from the section's palette, named once by `stateName`). They are kept
+  across ticks while the chunk's `Chunk::block_revision` stays (new on every block set, every
+  copy of a chunk; `Natives.chunkRevision`): a mob standing in the same place reads its sections
+  once. The view's own epoch is per thread (`Natives.threadEpoch`).
+- `HorizonChunks` copies are lazy: block and fluid reads go to the level; only code that reads a
+  chunk's sections or heightmaps fills it. `EntityFluidInteractionMixin` answers the fluid check
+  from loaded-ness (the exact per-block check follows).
+- Lock-free `isMirror`, a flag in front of `WRITTEN`'s lock, cached reflective fields
+  (`HorizonClient.set`), cached item SNBT, `HorizonJson` (floats rounded to 1e-4 written by
+  integer arithmetic).
+- The snapshot is made in the tick's own view (one lend), each entry routed by Java
+  (`x y z`, model `keys`, the entry `e`): Rust filters and concatenates the raw JSON per player
+  (`serde_json::RawValue`), and the player's game reads it into typed structs.
+- Entity activation range: a mod entity with no player within 32 blocks that is idle (no
+  target, not hurt, not moving fast, not in a fluid, not riding or ridden) ticks one tick in
+  4, and its last look is kept (`"keep"` entries: the game keeps the model, moves the box).
+  `HORIZON_JAVA_ENTITY_RANGE` sets the range; 0 turns it off.
+
+Now (same container): dense 100 critters 15 ms a tick on the server thread (AI 7.1, snapshot
+5.3, the rest spawner and client tick; block reads 0.1), spread 8–9 ms (AI 2.9, snapshot 2.9).
+Per mob: AI ~0.06–0.08 ms, snapshot ~0.03 ms. The container is two shared cores; a desktop
+core should be 2–3x faster. Left: the snapshot's fixed part (~2 ms: JSON for all, block
+entity scan), the player's game parsing ~1–2 ms on its own thread, and the mobs' own AI.
+
 ## Working on it
 
 - One task a branch (`bridge-<task>` off `java-bridge`); keep PR-sized steps.

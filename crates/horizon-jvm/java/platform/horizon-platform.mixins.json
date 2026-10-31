@@ -28,6 +28,7 @@
     "MirrorPacketContextMixin",
     "ServerChunkCacheMixin",
     "PathNavigationRegionMixin",
+    "EntityFluidInteractionMixin",
     "WorldGenRegionMixin",
     "NoiseFillMixin",
     "EntitySelectorMixin",

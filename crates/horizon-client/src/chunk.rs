@@ -134,10 +134,31 @@ impl Section {
         }
     }
 }
+/// A number for a chunk's blocks as they are, so a reader can keep what it read: new for
+/// each chunk made, each copy of one (a clone may then be changed in any way) and each block
+/// set on it ([`Chunk::set`]). Java mods' block reads keep whole sections while it stays.
+pub struct BlockRevision(u64);
+impl BlockRevision {
+    fn next() -> Self {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        Self(NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
+    }
+    pub fn get(&self) -> u64 {
+        self.0
+    }
+}
+impl Clone for BlockRevision {
+    fn clone(&self) -> Self {
+        Self::next()
+    }
+}
+
 #[derive(Clone)]
 pub struct Chunk {
     pub x: i32,
     pub z: i32,
+    /// Its blocks' [`BlockRevision`].
+    pub block_revision: BlockRevision,
     pub sections: Vec<Arc<Section>>,
     /// `Heightmap.Types.WORLD_SURFACE` per column (`z << 4 | x`): one above
     /// the highest non-air block, or `MIN_Y`. Built on the first read; a
@@ -173,6 +194,7 @@ impl Chunk {
         Self {
             x,
             z,
+            block_revision: BlockRevision::next(),
             sections: (0..SECTIONS)
                 .map(|_| Arc::new(Section::default()))
                 .collect(),
@@ -221,6 +243,9 @@ impl Chunk {
             return v;
         }
         let previous = Arc::make_mut(&mut self.sections[s as usize]).set(index(x, y, z), v);
+        if previous != v {
+            self.block_revision = BlockRevision::next();
+        }
         // `Heightmap.update`: a write two or more below a map's height can't
         // move it. Any other change rebuilds that map on the next read.
         if previous != v {
