@@ -67,6 +67,16 @@ pub struct NoiseFill {
 pub trait BiomeOracle: Send + Sync {
     /// `BiomeSource.getNoiseBiome` at each quart position; None to use Horizon's own.
     fn noise_biomes(&self, quarts: &[[i32; 3]]) -> Option<Vec<Option<String>>>;
+    /// `/locate structure` of `selector` (an id or a `#tag`) from `from` within `radius`
+    /// chunks (ChunkGenerator.findNearestMapStructure); None to use Horizon's own search.
+    fn locate_structure(
+        &self,
+        _selector: &str,
+        _from: [i32; 3],
+        _radius: i32,
+    ) -> Option<Option<(String, [i32; 3])>> {
+        None
+    }
     /// `BiomeSource.findClosestBiome3d`; None to use Horizon's own search.
     fn find_closest_biome(
         &self,
@@ -421,6 +431,24 @@ impl VanillaTerrain {
             blocks,
             postprocess,
         }
+    }
+    /// `/locate structure`: the oracle's when another generator makes the dimension (its
+    /// structures follow its biomes, and mods add their own), else [`VanillaTerrain::locate`].
+    pub fn locate_structure(
+        &self,
+        selector: &str,
+        names: &[String],
+        from: [i32; 3],
+        radius: i32,
+    ) -> Option<(String, [i32; 3])> {
+        if let Some(found) = self
+            .biome_oracle
+            .get()
+            .and_then(|o| o.locate_structure(selector, from, radius))
+        {
+            return found;
+        }
+        self.locate(names, from, radius)
     }
     /// Makes `oracle` the source of this dimension's biome queries (once).
     pub fn set_biome_oracle(&self, oracle: Arc<dyn BiomeOracle>) {

@@ -365,6 +365,31 @@ Naturalist (mobs with ModelPart models, Fabric API only). The repo's own critter
 
 ## Status
 
+Nether and End (tested 2026-10-31 with BOP, BetterNether, BetterEnd, BCLib, WorldWeaver):
+both generate through the mods, the Nether with BetterNether's and BOP's biomes and blocks
+(lumabus and golden vines, cincinnasite and nether ores), the End with WorldWeaver's End
+source (`WoverEndBiomeSource`: Better End's chorus forest with its pythadendrons; `/locate
+biome betterend:chorus_forest` finds one). Three things it took: the new world's dimensions
+are the server default's (`HorizonData.defaultDimensions`: DedicatedServerProperties'
+WorldDimensionData with the preset WorldWeaver suggests, as its create-world screen picks it),
+the mods' `ServerLevel` constructor injections fire (`HorizonWorldgen.levelHooks`: WorldWeaver
+seeds its biome sources there) and `MinecraftServer`'s get the constructor's arguments
+(`serverArguments`: WorldWeaver's registry-ready events), and Better End's content loads
+(its `fabric.mod.json` has raw newlines in strings: `jar::fabric` reads it leniently; its
+eternal pedestal's hardness -11 is carried as -1). `world()` runs once a world: the
+Nether's start came mid-tick and remade the stores the tick reads.
+Fluids: generated chunks bring their scheduled block and fluid ticks and post-processing
+marks (`block_ticks`, `fluid_ticks`, `PostProcessing`, read with the save tables): in the
+same area 12 flowing water and 50 flowing lava blocks, none without.
+Protos dropped unfinished are saved (`worldgen_snapshot`, `worldgen_restore`: blocks, block
+entities, entities, decorated) as Horizon saves its own: leaves no log holds
+(`distance=7`) after walking away mid-generation and back, three places: 64 before, 4 after (nine 32×32 areas around each).
+`/locate structure` asks the mods' generator (`findNearestMapStructure`; its chunks come
+from the generation while it runs: `locatingChunk`): `betternether:pyramid`,
+`betternether:ghast_hive`, `minecraft:fortress`, and the overworld's villages where the
+mods' biomes put them (a taiga village with its bell, not Horizon's plains one).
+`tools/java_bridge/launch.sh` now removes the previous run's scratch folder (~1 GB each).
+
 Mods' worldgen (tested with BOP + TerraBlender + GlitchCore, a new world): the overworld
 generates through the mods' chunk steps; BOP biomes (orchard, lavender field...) with their
 trees, flowers and blocks, read back by Horizon with their biome ids (`horizon-ctl block`).
@@ -409,10 +434,10 @@ not frozen yet!" is gone) work.
 
 Next (top failure of the pack, in order):
 1. Mods' worldgen gaps: far terrain's blocks and trees are still Horizon's (vanilla's surface
-   rules and features under the mods' biome colours); `/locate structure` is Horizon's; a
-   Java proto dropped unfinished isn't saved (a neighbour's tree cut at the edge of where the
-   player went); block/fluid ticks and post-processing of generated chunks aren't carried;
-   the Nether and End through TerraBlender untested.
+   rules and features under the mods' biome colours); `/locate structure` from one
+   dimension into another (`execute in … run locate`) asks the current dimension's
+   generator; a world made before the mods keeps the mods' default preset (WorldWeaver's)
+   on the Java side, not its own.
    Seen once in five `SCENE=ber` runs (with FD, whose features route the overworld through
    Java): the stove placed by the scene was gone a few seconds later, its outline left. A
    chunk generated on the Java side landing after a block was set in it would do that: check

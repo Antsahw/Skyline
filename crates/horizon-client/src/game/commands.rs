@@ -3032,7 +3032,10 @@ impl Game<'_> {
             None => vec![s.clone()],
         };
         let from = origin.map(|v| v.floor() as i32);
-        let found = self.end.locator().and_then(|t| t.locate(&names, from, 100));
+        let found = self
+            .end
+            .locator()
+            .and_then(|t| t.locate_structure(&s, &names, from, 100));
         let Some((name, p)) = found else {
             return Err(CommandError::new(Text::tr(
                 "commands.locate.structure.not_found",

@@ -413,6 +413,8 @@ public final class HorizonHooks {
         if (dot >= 0) head = head.substring(dot + 1);
         int colon = head.indexOf(':');
         if (colon >= 0) head = head.substring(0, colon);
+        // "<init>*": every constructor (Mixin's wildcard).
+        if (head.endsWith("*")) head = head.substring(0, head.length() - 1);
         // "<init>*": every constructor (Cardinal Components' level components).
         if (head.endsWith("*")) head = head.substring(0, head.length() - 1);
         return new String[] {head, desc};

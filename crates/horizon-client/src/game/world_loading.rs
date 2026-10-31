@@ -349,7 +349,7 @@ pub(super) fn make_streaming(
             seed,
             structures,
             world_root,
-            pack.assets.registry,
+            pack.assets.clone(),
             res.biomes().clone(),
         ) {
             let mut streaming = Streaming::new(

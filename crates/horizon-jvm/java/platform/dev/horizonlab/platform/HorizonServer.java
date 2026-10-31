@@ -527,7 +527,13 @@ public final class HorizonServer {
     public static boolean worldgenStart(String dimension, long seed, boolean structures, String world) {
         Thread.currentThread().setContextClassLoader(HorizonServer.class.getClassLoader());
         ensureServer();
-        world(world);
+        // Once a world: the Nether's and the End's starts come while the server ticks, and
+        // world() makes the stores the tick reads (a second time mid-tick: a
+        // ConcurrentModificationException in the tick).
+        if (world != null && !world.isEmpty()
+                && !java.nio.file.Paths.get(world).toAbsolutePath().equals(worldDir)) {
+            world(world);
+        }
         return HorizonWorldgen.start(dimension, seed, structures);
     }
 
@@ -545,6 +551,19 @@ public final class HorizonServer {
 
     public static long worldgenProtoFilled(String dimension, int x, int z, String[] palette, int[] blocks, int[] post) {
         return HorizonWorldgen.proto(dimension, x, z, palette, blocks, post);
+    }
+
+    public static byte[] worldgenSnapshot(String dimension, int x, int z, long token) {
+        return HorizonWorldgen.snapshot(dimension, x, z, token);
+    }
+
+    public static void worldgenRestore(String dimension, int x, int z, long token, String[] palette, int fromY,
+                                       int[] blocks, String[] blockEntities, String[] entities, boolean decorated) {
+        HorizonWorldgen.restore(dimension, x, z, token, palette, fromY, blocks, blockEntities, entities, decorated);
+    }
+
+    public static String[] worldgenLocateStructure(String dimension, String selector, int x, int y, int z, int radius) {
+        return HorizonWorldgen.locateStructure(dimension, selector, x, y, z, radius);
     }
 
     public static boolean worldgenNoiseFromHorizon(String dimension) {

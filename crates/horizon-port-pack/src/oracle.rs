@@ -427,7 +427,10 @@ impl Facts {
         let mut properties = Map::new();
         let mut differences = Vec::new();
         if let Some(s) = ours {
-            properties.insert("hardness".into(), json!(s.hardness));
+            // Any negative destroy time is unbreakable to vanilla (Better End's eternal pedestal
+            // has -11); Horizon's content format says it as -1.
+            let hardness = if s.hardness < 0.0 { -1.0 } else { s.hardness };
+            properties.insert("hardness".into(), json!(hardness));
             properties.insert(
                 "explosion_resistance".into(),
                 json!(block.explosion_resistance),

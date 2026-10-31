@@ -63,8 +63,10 @@ public abstract class ServerChunkCacheMixin {
             at = @At("HEAD"), cancellable = true)
     private void horizon$chunk(int x, int z, net.minecraft.world.level.chunk.status.ChunkStatus status, boolean load,
                                CallbackInfoReturnable<net.minecraft.world.level.chunk.ChunkAccess> cir) {
-        if (HorizonServer.isMirror(this)) cir.setReturnValue(dev.horizonlab.platform.HorizonChunks.chunk(
-                (net.minecraft.server.level.ServerLevel) horizon$level(), x, z));
+        if (!HorizonServer.isMirror(this)) return;
+        var level = (net.minecraft.server.level.ServerLevel) horizon$level();
+        var locating = dev.horizonlab.platform.HorizonWorldgen.locatingChunk(level, x, z, status);
+        cir.setReturnValue(locating != null ? locating : dev.horizonlab.platform.HorizonChunks.chunk(level, x, z));
     }
 
     /** Horizon ticks what it has (ServerChunkCache.isPositionTicking: entities' own checks). */

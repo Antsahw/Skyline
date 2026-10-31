@@ -28,6 +28,9 @@ pub(super) struct JavaTerrain {
     /// Whether Horizon's noise fills the Java protos (asked once the mods generate it).
     horizon_noise: OnceLock<bool>,
     registry: &'static BlockRegistry,
+    /// The game's assets, for the save tables reading the chunks' ticks (made once).
+    assets: Arc<horizon_client::assets::Assets>,
+    tables: OnceLock<horizon_client::save::SaveTables>,
     biomes: Arc<Biomes>,
 }
 
@@ -62,9 +65,10 @@ impl JavaTerrain {
         seed: i64,
         structures: bool,
         world: &std::path::Path,
-        registry: &'static BlockRegistry,
+        assets: Arc<horizon_client::assets::Assets>,
         biomes: Arc<Biomes>,
     ) -> Option<Self> {
+        let registry = assets.registry;
         super::java_mods::has_java_mods().then(|| Self {
             inner,
             dimension: Arc::from(dimension),
@@ -74,6 +78,8 @@ impl JavaTerrain {
             modded: Arc::new(OnceLock::new()),
             horizon_noise: OnceLock::new(),
             registry,
+            assets,
+            tables: OnceLock::new(),
             biomes,
         })
     }
@@ -114,9 +120,40 @@ impl JavaTerrain {
     fn read(&self, x: i32, z: i32, bytes: &[u8]) -> Option<Chunk> {
         let (root, _) =
             horizon_world::nbt::read_named(bytes, horizon_world::nbt::Limits::default()).ok()?;
-        let mut chunk = horizon_client::save::decode(&root, self.registry, &self.biomes)?;
+        // With the save tables, the chunk's scheduled ticks come too: the fluids and blocks
+        // the features scheduled (a lake's water, a spring's lava) flow once it is live.
+        let tables = self
+            .tables
+            .get_or_init(|| horizon_client::save::SaveTables::new(&self.assets));
+        let mut chunk =
+            horizon_client::save::decode_with(&root, self.registry, &self.biomes, Some(tables))?;
         if (chunk.x, chunk.z) != (x, z) {
             return None;
+        }
+        // ProtoChunk's post-processing marks (vanilla's PostProcessing: per section, packed
+        // x | y << 4 | z << 8): fluids an aquifer or a feature left to update, as
+        // LevelChunk.postProcessGeneration does once the chunk is live.
+        if let Some(horizon_world::nbt::Tag::List(sections)) = root.tag.get("PostProcessing") {
+            let base = match root.tag.get("yPos") {
+                Some(horizon_world::nbt::Tag::Int(y)) => *y,
+                _ => horizon_client::chunk::MIN_Y >> 4,
+            };
+            for (i, marks) in sections.iter().enumerate() {
+                let horizon_world::nbt::Tag::List(marks) = marks else {
+                    continue;
+                };
+                let sy = (base + i as i32) * 16;
+                for mark in marks {
+                    if let horizon_world::nbt::Tag::Short(p) = mark {
+                        let p = i32::from(*p);
+                        chunk.postprocess.push([
+                            x * 16 + (p & 15),
+                            sy + ((p >> 4) & 15),
+                            z * 16 + ((p >> 8) & 15),
+                        ]);
+                    }
+                }
+            }
         }
         // Structures' mobs (a villager in its house), as a generated proto chunk holds them.
         if let Some(horizon_world::nbt::Tag::List(entities)) = root.tag.get("entities") {
@@ -255,17 +292,77 @@ impl ChunkGenerator for JavaTerrain {
 
     /// A Java proto isn't saved: it is generated again (decoration a neighbour wrote into it
     /// before it was dropped is lost, at the edge of where the player went).
+    /// A Java proto dropped unfinished is saved as Horizon saves its own: its neighbours'
+    /// features wrote into it (half a tree at the edge of where the player went), and made
+    /// again it would lose those writes.
     fn saved_proto(&self, proto: &Proto) -> Option<horizon_client::chunk::SavedProto> {
-        match proto.downcast_ref::<JavaProto>() {
-            Some(_) => None,
-            None => self.inner.saved_proto(proto),
-        }
+        let Some(p) = proto.downcast_ref::<JavaProto>() else {
+            return self.inner.saved_proto(proto);
+        };
+        let bytes = horizon_jvm::events::worldgen_snapshot(&p.dimension, p.x, p.z, p.token)
+            .ok()
+            .flatten()?;
+        let column = self.read(p.x, p.z, &bytes)?;
+        let (root, _) =
+            horizon_world::nbt::read_named(&bytes, horizon_world::nbt::Limits::default()).ok()?;
+        let list = |key: &str| match root.tag.get(key) {
+            Some(horizon_world::nbt::Tag::List(l)) => l.clone(),
+            _ => Vec::new(),
+        };
+        Some(horizon_client::chunk::SavedProto {
+            column,
+            decorated: matches!(
+                root.tag.get("horizon:decorated"),
+                Some(horizon_world::nbt::Tag::Byte(1))
+            ),
+            block_entities: list("block_entities"),
+            entities: list("entities"),
+        })
     }
 
+    /// The saved proto's blocks, block entities, entities and decoration put back onto the
+    /// Java proto made again.
     fn restore_proto(&self, proto: &mut Proto, saved: horizon_client::chunk::SavedProto) {
-        if proto.downcast_ref::<JavaProto>().is_none() {
-            self.inner.restore_proto(proto, saved);
+        let Some(p) = proto.downcast_mut::<JavaProto>() else {
+            return self.inner.restore_proto(proto, saved);
+        };
+        let column = &saved.column;
+        let min_y = horizon_client::chunk::MIN_Y;
+        let height = horizon_client::chunk::HEIGHT;
+        let mut palette: Vec<String> = Vec::new();
+        let mut index: std::collections::HashMap<u32, i32> = std::collections::HashMap::new();
+        let mut blocks = vec![0i32; height as usize * 256];
+        for (i, slot) in blocks.iter_mut().enumerate() {
+            let (x, z, y) = (
+                (i & 15) as i32,
+                ((i >> 4) & 15) as i32,
+                min_y + (i >> 8) as i32,
+            );
+            let state = column.block(x, y, z);
+            *slot = *index.entry(state.0).or_insert_with(|| {
+                palette.push(state_name(self.registry, state));
+                palette.len() as i32 - 1
+            });
         }
+        let snbt = |tags: &[horizon_world::nbt::Tag]| -> Vec<String> {
+            tags.iter().map(horizon_client::snbt::to_snbt).collect()
+        };
+        if let Err(e) = horizon_jvm::events::worldgen_restore(
+            &p.dimension,
+            p.x,
+            p.z,
+            p.token,
+            &palette,
+            min_y,
+            &blocks,
+            &snbt(&saved.block_entities),
+            &snbt(&saved.entities),
+            saved.decorated,
+        ) {
+            log::warn!("Java mods' worldgen: restoring {} {}: {e}", p.x, p.z);
+            return;
+        }
+        p.decorated |= saved.decorated;
     }
 
     fn finish(&self, proto: Proto) -> Chunk {
@@ -319,6 +416,17 @@ impl JavaBiomes {
 impl horizon_client::vanillagen::BiomeOracle for JavaBiomes {
     fn noise_biomes(&self, quarts: &[[i32; 3]]) -> Option<Vec<Option<String>>> {
         horizon_jvm::events::worldgen_biomes(&self.dimension, quarts)
+            .ok()
+            .flatten()
+    }
+
+    fn locate_structure(
+        &self,
+        selector: &str,
+        from: [i32; 3],
+        radius: i32,
+    ) -> Option<Option<(String, [i32; 3])>> {
+        horizon_jvm::events::worldgen_locate_structure(&self.dimension, selector, from, radius)
             .ok()
             .flatten()
     }
@@ -464,4 +572,20 @@ impl LodSampler for JavaLod {
         }
         columns
     }
+}
+
+/// `minecraft:oak_log[axis=y]`: a state as Java reads it.
+fn state_name(registry: &BlockRegistry, state: horizon_world::registry::BlockStateId) -> String {
+    let Some(s) = registry.state(state) else {
+        return "minecraft:air".into();
+    };
+    if s.properties.is_empty() {
+        return s.name.clone();
+    }
+    let props: Vec<String> = s
+        .properties
+        .iter()
+        .map(|(k, v)| format!("{k}={v}"))
+        .collect();
+    format!("{}[{}]", s.name, props.join(","))
 }

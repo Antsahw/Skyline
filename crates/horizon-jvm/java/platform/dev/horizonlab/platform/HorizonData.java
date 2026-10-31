@@ -36,6 +36,49 @@ public final class HorizonData {
                   net.minecraft.world.level.storage.PrimaryLevelData worldData) {}
 
     static Loaded loaded;
+    /** The data pack repository the data came from (a server's, for mods' set-up). */
+    static PackRepository repository;
+
+    /**
+     * A new world's dimensions as a server makes them for its default level type ("normal":
+     * DedicatedServerProperties.WorldDimensionData.create), so mods that change the default
+     * world preset are heard (WorldWeaver's wover:normal: Better End's and Better Nether's
+     * biome sources for the End and the Nether). Vanilla's normal preset if that fails.
+     */
+    /**
+     * The level type a new single-player world gets: vanilla's "normal", or the preset a mod
+     * makes the default (WorldWeaver's create-world screen picks its suggested default,
+     * wover:normal: Better End's and Better Nether's own End and Nether biome sources).
+     */
+    private static String defaultLevelType() {
+        try {
+            Class<?> wover = Class.forName("de.ambertation.wover.preset.impl.WorldPresetsManagerImpl",
+                    true, HorizonData.class.getClassLoader());
+            Object key = wover.getMethod("getDefault").invoke(null);
+            if (key instanceof net.minecraft.resources.ResourceKey<?> preset) return preset.identifier().toString();
+        } catch (ReflectiveOperationException | LinkageError e) {
+            // No WorldWeaver.
+        }
+        return "normal";
+    }
+
+    private static net.minecraft.world.level.levelgen.WorldDimensions defaultDimensions(
+            net.minecraft.core.HolderLookup.Provider registries) {
+        try {
+            Class<?> data = Class.forName("net.minecraft.server.dedicated.DedicatedServerProperties$WorldDimensionData",
+                    true, HorizonData.class.getClassLoader());
+            var constructor = data.getDeclaredConstructor(com.google.gson.JsonObject.class, String.class);
+            constructor.setAccessible(true);
+            Object properties = constructor.newInstance(new com.google.gson.JsonObject(), defaultLevelType());
+            var create = data.getDeclaredMethod("create", net.minecraft.core.HolderLookup.Provider.class);
+            create.setAccessible(true);
+            return (net.minecraft.world.level.levelgen.WorldDimensions) create.invoke(properties, registries);
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            Natives.log("Java mods: the default world preset failed, vanilla's normal instead: " + e);
+            return registries.lookupOrThrow(Registries.WORLD_PRESET).getOrThrow(WorldPresets.NORMAL).value()
+                    .createWorldDimensions();
+        }
+    }
 
     /**
      * Loads the server's data; called by Horizon (horizon-jvm) once Fabric has started.
@@ -50,7 +93,7 @@ public final class HorizonData {
         Thread.currentThread().setContextClassLoader(HorizonData.class.getClassLoader());
         java.nio.file.Path folder = java.nio.file.Paths.get(datapacks);
         java.nio.file.Files.createDirectories(folder);
-        PackRepository packs = ServerPacksSource.createPackRepository(
+        PackRepository packs = repository = ServerPacksSource.createPackRepository(
                 folder, new net.minecraft.world.level.validation.DirectoryValidator(path -> true));
         packs.reload();
         // A new world's packs, as vanilla picks them (MinecraftServer.configurePackRepository):
@@ -67,11 +110,7 @@ public final class HorizonData {
         WorldLoader.WorldDataSupplier<net.minecraft.world.level.storage.PrimaryLevelData> world = context -> {
             MappedRegistry<net.minecraft.world.level.dimension.LevelStem> stems =
                     new MappedRegistry<>(Registries.LEVEL_STEM, Lifecycle.stable());
-            var dimensions = context.datapackWorldRegistries()
-                    .lookupOrThrow(Registries.WORLD_PRESET)
-                    .getOrThrow(WorldPresets.NORMAL)
-                    .value()
-                    .createWorldDimensions()
+            var dimensions = defaultDimensions(context.datapackWorldRegistries())
                     .bake(stems.freeze());
             // The world's settings, as the game-test server makes them. Horizon's own (game
             // mode, difficulty, rules) are mirrored over them as it hands them over.

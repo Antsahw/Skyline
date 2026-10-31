@@ -19,6 +19,7 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.LongArrayTag;
 import net.minecraft.nbt.NbtIo;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ChunkResult;
 import net.minecraft.server.level.GenerationChunkHolder;
@@ -118,6 +119,7 @@ public final class HorizonWorldgen {
             ServerLevel level = HorizonServer.level(dimension);
             ChunkGenerator generator = HorizonServer.generator(level);
             if (generator == null) return false;
+            levelHooks(level, dimension, seed);
             List<String> mods = modded(level, generator);
             if (mods.isEmpty()) {
                 Natives.log("Java mods: " + dimension + " generates as vanilla's (Horizon's generator)");
@@ -133,7 +135,9 @@ public final class HorizonWorldgen {
             DIMENSIONS.put(dimension, made);
             Natives.log("Java mods: " + dimension + "'s noise is "
                     + (made.horizonNoise ? "Horizon's" : "Java's") + (CHECK ? " (checked against vanilla's)" : ""));
-            Natives.log("Java mods: " + dimension + " generates through the mods (" + String.join(", ", mods) + ")");
+            Natives.log("Java mods: " + dimension + " generates through the mods (" + String.join(", ", mods) + "), "
+                    + generator.getBiomeSource().getClass().getSimpleName() + " with "
+                    + generator.getBiomeSource().possibleBiomes().size() + " biomes");
             return true;
         } catch (Throwable t) {
             Natives.log("Java mods: " + dimension + " can't generate through the mods: " + t);
@@ -166,8 +170,66 @@ public final class HorizonWorldgen {
         set(StructureTemplateManager.class, templates, "sources", List.of(source));
         set(StructureTemplateManager.class, templates, "structureRepository", new ConcurrentHashMap<>());
         set(MinecraftServer.class, server, "structureTemplateManager", templates);
+        // Handlers that take only the CallbackInfo, then those that take the constructor's
+        // arguments (WorldWeaver's: its registry-ready and server-ready events).
+        Object[] args = serverArguments(server, seed, structures);
         for (String at : new String[] {"RETURN", "TAIL"}) {
             HorizonHooks.fire(server, MinecraftServer.class, "<init>", "()V", at, new Object[0], null, false);
+            if (args != null) HorizonHooks.fire(server, MinecraftServer.class, "<init>", SERVER_CONSTRUCTOR, at, args, null, false);
+        }
+    }
+
+    private static final String SERVER_CONSTRUCTOR = "(Ljava/lang/Thread;"
+            + "Lnet/minecraft/world/level/storage/LevelStorageSource$LevelStorageAccess;"
+            + "Lnet/minecraft/server/packs/repository/PackRepository;Lnet/minecraft/server/WorldStem;"
+            + "Ljava/util/Optional;Ljava/net/Proxy;Lcom/mojang/datafixers/DataFixer;Lnet/minecraft/server/Services;"
+            + "Lnet/minecraft/server/level/progress/LevelLoadListener;ZLnet/minecraft/server/notifications/NotificationManager;)V";
+
+    /**
+     * MinecraftServer's constructor's arguments as a server would have them: the world's
+     * storage (a folder of the bridge's own, beside Horizon's world, so nothing of Horizon's
+     * is locked), the data packs, the world stem (registries, resources, world data and
+     * settings), the data fixer and services. Null if they can't be made.
+     */
+    private static Object[] serverArguments(MinecraftServer server, long seed, boolean structures) {
+        try {
+            java.nio.file.Path base = HorizonServer.worldDir() != null
+                    ? HorizonServer.worldDir().resolve("horizon-java").resolve("levels")
+                    : java.nio.file.Files.createTempDirectory("horizon-java-levels");
+            java.nio.file.Files.createDirectories(base);
+            var storage = net.minecraft.world.level.storage.LevelStorageSource.createDefault(base).createAccess("world");
+            HorizonData.Loaded data = HorizonData.loaded;
+            var stem = new net.minecraft.server.WorldStem(data.resources(), data.reloadable(), data.registries(),
+                    new net.minecraft.world.level.storage.LevelDataAndDimensions.WorldDataAndGenSettings(
+                            data.worldData(), server.getWorldGenSettings()));
+            return new Object[] {Thread.currentThread(), storage, HorizonData.repository, stem, java.util.Optional.empty(),
+                    java.net.Proxy.NO_PROXY, server.getFixerUpper(), HorizonServer.services(), null, false, null};
+        } catch (Throwable t) {
+            Natives.log("Java mods: no server arguments for mods' set-up: " + t);
+            return null;
+        }
+    }
+
+    private static final String LEVEL_CONSTRUCTOR = "(Lnet/minecraft/server/MinecraftServer;Ljava/util/concurrent/Executor;"
+            + "Lnet/minecraft/world/level/storage/LevelStorageSource$LevelStorageAccess;"
+            + "Lnet/minecraft/world/level/storage/ServerLevelData;Lnet/minecraft/resources/ResourceKey;"
+            + "Lnet/minecraft/world/level/dimension/LevelStem;ZJLjava/util/List;Z)V";
+
+    /**
+     * The mods' injections at the end of ServerLevel's constructor, which the mirror skips:
+     * world-generation mods set up a level's biome source there (WorldWeaver gives its End
+     * and Nether sources the seed and noise settings: Better End's biomes). Given the
+     * constructor's arguments as a server would (no storage, an inline executor).
+     */
+    private static void levelHooks(ServerLevel level, String dimension, long seed) {
+        var key = ResourceKey.create(Registries.LEVEL_STEM, level.dimension().identifier());
+        var stem = level.registryAccess().lookupOrThrow(Registries.LEVEL_STEM).getValue(key);
+        if (stem == null) return;
+        Object[] args = {HorizonServer.server(), (java.util.concurrent.Executor) Runnable::run, null,
+                HorizonData.loaded.worldData(), level.dimension(), stem, false,
+                net.minecraft.world.level.biome.BiomeManager.obfuscateSeed(seed), List.of(), true};
+        for (String at : new String[] {"RETURN", "TAIL"}) {
+            HorizonHooks.fire(level, ServerLevel.class, "<init>", LEVEL_CONSTRUCTOR, at, args, null, true);
         }
     }
 
@@ -405,10 +467,14 @@ public final class HorizonWorldgen {
         if (d == null) return;
         Live live = d.live.get(ChunkPos.pack(x, z));
         if (live == null) return;
+        Dimension outer = LOCATING.get();
+        LOCATING.set(d);
         try {
             advance(d, live.chunk(), ChunkStatus.FEATURES);
         } catch (Throwable t) {
             failed("features", t);
+        } finally {
+            if (outer == null) LOCATING.remove(); else LOCATING.set(outer);
         }
     }
 
@@ -430,6 +496,79 @@ public final class HorizonWorldgen {
         } catch (Throwable t) {
             failed("finish", t);
             return null;
+        }
+    }
+
+    /**
+     * Live chunk x z as {@link #finish} gives it, kept live (Horizon saves a proto it drops
+     * unfinished: its neighbours' features wrote into it), with {@code horizon:decorated}
+     * when its own features ran. Null if it isn't held.
+     */
+    public static byte[] snapshot(String dimension, int x, int z, long token) {
+        Thread.currentThread().setContextClassLoader(HorizonWorldgen.class.getClassLoader());
+        Dimension d = DIMENSIONS.get(dimension);
+        if (d == null) return null;
+        Live live = d.live.get(ChunkPos.pack(x, z));
+        if (live == null || live.token() != token) return null;
+        try {
+            CompoundTag tag;
+            synchronized (live.chunk()) {
+                tag = save(d, live.chunk());
+            }
+            tag.putBoolean("horizon:decorated", live.chunk().getPersistedStatus().isOrAfter(ChunkStatus.FEATURES));
+            ByteArrayOutputStream bytes = new ByteArrayOutputStream(64 * 1024);
+            NbtIo.write(tag, new DataOutputStream(bytes));
+            return bytes.toByteArray();
+        } catch (Throwable t) {
+            failed("snapshot", t);
+            return null;
+        }
+    }
+
+    /**
+     * Puts a saved proto's state back onto live chunk x z, made again to TERRAIN: its blocks
+     * (palette and an index a block from the chunk's bottom, as worldgenProtoFilled's), the
+     * block entities and entities placed in it (SNBT), and FEATURES if it was decorated, so
+     * what its neighbours' features wrote survives its unloading. Blocks count from fromY.
+     */
+    public static void restore(String dimension, int x, int z, long token, String[] palette, int fromY, int[] blocks,
+                               String[] blockEntities, String[] entities, boolean decorated) {
+        Thread.currentThread().setContextClassLoader(HorizonWorldgen.class.getClassLoader());
+        Dimension d = DIMENSIONS.get(dimension);
+        if (d == null) return;
+        Live live = d.live.get(ChunkPos.pack(x, z));
+        if (live == null || live.token() != token) return;
+        ProtoChunk chunk = live.chunk();
+        try {
+            synchronized (chunk) {
+                BlockState[] states = states(palette);
+                int minY = chunk.getMinY();
+                LevelChunkSection[] sections = chunk.getSections();
+                {
+                    for (int i = 0; i < blocks.length; i++) {
+                        int y = fromY + (i >> 8);
+                        if (y < minY || y >= minY + chunk.getHeight()) continue;
+                        LevelChunkSection section = sections[chunk.getSectionIndex(y)];
+                        BlockState state = states[blocks[i]];
+                        if (section.getBlockState(i & 15, y & 15, (i >> 4) & 15) != state) {
+                            section.setBlockState(i & 15, y & 15, (i >> 4) & 15, state, false);
+                        }
+                    }
+                }
+                for (BlockPos at : new ArrayList<>(chunk.getBlockEntitiesPos())) chunk.removeBlockEntity(at);
+                for (String snbt : blockEntities) {
+                    chunk.setBlockEntityNbt(net.minecraft.nbt.TagParser.parseCompoundFully(snbt));
+                }
+                chunk.getEntities().clear();
+                for (String snbt : entities) chunk.addEntity(net.minecraft.nbt.TagParser.parseCompoundFully(snbt));
+                var kinds = chunk.getPersistedStatus().heightmapsAfter();
+                net.minecraft.world.level.levelgen.Heightmap.primeHeightmaps(chunk, kinds);
+                if (decorated && chunk.getPersistedStatus().isBefore(ChunkStatus.FEATURES)) {
+                    chunk.setPersistedStatus(ChunkStatus.FEATURES);
+                }
+            }
+        } catch (Throwable t) {
+            failed("restore", t);
         }
     }
 
@@ -488,6 +627,66 @@ public final class HorizonWorldgen {
         BlockPos at = found.getFirst();
         String name = found.getSecond().unwrapKey().map(k -> k.identifier().toString()).orElse("");
         return new String[] {name, Integer.toString(at.getX()), Integer.toString(at.getY()), Integer.toString(at.getZ())};
+    }
+
+    /**
+     * /locate structure in a dimension the mods generate: ChunkGenerator.findNearestMapStructure
+     * with the mods' generator (their structures, placed by their biomes) for {@code selector},
+     * an id or a #tag. {name, x, y, z}, an empty array (none), or null if the mods don't
+     * generate the dimension or have no such structure.
+     */
+    public static String[] locateStructure(String dimension, String selector, int x, int y, int z, int radius) {
+        Thread.currentThread().setContextClassLoader(HorizonWorldgen.class.getClassLoader());
+        Dimension d = DIMENSIONS.get(dimension);
+        if (d == null) return null;
+        var structures = d.level.registryAccess().lookupOrThrow(Registries.STRUCTURE);
+        net.minecraft.core.HolderSet<net.minecraft.world.level.levelgen.structure.Structure> set;
+        if (selector.startsWith("#")) {
+            var tag = net.minecraft.tags.TagKey.create(Registries.STRUCTURE,
+                    net.minecraft.resources.Identifier.parse(selector.substring(1)));
+            var named = structures.get(tag);
+            if (named.isEmpty()) return null;
+            set = named.get();
+        } else {
+            var holder = structures.get(ResourceKey.create(Registries.STRUCTURE,
+                    net.minecraft.resources.Identifier.parse(selector)));
+            if (holder.isEmpty()) return null;
+            set = net.minecraft.core.HolderSet.direct(holder.get());
+        }
+        LOCATING.set(d);
+        try {
+            var found = d.generator.findNearestMapStructure(d.level, set, new BlockPos(x, y, z), radius, false);
+            if (found == null) return new String[0];
+            BlockPos at = found.getFirst();
+            String name = found.getSecond().unwrapKey().map(k -> k.identifier().toString()).orElse(selector);
+            return new String[] {name, Integer.toString(at.getX()), Integer.toString(at.getY()), Integer.toString(at.getZ())};
+        } catch (Throwable t) {
+            failed("locate", t);
+            return null;
+        } finally {
+            LOCATING.remove();
+        }
+    }
+
+    /**
+     * The dimension a locate or a generation step runs in on this thread: the level's chunks
+     * come from the generation then (a feature asking the level's StructureManager whether
+     * it stands in a village reads the level's chunks, not the region's).
+     */
+    private static final ThreadLocal<Dimension> LOCATING = new ThreadLocal<>();
+
+    /**
+     * A chunk a locate reads (StructureCheck wants a candidate's structure starts:
+     * level.getChunk(x, z, STRUCTURE_STARTS)): the generation's own, at that status, while a
+     * locate runs on this thread in {@code level}; null otherwise.
+     */
+    public static ChunkAccess locatingChunk(ServerLevel level, int x, int z, ChunkStatus status) {
+        Dimension d = LOCATING.get();
+        if (d == null || d.level != level) return null;
+        // As far as the generation's lower statuses go: what a structure lookup reads.
+        ChunkStatus at = status == null || status.isAfter(ChunkStatus.STRUCTURE_REFERENCES)
+                ? ChunkStatus.STRUCTURE_REFERENCES : status;
+        return neighbour(d, x, z, at);
     }
 
     // ---- Steps ------------------------------------------------------------------------------
@@ -623,6 +822,23 @@ public final class HorizonWorldgen {
         CompoundTag structureData = new CompoundTag();
         structureData.put("References", references);
         tag.put("structures", structureData);
+        // What the features scheduled (a lake's water, a spring's lava, leaves' shapes) and
+        // what they and the aquifers left to update (PostProcessing), as SerializableChunkData
+        // saves them: Horizon runs them once the chunk is live, so fluids flow.
+        var ticks = chunk.getTicksForSerialization(0L);
+        tag.store("block_ticks", net.minecraft.world.ticks.SavedTick.codec(
+                net.minecraft.core.registries.BuiltInRegistries.BLOCK.byNameCodec()).listOf(), ticks.blocks());
+        tag.store("fluid_ticks", net.minecraft.world.ticks.SavedTick.codec(
+                net.minecraft.core.registries.BuiltInRegistries.FLUID.byNameCodec()).listOf(), ticks.fluids());
+        ListTag post = new ListTag();
+        for (var marks : chunk.getPostProcessing()) {
+            ListTag section = new ListTag();
+            if (marks != null) {
+                for (int i = 0; i < marks.size(); i++) section.add(net.minecraft.nbt.ShortTag.valueOf(marks.getShort(i)));
+            }
+            post.add(section);
+        }
+        tag.put("PostProcessing", post);
         return tag;
     }
 
