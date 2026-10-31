@@ -35,16 +35,16 @@ The Java bridge runs **real Fabric mods for 26.3** inside Horizon. A Java VM in 
 
 | Area | Status |
 |---|---|
-| Loading | A 72-jar pack starts (213 mods with the ones they bundle): Biomes O' Plenty, Farmer's Delight, Tech Reborn, REI, Jade, Waystones, Storage Drawers… |
+| Loading | A 107-jar pack starts (265 mods with the ones they bundle, 20,000+ recipes): Biomes O' Plenty, Farmer's Delight, Tech Reborn, REI, Jade, Waystones, Veinminer… |
 | Blocks, items, recipes, creative tabs | ✅ |
 | Machines and their screens (block entities, menus) | ✅ Farmer's Delight's pot and stove, Tom's Storage terminal |
-| Recipe book and REI recipes (`/recipes`, `/uses`) | ✅ (REI's item list and overlay: in progress) |
-| Mod mobs: AI, combat, models, saving | ✅ (GeckoLib: in progress) |
-| Mod worldgen: biomes, trees, colours, `/locate biome` | ✅ Overworld (Nether and End: in progress) |
-| HUD mods | ✅ Jade, AppleSkin (Xaero's minimap: in progress) |
+| Recipe book and REI (item list beside the inventory, search, R/U, `/recipes`) | ✅ (REI over mod machine screens: in progress) |
+| Mod mobs: AI, combat, models, saving, sounds, particles | ✅ 100 mobs ~8–15 ms a tick (GeckoLib: untested on a real mod) |
+| Mod worldgen: biomes, trees, colours, `/locate biome` and `structure` | ✅ Overworld, Nether (BetterNether, BOP), End (BetterEnd); skyblock data packs |
+| HUD mods, GPU-drawn mods | ✅ Jade, AppleSkin, Xaero's minimap (its GPU calls run on wgpu) |
 | Client↔server mod messages, key bindings, chunk loaders | ✅ |
-| Mixins that change vanilla behaviour (Veinminer, Carry On…) | 🚧 Injections at the start or end of a dozen vanilla methods only |
-| Speed with big packs | 🚧 Mobs and chunk generation are being optimized |
+| Mixins that change vanilla behaviour | ✅ Veinminer; block breaking, random ticks, using items on blocks and pickups go to Java when a mod patches them (a table lists the rest) |
+| Speed with big packs | 🚧 Chunk generation through Java is the cost left |
 | Multiplayer with mods | 🚧 |
 
 How it works, the tick flow, 26.3 traps and the test tools: **[docs/java-bridge.md](docs/java-bridge.md)**.
