@@ -65,6 +65,23 @@ impl Drop for Timed {
     }
 }
 
+/// Bytes moved by name since the last report (the entity snapshot, its payloads).
+static BYTES: Mutex<Option<HashMap<&'static str, u64>>> = Mutex::new(None);
+
+/// `n` bytes moved as `name` (Java's entity snapshot, what players are sent).
+#[cfg_attr(not(feature = "java-mods"), allow(dead_code))]
+pub(super) fn bytes(name: &'static str, n: usize) {
+    if !on() {
+        return;
+    }
+    *BYTES
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get_or_insert_with(HashMap::new)
+        .entry(name)
+        .or_default() += n as u64;
+}
+
 /// Once a server tick: every 200, the sites' time as ms a tick, the slowest first.
 pub(super) fn tick() {
     static TICKS: Mutex<u32> = Mutex::new(0);
@@ -85,7 +102,7 @@ pub(super) fn tick() {
     rows.sort_by_key(|row| std::cmp::Reverse(row.1.1));
     let total: f64 = rows.iter().map(|r| r.1.1.as_secs_f64()).sum::<f64>() * 1000.0 / n;
     let mut line = format!("Java profile: {total:.2} ms a tick in calls to Java;");
-    for (site, (calls, took)) in rows.iter().take(8) {
+    for (site, (calls, took)) in rows.iter().take(12) {
         line.push_str(&format!(
             " {site} {:.2} ms ({:.1} calls)",
             took.as_secs_f64() * 1000.0 / n,
@@ -93,4 +110,11 @@ pub(super) fn tick() {
         ));
     }
     log::info!("{line}");
+    if let Some(bytes) = BYTES.lock().unwrap_or_else(|e| e.into_inner()).take() {
+        let mut line = String::from("Java profile (bytes):");
+        for (name, b) in bytes {
+            line.push_str(&format!(" {name} {:.1} KB a tick;", b as f64 / 1024.0 / n));
+        }
+        log::info!("{line}");
+    }
 }

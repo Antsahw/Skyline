@@ -2702,6 +2702,9 @@ impl Game<'_> {
             C::CustomPayload(p) if p.channel == super::java_entities::CHANNEL => {
                 self.remote_java_entities(&p.data)
             }
+            C::CustomPayload(p) if p.channel == super::java_entities::PARTICLES => {
+                self.remote_java_particles(&p.data)
+            }
             C::MountScreenOpen(p) => self.remote_open_mount(p),
             C::RecipeBookAdd(p) => self.remote_recipe_book_add(p),
             C::RecipeBookRemove(p) => self.remote_recipe_book_remove(p),

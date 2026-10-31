@@ -272,9 +272,16 @@ public final class HorizonClient {
         return minecraft;
     }
 
+    /** Fields set by name, looked up once (entities' snapshots set some for each entity). */
+    private static final java.util.Map<Class<?>, java.util.Map<String, Field>> FIELDS = new java.util.concurrent.ConcurrentHashMap<>();
+
     static void set(Class<?> owner, Object target, String name, Object value) throws ReflectiveOperationException {
-        Field field = owner.getDeclaredField(name);
-        field.setAccessible(true);
+        Field field = FIELDS.computeIfAbsent(owner, o -> new java.util.concurrent.ConcurrentHashMap<>()).get(name);
+        if (field == null) {
+            field = owner.getDeclaredField(name);
+            field.setAccessible(true);
+            FIELDS.get(owner).put(name, field);
+        }
         field.set(target, value);
     }
 

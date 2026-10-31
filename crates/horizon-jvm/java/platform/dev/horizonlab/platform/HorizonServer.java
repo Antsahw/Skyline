@@ -70,6 +70,17 @@ public final class HorizonServer {
      * once its constructor ran.
      */
     private static final Set<Object> MIRRORS = Collections.synchronizedSet(Collections.newSetFromMap(new IdentityHashMap<>()));
+    /** MIRRORS as read: a copy, made again when one is added (rarely: a level, a player). */
+    private static volatile Set<Object> MIRROR_VIEW = Set.of();
+
+    private static void mirror(Object object) {
+        synchronized (MIRRORS) {
+            MIRRORS.add(object);
+            Set<Object> view = Collections.newSetFromMap(new IdentityHashMap<>());
+            view.addAll(MIRRORS);
+            MIRROR_VIEW = view;
+        }
+    }
     private static final Map<String, Integer> FAILURES = new ConcurrentHashMap<>();
     private static boolean started;
     /** Horizon's world folder, where mods keep their world data (getWorldPath). */
@@ -82,7 +93,8 @@ public final class HorizonServer {
 
     /** Whether this object is one of Horizon's mirrors (not a vanilla object a mod made). */
     public static boolean isMirror(Object object) {
-        return object != null && MIRRORS.contains(object);
+        // Asked on every block read of a mirrored level (LevelMixin): a lock-free copy of the set.
+        return object != null && MIRROR_VIEW.contains(object);
     }
 
     /** Each mirrored player's packet context (Fabric's, which its connection would hold). */
@@ -219,7 +231,7 @@ public final class HorizonServer {
 
     private static <T> T allocate(Class<T> type) {
         T object = type.cast(Natives.allocate(type));
-        MIRRORS.add(object);
+        mirror(object);
         return object;
     }
 
@@ -723,7 +735,7 @@ public final class HorizonServer {
             // asks of the server that only a running world would know.
             player = new ServerPlayer(server, level, new GameProfile(uuid, name),
                     net.minecraft.server.level.ClientInformation.createDefault());
-            MIRRORS.add(player);
+            mirror(player);
             ServerGamePacketListenerImpl connection = allocate(ServerGamePacketListenerImpl.class);
             connection.player = player;
             ((ServerCommonListenerAccess) connection).horizon$setServer(server);
@@ -1034,6 +1046,7 @@ public final class HorizonServer {
             }
             WRITTEN.values().removeIf(Map::isEmpty);
             WRITTEN_AT.keySet().removeIf(k -> WRITTEN.values().stream().noneMatch(m -> m.containsKey(k)));
+            anyWritten = !WRITTEN.isEmpty();
         }
 
         // Mirror the players: those still on, as Horizon gives them.
@@ -1679,6 +1692,8 @@ public final class HorizonServer {
     private static final Map<String, BlockState> STATES = new ConcurrentHashMap<>();
     /** Per level: what mods set since Horizon last had the world, so they read their writes. */
     private static final Map<ServerLevel, Map<Long, BlockState>> WRITTEN = new IdentityHashMap<>();
+    /** Whether WRITTEN holds anything (read without its lock on every block read). */
+    private static volatile boolean anyWritten;
     /** The tick each pending write was made in (writes Horizon refuses go after a few). */
     private static final Map<Long, Long> WRITTEN_AT = new java.util.HashMap<>();
     private static volatile long currentTick;
@@ -1704,15 +1719,146 @@ public final class HorizonServer {
 
     /** A mirrored level's block: the call's own write, else Horizon's, else air (unloaded). */
     public static BlockState blockState(Level level, BlockPos pos) {
-        synchronized (WRITTEN) {
+        if (anyWritten) synchronized (WRITTEN) {
             Map<Long, BlockState> written = WRITTEN.get(level);
             if (written != null) {
                 BlockState mine = written.get(pos.asLong());
                 if (mine != null) return mine;
             }
         }
-        BlockState state = parseState(Natives.blockState(dimensionOf(level), pos.getX(), pos.getY(), pos.getZ()));
-        return state != null ? state : net.minecraft.world.level.block.Blocks.AIR.defaultBlockState();
+        Section section = section(level, pos.getX(), pos.getY(), pos.getZ());
+        if (section == null) return net.minecraft.world.level.block.Blocks.AIR.defaultBlockState();
+        HorizonProfile.cached();
+        return section.get((pos.getY() & 15) << 8 | (pos.getZ() & 15) << 4 | (pos.getX() & 15));
+    }
+
+    /** Whether Horizon has the block at x y z loaded (in this thread's view). */
+    public static boolean loaded(Level level, int x, int y, int z) {
+        return section(level, x, y, z) != null;
+    }
+
+    /**
+     * A section of Horizon's world as read: per block (y, z, x) an index into its palette, or
+     * Horizon's state id itself (no palette: Natives.sectionIds, named once by stateById).
+     */
+    private record Section(int[] index, BlockState[] palette) {
+        BlockState get(int i) {
+            return palette != null ? palette[index[i]] : stateById(index[i]);
+        }
+    }
+
+    /** Horizon's state ids as states, named the first time each is seen (Natives.stateName). */
+    private static volatile BlockState[] BY_ID = new BlockState[0];
+
+    private static BlockState stateById(int id) {
+        BlockState[] known = BY_ID;
+        if (id >= 0 && id < known.length && known[id] != null) return known[id];
+        BlockState state = parseState(Natives.stateName(id));
+        if (state == null) state = net.minecraft.world.level.block.Blocks.AIR.defaultBlockState();
+        if (id >= 0 && id < 1 << 20) {
+            synchronized (HorizonServer.class) {
+                BlockState[] grown = BY_ID.length > id ? BY_ID.clone() : java.util.Arrays.copyOf(BY_ID, Math.max(id + 1, BY_ID.length * 2));
+                grown[id] = state;
+                BY_ID = grown;
+            }
+        }
+        return state;
+    }
+
+    /**
+     * What this thread read of Horizon's world in the view it was lent: whole 16x16x16
+     * sections (Natives.sectionIds, or chunkBlocks on a section's height where the view can't),
+     * NONE where Horizon has no chunk. A mob's tick reads the same blocks over and over (its
+     * collisions, fluids, paths): one JNI call a section instead of one a block. Good while the
+     * view stays (Natives.threadEpoch); a call's own writes are WRITTEN's, read before.
+     */
+    private static final class Sections {
+        long epoch = Long.MIN_VALUE;
+        final Map<Level, it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap<Section>> levels = new IdentityHashMap<>();
+        /** This view's chunks' revisions (Natives.chunkRevision), asked once a chunk. */
+        final Map<Level, it.unimi.dsi.fastutil.longs.Long2LongOpenHashMap> revisions = new IdentityHashMap<>();
+    }
+
+    private static final Section NONE = new Section(new int[0], new BlockState[0]);
+    private static final ThreadLocal<Sections> SECTIONS = ThreadLocal.withInitial(Sections::new);
+
+    /** A section read in an earlier view, with its chunk's revision then. */
+    private record Kept(long revision, Section section) {}
+
+    /**
+     * Sections read in earlier views, kept while their chunk's revision stays (Horizon's
+     * chunks number their blocks' changes: Chunk::block_revision): a mob standing in the same
+     * place reads its sections once, not once a tick.
+     */
+    private static final Map<Level, it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap<Kept>> KEPT = new IdentityHashMap<>();
+
+    private static Section section(Level level, int x, int y, int z) {
+        Sections sections = SECTIONS.get();
+        long epoch = Natives.threadEpoch();
+        if (epoch != sections.epoch) {
+            sections.levels.clear();
+            sections.revisions.clear();
+            sections.epoch = epoch;
+        }
+        var map = sections.levels.computeIfAbsent(level, l -> new it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap<>());
+        long key = net.minecraft.core.SectionPos.asLong(x >> 4, y >> 4, z >> 4);
+        Section section = map.get(key);
+        if (section != null) return section == NONE ? null : section;
+        String dimension = dimensionOf(level);
+        var revisions = sections.revisions.computeIfAbsent(level, l -> {
+            var m = new it.unimi.dsi.fastutil.longs.Long2LongOpenHashMap();
+            m.defaultReturnValue(Long.MIN_VALUE);
+            return m;
+        });
+        long chunk = net.minecraft.world.level.ChunkPos.pack(x >> 4, z >> 4);
+        long revision = revisions.get(chunk);
+        if (revision == Long.MIN_VALUE) {
+            revision = Natives.chunkRevision(dimension, x >> 4, z >> 4);
+            revisions.put(chunk, revision);
+        }
+        if (revision == -2) {
+            map.put(key, NONE);
+            return null;
+        }
+        if (revision >= 0) {
+            synchronized (KEPT) {
+                var kept = KEPT.get(level);
+                Kept was = kept == null ? null : kept.get(key);
+                if (was != null && was.revision() == revision) section = was.section();
+            }
+        }
+        if (section == null) {
+            long started = HorizonProfile.ON ? System.nanoTime() : 0L;
+            section = fetch(level, dimension, x, y, z);
+            if (HorizonProfile.ON) HorizonProfile.read(System.nanoTime() - started);
+            if (revision >= 0 && section != NONE) {
+                synchronized (KEPT) {
+                    var kept = KEPT.computeIfAbsent(level, l -> new it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap<>());
+                    if (kept.size() > 65536) kept.clear();
+                    kept.put(key, new Kept(revision, section));
+                }
+            }
+        } else {
+            HorizonProfile.reused();
+        }
+        map.put(key, section);
+        return section == NONE ? null : section;
+    }
+
+    /** A section from Horizon (Natives.sectionIds, or chunkBlocks where the view can't). */
+    private static Section fetch(Level level, String dimension, int x, int y, int z) {
+        int[] indices = new int[4096];
+        int got = Natives.sectionIds(dimension, x >> 4, y >> 4, z >> 4, indices);
+        if (got == 1) return new Section(indices, null);
+        if (got == 0) return NONE;
+        String[] palette = Natives.chunkBlocks(dimension, x >> 4, z >> 4, y & ~15, indices);
+        if (palette == null) return NONE;
+        BlockState[] parsed = new BlockState[palette.length];
+        for (int i = 0; i < palette.length; i++) {
+            BlockState state = parseState(palette[i]);
+            parsed[i] = state != null ? state : net.minecraft.world.level.block.Blocks.AIR.defaultBlockState();
+        }
+        return new Section(indices, parsed);
     }
 
     /** A mod's Level.setBlock on a mirrored level: Horizon makes it; reads see it at once. */
@@ -1723,6 +1869,7 @@ public final class HorizonServer {
         if (clientHalf == Thread.currentThread()) return true;
         synchronized (WRITTEN) {
             WRITTEN.computeIfAbsent((ServerLevel) level, l -> new java.util.HashMap<>()).put(pos.asLong(), state);
+            anyWritten = true;
             WRITTEN_AT.put(pos.asLong(), currentTick);
         }
         HorizonChunks.set((ServerLevel) level, pos, state);

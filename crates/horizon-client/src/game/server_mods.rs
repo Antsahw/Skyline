@@ -429,21 +429,95 @@ mod run {
         ) -> Option<Vec<String>> {
             let (_, chunks) = self.dims.iter().find(|(d, _)| *d == dimension)?;
             let chunk = chunks.get(&(cx, cz))?;
-            let mut palette = Vec::new();
-            let mut index: std::collections::HashMap<u32, i32> = std::collections::HashMap::new();
-            for (i, slot) in out.iter_mut().enumerate() {
-                let (x, z, y) = (
-                    (i & 15) as i32,
-                    ((i >> 4) & 15) as i32,
-                    min_y + (i >> 8) as i32,
-                );
-                let state = chunk.block(x, y, z);
-                *slot = *index.entry(state.0).or_insert_with(|| {
-                    palette.push(state_string(self.registry, state));
-                    palette.len() as i32 - 1
+            // Whole sections unpacked at once (Java asks for one section at a time, or the
+            // whole column): a few states each, found by a short search, not a hash.
+            thread_local! {
+                /// Each state's place in the palette being made (-1: none yet), by state id.
+                static PLACES: std::cell::RefCell<Vec<i32>> = const { std::cell::RefCell::new(Vec::new()) };
+            }
+            let mut ids: Vec<u32> = Vec::new();
+            let mut unpacked = [0u32; 4096];
+            for (n, part) in out.chunks_mut(4096).enumerate() {
+                let base = min_y + n as i32 * 16;
+                let s = (base - horizon_client::chunk::MIN_Y) >> 4;
+                let aligned = base & 15 == 0 && part.len() == 4096;
+                match chunk.sections.get(s as usize) {
+                    Some(section) if aligned && s >= 0 => section.unpack(&mut unpacked),
+                    _ => {
+                        for (i, v) in unpacked.iter_mut().enumerate().take(part.len()) {
+                            let (x, z, y) = (
+                                (i & 15) as i32,
+                                ((i >> 4) & 15) as i32,
+                                base + (i >> 8) as i32,
+                            );
+                            *v = chunk.block(x, y, z).0;
+                        }
+                    }
+                }
+                PLACES.with_borrow_mut(|places| {
+                    for (slot, &state) in part.iter_mut().zip(unpacked.iter()) {
+                        let i = state as usize;
+                        if i >= places.len() {
+                            places.resize(i + 1, -1);
+                        }
+                        if places[i] < 0 {
+                            places[i] = ids.len() as i32;
+                            ids.push(state);
+                        }
+                        *slot = places[i];
+                    }
                 });
             }
-            Some(palette)
+            PLACES.with_borrow_mut(|places| {
+                for &id in &ids {
+                    places[id as usize] = -1;
+                }
+            });
+            Some(
+                ids.into_iter()
+                    .map(|id| state_string(self.registry, BlockStateId(id)))
+                    .collect(),
+            )
+        }
+        fn section_ids(
+            &self,
+            dimension: &str,
+            cx: i32,
+            sy: i32,
+            cz: i32,
+            out: &mut [i32],
+        ) -> Option<bool> {
+            let Some((_, chunks)) = self.dims.iter().find(|(d, _)| *d == dimension) else {
+                return Some(false);
+            };
+            let Some(chunk) = chunks.get(&(cx, cz)) else {
+                return Some(false);
+            };
+            let s = sy - (horizon_client::chunk::MIN_Y >> 4);
+            let mut unpacked = [0u32; 4096];
+            match usize::try_from(s).ok().and_then(|s| chunk.sections.get(s)) {
+                Some(section) => section.unpack(&mut unpacked),
+                // Above or below the world: air.
+                None => unpacked.fill(0),
+            }
+            for (slot, id) in out.iter_mut().zip(unpacked) {
+                *slot = id as i32;
+            }
+            Some(true)
+        }
+        fn chunk_revision(&self, dimension: &str, cx: i32, cz: i32) -> i64 {
+            let Some((_, chunks)) = self.dims.iter().find(|(d, _)| *d == dimension) else {
+                return -2;
+            };
+            chunks
+                .get(&(cx, cz))
+                .map_or(-2, |chunk| chunk.block_revision.get() as i64)
+        }
+        fn state_name(&self, id: i32) -> Option<String> {
+            let id = u32::try_from(id).ok()?;
+            self.registry
+                .state(BlockStateId(id))
+                .map(|_| state_string(self.registry, BlockStateId(id)))
         }
         fn column_biomes(
             &self,
@@ -941,15 +1015,24 @@ mod run {
                 self.streaming.set_ticketed(wanted);
             }
             let (game_time, seed) = (self.world.game_time, self.level.seed);
-            let ticked = self.with_java_world(|| {
-                horizon_jvm::events::game_time(game_time, seed)?;
-                horizon_jvm::events::server_tick(ticks, dedicated, &root, &players, &events)
+            // The entities' snapshot in the same view as the tick: what the tick read of the
+            // world (whole sections, HorizonServer.section) serves it too.
+            let (ticked, entities) = self.with_java_world(|| {
+                let ticked = horizon_jvm::events::game_time(game_time, seed).and_then(|()| {
+                    horizon_jvm::events::server_tick(ticks, dedicated, &root, &players, &events)
+                });
+                let entities = java_mods_on().then(horizon_jvm::events::entities);
+                (ticked, entities)
             });
             if let Err(e) = ticked {
                 log::warn!("Java mods: a tick failed: {e}");
             }
             self.apply_java_actions(None);
-            self.send_java_entities();
+            match entities {
+                Some(Ok(json)) => self.send_java_entities(&json),
+                Some(Err(e)) => log::warn!("Java mods: their entities could not be read: {e}"),
+                None => {}
+            }
         }
 
         /// The mods' entities after their tick (`HorizonEntityRender.snapshot`), to each
@@ -957,29 +1040,40 @@ mod run {
         /// java_entities::CHANNEL, with the model trees its game has not had; the window's own
         /// player in-frame gets them straight.
         #[cfg(feature = "java-mods")]
-        fn send_java_entities(&mut self) {
+        fn send_java_entities(&mut self, json: &str) {
+            use serde_json::value::RawValue;
             use std::collections::{HashMap, HashSet};
             /// Every model tree Java gave, by key, and per connection those sent to it.
             struct Sent {
-                trees: HashMap<String, Value>,
+                trees: HashMap<String, Box<RawValue>>,
                 to: HashMap<u32, HashSet<String>>,
                 /// Connections last sent some entities (an empty list clears theirs).
                 showing: HashSet<u32>,
             }
-            static SENT: std::sync::Mutex<Option<Sent>> = std::sync::Mutex::new(None);
-            // Mods with no entities of their own may still draw block entities (the snapshot
-            // has those too): only no Java mods at all skips it.
-            if !java_mods_on() {
-                return;
+            /// A snapshot entry as Java routes it (`HorizonEntityRender.routed`): where, its
+            /// model trees, then the entry passed on untouched.
+            #[derive(serde::Deserialize)]
+            struct Entry<'a> {
+                x: f64,
+                y: f64,
+                z: f64,
+                #[serde(default, borrow)]
+                keys: Vec<&'a str>,
+                #[serde(borrow)]
+                e: &'a RawValue,
             }
-            let json = match self.with_java_world(horizon_jvm::events::entities) {
-                Ok(json) => json,
-                Err(e) => {
-                    log::warn!("Java mods: their entities could not be read: {e}");
-                    return;
-                }
-            };
-            let Ok(snapshot) = serde_json::from_str::<Value>(&json) else {
+            #[derive(serde::Deserialize)]
+            struct Snapshot<'a> {
+                #[serde(default, borrow)]
+                dims: HashMap<&'a str, Vec<Entry<'a>>>,
+                #[serde(default)]
+                models: HashMap<String, Box<RawValue>>,
+            }
+            static SENT: std::sync::Mutex<Option<Sent>> = std::sync::Mutex::new(None);
+            let _timed =
+                super::super::java_profile::Timed::named("(Rust) entities: parse and send");
+            super::super::java_profile::bytes("entities: snapshot from Java", json.len());
+            let Ok(snapshot) = serde_json::from_str::<Snapshot>(json) else {
                 return;
             };
             let mut sent = SENT.lock().unwrap_or_else(|e| e.into_inner());
@@ -988,49 +1082,52 @@ mod run {
                 to: HashMap::new(),
                 showing: HashSet::new(),
             });
-            if let Some(trees) = snapshot.get("models").and_then(Value::as_object) {
-                for (key, tree) in trees {
-                    sent.trees.insert(key.clone(), tree.clone());
-                }
-            }
-            let near = |dimension: &str, at: [f64; 3]| -> Vec<Value> {
+            sent.trees.extend(snapshot.models);
+            // A player's entries: those of its level within 160 blocks (the entries' JSON,
+            // passed on as Java wrote it).
+            let near = |dimension: &str, at: [f64; 3]| -> Vec<&Entry> {
                 snapshot
-                    .get("dims")
-                    .and_then(|d| d.get(dimension))
-                    .and_then(Value::as_array)
+                    .dims
+                    .get(dimension)
                     .into_iter()
                     .flatten()
                     .filter(|e| {
-                        let f = |k: &str| e.get(k).and_then(Value::as_f64).unwrap_or(0.0);
-                        let d = [f("x") - at[0], f("y") - at[1], f("z") - at[2]];
+                        let d = [e.x - at[0], e.y - at[1], e.z - at[2]];
                         d[0] * d[0] + d[1] * d[1] + d[2] * d[2] <= 160.0 * 160.0
                     })
-                    .cloned()
                     .collect()
             };
-            let payload = |sent: &mut Sent, who: u32, entities: Vec<Value>| -> Vec<u8> {
+            let payload = |sent: &mut Sent, who: u32, entries: &[&Entry]| -> Vec<u8> {
                 let have = sent.to.entry(who).or_default();
-                let mut trees = serde_json::Map::new();
-                for e in &entities {
-                    for m in e
-                        .get("models")
-                        .and_then(Value::as_array)
-                        .into_iter()
-                        .flatten()
-                    {
-                        let Some(key) = m.get("key").and_then(Value::as_str) else {
-                            continue;
-                        };
-                        if have.insert(key.to_owned())
-                            && let Some(tree) = sent.trees.get(key)
+                let mut out = String::with_capacity(
+                    entries.iter().map(|e| e.e.get().len() + 1).sum::<usize>() + 64,
+                );
+                out.push_str("{\"entities\":[");
+                for (i, e) in entries.iter().enumerate() {
+                    if i > 0 {
+                        out.push(',');
+                    }
+                    out.push_str(e.e.get());
+                }
+                out.push_str("],\"models\":{");
+                let mut first = true;
+                for e in entries {
+                    for key in &e.keys {
+                        if have.insert((*key).to_owned())
+                            && let Some(tree) = sent.trees.get(*key)
                         {
-                            trees.insert(key.to_owned(), tree.clone());
+                            if !first {
+                                out.push(',');
+                            }
+                            first = false;
+                            out.push_str(&serde_json::to_string(key).unwrap_or_default());
+                            out.push(':');
+                            out.push_str(tree.get());
                         }
                     }
                 }
-                json!({"entities": entities, "models": trees})
-                    .to_string()
-                    .into_bytes()
+                out.push_str("}}");
+                out.into_bytes()
             };
             let Some(host) = self.lan.as_mut() else {
                 // In-frame: the window's own player.
@@ -1040,7 +1137,7 @@ mod run {
                         .as_ref()
                         .map_or([0.0; 3], |p| [p.position.x, p.position.y, p.position.z]);
                     let entities = near(self.dim.id(), at);
-                    let data = payload(sent, u32::MAX, entities);
+                    let data = payload(sent, u32::MAX, &entities);
                     self.remote_java_entities(&data);
                 }
                 return;
@@ -1059,7 +1156,8 @@ mod run {
                 } else {
                     sent.showing.insert(g.conn);
                 }
-                let data = payload(sent, g.conn, entities);
+                let data = payload(sent, g.conn, &entities);
+                super::super::java_profile::bytes("entities: payload to players", data.len());
                 host.hub.send_to(
                     g.conn,
                     &C::CustomPayload(horizon_protocol::packets::configuration::CustomPayload {

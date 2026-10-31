@@ -88,6 +88,28 @@ public final class Natives {
     /** The number of the world view Horizon lent last: what was read of an older one may be stale. */
     public static native long viewEpoch();
 
+    /**
+     * This thread's view changes so far (one when a call lends it a view of the world, one when
+     * the view is put back): what the thread read of the world stays true while it stays.
+     */
+    public static native long threadEpoch();
+
+    /**
+     * Horizon's state ids of the 16x16x16 section cx sy cz into out[(y * 16 + z) * 16 + x]
+     * (named by stateName): 1, 0 where its chunk isn't loaded, -1 when this call's view can't
+     * give them (read chunkBlocks then).
+     */
+    public static native int sectionIds(String dimension, int cx, int sy, int cz, int[] out);
+
+    /**
+     * A number for chunk cx cz's blocks as they are (new when one changes, or the chunk is
+     * another): -2 where it isn't loaded, -1 when this call's view can't say.
+     */
+    public static native long chunkRevision(String dimension, int cx, int cz);
+
+    /** The state a sectionIds id is ({@code minecraft:oak_log[axis=y]}), or null. */
+    public static native String stateName(int id);
+
     /** A mod set a block of a mirrored level: Horizon makes it, as /setblock does. */
     public static native void setBlock(String dimension, int x, int y, int z, String state);
 

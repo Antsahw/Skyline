@@ -82,7 +82,7 @@ public final class HorizonEntities {
     }
 
     private static boolean loaded(ServerLevel level, double x, double y, double z) {
-        return Natives.blockState(dimension(level), (int) Math.floor(x), (int) Math.floor(y), (int) Math.floor(z)) != null;
+        return HorizonServer.loaded(level, (int) Math.floor(x), (int) Math.floor(y), (int) Math.floor(z));
     }
 
     /**
@@ -136,6 +136,7 @@ public final class HorizonEntities {
 
         @Override
         public void onRemove(Entity.RemovalReason reason) {
+            RESTING.remove(entity);
             synchronized (HorizonEntities.class) {
                 Map<UUID, Entity> live = LIVE.get(level);
                 if (live != null && live.get(entity.getUUID()) == entity) live.remove(entity.getUUID());
@@ -164,11 +165,63 @@ public final class HorizonEntities {
                 if (entity.isPassenger()) continue;
                 fire(entity, "Entity.checkDespawn", entity::checkDespawn);
                 if (entity.isRemoved()) continue;
+                if (!active(level, entity) && (ticks + entity.getId()) % FAR_EVERY != 0) {
+                    // Far from every player and idle: it ticks one tick in FAR_EVERY, and isn't
+                    // drawn again until it does (HorizonEntityRender keeps its last look).
+                    RESTING.add(entity);
+                    continue;
+                }
+                RESTING.remove(entity);
+                long started = HorizonProfile.start();
                 fire(entity, "Entity.tick", () -> tickNonPassenger(entity));
+                if (HorizonProfile.ON) HorizonProfile.entity(
+                        BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString(), System.nanoTime() - started);
             }
         }
         if (++ticks % SAVE_TICKS == 0) save();
         if (ticks % 20 == 0) restore();
+    }
+
+    /**
+     * Mods' entities farther than this from every player tick one tick in FAR_EVERY while idle
+     * (an entity activation range, as servers such as Paper's run theirs): a big pack's mobs
+     * spread around the players and most of them stand far away doing nothing.
+     * HORIZON_JAVA_ENTITY_RANGE sets it (0: every entity ticks every tick).
+     */
+    static final int ACTIVE_RANGE = Integer.getInteger("horizon.entityRange",
+            parseInt(System.getenv("HORIZON_JAVA_ENTITY_RANGE"), 32));
+    static final int FAR_EVERY = 4;
+    /** The entities that didn't tick this tick (far and idle): their last look stands. */
+    private static final java.util.Set<Entity> RESTING = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+
+    private static int parseInt(String text, int otherwise) {
+        try {
+            return text == null ? otherwise : Integer.parseInt(text.trim());
+        } catch (NumberFormatException e) {
+            return otherwise;
+        }
+    }
+
+    /** Whether the entity didn't tick this tick (HorizonEntityRender keeps its last look). */
+    static boolean resting(Entity entity) {
+        return RESTING.contains(entity);
+    }
+
+    /**
+     * Whether an entity ticks every tick: a player within ACTIVE_RANGE, or busy (hurt, dying,
+     * with a target, carrying or carried, moving faster than walking, in a fluid).
+     */
+    private static boolean active(ServerLevel level, Entity entity) {
+        if (ACTIVE_RANGE <= 0) return true;
+        double range = (double) ACTIVE_RANGE * ACTIVE_RANGE;
+        for (var player : level.players()) {
+            if (player.distanceToSqr(entity) < range) return true;
+        }
+        if (entity.isVehicle() || entity.isPassenger() || entity.isInWater() || entity.isInLava()) return true;
+        if (entity.getDeltaMovement().horizontalDistanceSqr() > 0.04 || entity.getDeltaMovement().y > 0.1) return true;
+        if (entity instanceof net.minecraft.world.entity.LivingEntity living
+                && (living.hurtTime > 0 || living.isDeadOrDying())) return true;
+        return entity instanceof net.minecraft.world.entity.Mob mob && mob.getTarget() != null;
     }
 
     private static void tickNonPassenger(Entity entity) {
@@ -334,17 +387,65 @@ public final class HorizonEntities {
     }
 
     /**
-     * Level.broadcastEntityEvent of a mirrored level: a mod entity's death poof
-     * (LivingEntity.makePoofParticles, which vanilla's client does for EntityEvent.POOF) as
-     * twenty poof particles in its box, sent to the players within 64 blocks.
+     * Level.broadcastEntityEvent of a mirrored level: the particles vanilla's client makes for
+     * a mod entity's event (Horizon's game doesn't run the entity's handleEntityEvent), sent
+     * to the players within 64 blocks as level particles in its box. Only events of the
+     * classes that define them (a mod may use the same byte for its own event).
      */
     public static void entityEvent(ServerLevel level, Entity entity, byte event) {
-        if (event != net.minecraft.world.entity.EntityEvent.POOF || !modded(entity.getType())) return;
+        if (!modded(entity.getType())) return;
         float w = entity.getBbWidth(), h = entity.getBbHeight();
-        HorizonPackets.near(level, entity.getX(), entity.getY(), entity.getZ(), 64.0,
+        net.minecraft.core.particles.ParticleOptions type = null;
+        int count = 7;
+        double y = entity.getY() + h / 2.0 + 0.5;
+        float speed = 0.02F;
+        switch (event) {
+            // LivingEntity.makePoofParticles; Mob.spawnAnim.
+            case net.minecraft.world.entity.EntityEvent.POOF, net.minecraft.world.entity.EntityEvent.SILVERFISH_MERGE_ANIM -> {
+                if (!(entity instanceof net.minecraft.world.entity.LivingEntity)) return;
+                type = net.minecraft.core.particles.ParticleTypes.POOF;
+                count = 20;
+                y = entity.getY() + h / 2.0;
+            }
+            // TamableAnimal.spawnTamingParticles.
+            case net.minecraft.world.entity.EntityEvent.TAMING_SUCCEEDED, net.minecraft.world.entity.EntityEvent.TAMING_FAILED -> {
+                if (!(entity instanceof net.minecraft.world.entity.TamableAnimal)) return;
+                type = event == net.minecraft.world.entity.EntityEvent.TAMING_SUCCEEDED
+                        ? net.minecraft.core.particles.ParticleTypes.HEART : net.minecraft.core.particles.ParticleTypes.SMOKE;
+            }
+            // Animal.handleEntityEvent: bred.
+            case net.minecraft.world.entity.EntityEvent.IN_LOVE_HEARTS -> {
+                if (!(entity instanceof net.minecraft.world.entity.animal.Animal)) return;
+                type = net.minecraft.core.particles.ParticleTypes.HEART;
+            }
+            // Villager.handleEntityEvent.
+            case net.minecraft.world.entity.EntityEvent.LOVE_HEARTS, net.minecraft.world.entity.EntityEvent.VILLAGER_ANGRY,
+                 net.minecraft.world.entity.EntityEvent.VILLAGER_HAPPY, net.minecraft.world.entity.EntityEvent.VILLAGER_SWEAT -> {
+                if (!(entity instanceof net.minecraft.world.entity.npc.villager.AbstractVillager)) return;
+                type = switch (event) {
+                    case net.minecraft.world.entity.EntityEvent.LOVE_HEARTS -> net.minecraft.core.particles.ParticleTypes.HEART;
+                    case net.minecraft.world.entity.EntityEvent.VILLAGER_ANGRY -> net.minecraft.core.particles.ParticleTypes.ANGRY_VILLAGER;
+                    case net.minecraft.world.entity.EntityEvent.VILLAGER_HAPPY -> net.minecraft.core.particles.ParticleTypes.HAPPY_VILLAGER;
+                    default -> net.minecraft.core.particles.ParticleTypes.SPLASH;
+                };
+                count = 5;
+                y = entity.getY() + h + 0.5;
+            }
+            // LivingEntity.handleEntityEvent: teleported (a chorus fruit, an enderman's kin).
+            case net.minecraft.world.entity.EntityEvent.TELEPORT -> {
+                if (!(entity instanceof net.minecraft.world.entity.LivingEntity)) return;
+                type = net.minecraft.core.particles.ParticleTypes.PORTAL;
+                count = 128;
+                speed = 0.1F;
+                y = entity.getY() + h / 2.0;
+            }
+            default -> {
+                return;
+            }
+        }
+        HorizonPackets.near(level, entity.getX(), y, entity.getZ(), 64.0,
                 new net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket(
-                        net.minecraft.core.particles.ParticleTypes.POOF, false, false,
-                        entity.getX(), entity.getY() + h / 2.0, entity.getZ(), w / 2.0F, h / 2.0F, w / 2.0F, 0.02F, 20));
+                        type, false, false, entity.getX(), y, entity.getZ(), w / 2.0F, h / 2.0F, w / 2.0F, speed, count));
     }
 
     /**
