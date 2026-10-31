@@ -505,6 +505,11 @@ fn boot(env: &mut JNIEnv, jars: &[PathBuf]) -> jni::errors::Result<String> {
                 fn_ptr: native_broadcast as *mut c_void,
             },
             NativeMethod {
+                name: "worldSpawn".into(),
+                sig: "(Ljava/lang/String;IIIFF)V".into(),
+                fn_ptr: native_world_spawn as *mut c_void,
+            },
+            NativeMethod {
                 name: "chunkTickets".into(),
                 sig: "(Ljava/lang/String;Ljava/lang/String;)V".into(),
                 fn_ptr: native_chunk_tickets as *mut c_void,
@@ -743,6 +748,29 @@ extern "system" fn native_tab_name(mut env: JNIEnv, _class: JClass, uuid: JStrin
             env.get_string(&json).ok().map(String::from)
         };
         events::push(events::Action::TabName { uuid, json });
+    }));
+}
+
+/// `Natives.worldSpawn(String dimension, int x, int y, int z, float yaw, float pitch)`.
+extern "system" fn native_world_spawn(
+    mut env: JNIEnv,
+    _class: JClass,
+    dimension: JString,
+    x: i32,
+    y: i32,
+    z: i32,
+    yaw: f32,
+    pitch: f32,
+) {
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        if let Ok(dimension) = env.get_string(&dimension) {
+            events::push(events::Action::WorldSpawn {
+                dimension: String::from(dimension),
+                position: [x, y, z],
+                yaw,
+                pitch,
+            });
+        }
     }));
 }
 

@@ -178,6 +178,16 @@ public final class HorizonServer {
             var advancements = allocate(net.minecraft.server.PlayerAdvancements.class);
             // No trigger listens (Horizon awards the real advancements): triggers find none.
             ((dev.horizonlab.platform.mixin.PlayerAdvancementsAccess) advancements).horizon$setActiveTriggers(new java.util.HashMap<>());
+            // Its progress, empty (mods read it: Modonomicon replays the advancements a player
+            // has as it joins).
+            emptyCollections(advancements, net.minecraft.server.PlayerAdvancements.class);
+            try {
+                java.lang.reflect.Field owner = net.minecraft.server.PlayerAdvancements.class.getDeclaredField("player");
+                owner.setAccessible(true);
+                owner.set(advancements, player);
+            } catch (ReflectiveOperationException e) {
+                // A player-less one still answers progress.
+            }
             return advancements;
         });
     }
@@ -335,9 +345,79 @@ public final class HorizonServer {
         // What mods add at the end of a level's constructor (which the mirror skips), now that
         // it is set up: once, outside the map's update (their code may ask for levels).
         // A level made before a world opened (the content export's) waits for its saved data.
-        if (HorizonSavedData.ready() && CONSTRUCTED.add(level)) HorizonHooks.constructed(level);
+        if (HorizonSavedData.ready() && CONSTRUCTED.add(level)) {
+            chunkMap(level);
+            HorizonHooks.constructed(level);
+        }
         if (started) levelLoaded(level);
         return level;
+    }
+
+    /** The mirrored levels' chunk maps (ChunkMapMixin answers for them). */
+    private static final java.util.Set<Object> CHUNK_MAPS =
+            java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+
+    public static boolean isMirrorChunkMap(Object map) {
+        return CHUNK_MAPS.contains(map);
+    }
+
+    /**
+     * The world's storage as mods see it (MinecraftServer.storageSource: getWorldPath, a
+     * dimension's folder): rooted in the world's horizon-java folder, so what mods write stays
+     * beside the rest of the Java side's files. Made without its constructor (no session lock:
+     * Horizon holds the world).
+     */
+    static synchronized net.minecraft.world.level.storage.LevelStorageSource.LevelStorageAccess storage() {
+        java.nio.file.Path root = HorizonSavedData.javaDir();
+        if (root == null) return null;
+        if (storage != null && root.equals(storageRoot)) return storage;
+        try {
+            var access = (net.minecraft.world.level.storage.LevelStorageSource.LevelStorageAccess)
+                    allocate(net.minecraft.world.level.storage.LevelStorageSource.LevelStorageAccess.class);
+            Class<?> owner = net.minecraft.world.level.storage.LevelStorageSource.LevelStorageAccess.class;
+            for (var entry : new Object[][] {
+                    {"levelDirectory", new net.minecraft.world.level.storage.LevelStorageSource.LevelDirectory(root)},
+                    {"levelId", root.getParent() == null ? "world" : root.getParent().getFileName().toString()},
+                    {"resources", new java.util.concurrent.ConcurrentHashMap<>()}}) {
+                java.lang.reflect.Field f = owner.getDeclaredField((String) entry[0]);
+                f.setAccessible(true);
+                f.set(access, entry[1]);
+            }
+            java.lang.reflect.Field source = MinecraftServer.class.getDeclaredField("storageSource");
+            source.setAccessible(true);
+            source.set(server, access);
+            storage = access;
+            storageRoot = root;
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            Natives.log("Java mods: no world storage for the mods: " + e);
+        }
+        return storage;
+    }
+
+    private static net.minecraft.world.level.storage.LevelStorageSource.LevelStorageAccess storage;
+    private static java.nio.file.Path storageRoot;
+
+    /**
+     * A mirrored level's chunk map (ServerChunkCache.chunkMap), made without its constructor:
+     * mods reach their per-level state through it (GraphLib's graph storage, which its mixin
+     * makes at the end of ChunkMap's constructor: run here, with the world's storage).
+     * Horizon holds the chunks; ChunkMapMixin answers what mods ask of it.
+     */
+    private static void chunkMap(ServerLevel level) {
+        try {
+            var map = allocate(net.minecraft.server.level.ChunkMap.class);
+            java.lang.reflect.Field owner = net.minecraft.server.level.ChunkMap.class.getDeclaredField("level");
+            owner.setAccessible(true);
+            owner.set(map, level);
+            emptyCollections(map, map.getClass());
+            java.lang.reflect.Field field = net.minecraft.server.level.ServerChunkCache.class.getDeclaredField("chunkMap");
+            field.setAccessible(true);
+            field.set(level.getChunkSource(), map);
+            CHUNK_MAPS.add(map);
+            HorizonHooks.constructed(map, storage(), generator(level));
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            Natives.log("Java mods: a level has no chunk map: " + e);
+        }
     }
 
     private static final java.util.Set<ServerLevel> CONSTRUCTED =
@@ -1026,6 +1106,8 @@ public final class HorizonServer {
             fireEach("ServerTickEvents.END_LEVEL_TICK", ServerTickEvents.END_LEVEL_TICK, l -> l.onEndTick(level));
         }
         phase = HorizonProfile.add("level tick hooks", phase);
+        HorizonFunctions.tick(server, server.getWorldData().overworldData().getGameTime());
+        phase = HorizonProfile.add("functions", phase);
         // Each player's tick (ServerPlayer.tick, Player.tick from doTick), as vanilla's
         // levels and connections run them within the server's tick.
         for (ServerPlayer player : new ArrayList<>(PLAYERS)) {

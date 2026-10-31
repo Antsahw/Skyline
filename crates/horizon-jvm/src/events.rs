@@ -97,6 +97,14 @@ pub enum Action {
         dimension: String,
         chunks: Vec<(i32, i32)>,
     },
+    /// `ServerLevel.setRespawnData` (a mod's or a data pack's `/setworldspawn`): the world's
+    /// spawn, where players without a spawn point of their own respawn.
+    WorldSpawn {
+        dimension: String,
+        position: [i32; 3],
+        yaw: f32,
+        pitch: f32,
+    },
     /// `ServerPlayer.teleport` and the connection's: the player is to be moved there.
     Teleport {
         uuid: String,

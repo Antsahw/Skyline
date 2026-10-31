@@ -481,6 +481,15 @@ public final class HorizonHooks {
      * there to give: a handler that takes them gets nulls (zeros), and may fail (logged).
      */
     public static void constructed(Object self) {
+        constructed(self, new Object[0]);
+    }
+
+    /**
+     * As {@link #constructed(Object)}, with values for constructor arguments the object didn't
+     * keep (a chunk map's world storage): each goes to a parameter of its type, before the
+     * object's own fields.
+     */
+    public static void constructed(Object self, Object... extras) {
         // A level can be made before the census ran (the content export's).
         scan();
         List<Class<?>> chain = new ArrayList<>();
@@ -493,7 +502,8 @@ public final class HorizonHooks {
                     Class<?>[] params = handler.getParameterTypes();
                     java.lang.reflect.Type[] types = handler.getGenericParameterTypes();
                     Object[] call = new Object[params.length];
-                    for (int i = 0; i < params.length - 1; i++) call[i] = argument(owner, self, params[i], types[i]);
+                    for (int i = 0; i < params.length - 1; i++) call[i] = extra(extras, params[i]);
+                    for (int i = 0; i < params.length - 1; i++) if (call[i] == null) call[i] = argument(owner, self, params[i], types[i]);
                     call[params.length - 1] = new CallbackInfo("<init>", false);
                     try {
                         handler.invoke(Modifier.isStatic(handler.getModifiers()) ? null : self, call);
@@ -513,6 +523,11 @@ public final class HorizonHooks {
      * from it (Level's dimension type holder, which Lithium caches the height from at its end:
      * without it every level is 0 blocks tall and worldgen fails); otherwise null or zero.
      */
+    private static Object extra(Object[] extras, Class<?> type) {
+        for (Object e : extras) if (e != null && !type.isPrimitive() && type.isInstance(e)) return e;
+        return null;
+    }
+
     private static Object argument(Class<?> owner, Object self, Class<?> type, java.lang.reflect.Type generic) {
         if (type.isPrimitive()) return zero(type);
         // A level's stem (ServerLevel's constructor: its generator, which BCLib's and BetterEnd's

@@ -1133,6 +1133,19 @@ mod run {
                     horizon_jvm::events::Action::Overlay { uuid, text } => {
                         self.overlay_server_player(host.as_deref_mut(), &uuid, java_chat(&text));
                     }
+                    horizon_jvm::events::Action::WorldSpawn {
+                        dimension,
+                        position,
+                        yaw,
+                        pitch,
+                    } => {
+                        // LevelData.setRespawnData, as /setworldspawn sets it (the
+                        // overworld's: Horizon's world spawn is the overworld's).
+                        if dimension == "minecraft:overworld" {
+                            self.level.world_spawn = Some(position);
+                            self.level.world_spawn_angle = [yaw, pitch];
+                        }
+                    }
                     teleport @ horizon_jvm::events::Action::Teleport { .. } => {
                         if host.is_some() {
                             // The hub is out of `self.lan` (a connection's command): the

@@ -205,7 +205,50 @@ public final class HorizonWorldgen {
                 }
             }
         }
+        // A generator of a mod's own (One Block's), or vanilla's on a mod's noise settings.
+        String generatorClass = generator.getClass().getName();
+        if (!generatorClass.startsWith("net.minecraft.")) mods.add(owner(generator.getClass()));
+        if (!generator.getBiomeSource().getClass().getName().startsWith("net.minecraft.")) {
+            mods.add(owner(generator.getBiomeSource().getClass()));
+        }
+        if (generator instanceof net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator noise) {
+            noise.generatorSettings().unwrapKey().ifPresent(k -> {
+                if (!k.identifier().getNamespace().equals("minecraft")) mods.add(k.identifier().getNamespace());
+            });
+        }
+        // Data packs that change vanilla's own generation files (a skyblock's void noise
+        // settings, a one-block's dimension, biomes with other features): the pack's id.
+        var resources = HorizonData.loaded == null ? null : HorizonData.loaded.resources();
+        if (resources != null) {
+            String dimension = level.dimension().identifier().getPath();
+            for (String folder : new String[] {"worldgen/noise_settings", "worldgen/density_function", "worldgen/noise",
+                    "worldgen/biome", "worldgen/placed_feature", "worldgen/configured_feature", "dimension"}) {
+                for (var entry : resources.listResourceStacks(folder, id -> id.getNamespace().equals("minecraft")).entrySet()) {
+                    if (folder.equals("dimension") && !entry.getKey().getPath().equals("dimension/" + dimension + ".json")) continue;
+                    for (var resource : entry.getValue()) {
+                        if (!"vanilla".equals(resource.sourcePackId())) mods.add(resource.sourcePackId());
+                    }
+                }
+            }
+        }
         return new ArrayList<>(mods);
+    }
+
+    /** The mod a class comes from (its jar's mod), or the class's package. */
+    private static String owner(Class<?> c) {
+        try {
+            var source = c.getProtectionDomain().getCodeSource();
+            if (source != null) {
+                for (var mod : net.fabricmc.loader.api.FabricLoader.getInstance().getAllMods()) {
+                    for (var root : mod.getOrigin().getPaths()) {
+                        if (source.getLocation().toString().contains(root.getFileName().toString())) return mod.getMetadata().getId();
+                    }
+                }
+            }
+        } catch (RuntimeException e) {
+            // Its package, then.
+        }
+        return c.getPackageName();
     }
 
     // ---- Horizon's calls ------------------------------------------------------------------

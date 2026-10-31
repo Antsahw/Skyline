@@ -43,6 +43,11 @@ public final class HorizonSavedData {
         }
     }
 
+    /** The folder of the Java side's own files in the world (horizon-java), or null before one opens. */
+    static synchronized Path javaDir() {
+        return dir == null ? null : dir.getParent();
+    }
+
     /** Whether a world's folder is known: its levels' saved data can be read. */
     public static synchronized boolean ready() {
         return dir != null;

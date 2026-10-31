@@ -31,7 +31,12 @@
     "WorldGenRegionMixin",
     "NoiseFillMixin",
     "EntitySelectorMixin",
-    "BlockScanMixin"
+    "BlockScanMixin",
+    "ChunkMapMixin",
+    "FunctionsMixin",
+    "TimerCallbackMixin",
+    "RespawnDataMixin",
+    "MirrorUpdatesMixin"
   ],
   "injectors": {
     "defaultRequire": 1
@@ -58,6 +63,7 @@
     "ItemModelResolverMixin",
     "ItemStackRenderStateMixin",
     "ReiGuiGraphicsMixin",
-    "GuiGraphicsMixin"
+    "GuiGraphicsMixin",
+    "LevelExtractorMixin"
   ]
 }

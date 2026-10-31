@@ -122,6 +122,9 @@ public final class Natives {
      */
     public static native void chunkTickets(String dimension, String chunks);
 
+    /** ServerLevel.setRespawnData on a mirrored level: Horizon's world spawn moves there. */
+    public static native void worldSpawn(String dimension, int x, int y, int z, float yaw, float pitch);
+
     /**
      * An instance of {@code type} made without running a constructor (JNI AllocObject): the
      * game objects Horizon's state is mirrored into. Every field starts at its default.
