@@ -12,6 +12,12 @@ if ! "${JAVA_HOME:-/nonexistent}/bin/java" -version 2>&1 | grep -q '"25'; then
 fi
 [ -n "$JAVA_HOME" ] || { echo "no Java 25 in /usr/lib/jvm: set JAVA_HOME" >&2; exit 1; }
 export JAVA_HOME HORIZON_JAVA_HOME=$JAVA_HOME PATH=$JAVA_HOME/bin:$PATH
+# The previous run's scratch folder goes (each holds a world and the mods' content: ~1 GB).
+old=$(cat /tmp/hz-bridge-scratch 2>/dev/null)
+if [ -n "$old" ] && [ -d "$old" ]; then
+  "$R/target/fast/horizon-ctl" --socket "$old/ctl.sock" quit >/dev/null 2>&1 || true
+  rm -rf "$old"
+fi
 S=$(mktemp -d /tmp/hz-bridge.XXXX)
 mkdir -p "$S/mods-java" "$S/home" "$S/lh" "$S/data" "$S/conf"
 cp "$MODS"/*.jar "$S/mods-java/"

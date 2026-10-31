@@ -1293,3 +1293,125 @@ pub fn worldgen_proto_filled(
     })?;
     Ok(token.filter(|&t| t != 0))
 }
+
+/// Held chunk `x z` as [`worldgen_finish`] gives it, still held (to save a proto Horizon drops
+/// unfinished), with `horizon:decorated` when its own features ran.
+pub fn worldgen_snapshot(
+    dimension: &str,
+    x: i32,
+    z: i32,
+    token: i64,
+) -> Result<Option<Vec<u8>>, String> {
+    let bytes = with_server(|env, class| {
+        let dimension = env.new_string(dimension)?;
+        let array = env
+            .call_static_method(
+                class,
+                "worldgenSnapshot",
+                "(Ljava/lang/String;IIJ)[B",
+                &[
+                    JValue::Object(&dimension),
+                    JValue::Int(x),
+                    JValue::Int(z),
+                    JValue::Long(token),
+                ],
+            )?
+            .l()?;
+        if array.is_null() {
+            return Ok(None);
+        }
+        env.convert_byte_array(jni::objects::JByteArray::from(array))
+            .map(Some)
+    })?;
+    Ok(bytes.flatten())
+}
+
+/// Puts a saved proto back onto held chunk `x z` (made again to TERRAIN): its blocks
+/// (`palette`, `blocks` from `from_y` up), block entities and entities (SNBT), and
+/// FEATURES when `decorated`.
+#[allow(clippy::too_many_arguments)]
+pub fn worldgen_restore(
+    dimension: &str,
+    x: i32,
+    z: i32,
+    token: i64,
+    palette: &[String],
+    from_y: i32,
+    blocks: &[i32],
+    block_entities: &[String],
+    entities: &[String],
+    decorated: bool,
+) -> Result<(), String> {
+    with_server(|env, class| {
+        let dimension = env.new_string(dimension)?;
+        fn refs(v: &[String]) -> Vec<&str> {
+            v.iter().map(String::as_str).collect()
+        }
+        let palette = strings(env, &refs(palette))?;
+        let array = env.new_int_array(blocks.len() as sys::jsize)?;
+        env.set_int_array_region(&array, 0, blocks)?;
+        let block_entities = strings(env, &refs(block_entities))?;
+        let entities = strings(env, &refs(entities))?;
+        env.call_static_method(
+            class,
+            "worldgenRestore",
+            "(Ljava/lang/String;IIJ[Ljava/lang/String;I[I[Ljava/lang/String;[Ljava/lang/String;Z)V",
+            &[
+                JValue::Object(&dimension),
+                JValue::Int(x),
+                JValue::Int(z),
+                JValue::Long(token),
+                JValue::Object(&palette),
+                JValue::Int(from_y),
+                JValue::Object(&array),
+                JValue::Object(&block_entities),
+                JValue::Object(&entities),
+                JValue::Bool(decorated.into()),
+            ],
+        )?;
+        Ok(())
+    })?;
+    Ok(())
+}
+
+/// `/locate structure` with the mods' generator (`ChunkGenerator.findNearestMapStructure`) of
+/// `selector` (an id or a `#tag`) from `origin` within `radius` chunks: Some(None) when none,
+/// None if the mods don't generate `dimension` (or don't know the selector).
+pub fn worldgen_locate_structure(
+    dimension: &str,
+    selector: &str,
+    origin: [i32; 3],
+    radius: i32,
+) -> Result<Option<Option<(String, [i32; 3])>>, String> {
+    let found = with_server(|env, class| {
+        let dimension = env.new_string(dimension)?;
+        let selector = env.new_string(selector)?;
+        let found = env
+            .call_static_method(
+                class,
+                "worldgenLocateStructure",
+                "(Ljava/lang/String;Ljava/lang/String;IIII)[Ljava/lang/String;",
+                &[
+                    JValue::Object(&dimension),
+                    JValue::Object(&selector),
+                    JValue::Int(origin[0]),
+                    JValue::Int(origin[1]),
+                    JValue::Int(origin[2]),
+                    JValue::Int(radius),
+                ],
+            )?
+            .l()?;
+        if found.is_null() {
+            return Ok(None);
+        }
+        let found = string_array(env, found)?;
+        let parsed = (found.len() == 4)
+            .then(|| {
+                let n = |i: usize| found[i].parse::<i32>().ok();
+                Some((found[0].clone(), [n(1)?, n(2)?, n(3)?]))
+            })
+            .flatten();
+        Ok(Some(parsed))
+    })?;
+    Ok(found.flatten())
+}
