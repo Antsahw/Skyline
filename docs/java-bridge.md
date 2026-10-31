@@ -476,6 +476,15 @@ and block entities alike (`GeoBlockRenderer` goes the same way). Tested with
 a cube over its block; `tools/java_bridge/fixture_mod.sh geomod …`); a real GeckoLib mod
 isn't tested here (this container may not run downloaded mods): GeckoLib's models load
 through its client reload listener, which `HorizonClient.reloadClientResources` runs.
+Emissive render types (`eyes`, `entity_translucent_emissive`: GeckoLib's glow layers,
+spiders' eyes) are sent `"glow"` and drawn at full light.
+
+GeckoLib in the big pack (2026-10-31, the mods' Modrinth dependencies): none of the 72 jars
+needs it. The Graveyard (`the-graveyard-fabric`, 4.0.0+mc26.3) does: plain
+`GeoEntityRenderer`s (ghoul, revenant, lich, nightmare...) with `TextureLayerGeoLayer` eye
+layers, its textures in `textures/entity/`; it also needs `villagertradingplus`. To try it:
+GeckoLib 5.5.7 + The Graveyard + Villager Trading Plus + Fabric API in the mods folder,
+`/summon graveyard:ghoul ~3 ~ ~ {NoAI:1b}`.
 
 Name tags are the renderer's own (`EntityRenderState.nameTag`, made with the camera on the
 entity and it under the crosshair, the nearest player as `Minecraft.player`), shown always
@@ -489,9 +498,8 @@ autosave, `/save-all` and the world closing, besides every 10 s.
 Known gaps of mod entities: vanilla mobs don't see them nor they vanilla mobs (a mod's wolf
 won't hunt Horizon's sheep); worn armour, fire, leashes and sprite-atlas models
 (`UvMapping`) aren't drawn; custom geometry is sent whole each tick (fine for a few
-GeckoLib mobs, heavy for many); particles of a mod's own particle types and entity events
-other than the poof (a wolf's hearts) are left out; a mod's own sounds need their files in
-the content mod; natural spawns pick a height near the player (no heightmap), and spawn on
+GeckoLib mobs, heavy for many); a mod's particle types are drawn as a generic particle
+(its sprites, not its provider's motion); natural spawns pick a height near the player (no heightmap), and spawn on
 world generation doesn't happen; in-frame single player is untested.
 
 Client HUD mods (tested headless, survival): Jade's tooltip for the block looked at (box,
@@ -521,6 +529,17 @@ screen); sprites drawn under a scissor overflow it (Tech Reborn's energy bars); 
 an error each tick per level (`ServerChunkCache.chunkMap` is null on the mirror); Glitchcore's
 client tick wants `LevelExtractor`; Xaero's HUD wants a GPU device; Traveler's Backpack's model
 reload listener fails.
+
+Mods' sounds and particles (2026-10-31): a mod's sound event plays by name (its
+`sounds.json` and `.ogg` files are carried into the content mod, which Horizon's sound
+registry reads). A mod's own particle type goes as `horizon:java_particles` (JSON: the type's
+name and the packet's fields; `HorizonPackets.modParticles`), and the game draws it with the
+type's sprites (`assets/<ns>/particles/<name>.json`, textures in the HUD atlas as
+`<ns>:particle/...`): `ParticleEngine::add_mod`, a `SingleQuadParticle` animated by age,
+moving as sent. Entity events whose particles vanilla's client makes (taming hearts and
+smoke, breeding hearts, villager hearts, anger, happiness and sweat, spawn poof, teleport
+portal) are sent as vanilla level particles, for the classes that define them. Tested with
+the critter fixture: its squeak (`heard` in `horizon-ctl status`) and sparkles when hit.
 
 ### Profiling
 

@@ -17,6 +17,21 @@ use std::sync::Arc;
 /// (`HorizonEntityRender.snapshot`'s entities of the player's level, near it, and the trees
 /// this client has not had yet).
 pub(super) const CHANNEL: &str = "horizon:java_entities";
+/// Mods' own particle types (`HorizonPackets.modParticles`): a level particles packet by the
+/// type's name, as JSON.
+pub(super) const PARTICLES: &str = "horizon:java_particles";
+
+/// A level particles packet of a mod's particle type.
+#[derive(serde::Deserialize)]
+struct ModParticles {
+    t: String,
+    p: [f64; 3],
+    d: [f64; 3],
+    s: [f64; 3],
+    n: i32,
+    #[serde(default)]
+    f: bool,
+}
 
 /// Entity ids the bridge gives Java's entities (`HorizonServer.nextEntityId`), apart from
 /// Horizon's own.
@@ -54,6 +69,8 @@ struct Item {
 struct Mesh {
     sprite: String,
     overlay: u32,
+    /// Full light (an emissive render type).
+    glow: bool,
     /// Per vertex: x, y, z, u, v, nx, ny, nz.
     vertices: Vec<[f32; 8]>,
     /// Per vertex: Java's ARGB.
@@ -170,6 +187,9 @@ struct RawModel {
     skip: Vec<String>,
     /// Custom geometry (GeckoLib's): x, y, z, u, v, nx, ny, nz, colour per vertex.
     v: Option<Vec<f64>>,
+    /// An emissive render type (eyes, glow layers): drawn at full light.
+    #[serde(default)]
+    glow: bool,
 }
 
 impl RawModel {
@@ -197,6 +217,7 @@ impl RawModel {
         Some(Mesh {
             sprite: sprite_key(self.tex.as_deref()?),
             overlay: self.overlay.unwrap_or(0) as u32,
+            glow: self.glow,
             vertices,
             colors,
         })
@@ -237,6 +258,9 @@ impl RawShown {
         }
     }
 }
+
+/// Packed light at block and sky 15 (LightTexture.FULL_BRIGHT).
+const FULL_BRIGHT: u32 = 240 | (240 << 8);
 
 /// Java's ARGB as a vertex colour (ABGR).
 fn abgr(argb: u32) -> u32 {
@@ -426,7 +450,7 @@ impl Game<'_> {
                         uv: [r.u0 + (r.u1 - r.u0) * v[3], r.v0 + (r.v1 - r.v0) * v[4]],
                         layer: overlay,
                         color: abgr(argb),
-                        light: packed,
+                        light: if m.glow { FULL_BRIGHT } else { packed },
                         normal: [n[0], n[1], n[2], -127],
                         glint_uv: [0.0, 0.0],
                     });
@@ -495,5 +519,30 @@ impl Game<'_> {
         };
         let dir = super::view_vector(self.yaw, self.pitch);
         std::array::from_fn(|i| eye[i] + dir[i] * distance - s.position[i])
+    }
+}
+
+impl Game<'_> {
+    /// `ClientPacketListener.handleParticleEvent` for a mod's particle type: drawn with its
+    /// sprites (`ParticleEngine::add_mod`), spread as vanilla spreads a packet's particles.
+    pub(super) fn remote_java_particles(&mut self, data: &[u8]) {
+        use horizon_core::random::RandomSource;
+        let Ok(p) = serde_json::from_slice::<ModParticles>(data) else {
+            return;
+        };
+        if !self.particles.has_mod(&p.t) {
+            return;
+        }
+        if p.n == 0 {
+            let v = std::array::from_fn(|i| p.s[i] * p.d[i]);
+            self.particles.add_mod(&p.t, p.p, v, p.f);
+            return;
+        }
+        for _ in 0..p.n.min(4096) {
+            let r = self.particles.random();
+            let at: [f64; 3] = std::array::from_fn(|i| p.p[i] + r.next_gaussian() * p.d[i]);
+            let v: [f64; 3] = std::array::from_fn(|i| r.next_gaussian() * p.s[i]);
+            self.particles.add_mod(&p.t, at, v, p.f);
+        }
     }
 }

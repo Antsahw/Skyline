@@ -23,6 +23,14 @@ public final class CritterMod implements ModInitializer {
     public static final EntityType<Critter> CRITTER = Registry.register(BuiltInRegistries.ENTITY_TYPE, KEY,
             EntityType.Builder.of(Critter::new, MobCategory.CREATURE).sized(0.8F, 0.9F).build(KEY));
 
+    /** Its own sound (assets/horizon_critters/sounds.json) and particle type (particles/sparkle.json). */
+    public static final net.minecraft.sounds.SoundEvent SQUEAK = Registry.register(BuiltInRegistries.SOUND_EVENT,
+            Identifier.fromNamespaceAndPath("horizon_critters", "critter.squeak"),
+            net.minecraft.sounds.SoundEvent.createVariableRangeEvent(Identifier.fromNamespaceAndPath("horizon_critters", "critter.squeak")));
+    public static final net.minecraft.core.particles.SimpleParticleType SPARKLE = Registry.register(BuiltInRegistries.PARTICLE_TYPE,
+            Identifier.fromNamespaceAndPath("horizon_critters", "sparkle"),
+            net.fabricmc.fabric.api.particle.v1.FabricParticleTypes.simple());
+
     @Override
     public void onInitialize() {
         FabricDefaultAttributeRegistry.register(CRITTER, Mob.createMobAttributes()

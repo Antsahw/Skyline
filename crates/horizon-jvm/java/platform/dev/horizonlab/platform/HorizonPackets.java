@@ -43,7 +43,9 @@ public final class HorizonPackets {
                         sound.getZ(), sound.getVolume(), sound.getPitch(), sound.getSeed());
             }
         } else if (packet instanceof ClientboundLevelParticlesPacket particles) {
-            if (!BuiltInRegistries.PARTICLE_TYPE.getKey(particles.particle().getType()).getNamespace().equals("minecraft")) {
+            var key = BuiltInRegistries.PARTICLE_TYPE.getKey(particles.particle().getType());
+            if (key != null && !key.getNamespace().equals("minecraft")) {
+                modParticles(player, key.toString(), particles);
                 return true;
             }
         } else {
@@ -51,6 +53,38 @@ public final class HorizonPackets {
         }
         send(player, out);
         return true;
+    }
+
+    /** The channel of mods' own particle types (game/java_entities.rs draws them by name). */
+    static final String PARTICLES = "horizon:java_particles";
+    private static int customPayloadId = -1;
+
+    /**
+     * A mod's particle type, which Horizon's game has no id for: the packet's fields by the
+     * type's name, as a custom payload (its id, the channel, then JSON).
+     */
+    private static void modParticles(ServerPlayer player, String type, ClientboundLevelParticlesPacket p) {
+        String json = "{\"t\":\"" + type + "\",\"p\":[" + p.x() + "," + p.y() + "," + p.z()
+                + "],\"d\":[" + p.xDist() + "," + p.yDist() + "," + p.zDist()
+                + "],\"s\":[" + p.xMaxSpeed() + "," + p.yMaxSpeed() + "," + p.zMaxSpeed()
+                + "],\"n\":" + p.count() + ",\"f\":" + p.overrideLimiter() + "}";
+        try {
+            if (customPayloadId < 0) {
+                byte[] brand = encode(new net.minecraft.network.protocol.common.ClientboundCustomPayloadPacket(
+                        new net.minecraft.network.protocol.common.custom.BrandPayload("h")));
+                customPayloadId = brand[0] & 0x7F; // a one-byte VarInt (ids below 128)
+            }
+            ByteBuf buf = Unpooled.buffer();
+            net.minecraft.network.FriendlyByteBuf out = new net.minecraft.network.FriendlyByteBuf(buf);
+            out.writeVarInt(customPayloadId);
+            out.writeUtf(PARTICLES);
+            out.writeBytes(json.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            byte[] bytes = new byte[buf.readableBytes()];
+            buf.readBytes(bytes);
+            Natives.packet(player.getStringUUID(), bytes);
+        } catch (Throwable t) {
+            HorizonServer.fire("sending " + type, () -> { throw new RuntimeException(t); });
+        }
     }
 
     /** To every mirrored player in the level within {@code range} of the point. */
@@ -70,18 +104,23 @@ public final class HorizonPackets {
         return modded(sound) ? Holder.direct(sound.value()) : sound;
     }
 
+    /** The packet as vanilla's codec writes it: its id (a VarInt), then its body. */
     @SuppressWarnings({"unchecked", "rawtypes"})
+    private static byte[] encode(Packet<?> packet) {
+        if (protocol == null) {
+            protocol = net.minecraft.network.protocol.game.GameProtocols.CLIENTBOUND_TEMPLATE.bind(
+                    net.minecraft.network.RegistryFriendlyByteBuf.decorator(HorizonServer.server().registryAccess()));
+        }
+        ByteBuf buf = Unpooled.buffer();
+        ((net.minecraft.network.codec.StreamCodec) protocol.codec()).encode(buf, packet);
+        byte[] bytes = new byte[buf.readableBytes()];
+        buf.readBytes(bytes);
+        return bytes;
+    }
+
     private static void send(ServerPlayer player, Packet<?> packet) {
         try {
-            if (protocol == null) {
-                protocol = net.minecraft.network.protocol.game.GameProtocols.CLIENTBOUND_TEMPLATE.bind(
-                        net.minecraft.network.RegistryFriendlyByteBuf.decorator(HorizonServer.server().registryAccess()));
-            }
-            ByteBuf buf = Unpooled.buffer();
-            ((net.minecraft.network.codec.StreamCodec) protocol.codec()).encode(buf, packet);
-            byte[] bytes = new byte[buf.readableBytes()];
-            buf.readBytes(bytes);
-            Natives.packet(player.getStringUUID(), bytes);
+            Natives.packet(player.getStringUUID(), encode(packet));
         } catch (Throwable t) {
             HorizonServer.fire("sending " + packet.getClass().getSimpleName(), () -> { throw new RuntimeException(t); });
         }

@@ -33,4 +33,21 @@ public class Critter extends PathfinderMob {
         setItemSlot(net.minecraft.world.entity.EquipmentSlot.MAINHAND, new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.STICK));
         return super.finalizeSpawn(level, difficulty, reason, data);
     }
+
+    /** Its own sound when hit and now and then, and its own particles when hit. */
+    @Override
+    protected net.minecraft.sounds.SoundEvent getAmbientSound() {
+        return CritterMod.SQUEAK;
+    }
+
+    @Override
+    protected net.minecraft.sounds.SoundEvent getHurtSound(net.minecraft.world.damagesource.DamageSource source) {
+        return CritterMod.SQUEAK;
+    }
+
+    @Override
+    public boolean hurtServer(net.minecraft.server.level.ServerLevel level, net.minecraft.world.damagesource.DamageSource source, float amount) {
+        level.sendParticles(CritterMod.SPARKLE, getX(), getY() + getBbHeight() / 2.0, getZ(), 12, 0.3, 0.3, 0.3, 0.05);
+        return super.hurtServer(level, source, amount);
+    }
 }

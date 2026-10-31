@@ -1008,6 +1008,8 @@ pub struct ParticleEngine {
     /// The item particles' sprites (`BreakingItemParticle`'s slime ball, snowball
     /// and cobweb models, resolved for the ground), one per model layer.
     pub item_sprites: HashMap<ParticleType, Vec<String>>,
+    /// Mods' particle types' sprite sets (`assets/<ns>/particles/<name>.json`), by `ns:name`.
+    mod_sets: HashMap<String, u32>,
 }
 /// `ParticleGroup.MAX_PARTICLES` (per render group; one group here).
 const MAX_PARTICLES: usize = 16384;
@@ -1033,6 +1035,7 @@ impl ParticleEngine {
             sounds: Vec::new(),
             made: Default::default(),
             item_sprites: HashMap::new(),
+            mod_sets: HashMap::new(),
         };
         engine.reload(root, atlas, translucent);
         engine
@@ -1058,7 +1061,9 @@ impl ParticleEngine {
         self.sets.clear();
         self.set_sprites.clear();
         self.item_sprites.clear();
+        self.mod_sets.clear();
         self.load_sprites(root);
+        self.load_mod_sprites(root);
     }
     /// The sprite sets of every `particles/*.json` under `root`.
     fn load_sprites(&mut self, root: &Path) {
@@ -1086,6 +1091,86 @@ impl ParticleEngine {
                 self.set_sprites.push(sprites);
             }
         }
+    }
+    /// The sprite sets of mods' particle types: every `assets/<ns>/particles/*.json` of a
+    /// namespace other than vanilla's, their textures `ns:x` as the atlas's `ns:particle/x`.
+    fn load_mod_sprites(&mut self, root: &Path) {
+        let assets = root.join("assets");
+        for ns in std::fs::read_dir(&assets).into_iter().flatten().flatten() {
+            let namespace = ns.file_name().to_string_lossy().into_owned();
+            if namespace == "minecraft" {
+                continue;
+            }
+            for file in std::fs::read_dir(ns.path().join("particles"))
+                .into_iter()
+                .flatten()
+                .flatten()
+            {
+                let path = file.path();
+                let Some(name) = path
+                    .file_stem()
+                    .filter(|_| path.extension().is_some_and(|e| e == "json"))
+                else {
+                    continue;
+                };
+                let id = format!("{namespace}:{}", name.to_string_lossy());
+                let Some(json) = std::fs::read(&path)
+                    .ok()
+                    .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
+                else {
+                    continue;
+                };
+                let names: Vec<String> = json["textures"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|t| t.as_str())
+                    .map(|t| match t.split_once(':') {
+                        Some((ns, rest)) if ns != "minecraft" => format!("{ns}:particle/{rest}"),
+                        _ => format!("particle/{}", t.trim_start_matches("minecraft:")),
+                    })
+                    .collect();
+                let sprites: Vec<u32> = names.iter().map(|n| self.intern(n)).collect();
+                if !sprites.is_empty() {
+                    self.mod_sets.insert(id, self.set_sprites.len() as u32);
+                    self.set_sprites.push(sprites);
+                }
+            }
+        }
+    }
+    /// Whether a mod's particle type has sprites here (else it can't be drawn).
+    pub fn has_mod(&self, id: &str) -> bool {
+        self.mod_sets.contains_key(id)
+    }
+    /// A mod's own particle type (`ns:name`): its provider is Java's, so it is drawn as a
+    /// generic `SingleQuadParticle` with the type's sprites (animated by age when it has
+    /// several), moving as sent, slowing as most do. Limited like `add`.
+    pub fn add_mod(&mut self, id: &str, p: [f64; 3], v: [f64; 3], override_limiter: bool) {
+        let Some(&set) = self.mod_sets.get(id) else {
+            return;
+        };
+        let c = self.camera;
+        let d2 = (p[0] - c[0]).powi(2) + (p[1] - c[1]).powi(2) + (p[2] - c[2]).powi(2);
+        if !override_limiter && (d2 > 1024.0 || self.calculate_particle_level(false) == 2) {
+            return;
+        }
+        let r = &mut self.random;
+        let mut q = Particle::blank(ParticleType::Poof, p);
+        q.velocity = v;
+        q.size = 0.1 * (r.next_float() * 0.5 + 0.5) * 2.0;
+        q.lifetime = 10 + r.next_int_bound(20).unwrap_or(0);
+        q.friction = 0.96;
+        q.random = LegacyRandom::new(r.next_long());
+        let sprites = &self.set_sprites[set as usize];
+        if sprites.len() > 1 {
+            q.set = Some(set);
+            q.behaviour = Behaviour::Animated;
+            q.sprite = Sprite::Index(sprites[0]);
+        } else {
+            q.sprite = Sprite::Index(sprites[0]);
+        }
+        *self.made.entry("mod").or_default() += 1;
+        self.pending.push(q);
     }
     fn intern(&mut self, name: &str) -> u32 {
         if let Some(i) = self.names.iter().position(|n| n == name) {

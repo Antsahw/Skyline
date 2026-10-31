@@ -387,17 +387,65 @@ public final class HorizonEntities {
     }
 
     /**
-     * Level.broadcastEntityEvent of a mirrored level: a mod entity's death poof
-     * (LivingEntity.makePoofParticles, which vanilla's client does for EntityEvent.POOF) as
-     * twenty poof particles in its box, sent to the players within 64 blocks.
+     * Level.broadcastEntityEvent of a mirrored level: the particles vanilla's client makes for
+     * a mod entity's event (Horizon's game doesn't run the entity's handleEntityEvent), sent
+     * to the players within 64 blocks as level particles in its box. Only events of the
+     * classes that define them (a mod may use the same byte for its own event).
      */
     public static void entityEvent(ServerLevel level, Entity entity, byte event) {
-        if (event != net.minecraft.world.entity.EntityEvent.POOF || !modded(entity.getType())) return;
+        if (!modded(entity.getType())) return;
         float w = entity.getBbWidth(), h = entity.getBbHeight();
-        HorizonPackets.near(level, entity.getX(), entity.getY(), entity.getZ(), 64.0,
+        net.minecraft.core.particles.ParticleOptions type = null;
+        int count = 7;
+        double y = entity.getY() + h / 2.0 + 0.5;
+        float speed = 0.02F;
+        switch (event) {
+            // LivingEntity.makePoofParticles; Mob.spawnAnim.
+            case net.minecraft.world.entity.EntityEvent.POOF, net.minecraft.world.entity.EntityEvent.SILVERFISH_MERGE_ANIM -> {
+                if (!(entity instanceof net.minecraft.world.entity.LivingEntity)) return;
+                type = net.minecraft.core.particles.ParticleTypes.POOF;
+                count = 20;
+                y = entity.getY() + h / 2.0;
+            }
+            // TamableAnimal.spawnTamingParticles.
+            case net.minecraft.world.entity.EntityEvent.TAMING_SUCCEEDED, net.minecraft.world.entity.EntityEvent.TAMING_FAILED -> {
+                if (!(entity instanceof net.minecraft.world.entity.TamableAnimal)) return;
+                type = event == net.minecraft.world.entity.EntityEvent.TAMING_SUCCEEDED
+                        ? net.minecraft.core.particles.ParticleTypes.HEART : net.minecraft.core.particles.ParticleTypes.SMOKE;
+            }
+            // Animal.handleEntityEvent: bred.
+            case net.minecraft.world.entity.EntityEvent.IN_LOVE_HEARTS -> {
+                if (!(entity instanceof net.minecraft.world.entity.animal.Animal)) return;
+                type = net.minecraft.core.particles.ParticleTypes.HEART;
+            }
+            // Villager.handleEntityEvent.
+            case net.minecraft.world.entity.EntityEvent.LOVE_HEARTS, net.minecraft.world.entity.EntityEvent.VILLAGER_ANGRY,
+                 net.minecraft.world.entity.EntityEvent.VILLAGER_HAPPY, net.minecraft.world.entity.EntityEvent.VILLAGER_SWEAT -> {
+                if (!(entity instanceof net.minecraft.world.entity.npc.villager.AbstractVillager)) return;
+                type = switch (event) {
+                    case net.minecraft.world.entity.EntityEvent.LOVE_HEARTS -> net.minecraft.core.particles.ParticleTypes.HEART;
+                    case net.minecraft.world.entity.EntityEvent.VILLAGER_ANGRY -> net.minecraft.core.particles.ParticleTypes.ANGRY_VILLAGER;
+                    case net.minecraft.world.entity.EntityEvent.VILLAGER_HAPPY -> net.minecraft.core.particles.ParticleTypes.HAPPY_VILLAGER;
+                    default -> net.minecraft.core.particles.ParticleTypes.SPLASH;
+                };
+                count = 5;
+                y = entity.getY() + h + 0.5;
+            }
+            // LivingEntity.handleEntityEvent: teleported (a chorus fruit, an enderman's kin).
+            case net.minecraft.world.entity.EntityEvent.TELEPORT -> {
+                if (!(entity instanceof net.minecraft.world.entity.LivingEntity)) return;
+                type = net.minecraft.core.particles.ParticleTypes.PORTAL;
+                count = 128;
+                speed = 0.1F;
+                y = entity.getY() + h / 2.0;
+            }
+            default -> {
+                return;
+            }
+        }
+        HorizonPackets.near(level, entity.getX(), y, entity.getZ(), 64.0,
                 new net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket(
-                        net.minecraft.core.particles.ParticleTypes.POOF, false, false,
-                        entity.getX(), entity.getY() + h / 2.0, entity.getZ(), w / 2.0F, h / 2.0F, w / 2.0F, 0.02F, 20));
+                        type, false, false, entity.getX(), y, entity.getZ(), w / 2.0F, h / 2.0F, w / 2.0F, speed, count));
     }
 
     /**

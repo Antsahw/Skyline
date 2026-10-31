@@ -611,6 +611,7 @@ public final class HorizonEntityRender {
         JsonObject o = new JsonObject();
         o.addProperty("tex", texture);
         o.addProperty("overlay", recorder.overlay);
+        if (glows(type)) o.addProperty("glow", true);
         JsonArray v = new JsonArray();
         for (int i = 0; i < n; i++) {
             float[] x = recorder.vertices.get(i);
@@ -684,6 +685,12 @@ public final class HorizonEntityRender {
         public com.mojang.blaze3d.vertex.VertexConsumer setLineWidth(float width) {
             return this;
         }
+    }
+
+    /** Emissive render types (eyes, GeckoLib's glow layers) draw at full light. */
+    private static boolean glows(RenderType type) {
+        String name = type.toString();
+        return name.contains("eyes") || name.contains("emissive");
     }
 
     /** The texture a render type samples first (its Sampler0: the entity's texture). */

@@ -414,6 +414,8 @@ impl HudAtlas {
                 if entry.file_name() != "minecraft" {
                     walk(&entry.path().join("textures/gui"), &mut files);
                     walk(&entry.path().join("textures/entity"), &mut files);
+                    // Their particle types' sprites (`ns:particle/...`: particles.rs's mod sets).
+                    walk(&entry.path().join("textures/particle"), &mut files);
                     // HUD mods' sheets (AppleSkin's `textures/icons.png`, `textures/hud/`).
                     walk(&entry.path().join("textures/hud"), &mut files);
                     for file in fs::read_dir(entry.path().join("textures"))
