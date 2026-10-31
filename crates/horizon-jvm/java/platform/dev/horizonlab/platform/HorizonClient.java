@@ -492,6 +492,56 @@ public final class HorizonClient {
             for (String f : new String[] {"attributes", "activeEffects"}) {
                 set(net.minecraft.world.entity.LivingEntity.class, local, f, field(net.minecraft.world.entity.LivingEntity.class, player, f));
             }
+            // What mods add at the end of its constructors (Spell Engine's cast controller on
+            // LocalPlayer), as for a mirrored level.
+            HorizonHooks.constructed(local, minecraft, player.level());
+            // And what their field initializers make, which mixins merge into the constructors
+            // (Spell Engine's `castController = new ClientCastController(player)`): empty
+            // collections, and objects of mods' types made from the player where their class
+            // has such a constructor.
+            HorizonServer.emptyCollections(local, net.minecraft.client.player.LocalPlayer.class);
+            for (Class<?> c : new Class<?>[] {net.minecraft.client.player.LocalPlayer.class,
+                    net.minecraft.client.player.AbstractClientPlayer.class}) {
+                for (Field f : c.getDeclaredFields()) {
+                    if (java.lang.reflect.Modifier.isStatic(f.getModifiers()) || f.getType().isPrimitive()
+                            || f.getType().isInterface() || f.getType().getName().startsWith("net.minecraft.")
+                            || f.getType().getName().startsWith("java.") || f.getType().getName().startsWith("com.mojang.")) continue;
+                    try {
+                        f.setAccessible(true);
+                        if (f.get(local) != null) continue;
+                        for (var make : f.getType().getDeclaredConstructors()) {
+                            Class<?>[] params = make.getParameterTypes();
+                            if (params.length == 1 && params[0].isInstance(local)) {
+                                make.setAccessible(true);
+                                f.set(local, make.newInstance(local));
+                                break;
+                            }
+                        }
+                    } catch (ReflectiveOperationException | RuntimeException | LinkageError e) {
+                        // Left empty.
+                    }
+                }
+            }
+            // What mods' mixins add to entities and players (Trinkets' equipment attachment,
+            // which Traveler's Backpack's keys and HUD read), set in constructors this player
+            // never ran: the server player's, where the client's has none.
+            for (Class<?> c : new Class<?>[] {net.minecraft.world.entity.Entity.class,
+                    net.minecraft.world.entity.LivingEntity.class, net.minecraft.world.entity.player.Player.class}) {
+                for (Field f : c.getDeclaredFields()) {
+                    if (java.lang.reflect.Modifier.isStatic(f.getModifiers()) || f.getType().isPrimitive()) continue;
+                    // A mod's own type (vanilla's and the JDK's fields the client sets itself).
+                    String type = f.getType().getName();
+                    if (type.startsWith("net.minecraft.") || type.startsWith("com.mojang.") || type.startsWith("java.")
+                            || type.startsWith("javax.") || type.startsWith("org.joml.") || type.startsWith("it.unimi.")
+                            || f.getType().isArray()) continue;
+                    try {
+                        f.setAccessible(true);
+                        if (f.get(local) == null && f.get(player) != null) f.set(local, f.get(player));
+                    } catch (ReflectiveOperationException | RuntimeException e) {
+                        // A field it can't reach stays empty.
+                    }
+                }
+            }
             PLAYERS.put(player.getUUID(), local);
         }
         SERVER_PLAYERS.put(local, player);

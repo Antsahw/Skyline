@@ -38,8 +38,6 @@ public final class HorizonFunctions {
     private static boolean running;
     /** A function forced a chunk Horizon hasn't loaded: the rest of this run is dropped and the run retried. */
     private static boolean abort;
-    private static long abortedAt;
-    private static int aborts;
     private static final java.util.Set<String> WAITING = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     /**
@@ -56,7 +54,6 @@ public final class HorizonFunctions {
             }
             if (TRACE) Natives.log("function! waiting for chunk " + x + " " + z);
             abort = true;
-            abortedAt = System.currentTimeMillis();
         }
     }
 

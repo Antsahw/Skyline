@@ -315,6 +315,28 @@ saying something works.
   mods look up themselves (`getAtlasOrThrow(GUI).getSprite`) are made on demand (name only)
   and drawn by name. `setScreenAndShow` draws a frame at once: `renderFrame` is a no-op
   headless. Screens that read `mouseHandler.xpos()` get Horizon's mouse.
+- Mirrored levels now have a chunk map (`HorizonServer.chunkMap`, made without its
+  constructor, then its constructor-end hooks with a world storage rooted in `horizon-java/`):
+  GraphLib (Extended Drawers) keeps its graph storage there. `ChunkMapMixin` makes
+  `forEachBlockTickingChunk` walk nothing (Horizon random-ticks its own chunks).
+- Field initializers in mixins are merged into constructors: an object made without its
+  constructor has those fields null (Spell Engine's `castController` on LocalPlayer, Trinkets'
+  attachment on LivingEntity). The headless client's player runs its constructor-end hooks,
+  takes the server player's mod-typed fields and makes mod objects that have a constructor
+  taking the player. `emptyCollections` now also fills concrete `java.util` collections.
+- Mods' data-pack functions (`HorizonFunctions`): the load/tick tags and `/schedule` run on the
+  mirror. Vanilla's `/forceload add` loads the chunk at once (`setChunkForced` calls `getChunk`)
+  and packs rely on it; Horizon can't, so the run stops (`FunctionsMixin` drops the queue) and is
+  retried each tick until Horizon has the chunk. Forced chunks now load as near as the player's
+  own (streaming `Ranges::priority`: vanilla's FORCED ticket is level 31). Trace a pack with
+  `HORIZON_JAVA_FUNCTIONS_TRACE=1`; command errors go to Java's own log (`<scratch>/logs/latest.log`,
+  "Failed to execute function").
+- What functions do that Horizon keeps: `/setworldspawn` (`Natives.worldSpawn`), `/gamerule`
+  (the mirror's `NotificationManager` → `Natives.gameRule`), teleports (already). Neighbour
+  updates on mirrored levels are Horizon's (`MirrorUpdatesMixin`), so `/place template` works.
+- A pack that replaces vanilla's noise settings, density functions, dimensions or biomes, or
+  ships its own generator, now sends the dimension through Java (`HorizonWorldgen.modded`):
+  void and skyblock worlds.
 - Commands through `horizon-ctl command` run as the owner's console; server mods' commands
   (and `/summon` of a mod entity) now go to the mods first (`owner_console_command`).
 
@@ -521,6 +543,22 @@ screen); sprites drawn under a scissor overflow it (Tech Reborn's energy bars); 
 an error each tick per level (`ServerChunkCache.chunkMap` is null on the mirror); Glitchcore's
 client tick wants `LevelExtractor`; Xaero's HUD wants a GPU device; Traveler's Backpack's model
 reload listener fails.
+
+SkyFactory direction (tested 2026-10-31): no sieve mod exists for 26.3 Fabric (Ex Nihilo,
+Ex Deorum, Ex Compressum stop at 26.2 or NeoForge). Skyblock Infinite (void world + island
+function) works: the void generates through Java, its function places the island at 6 61 6,
+moves the world spawn and the player there. Simply OneBlock works after the first respawn
+(its load function runs after Horizon placed the first player in the void; the block and the
+world spawn come right after). One Block (theoneblock) and Grid World Generator need their
+world preset, which Horizon's world creation can't pick yet. Just Hammers (needs Nanite
+Library, undeclared on Modrinth), CB Compressed Blocks, Forgiving Void load.
+A 107-jar pack (`big3`: the big pack plus Veinminer, Just Hammers, Compressed Blocks, XP Tome,
+Moving Elevators, Simple Copper Pipes, Effortless Building, Nether Chested, Easy Shulker
+Boxes, Inventory Sorter, Wizards/Spell Engine/Runes, Jewelry, Archers, Mythic Upgrades,
+Forgiving Void, Elevator Mod, Mob Lassos, Hang Glider, FallingTree, Towns and Towers,
+Repurposed Structures, Open Parties and Claims, Better Combat): 265 mods, 20179 recipes, REI
+shows them (`/recipes justhammers:iron_hammer`). Left: Open Parties and Claims' server tick
+(a task holder null), FrozenLib's cape reload (client skins), Xaero's HUD (GPU).
 
 ### Profiling
 

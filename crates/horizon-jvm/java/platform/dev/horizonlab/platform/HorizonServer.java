@@ -355,6 +355,17 @@ public final class HorizonServer {
                 else if (type == java.util.Set.class) empty = java.util.concurrent.ConcurrentHashMap.newKeySet();
                 else if (type == List.class || type == java.util.Collection.class) empty = new java.util.concurrent.CopyOnWriteArrayList<>();
                 else if (type == java.util.Queue.class || type == java.util.Deque.class) empty = new java.util.concurrent.ConcurrentLinkedDeque<>();
+                else if ((java.util.Collection.class.isAssignableFrom(type) || Map.class.isAssignableFrom(type))
+                        && !type.isInterface() && !java.lang.reflect.Modifier.isAbstract(type.getModifiers())
+                        && type.getName().startsWith("java.util.")) {
+                    // A concrete JDK collection a mod's mixin declares (Spell Engine's ArrayList
+                    // on ServerLevel): a new empty one of that class.
+                    try {
+                        empty = type.getDeclaredConstructor().newInstance();
+                    } catch (ReflectiveOperationException | RuntimeException e) {
+                        continue;
+                    }
+                }
                 else continue;
                 try {
                     field.setAccessible(true);
