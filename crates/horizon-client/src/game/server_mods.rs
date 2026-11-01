@@ -250,6 +250,25 @@ impl Game<'_> {
     pub(super) fn java_dismount(&mut self, _vehicle: u32, _after: bool) -> bool {
         false
     }
+    pub(super) fn java_fall_routed(&self) -> bool {
+        false
+    }
+    pub(super) fn java_add_effect(
+        &mut self,
+        _effect: &horizon_client::effects::EffectInstance,
+    ) -> bool {
+        false
+    }
+    pub(super) fn java_fall(
+        &mut self,
+        _distance: f64,
+        _multiplier: f32,
+        _stalagmite: bool,
+        _safe: f64,
+        _damage_multiplier: f64,
+    ) -> Option<f32> {
+        None
+    }
     pub(super) fn java_orb_touch(
         &mut self,
         _orb: &horizon_client::entities::ExperienceOrb,
@@ -3054,6 +3073,96 @@ mod run {
             {
                 let _ = (vehicle, after);
                 false
+            }
+        }
+
+        /// The player acting now gets `effect`: the Java mods' heads of `LivingEntity.addEffect`.
+        /// True when one cancelled (the effect isn't added).
+        pub(in crate::game) fn java_add_effect(
+            &mut self,
+            effect: &horizon_client::effects::EffectInstance,
+        ) -> bool {
+            #[cfg(feature = "java-mods")]
+            {
+                if !java_mods_on() || !self.hears_players() {
+                    return false;
+                }
+                let uuid = self
+                    .lan_acting_uuid
+                    .map(uuid_string)
+                    .unwrap_or_else(|| self.player_uuid_string());
+                let id = format!("minecraft:{}", effect.id);
+                let (duration, amplifier) = (effect.duration, effect.amplifier);
+                let (ambient, visible) = (effect.ambient, effect.visible);
+                self.with_java_world(|| {
+                    horizon_jvm::events::add_effect(
+                        &uuid, &id, duration, amplifier, ambient, visible,
+                    )
+                })
+                .unwrap_or(false)
+            }
+            #[cfg(not(feature = "java-mods"))]
+            {
+                let _ = effect;
+                false
+            }
+        }
+
+        /// Whether Java mods patch a player's fall damage (`PlayerMotion::route_fall`).
+        pub(in crate::game) fn java_fall_routed(&self) -> bool {
+            #[cfg(feature = "java-mods")]
+            {
+                java_mods_on() && self.hears_players() && super::java_routed("fall_damage")
+            }
+            #[cfg(not(feature = "java-mods"))]
+            {
+                false
+            }
+        }
+
+        /// The player acting now landed (a `FallEvent::Routed`): vanilla's `causeFallDamage`
+        /// with the mods' patches on the mirror, Horizon's `safe` distance and
+        /// `damage_multiplier` answering `calculateFallDamage`. The damage to deal; `None`
+        /// when the mirror couldn't say (Horizon's own rule then).
+        pub(in crate::game) fn java_fall(
+            &mut self,
+            distance: f64,
+            multiplier: f32,
+            stalagmite: bool,
+            safe: f64,
+            damage_multiplier: f64,
+        ) -> Option<f32> {
+            #[cfg(feature = "java-mods")]
+            {
+                let uuid = self
+                    .lan_acting_uuid
+                    .map(uuid_string)
+                    .unwrap_or_else(|| self.player_uuid_string());
+                let dim = self.dim.id();
+                let r = self.with_java_world(|| {
+                    horizon_jvm::events::fall(
+                        &uuid,
+                        dim,
+                        distance,
+                        multiplier,
+                        stalagmite,
+                        safe,
+                        damage_multiplier,
+                        false,
+                    )
+                });
+                match r {
+                    Ok(damage) => damage,
+                    Err(e) => {
+                        log::warn!("Java mods: fall damage: {e}");
+                        None
+                    }
+                }
+            }
+            #[cfg(not(feature = "java-mods"))]
+            {
+                let _ = (distance, multiplier, stalagmite, safe, damage_multiplier);
+                None
             }
         }
 

@@ -17,6 +17,7 @@ import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.storage.TagValueInput;
@@ -345,6 +346,95 @@ public final class HorizonVanillaActions {
         if (DEBUG) Natives.log("entities: " + player.getName().getString() + (after ? " got off " : " gets off ") + vehicle
                 + " holding " + player.getMainHandItem() + (cancelled ? ": stopped" : ""));
         return cancelled;
+    }
+
+    // ---- Effects ---------------------------------------------------------------------------
+
+    /**
+     * Horizon adds effect {@code id} to a player (potions, food, totems, /effect): the mods'
+     * injections at the head of LivingEntity.addEffect, with the instance as vanilla would
+     * make it; true when one cancelled (Spell Engine's immunities, Open Parties and Claims'
+     * protection).
+     */
+    public static boolean addEffect(String uuid, String id, int duration, int amplifier, boolean ambient, boolean visible) {
+        Thread.currentThread().setContextClassLoader(HorizonVanillaActions.class.getClassLoader());
+        String owner = "net/minecraft/world/entity/LivingEntity";
+        ServerPlayer player = HorizonServer.player(UUID.fromString(uuid));
+        if (player == null || !HorizonHooks.hooked(owner, "addEffect")) return false;
+        var effect = BuiltInRegistries.MOB_EFFECT.get(Identifier.parse(id));
+        if (effect.isEmpty()) return false;
+        var instance = new net.minecraft.world.effect.MobEffectInstance(effect.get(), duration, amplifier, ambient, visible);
+        boolean cancelled = HorizonHooks.fire(player, LivingEntity.class, "addEffect",
+                "(Lnet/minecraft/world/effect/MobEffectInstance;Lnet/minecraft/world/entity/Entity;)Z", "HEAD",
+                new Object[] {instance, null}, null, true).cancelled();
+        HorizonServer.afterCall();
+        if (DEBUG) Natives.log("entities: " + player.getName().getString() + " gets " + instance + (cancelled ? ": stopped" : ""));
+        return cancelled;
+    }
+
+    // ---- Fall damage --------------------------------------------------------------------
+
+    private static Boolean fallRouted;
+    /** The player whose routed fall runs now, with Horizon's {safe distance, damage multiplier, immune}. */
+    private static LivingEntity falling;
+    private static double[] fallAttributes;
+    private static float fallCaught;
+
+    /**
+     * Whether a player's fall damage goes to the mirror: a mod patches causeFallDamage or
+     * calculateFallDamage (Moving Elevators, Mythic Upgrades, Balm's and Puzzles Lib's events).
+     */
+    public static boolean fallRouted() {
+        if (fallRouted == null) {
+            Set<String> methods = Set.of("causeFallDamage", "calculateFallDamage");
+            fallRouted = HorizonMixinTable.patchedInside(ServerPlayer.class, methods, Set.of());
+            if (fallRouted) Natives.log("Fall damage goes to the mods (" + HorizonMixinTable.mods("net/minecraft/world/entity/LivingEntity", "causeFallDamage")
+                    + HorizonMixinTable.mods("net/minecraft/world/entity/LivingEntity", "calculateFallDamage") + ")");
+        }
+        return fallRouted;
+    }
+
+    /**
+     * A player lands: vanilla's {@code causeFallDamage(distance, multiplier, source)} runs on
+     * the mirrored player with the mods' patches. calculateFallDamage answers with Horizon's
+     * safe fall distance, damage multiplier and immunity (the mirror doesn't keep effects and
+     * attributes); what reaches hurtServer is caught, not applied (FallCaptureMixin). The
+     * damage Horizon deals (0: none).
+     */
+    public static float fall(String uuid, String dimension, double distance, float multiplier, boolean stalagmite,
+                             double safe, double damageMultiplier, boolean immune) {
+        Thread.currentThread().setContextClassLoader(HorizonVanillaActions.class.getClassLoader());
+        ServerPlayer player = HorizonServer.player(UUID.fromString(uuid));
+        if (player == null) return -1;
+        ServerLevel level = HorizonServer.level(dimension);
+        var sources = level.damageSources();
+        fallAttributes = new double[] {safe, damageMultiplier, immune ? 1 : 0};
+        fallCaught = 0;
+        falling = player;
+        try {
+            player.causeFallDamage(distance, multiplier, stalagmite ? sources.stalagmite() : sources.fall());
+        } finally {
+            falling = null;
+        }
+        HorizonServer.afterCall();
+        if (DEBUG) Natives.log("entities: " + player.getName().getString() + " falls " + distance + " (x" + multiplier + "): " + fallCaught);
+        return fallCaught;
+    }
+
+    /** Whether {@code entity} is the player in a routed fall (FallCaptureMixin). */
+    public static boolean falling(Object entity) {
+        return entity == falling;
+    }
+
+    /** LivingEntity.calculateFallDamage with Horizon's attributes, for the routed fall. */
+    public static int fallDamage(double distance, float multiplier) {
+        if (fallAttributes[2] != 0) return 0;
+        return (int) Math.floor((distance + 1.0E-6 - fallAttributes[0]) * multiplier * fallAttributes[1]);
+    }
+
+    /** The routed fall's damage reached hurtServer. */
+    public static void caughtFall(float amount) {
+        fallCaught += amount;
     }
 
     // ---- Precipitation: biome weather and snow --------------------------------------------

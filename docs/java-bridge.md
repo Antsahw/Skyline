@@ -343,6 +343,19 @@ it does nothing unless Horizon fires it or hands the action to the mirror.
   - Better Combat's sweep: the mirror level's box queries (`HorizonServer.entities`'
     `get(box, ...)`) now list the visiting copies too, so its `TargetFinder` finds every mob
     in the swing, not just the cursor's. Passive mobs aren't swept (its relation rules).
+  - A player's fall damage (`fall_damage`, when a mod patches `causeFallDamage` or
+    `calculateFallDamage`: Moving Elevators, Mythic Upgrades, Balm's and Puzzles Lib's
+    events): the server sets `PlayerMotion::route_fall` for a guest's moves; a landing that
+    would hurt leaves `FallEvent::Routed` instead (the statistic stays Rust's), and after the
+    moves the game asks `HorizonVanillaActions.fall`: vanilla's `causeFallDamage` on the
+    mirrored player, `calculateFallDamage` answered with Horizon's safe distance and damage
+    multiplier attributes (`FallCaptureMixin`: the mirror has no effects or attributes), the
+    damage reaching `hurtServer` caught. Horizon deals it with vanilla's sounds
+    (`MotionWorld::routed_fall_damage`). A mace's or wind charge's impulse stays Rust's;
+    in-frame single player isn't routed.
+  - A player's new effect (`Game::add_player_effect`: potions, food, totems, `/effect`): the
+    heads of `LivingEntity.addEffect` with the instance; a cancel drops it. Beacons,
+    conduits, raids' Bad Omen and the Warden's darkness add theirs directly (not asked).
   - Precipitation (`ServerLevel.tickPrecipitation`), when a mod patches the biomes' weather
     (`Biome.shouldSnow`, `shouldFreeze`, `getPrecipitationAt`...: Serene Seasons): the game
     keeps each column's top (`GameLevel::precipitation` → `java_precipitation`) and, at the
@@ -894,13 +907,16 @@ terrain on.
 
 Vanilla-patching mods (tested headless 2026-11-01, server thread, survival; each is a
 `regress.py` case: `veinminer`, `harvest`, `carry`, `seasons`, `orbs`, `bettercombat`,
-`snow`, `sweep`; the `mixinmod` fixture's `attack`, `ride`, `dismount`, `slot`, `mixins2`):
+`snow`, `sweep`; the `mixinmod` fixture's `attack`, `ride`, `dismount`, `fall`, `effects`,
+`slot`, `mixins2`):
 - Better Combat: a click with an iron sword is its attack request; the cow takes 6. One swing
   at three zombies in a row hurts them all (`sweep`).
 - Serene Seasons' snow: mid winter, rain: the plains' floor gets snow layers.
 - The fixture: ten times the damage inside `Player.attack` (a cow dies to one sword hit, a pig
   spared by its head), no minecarts (the boat still takes the player), no ninth hotbar slot,
-  no snowball throws, an emerald with each craft, no getting off while holding a stick.
+  no snowball throws, an emerald with each craft, no getting off while holding a stick, no
+  fall damage holding a feather (half the distance with a slime ball: 2 for 10 blocks, 7
+  with empty hands), players immune to poison.
 - Veinminer: sneak + one dig breaks a 7-block iron vein, raw iron and experience drop, the
   pickaxe wears 7.
 - Right Click Harvest: a ripe wheat right-clicked is replanted (age 0) and drops wheat.
@@ -960,7 +976,7 @@ Next (top failure of the pack, in order):
    joins and settings").
 3. Vanilla patches Horizon still does in Rust (the `Mixin table: Rust does …` lines): biome
    see `mixin-table.tsv`; routed so far: weather and snow, riding on and off, slot picking,
-   Better Combat's attack and sweep; in-frame single player's pickups aren't routed. Next actions to route by the
+   Better Combat's attack and sweep, players' fall damage and new effects; in-frame single player's pickups aren't routed. Next actions to route by the
    same pattern: mob drops (`LivingEntity.dropAllDeathLoot` past its head), fishing, crafting
    results.
 Then: NeoForge later.

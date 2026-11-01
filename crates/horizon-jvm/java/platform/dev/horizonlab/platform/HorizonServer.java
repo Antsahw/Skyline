@@ -2319,6 +2319,7 @@ public final class HorizonServer {
         if (orbsRouted()) out.add("experience_orbs");
         if (HorizonCombat.routed()) out.add("player_attack");
         if (HorizonVanillaActions.weatherRouted()) out.add("precipitation");
+        if (HorizonVanillaActions.fallRouted()) out.add("fall_damage");
         if (!out.isEmpty()) {
             Natives.log("Routed to the mods: " + out + " (item pickup: " + HorizonMixinTable.mods(ITEM_ENTITY, "playerTouch")
                     + ", orbs: " + HorizonMixinTable.mods(ORB, "playerTouch") + ")");

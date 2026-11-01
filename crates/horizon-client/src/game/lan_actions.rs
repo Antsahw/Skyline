@@ -2630,9 +2630,11 @@ impl Game<'_> {
             let health = &motion.health;
             let freeze_immune = game.wears_freeze_immune();
             let burn_immune = game.wears_burn_from_stepping_immunity();
+            let route_fall = game.java_fall_routed();
             let Some(player) = game.player.as_mut() else {
                 return (Vec::new(), None);
             };
+            player.route_fall = route_fall;
             let mut w = MotionWorld {
                 entities: &[],
                 player,
@@ -2770,6 +2772,47 @@ impl Game<'_> {
                 {
                     game.stats.custom("fall_one_cm", *cm);
                 }
+            }
+            // Java mods patch fall damage (PlayerMotion::route_fall): each landing that would
+            // hurt is theirs to judge, then dealt here.
+            let routed: Vec<_> = events
+                .iter()
+                .filter_map(|e| match e {
+                    MotionEvent::Fall(horizon_client::landing::FallEvent::Routed {
+                        distance,
+                        multiplier,
+                        source,
+                        safe,
+                        damage_multiplier,
+                    }) => Some((*distance, *multiplier, *source, *safe, *damage_multiplier)),
+                    _ => None,
+                })
+                .collect();
+            for (distance, multiplier, source, safe, damage_multiplier) in routed {
+                let stalagmite = source == horizon_world::block_landing::LandingDamage::Stalagmite;
+                let damage = game
+                    .java_fall(distance, multiplier, stalagmite, safe, damage_multiplier)
+                    .unwrap_or_else(|| {
+                        ((distance + 1.0e-6 - safe) * f64::from(multiplier) * damage_multiplier)
+                            .floor()
+                            .max(0.0) as f32
+                    });
+                let Some(player) = game.player.as_mut() else {
+                    break;
+                };
+                let _ = MotionWorld {
+                    entities: &[],
+                    player,
+                    scene: &mut game.world,
+                    assets: &game.pack.assets,
+                    collision_binding: game.collision,
+                    resources: game.motion,
+                }
+                .routed_fall_damage(damage, source);
+                events.append(&mut player.events);
+            }
+            if let Some(player) = game.player.as_mut() {
+                player.route_fall = false;
             }
             game.record_combat(&events);
             game.wear_armor(&events);

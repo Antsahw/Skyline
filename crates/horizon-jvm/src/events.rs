@@ -892,6 +892,76 @@ pub fn dismount(
     Ok(r.unwrap_or(false))
 }
 
+/// A player lands from `distance` (`multiplier` and `stalagmite` from the block it lands on):
+/// vanilla's `causeFallDamage` on the mirror with the mods' patches, Horizon's `safe` fall
+/// distance, `damage_multiplier` and immunity answering `calculateFallDamage`
+/// (`HorizonVanillaActions.fall`). The damage to deal; `None` when the mirror has no such
+/// player.
+#[allow(clippy::too_many_arguments)]
+pub fn fall(
+    uuid: &str,
+    dimension: &str,
+    distance: f64,
+    multiplier: f32,
+    stalagmite: bool,
+    safe: f64,
+    damage_multiplier: f64,
+    immune: bool,
+) -> Result<Option<f32>, String> {
+    let r = with_server(|env, _| {
+        let uuid = env.new_string(uuid)?;
+        let dimension = env.new_string(dimension)?;
+        call_vanilla(
+            env,
+            "fall",
+            "(Ljava/lang/String;Ljava/lang/String;DFZDDZ)F",
+            &[
+                JValue::Object(&uuid),
+                JValue::Object(&dimension),
+                JValue::Double(distance),
+                JValue::Float(multiplier),
+                JValue::Bool(u8::from(stalagmite)),
+                JValue::Double(safe),
+                JValue::Double(damage_multiplier),
+                JValue::Bool(u8::from(immune)),
+            ],
+        )?
+        .f()
+    })?;
+    Ok(r.filter(|d| *d >= 0.0))
+}
+
+/// Horizon adds effect `id` (namespaced) to a player: the mods' heads of
+/// `LivingEntity.addEffect` (`HorizonVanillaActions.addEffect`). True when one cancelled.
+pub fn add_effect(
+    uuid: &str,
+    id: &str,
+    duration: i32,
+    amplifier: i32,
+    ambient: bool,
+    visible: bool,
+) -> Result<bool, String> {
+    let r = with_server(|env, _| {
+        let uuid = env.new_string(uuid)?;
+        let id = env.new_string(id)?;
+        call_vanilla(
+            env,
+            "addEffect",
+            "(Ljava/lang/String;Ljava/lang/String;IIZZ)Z",
+            &[
+                JValue::Object(&uuid),
+                JValue::Object(&id),
+                JValue::Int(duration),
+                JValue::Int(amplifier),
+                JValue::Bool(u8::from(ambient)),
+                JValue::Bool(u8::from(visible)),
+            ],
+        )?
+        .z()
+    })?;
+    Ok(r.unwrap_or(false))
+}
+
 /// Precipitation ticks of `dimension` at columns topped by `tops` (x, y, z each): the
 /// biome's answers on the Java side with the mods' patches (Serene Seasons): per column
 /// {freezes below the top, snows at it, precipitation below it: 0 none, 1 rain, 2 snow}.

@@ -12,7 +12,9 @@
     "HeavyHitMixin",
     "RideMixin",
     "SlotMixin",
-    "DismountMixin"
+    "DismountMixin",
+    "FallMixin",
+    "EffectMixin"
   ],
   "injectors": {
     "defaultRequire": 1
