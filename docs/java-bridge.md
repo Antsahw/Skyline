@@ -333,7 +333,16 @@ it does nothing unless Horizon fires it or hands the action to the mirror.
     carrying); a cancel keeps the old slot and sends it (`SetHeldSlot`).
   - Getting onto a vehicle (after the guest's interact boarded one): the heads of
     `Entity.startRiding` with a copy of it (a mob from its NBT, a boat or cart by type); a
-    cancel takes the guest off (`stop_riding`). Getting off isn't hooked yet.
+    cancel takes the guest off (`stop_riding`).
+- Fourth round:
+  - Getting off (a guest sneaking in a boat, cart, mount; `guest_vehicle_tick`): before the
+    seat logic, the heads of `LivingEntity.stopRiding`, `Entity.stopRiding`,
+    `Player/Entity.removeVehicle` run with the player sitting on a copy of its vehicle
+    (`HorizonVanillaActions.dismount`, the `vehicle` field set by reflection); a cancel keeps
+    it seated (its shift is dropped for the tick). Once off, their RETURN/TAIL run.
+  - Better Combat's sweep: the mirror level's box queries (`HorizonServer.entities`'
+    `get(box, ...)`) now list the visiting copies too, so its `TargetFinder` finds every mob
+    in the swing, not just the cursor's. Passive mobs aren't swept (its relation rules).
   - Precipitation (`ServerLevel.tickPrecipitation`), when a mod patches the biomes' weather
     (`Biome.shouldSnow`, `shouldFreeze`, `getPrecipitationAt`...: Serene Seasons): the game
     keeps each column's top (`GameLevel::precipitation` → `java_precipitation`) and, at the
@@ -715,6 +724,10 @@ gets SPIR-V, vertex layouts and uniform lists.
   `minecraft.level.connection.registryAccess()` once there is a level; with a null one REI
   silently drops every recipe whose display touches a tag (half of them). Client levels share
   `HorizonClient.connection(level)`, which carries the server's registries.
+- `Level.getEntities(Entity, AABB, Predicate)` goes through `getEntities().get(box, consumer)`,
+  not `all()`: anything the mirror lends a level for a call must be in the box queries too
+  (Better Combat's `TargetFinder` saw only its cursor). `regress.py` now rebuilds a fixture
+  jar when its sources are newer than the cached one (a stale `mixinmod.jar` hid a mixin).
 
 ## Build and test
 
@@ -881,12 +894,13 @@ terrain on.
 
 Vanilla-patching mods (tested headless 2026-11-01, server thread, survival; each is a
 `regress.py` case: `veinminer`, `harvest`, `carry`, `seasons`, `orbs`, `bettercombat`,
-`snow`; the `mixinmod` fixture's `attack`, `ride`, `slot`, `mixins2`):
-- Better Combat: a click with an iron sword is its attack request; the cow takes 6.
+`snow`, `sweep`; the `mixinmod` fixture's `attack`, `ride`, `dismount`, `slot`, `mixins2`):
+- Better Combat: a click with an iron sword is its attack request; the cow takes 6. One swing
+  at three zombies in a row hurts them all (`sweep`).
 - Serene Seasons' snow: mid winter, rain: the plains' floor gets snow layers.
 - The fixture: ten times the damage inside `Player.attack` (a cow dies to one sword hit, a pig
   spared by its head), no minecarts (the boat still takes the player), no ninth hotbar slot,
-  no snowball throws, an emerald with each craft.
+  no snowball throws, an emerald with each craft, no getting off while holding a stick.
 - Veinminer: sneak + one dig breaks a 7-block iron vein, raw iron and experience drop, the
   pickaxe wears 7.
 - Right Click Harvest: a ripe wheat right-clicked is replanted (age 0) and drops wheat.
@@ -945,8 +959,8 @@ Next (top failure of the pack, in order):
    Mods' settings: Options → Mods lists the Java mods with a settings screen (see "Players,
    joins and settings").
 3. Vanilla patches Horizon still does in Rust (the `Mixin table: Rust does …` lines): biome
-   weather and snow (Serene Seasons' seasons in the sky), entity riding, the inventory's slot
-   picking; in-frame single player's pickups aren't routed. Next actions to route by the
+   see `mixin-table.tsv`; routed so far: weather and snow, riding on and off, slot picking,
+   Better Combat's attack and sweep; in-frame single player's pickups aren't routed. Next actions to route by the
    same pattern: mob drops (`LivingEntity.dropAllDeathLoot` past its head), fishing, crafting
    results.
 Then: NeoForge later.

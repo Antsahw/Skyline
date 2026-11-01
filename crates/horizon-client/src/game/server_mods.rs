@@ -247,6 +247,9 @@ impl Game<'_> {
     pub(super) fn java_ride(&mut self, _vehicle: u32) -> bool {
         false
     }
+    pub(super) fn java_dismount(&mut self, _vehicle: u32, _after: bool) -> bool {
+        false
+    }
     pub(super) fn java_orb_touch(
         &mut self,
         _orb: &horizon_client::entities::ExperienceOrb,
@@ -2967,6 +2970,35 @@ mod run {
             }
         }
 
+        /// A vehicle of the level as the Java mods get a copy of it: its type, where it is,
+        /// and a mob's NBT (empty for a boat or cart).
+        #[cfg(feature = "java-mods")]
+        fn java_vehicle(&mut self, vehicle: u32) -> Option<(String, [f64; 3], String)> {
+            if let Some(i) = self.mobs.iter().position(|m| m.id == vehicle) {
+                let m = &self.mobs[i];
+                let at = [m.position.x, m.position.y, m.position.z];
+                let ty = format!("minecraft:{}", m.kind.id.trim_start_matches("minecraft:"));
+                return Some((ty, at, horizon_client::snbt::to_snbt(&self.mob_tree_nbt(i))));
+            }
+            if let Some(b) = self.boats.iter().find(|b| b.id == vehicle) {
+                let raft = &*b.wood == "bamboo";
+                let ty = match (raft, b.chest) {
+                    (true, false) => "minecraft:bamboo_raft".to_string(),
+                    (true, true) => "minecraft:bamboo_chest_raft".to_string(),
+                    (false, false) => format!("minecraft:{}_boat", b.wood),
+                    (false, true) => format!("minecraft:{}_chest_boat", b.wood),
+                };
+                return Some((
+                    ty,
+                    [b.position.x, b.position.y, b.position.z],
+                    String::new(),
+                ));
+            }
+            let c = self.carts.iter().find(|c| c.id == vehicle)?;
+            let at = [c.position.x, c.position.y, c.position.z];
+            Some(("minecraft:minecart".to_string(), at, String::new()))
+        }
+
         /// The player acting now got onto vehicle `vehicle`: the Java mods' heads of
         /// `Entity.startRiding`, with a copy of it. True when one cancelled.
         pub(in crate::game) fn java_ride(&mut self, vehicle: u32) -> bool {
@@ -2975,29 +3007,7 @@ mod run {
                 if !java_mods_on() || !self.hears_players() {
                     return false;
                 }
-                let (ty, at, snbt) = if let Some(i) = self.mobs.iter().position(|m| m.id == vehicle)
-                {
-                    let m = &self.mobs[i];
-                    let at = [m.position.x, m.position.y, m.position.z];
-                    let ty = format!("minecraft:{}", m.kind.id.trim_start_matches("minecraft:"));
-                    (ty, at, horizon_client::snbt::to_snbt(&self.mob_tree_nbt(i)))
-                } else if let Some(b) = self.boats.iter().find(|b| b.id == vehicle) {
-                    let raft = &*b.wood == "bamboo";
-                    let ty = match (raft, b.chest) {
-                        (true, false) => "minecraft:bamboo_raft".to_string(),
-                        (true, true) => "minecraft:bamboo_chest_raft".to_string(),
-                        (false, false) => format!("minecraft:{}_boat", b.wood),
-                        (false, true) => format!("minecraft:{}_chest_boat", b.wood),
-                    };
-                    (
-                        ty,
-                        [b.position.x, b.position.y, b.position.z],
-                        String::new(),
-                    )
-                } else if let Some(c) = self.carts.iter().find(|c| c.id == vehicle) {
-                    let at = [c.position.x, c.position.y, c.position.z];
-                    ("minecraft:minecart".to_string(), at, String::new())
-                } else {
+                let Some((ty, at, snbt)) = self.java_vehicle(vehicle) else {
                     return false;
                 };
                 let uuid = self
@@ -3013,6 +3023,36 @@ mod run {
             #[cfg(not(feature = "java-mods"))]
             {
                 let _ = vehicle;
+                false
+            }
+        }
+
+        /// The player acting now gets off `vehicle` (sneaking): before the game takes it off
+        /// (`after` false), the Java mods' heads of `stopRiding`/`removeVehicle` (true: one
+        /// cancelled, it stays on); after (`after` true), their ends.
+        pub(in crate::game) fn java_dismount(&mut self, vehicle: u32, after: bool) -> bool {
+            #[cfg(feature = "java-mods")]
+            {
+                if !java_mods_on() || !self.hears_players() {
+                    return false;
+                }
+                let Some((ty, at, snbt)) = self.java_vehicle(vehicle) else {
+                    return false;
+                };
+                let uuid = self
+                    .lan_acting_uuid
+                    .map(uuid_string)
+                    .unwrap_or_else(|| self.player_uuid_string());
+                let dim = self.dim.id();
+                let r = self.with_java_world(|| {
+                    horizon_jvm::events::dismount(&uuid, dim, &ty, at, &snbt, after)
+                });
+                self.apply_java_actor_slots(&uuid);
+                r.unwrap_or(false)
+            }
+            #[cfg(not(feature = "java-mods"))]
+            {
+                let _ = (vehicle, after);
                 false
             }
         }

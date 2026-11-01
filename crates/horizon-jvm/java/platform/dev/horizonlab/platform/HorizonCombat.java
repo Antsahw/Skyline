@@ -218,6 +218,7 @@ public final class HorizonCombat {
             @SuppressWarnings("unchecked")
             List<Entity> targets = (List<Entity>) finder.getMethod("findAttackTargets", Player.class, Entity.class, attackClass, double.class)
                     .invoke(null, player, cursor, attack, range);
+            if (DEBUG) Natives.log("combat: Better Combat's targets " + targets);
             if (targets == null || targets.isEmpty()) targets = List.of(cursor);
             Class<?> request = Class.forName("net.bettercombat.network.Packets$C2S_AttackRequest", true, loader);
             Object packet = request.getConstructor(int.class, boolean.class, int.class, Entity.class, List.class)

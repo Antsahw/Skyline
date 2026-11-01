@@ -109,7 +109,7 @@ impl Game<'_> {
         let Some(vehicle) = g.vehicle else {
             return;
         };
-        let (keys, dead) = (input_keys(g.input), g.dead || g.health <= 0.0);
+        let (mut keys, dead) = (input_keys(g.input), g.dead || g.health <= 0.0);
         let boat = self.boats.iter().position(|b| b.id == vehicle);
         let cart = self.carts.iter().any(|c| c.id == vehicle);
         let mount = self.mobs.iter().any(|m| m.id == vehicle);
@@ -127,6 +127,14 @@ impl Game<'_> {
             let b = &mut self.boats[i];
             b.hurt_time = (b.hurt_time - 1).max(0);
             b.damage = (b.damage - 1.0).max(0.0);
+        }
+        // Java mods' heads of stopRiding/removeVehicle: one may keep the rider on.
+        if keys.shift
+            && self
+                .as_guest(host, conn, |game| game.java_dismount(vehicle, false))
+                .unwrap_or(false)
+        {
+            keys.shift = false;
         }
         // Getting out goes through leave_guest, which tells the client and
         // teleports it (ServerPlayer.dismountTo).
@@ -161,6 +169,10 @@ impl Game<'_> {
             let p = game.player.as_ref()?.position;
             Some([p.x, p.y, p.z])
         });
+        // Off it now (the seat is gone): the ends of stopRiding/removeVehicle for the mods.
+        if keys.shift && matches!(seat, Some(None)) {
+            self.as_guest(host, conn, |game| game.java_dismount(vehicle, true));
+        }
         if let Some(Some(at)) = seat {
             let g = &mut host.hub.guests[gi];
             g.previous_position = g.position;

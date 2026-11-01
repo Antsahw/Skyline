@@ -2236,6 +2236,9 @@ public final class HorizonServer {
                 List<ServerPlayer> players = LEVEL_PLAYERS.get(level);
                 if (players != null) for (var p : players) out.accept(p);
                 HorizonEntities.near(level, box, out);
+                // Copies of Horizon mobs standing in the level during a routed call
+                // (Better Combat's sweep finds its targets with a box query).
+                for (var e : HorizonCombat.visiting(level)) if (e.getBoundingBox().intersects(box)) out.accept(e);
             }
 
             @Override

@@ -113,12 +113,20 @@ case "$SCENE" in
   # A fight: a cow and a pig standing still ahead (two blocks east, a block apart), survival,
   # an iron sword in hand, looking at the cow; their ids in $S/cow.id and $S/pig.id.
   fight) "$R/tools/java_bridge/around.sh" \
-    'q "gamemode survival"' 'q "give @s minecraft:iron_sword"' \
+    'q "gamemode survival"' 'q "item replace entity @s weapon.mainhand with minecraft:iron_sword"' \
     'q "summon minecraft:cow ~2.5 ~ ~-0.6 {NoAI:1b}"' 'q "summon minecraft:pig ~2.5 ~ ~1.4 {NoAI:1b}"' \
     'q "tp @s ~ ~ ~ -90 15"' 'sleep 1' \
     '$C entities 6 minecraft:cow | python3 -c "import json,sys;print(json.load(sys.stdin)[\"entities\"][0][\"id\"])" > "$S/cow.id"' \
     '$C entities 6 minecraft:pig | python3 -c "import json,sys;print(json.load(sys.stdin)[\"entities\"][0][\"id\"])" > "$S/pig.id"' \
     '$C look-at-entity $(cat "$S/cow.id") >/dev/null' ;;
+  # A sweep: three zombies standing still in a row two and a half blocks east (z -1, 0, +1),
+  # fire resistant (daylight), survival, an iron sword in hand, looking at the middle one.
+  sweep) "$R/tools/java_bridge/around.sh" \
+    'q "gamemode survival"' 'q "item replace entity @s weapon.mainhand with minecraft:iron_sword"' \
+    'q "summon minecraft:zombie ~2.5 ~ ~-1 {NoAI:1b}"' 'q "summon minecraft:zombie ~2.5 ~ ~ {NoAI:1b}"' \
+    'q "summon minecraft:zombie ~2.5 ~ ~1 {NoAI:1b}"' 'q "effect give @e[type=minecraft:zombie,distance=..6] minecraft:fire_resistance infinite 0 true"' \
+    'q "tp @s ~ ~ ~ -90 10"' 'sleep 1' \
+    '$C look-at-entity $($C entities 6 minecraft:zombie | python3 -c "import json,sys;print(json.load(sys.stdin)[\"entities\"][0][\"id\"])") >/dev/null' ;;
   # Vehicles: a minecart two blocks north, a boat two blocks south; where they are in
   # $S/cart.pos and $S/boat.pos (points to look at).
   ride) "$R/tools/java_bridge/around.sh" \

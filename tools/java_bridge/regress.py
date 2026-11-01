@@ -251,6 +251,25 @@ CASES = {
         checks=[check_json("cart.json", ["riding"], None, "not in the minecart"),
                 check_file("boat.json", r'"riding":\{|"riding":[0-9]', "in the boat")],
     ),
+    "dismount": dict(
+        about="Entity.removeVehicle's head (mixinmod: not with a stick in hand): sneaking keeps the player in the boat, then lets go",
+        fixtures=["mixinmod"], scene="ride",
+        steps=['$C look-at $(cat $S/boat.pos) >/dev/null; sleep 0.5; $C mouse right click >/dev/null; sleep 1; $C status > $S/in.json; '
+               '$C command "give @s minecraft:stick" >/dev/null; sleep 0.5; '
+               '$C key shift down >/dev/null; sleep 0.5; $C key shift up >/dev/null; sleep 1; $C status > $S/kept.json',
+               '$C command "clear @s minecraft:stick" >/dev/null; sleep 0.5; '
+               '$C key shift down >/dev/null; sleep 0.5; $C key shift up >/dev/null; sleep 1; $C status > $S/off.json'],
+        checks=[check_file("in.json", r'"riding":\{|"riding":[0-9]', "in the boat"),
+                check_file("kept.json", r'"riding":\{|"riding":[0-9]', "still in the boat with a stick"),
+                check_json("off.json", ["riding"], None, "off the boat with empty hands")],
+    ),
+    "sweep": dict(
+        about="Better Combat's sweep: one swing of an iron sword hurts more than one of three zombies in a row",
+        mods=["bettercombat", "cloth", "playeranim"], scene="sweep",
+        steps=['$C mouse left click >/dev/null; sleep 1.5; $C entities 6 minecraft:zombie | '
+               'python3 -c "import json,sys;print(sum(e[\'health\']<20 for e in json.load(sys.stdin)[\'entities\']))" > $S/hurt.txt'],
+        checks=[check_file("hurt.txt", r"^[23]$", "two or three zombies hurt")],
+    ),
     "slot": dict(
         about="Inventory.setSelectedSlot's head (mixinmod: not the ninth): the slot stays",
         fixtures=["mixinmod"], scene="none",
@@ -316,7 +335,9 @@ def find_jars(folder, names):
 
 def fixture(name, cache):
     jar = cache / f"{name}.jar"
-    if not jar.exists():
+    src = ROOT / "crates/horizon-jvm/java/fixtures" / name
+    newest = max((f.stat().st_mtime for f in src.rglob("*") if f.is_file()), default=0)
+    if not jar.exists() or jar.stat().st_mtime < newest:
         r = subprocess.run([str(TOOLS / "fixture_mod.sh"), name, str(jar)], capture_output=True, text=True)
         if r.returncode != 0 or not jar.exists():
             raise RuntimeError(f"fixture {name} did not build: {r.stderr[-400:]}")

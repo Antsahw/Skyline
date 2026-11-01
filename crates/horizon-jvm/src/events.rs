@@ -856,6 +856,42 @@ pub fn ride(
     Ok(r.unwrap_or(false))
 }
 
+/// Player `uuid` gets off the game's vehicle (as [`ride`]'s): before the game takes it off
+/// (`after` false), the mods' heads of `stopRiding`/`removeVehicle`, true when one cancelled;
+/// after (`after` true), their ends.
+pub fn dismount(
+    uuid: &str,
+    dimension: &str,
+    ty: &str,
+    position: [f64; 3],
+    snbt: &str,
+    after: bool,
+) -> Result<bool, String> {
+    let r = with_server(|env, _| {
+        let uuid = env.new_string(uuid)?;
+        let dimension = env.new_string(dimension)?;
+        let ty = env.new_string(ty)?;
+        let snbt = env.new_string(snbt)?;
+        call_vanilla(
+            env,
+            "dismount",
+            "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;DDDLjava/lang/String;Z)Z",
+            &[
+                JValue::Object(&uuid),
+                JValue::Object(&dimension),
+                JValue::Object(&ty),
+                JValue::Double(position[0]),
+                JValue::Double(position[1]),
+                JValue::Double(position[2]),
+                JValue::Object(&snbt),
+                JValue::Bool(u8::from(after)),
+            ],
+        )?
+        .z()
+    })?;
+    Ok(r.unwrap_or(false))
+}
+
 /// Precipitation ticks of `dimension` at columns topped by `tops` (x, y, z each): the
 /// biome's answers on the Java side with the mods' patches (Serene Seasons): per column
 /// {freezes below the top, snows at it, precipitation below it: 0 none, 1 rain, 2 snow}.

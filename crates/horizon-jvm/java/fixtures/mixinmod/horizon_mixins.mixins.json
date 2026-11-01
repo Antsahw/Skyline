@@ -11,7 +11,8 @@
     "AttackMixin",
     "HeavyHitMixin",
     "RideMixin",
-    "SlotMixin"
+    "SlotMixin",
+    "DismountMixin"
   ],
   "injectors": {
     "defaultRequire": 1
