@@ -333,7 +333,29 @@ it does nothing unless Horizon fires it or hands the action to the mirror.
     carrying); a cancel keeps the old slot and sends it (`SetHeldSlot`).
   - Getting onto a vehicle (after the guest's interact boarded one): the heads of
     `Entity.startRiding` with a copy of it (a mob from its NBT, a boat or cart by type); a
-    cancel takes the guest off (`stop_riding`). Getting off isn't hooked yet.
+    cancel takes the guest off (`stop_riding`).
+- Fourth round:
+  - Getting off (a guest sneaking in a boat, cart, mount; `guest_vehicle_tick`): before the
+    seat logic, the heads of `LivingEntity.stopRiding`, `Entity.stopRiding`,
+    `Player/Entity.removeVehicle` run with the player sitting on a copy of its vehicle
+    (`HorizonVanillaActions.dismount`, the `vehicle` field set by reflection); a cancel keeps
+    it seated (its shift is dropped for the tick). Once off, their RETURN/TAIL run.
+  - Better Combat's sweep: the mirror level's box queries (`HorizonServer.entities`'
+    `get(box, ...)`) now list the visiting copies too, so its `TargetFinder` finds every mob
+    in the swing, not just the cursor's. Passive mobs aren't swept (its relation rules).
+  - A player's fall damage (`fall_damage`, when a mod patches `causeFallDamage` or
+    `calculateFallDamage`: Moving Elevators, Mythic Upgrades, Balm's and Puzzles Lib's
+    events): the server sets `PlayerMotion::route_fall` for a guest's moves; a landing that
+    would hurt leaves `FallEvent::Routed` instead (the statistic stays Rust's), and after the
+    moves the game asks `HorizonVanillaActions.fall`: vanilla's `causeFallDamage` on the
+    mirrored player, `calculateFallDamage` answered with Horizon's safe distance and damage
+    multiplier attributes (`FallCaptureMixin`: the mirror has no effects or attributes), the
+    damage reaching `hurtServer` caught. Horizon deals it with vanilla's sounds
+    (`MotionWorld::routed_fall_damage`). A mace's or wind charge's impulse stays Rust's;
+    in-frame single player isn't routed.
+  - A player's new effect (`Game::add_player_effect`: potions, food, totems, `/effect`): the
+    heads of `LivingEntity.addEffect` with the instance; a cancel drops it. Beacons,
+    conduits, raids' Bad Omen and the Warden's darkness add theirs directly (not asked).
   - Precipitation (`ServerLevel.tickPrecipitation`), when a mod patches the biomes' weather
     (`Biome.shouldSnow`, `shouldFreeze`, `getPrecipitationAt`...: Serene Seasons): the game
     keeps each column's top (`GameLevel::precipitation` → `java_precipitation`) and, at the
@@ -742,6 +764,10 @@ gets SPIR-V, vertex layouts and uniform lists.
   `minecraft.level.connection.registryAccess()` once there is a level; with a null one REI
   silently drops every recipe whose display touches a tag (half of them). Client levels share
   `HorizonClient.connection(level)`, which carries the server's registries.
+- `Level.getEntities(Entity, AABB, Predicate)` goes through `getEntities().get(box, consumer)`,
+  not `all()`: anything the mirror lends a level for a call must be in the box queries too
+  (Better Combat's `TargetFinder` saw only its cursor). `regress.py` now rebuilds a fixture
+  jar when its sources are newer than the cached one (a stale `mixinmod.jar` hid a mixin).
 
 Found in the upstream sync (2026-11-01):
 - Upstream's content blocks fan their states out over declared `state_properties`
@@ -928,12 +954,19 @@ terrain on.
 
 Vanilla-patching mods (tested headless 2026-11-01, server thread, survival; each is a
 `regress.py` case: `veinminer`, `harvest`, `carry`, `seasons`, `orbs`, `bettercombat`,
-`snow`; the `mixinmod` fixture's `attack`, `ride`, `slot`, `mixins2`):
-- Better Combat: a click with an iron sword is its attack request; the cow takes 6.
+`snow`, `sweep`; the `mixinmod` fixture's `mixins1`, `attack`, `ride`, `dismount`, `fall`,
+`effects`, `slot`, `mixins2`; every routed action has one, and the fixture ones need no
+downloaded jars):
+- Better Combat: a click with an iron sword is its attack request; the cow takes 6. One swing
+  at three zombies in a row hurts them all (`sweep`).
 - Serene Seasons' snow: mid winter, rain: the plains' floor gets snow layers.
 - The fixture: ten times the damage inside `Player.attack` (a cow dies to one sword hit, a pig
   spared by its head), no minecarts (the boat still takes the player), no ninth hotbar slot,
-  no snowball throws, an emerald with each craft.
+  no snowball throws, an emerald with each craft, no getting off while holding a stick, no
+  fall damage holding a feather (half the distance with a slime ball: 2 for 10 blocks, 7
+  with empty hands), players immune to poison, cows that can't be milked (`Player.interactOn`'s
+  head); `mixins1`: a broken block also drops a diamond, dirt isn't picked up, wheat lit 8
+  (one short of vanilla's 9) grows.
 - Veinminer: sneak + one dig breaks a 7-block iron vein, raw iron and experience drop, the
   pickaxe wears 7.
 - Right Click Harvest: a ripe wheat right-clicked is replanted (age 0) and drops wheat.
@@ -992,8 +1025,8 @@ Next (top failure of the pack, in order):
    Mods' settings: Options → Mods lists the Java mods with a settings screen (see "Players,
    joins and settings").
 3. Vanilla patches Horizon still does in Rust (the `Mixin table: Rust does …` lines): biome
-   weather and snow (Serene Seasons' seasons in the sky), entity riding, the inventory's slot
-   picking; in-frame single player's pickups aren't routed. Next actions to route by the
+   see `mixin-table.tsv`; routed so far: weather and snow, riding on and off, slot picking,
+   Better Combat's attack and sweep, players' fall damage and new effects; in-frame single player's pickups aren't routed. Next actions to route by the
    same pattern: mob drops (`LivingEntity.dropAllDeathLoot` past its head), fishing, crafting
    results.
 Then: NeoForge later.

@@ -2281,6 +2281,9 @@ public final class HorizonServer {
                 List<ServerPlayer> players = LEVEL_PLAYERS.get(level);
                 if (players != null) for (var p : players) out.accept(p);
                 HorizonEntities.near(level, box, out);
+                // Copies of Horizon mobs standing in the level during a routed call
+                // (Better Combat's sweep finds its targets with a box query).
+                for (var e : HorizonCombat.visiting(level)) if (e.getBoundingBox().intersects(box)) out.accept(e);
             }
 
             @Override
@@ -2361,6 +2364,7 @@ public final class HorizonServer {
         if (orbsRouted()) out.add("experience_orbs");
         if (HorizonCombat.routed()) out.add("player_attack");
         if (HorizonVanillaActions.weatherRouted()) out.add("precipitation");
+        if (HorizonVanillaActions.fallRouted()) out.add("fall_damage");
         if (!out.isEmpty()) {
             Natives.log("Routed to the mods: " + out + " (item pickup: " + HorizonMixinTable.mods(ITEM_ENTITY, "playerTouch")
                     + ", orbs: " + HorizonMixinTable.mods(ORB, "playerTouch") + ")");

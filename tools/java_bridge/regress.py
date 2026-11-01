@@ -286,6 +286,45 @@ CASES = {
         checks=[check_json("cart.json", ["riding"], None, "not in the minecart"),
                 check_file("boat.json", r'"riding":\{|"riding":[0-9]', "in the boat")],
     ),
+    "dismount": dict(
+        about="Entity.removeVehicle's head (mixinmod: not with a stick in hand): sneaking keeps the player in the boat, then lets go",
+        fixtures=["mixinmod"], scene="ride",
+        steps=['$C look-at $(cat $S/boat.pos) >/dev/null; sleep 0.5; $C mouse right click >/dev/null; sleep 1; $C status > $S/in.json; '
+               '$C command "give @s minecraft:stick" >/dev/null; sleep 0.5; '
+               '$C key shift down >/dev/null; sleep 0.5; $C key shift up >/dev/null; sleep 1; $C status > $S/kept.json',
+               '$C command "clear @s minecraft:stick" >/dev/null; sleep 0.5; '
+               '$C key shift down >/dev/null; sleep 0.5; $C key shift up >/dev/null; sleep 1; $C status > $S/off.json'],
+        checks=[check_file("in.json", r'"riding":\{|"riding":[0-9]', "in the boat"),
+                check_file("kept.json", r'"riding":\{|"riding":[0-9]', "still in the boat with a stick"),
+                check_json("off.json", ["riding"], None, "off the boat with empty hands")],
+    ),
+    "sweep": dict(
+        about="Better Combat's sweep: one swing of an iron sword hurts more than one of three zombies in a row",
+        mods=["bettercombat", "cloth", "playeranim"], scene="sweep", env={"HORIZON_JAVA_DEBUG": "combat"},
+        steps=['sleep 1; $C mouse left click >/dev/null; sleep 2; $C entities 6 minecraft:zombie | '
+               'python3 -c "import json,sys;print(sum(e[\'health\']<20 for e in json.load(sys.stdin)[\'entities\']))" > $S/hurt.txt'],
+        checks=[check_file("hurt.txt", r"^[23]$", "two or three zombies hurt")],
+    ),
+    "fall": dict(
+        about="LivingEntity.causeFallDamage (mixinmod: a feather cancels it, a slime ball halves the distance): 10-block falls",
+        fixtures=["mixinmod"], scene="none",
+        steps=['$C command "gamemode survival" >/dev/null; $C command "gamerule natural_health_regeneration false" >/dev/null; sleep 0.5; '
+               '$C command "item replace entity @s weapon.mainhand with minecraft:feather" >/dev/null; sleep 0.5; $C command "tp @s ~ ~10 ~" >/dev/null; sleep 3; $C status > $S/feather.json',
+               '$C command "item replace entity @s weapon.mainhand with minecraft:slime_ball" >/dev/null; sleep 0.5; $C command "tp @s ~ ~10 ~" >/dev/null; sleep 3; $C status > $S/slime.json',
+               '$C command "item replace entity @s weapon.mainhand with minecraft:air" >/dev/null; sleep 0.5; $C command "tp @s ~ ~10 ~" >/dev/null; sleep 3; $C status > $S/hand.json'],
+        checks=[check_json("feather.json", ["player", "health"], 20.0, "no damage with a feather"),
+                check_json("slime.json", ["player", "health"], 18.0, "2 with a slime ball (5 blocks: 5 - 3)"),
+                check_json("hand.json", ["player", "health"], 11.0, "7 more with empty hands (10 - 3)"),
+                check_log(r"Fall damage goes to the mods", "fall damage routed")],
+    ),
+    "effects": dict(
+        about="LivingEntity.addEffect's head (mixinmod: players are immune to poison): /effect gives speed, not poison",
+        fixtures=["mixinmod"], scene="none",
+        steps=['$C command "gamemode survival" >/dev/null; $C command "effect give @s minecraft:poison 30" >/dev/null; '
+               '$C command "effect give @s minecraft:speed 30" >/dev/null; sleep 1.5; '
+               '$C state | python3 -c "import json,sys;print(sorted(e[\'id\'] for e in json.load(sys.stdin)[\'player\'][\'effects\']))" > $S/effects.txt'],
+        checks=[check_file("effects.txt", r"^\['speed'\]$", "speed, no poison")],
+    ),
     "slot": dict(
         about="Inventory.setSelectedSlot's head (mixinmod: not the ninth): the slot stays",
         fixtures=["mixinmod"], scene="none",
@@ -301,6 +340,23 @@ CASES = {
         checks=[check_file("floor.json", r'"minecraft:snow":\s*[1-9]', "snow on the floor"),
                 check_log(r"Precipitation goes to the mods", "precipitation goes to the mods")],
         look="snow layers on the stone",
+    ),
+    "mixins1": dict(
+        about="Round one's actions (mixinmod): a broken block also drops a diamond, dirt isn't picked up, wheat grows in dim light, cows can't be milked",
+        fixtures=["mixinmod"], scene="mixins1",
+        steps=['$C mouse left down >/dev/null; sleep 2; $C mouse left up >/dev/null; sleep 1; '
+               '$C command "tp @s ~2 ~ ~" >/dev/null; sleep 3; $C inventory > $S/inv.json; $C entities 4 minecraft:item > $S/ground.json',
+               '$C command "gamerule random_tick_speed 1000" >/dev/null; sleep 6; $C command "gamerule random_tick_speed 3" >/dev/null; '
+               '$C block $(cat $S/crop.pos) > $S/crop.json',
+               '$C command "item replace entity @s weapon.mainhand with minecraft:bucket" >/dev/null; '
+               '$C command "summon minecraft:cow ~2 ~ ~ {NoAI:1b}" >/dev/null; sleep 1; '
+               '$C look-at-entity $($C entities 6 minecraft:cow | python3 -c "import json,sys;print(json.load(sys.stdin)[\'entities\'][0][\'id\'])") >/dev/null; '
+               'sleep 0.5; $C mouse right click >/dev/null; sleep 1; $C inventory > $S/milk.json'],
+        checks=[check_file("inv.json", r'"minecraft:diamond":\s*1', "a diamond with the dirt (picked up)"),
+                check_file("ground.json", r"minecraft:dirt", "the dirt left on the ground"),
+                check_file("crop.json", r"wheat\[age=[1-7]\]", "the wheat grew in the dim light"),
+                check_file("milk.json", r'"minecraft:bucket":\s*1', "the cow wasn't milked (Player.interactOn's head)"),
+                check_log(r"Random ticks of \d+ vanilla blocks go to the mods", "crop ticks go to the mods")],
     ),
     "mixins2": dict(
         about="Round two's actions (mixinmod): no snowball throws, an emerald with each craft",
@@ -391,6 +447,10 @@ def fixture(name, cache, against=()):
     if not jar.exists():
         env = dict(os.environ, FIXTURE_CP=":".join(str(j) for j in against))
         r = subprocess.run([str(TOOLS / "fixture_mod.sh"), name, str(jar)], capture_output=True, text=True, env=env)
+    src = ROOT / "crates/horizon-jvm/java/fixtures" / name
+    newest = max((f.stat().st_mtime for f in src.rglob("*") if f.is_file()), default=0)
+    if not jar.exists() or jar.stat().st_mtime < newest:
+        r = subprocess.run([str(TOOLS / "fixture_mod.sh"), name, str(jar)], capture_output=True, text=True)
         if r.returncode != 0 or not jar.exists():
             raise RuntimeError(f"fixture {name} did not build: {r.stderr[-400:]}")
     return jar
@@ -470,13 +530,18 @@ def run_game(case, name, jars, out, extra_env, pack=None, join_within=None):
                 ok = re.search(pattern, text) is not None
             else:
                 path, expect = pattern
+                value = None
                 try:
-                    value = json.loads((scratch / file).read_text())
+                    text = (scratch / file).read_text()
+                    (out / file).write_text(text)
+                    value = json.loads(text)
                     for key in path:
                         value = value[key]
                     ok = value == expect
                 except (OSError, ValueError, KeyError, IndexError, TypeError):
                     ok = False
+                if not ok:
+                    what = f"{what} (got {json.dumps(value)[:80]})"
             results.append((ok, what))
         if join_within is not None:
             joined = join_seconds(log)

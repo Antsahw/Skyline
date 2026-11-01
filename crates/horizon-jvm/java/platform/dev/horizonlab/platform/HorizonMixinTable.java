@@ -259,7 +259,11 @@ public final class HorizonMixinTable {
             "net/minecraft/world/entity/player/Player.attack", "net/minecraft/world/entity/player/Player.interactOn",
             "net/minecraft/world/item/ItemStack.use",
             // A player picking a hotbar slot, getting onto a vehicle (HorizonVanillaActions).
-            "net/minecraft/world/entity/player/Inventory.setSelectedSlot", "net/minecraft/world/entity/Entity.startRiding");
+            "net/minecraft/world/entity/player/Inventory.setSelectedSlot", "net/minecraft/world/entity/Entity.startRiding",
+            // Getting off, a player's new effect (HorizonVanillaActions).
+            "net/minecraft/world/entity/Entity.stopRiding", "net/minecraft/world/entity/LivingEntity.stopRiding",
+            "net/minecraft/world/entity/Entity.removeVehicle", "net/minecraft/world/entity/player/Player.removeVehicle",
+            "net/minecraft/world/entity/LivingEntity.addEffect");
 
     public static Where where(String owner, String method) {
         String key = owner + "." + method;
@@ -280,6 +284,10 @@ public final class HorizonMixinTable {
                 || method.equals("getPrecipitationAt") || method.equals("warmEnoughToRain") || method.equals("coldEnoughToSnow"))
                 || key.equals("net/minecraft/server/level/ServerLevel.tickPrecipitation")) {
             return new Where("routed", "precipitation (ice, snow, cauldrons)");
+        }
+        if ((method.equals("causeFallDamage") || method.equals("calculateFallDamage")) && (owner.equals("net/minecraft/world/entity/LivingEntity")
+                || owner.equals("net/minecraft/world/entity/player/Player") || owner.equals("net/minecraft/server/level/ServerPlayer"))) {
+            return new Where("routed", "a player's fall damage");
         }
         if (FIRED.contains(key)) return new Where("fired", "Horizon fires it");
         if (owner.equals("net/minecraft/world/inventory/ResultSlot")) {

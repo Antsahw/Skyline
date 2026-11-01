@@ -115,6 +115,15 @@ pub enum FallEvent {
         pitch: f32,
     },
     BlockFallSound,
+    /// A landing for Java mods to judge (`PlayerMotion::route_fall`): vanilla's
+    /// `causeFallDamage` arguments and the player's own answers to `calculateFallDamage`.
+    Routed {
+        distance: f64,
+        multiplier: f32,
+        source: LandingDamage,
+        safe: f64,
+        damage_multiplier: f64,
+    },
     Broadcast(u8),
     Write {
         position: BlockPos,
@@ -188,6 +197,15 @@ impl FallEvent {
                 pitch.to_bits()
             ),
             Self::BlockFallSound => "block-fall-sound".into(),
+            Self::Routed {
+                distance,
+                multiplier,
+                ..
+            } => format!(
+                "routed {:016x} {:08x}",
+                distance.to_bits(),
+                multiplier.to_bits()
+            ),
             Self::Broadcast(event) => format!("broadcast {event}"),
             Self::Write {
                 position,
@@ -273,6 +291,20 @@ impl MotionWorld<'_, '_, '_> {
                 floor
             }) as i64;
             self.fall_event(FallEvent::Statistic(rounded as i32));
+        }
+        // Java mods patch it: they judge the damage (the game asks them after the moves).
+        // A mace's or wind charge's impulse stays Horizon's.
+        if self.player.route_fall && self.player.impulse.impact_position.is_none() {
+            let safe = self.player.attribute("minecraft:safe_fall_distance")?;
+            let damage_multiplier = self.player.attribute("minecraft:fall_damage_multiplier")?;
+            self.fall_event(FallEvent::Routed {
+                distance,
+                multiplier,
+                source,
+                safe,
+                damage_multiplier,
+            });
+            return Ok(false);
         }
         living_fall::cause_living_fall_damage(
             &mut FallCall {
@@ -545,6 +577,26 @@ impl BlockLandingWorld for MotionWorld<'_, '_, '_> {
         Ok(())
     }
 }
+impl MotionWorld<'_, '_, '_> {
+    /// The damage Java mods settled on for a [`FallEvent::Routed`] landing, dealt as
+    /// `LivingEntity.causeFallDamage` deals it: the fall sounds, then the hurt.
+    pub fn routed_fall_damage(&mut self, damage: f32, source: LandingDamage) -> Result<()> {
+        if damage <= 0.0 {
+            return Ok(());
+        }
+        let mut call = FallCall {
+            world: self,
+            source,
+            contact: None,
+        };
+        call.reset_impulse()?;
+        let sound = call.fall_sound(damage > 4.0)?;
+        call.play_fall_sound(sound)?;
+        call.play_block_fall_sound()?;
+        call.hurt(damage)
+    }
+}
+
 struct FallCall<'a, 'p, 'w, 'r> {
     world: &'a mut MotionWorld<'p, 'w, 'r>,
     source: LandingDamage,

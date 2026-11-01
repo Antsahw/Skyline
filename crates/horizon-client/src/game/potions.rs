@@ -891,6 +891,10 @@ impl Game<'_> {
     }
     /// Add an active effect to the player and update attributes / absorption.
     pub(super) fn add_player_effect(&mut self, effect: EffectInstance) -> bool {
+        // Java mods' heads of LivingEntity.addEffect may refuse it.
+        if self.java_add_effect(&effect) {
+            return false;
+        }
         let id = effect.id;
         let amp = effect.amplifier;
         let new = self.potions.effects.get(id).is_none();

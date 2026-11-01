@@ -126,12 +126,20 @@ case "$SCENE" in
   # A fight: a cow and a pig standing still ahead (two blocks east, a block apart), survival,
   # an iron sword in hand, looking at the cow; their ids in $S/cow.id and $S/pig.id.
   fight) "$R/tools/java_bridge/around.sh" \
-    'q "gamemode survival"' 'q "give @s minecraft:iron_sword"' \
+    'q "gamemode survival"' 'q "item replace entity @s weapon.mainhand with minecraft:iron_sword"' \
     'q "summon minecraft:cow ~2.5 ~ ~-0.6 {NoAI:1b}"' 'q "summon minecraft:pig ~2.5 ~ ~1.4 {NoAI:1b}"' \
     'q "tp @s ~ ~ ~ -90 15"' 'sleep 1' \
     '$C entities 6 minecraft:cow | python3 -c "import json,sys;print(json.load(sys.stdin)[\"entities\"][0][\"id\"])" > "$S/cow.id"' \
     '$C entities 6 minecraft:pig | python3 -c "import json,sys;print(json.load(sys.stdin)[\"entities\"][0][\"id\"])" > "$S/pig.id"' \
     '$C look-at-entity $(cat "$S/cow.id") >/dev/null' ;;
+  # A sweep: three zombies standing still in a row two and a half blocks east (z -1, 0, +1),
+  # fire resistant (daylight), survival, an iron sword in hand, looking at the middle one.
+  sweep) "$R/tools/java_bridge/around.sh" \
+    'q "gamemode survival"' 'q "item replace entity @s weapon.mainhand with minecraft:iron_sword"' \
+    'q "summon minecraft:zombie ~2.5 ~ ~-1 {NoAI:1b}"' 'q "summon minecraft:zombie ~2.5 ~ ~ {NoAI:1b}"' \
+    'q "summon minecraft:zombie ~2.5 ~ ~1 {NoAI:1b}"' 'q "effect give @e[type=minecraft:zombie,distance=..6] minecraft:fire_resistance infinite 0 true"' \
+    'q "tp @s ~ ~ ~ -90 10"' 'sleep 1' \
+    '$C look-at-entity $($C entities 6 minecraft:zombie | python3 -c "import json,sys;print(json.load(sys.stdin)[\"entities\"][0][\"id\"])") >/dev/null' ;;
   # Vehicles: a minecart two blocks north, a boat two blocks south; where they are in
   # $S/cart.pos and $S/boat.pos (points to look at).
   ride) "$R/tools/java_bridge/around.sh" \
@@ -141,6 +149,15 @@ case "$SCENE" in
   # $S/floor.pos; seasons and tick speed are the case's.
   snow) "$R/tools/java_bridge/around.sh" \
     'q "weather rain"' 'echo "$((X-4)) $Y $((Z-4)) $((X+4)) $Y $((Z+4))" > "$S/floor.pos"' ;;
+  # The mixinmod fixture's first round: dirt two blocks east to break (looking at it), and a
+  # wheat seedling shut in stone to the west, lit 8 by a light block beside it (enough to
+  # stay, one short of growing); its position in $S/crop.pos.
+  mixins1) "$R/tools/java_bridge/around.sh" \
+    'q "gamemode survival"' 'q "setblock $((X+2)) $Y $Z minecraft:dirt"' \
+    'q "fill $((X-4)) $Y $((Z-2)) $((X-2)) $((Y+2)) $((Z+2)) minecraft:stone"' \
+    'q "setblock $((X-3)) $((Y+1)) $((Z+1)) minecraft:light[level=9]"' \
+    'q "setblock $((X-3)) $Y $Z minecraft:farmland[moisture=7]"' 'q "setblock $((X-3)) $((Y+1)) $Z minecraft:wheat[age=0]"' \
+    'echo "$((X-3)) $((Y+1)) $Z" > "$S/crop.pos"' '$C look-at-block $((X+2)) $Y $Z west >/dev/null' ;;
   none) ;;
 esac
 n=0; for step in "$@"; do eval "$step"; sleep 1; n=$((n+1)); $C screenshot "$S/s$n.png" >/dev/null; cp "$S/s$n.png" "$OUT/$SCENE-$n.png"; done

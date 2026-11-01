@@ -11,7 +11,11 @@
     "AttackMixin",
     "HeavyHitMixin",
     "RideMixin",
-    "SlotMixin"
+    "SlotMixin",
+    "DismountMixin",
+    "FallMixin",
+    "EffectMixin",
+    "MilkMixin"
   ],
   "injectors": {
     "defaultRequire": 1

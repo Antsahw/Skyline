@@ -17,6 +17,7 @@ import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.storage.TagValueInput;
@@ -251,26 +252,189 @@ public final class HorizonVanillaActions {
         ServerPlayer player = HorizonServer.player(UUID.fromString(uuid));
         if (player == null || !HorizonHooks.hooked("net/minecraft/world/entity/Entity", "startRiding")) return false;
         ServerLevel level = HorizonServer.level(dimension);
-        Entity vehicle = null;
-        try {
-            if (snbt != null && !snbt.isEmpty()) {
-                var tag = net.minecraft.nbt.TagParser.parseCompoundFully(snbt);
-                vehicle = EntityType.loadEntityRecursive(TagValueInput.create(ProblemReporter.DISCARDING, level.registryAccess(), tag),
-                        level, EntitySpawnReason.LOAD, e -> e);
-            } else {
-                var entityType = net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE.getValue(net.minecraft.resources.Identifier.parse(type));
-                if (entityType != null) vehicle = entityType.create(level, EntitySpawnReason.LOAD);
-                if (vehicle != null) vehicle.setPos(x, y, z);
-            }
-        } catch (Throwable t) {
-            if (HorizonServer.failedOnce("vehicle " + type)) Natives.log("Java mods: a vehicle (" + type + ") couldn't be copied: " + t);
-        }
+        Entity vehicle = vehicleCopy(level, type, x, y, z, snbt);
         if (vehicle == null) return false;
         var r = HorizonHooks.fire(player, Entity.class, "startRiding", START_RIDING, "HEAD", new Object[] {vehicle, false, true},
                 Boolean.TRUE, true);
         HorizonServer.afterCall();
         if (DEBUG) Natives.log("entities: " + player.getName().getString() + " rides " + vehicle + ": " + (r.cancelled() ? "stopped" : "ok"));
         return r.cancelled() && !Boolean.TRUE.equals(r.returnValue());
+    }
+
+    /** A copy of Horizon's vehicle: a mob from its NBT, else a new entity of the type there. */
+    private static Entity vehicleCopy(ServerLevel level, String type, double x, double y, double z, String snbt) {
+        try {
+            if (snbt != null && !snbt.isEmpty()) {
+                var tag = net.minecraft.nbt.TagParser.parseCompoundFully(snbt);
+                return EntityType.loadEntityRecursive(TagValueInput.create(ProblemReporter.DISCARDING, level.registryAccess(), tag),
+                        level, EntitySpawnReason.LOAD, e -> e);
+            }
+            var entityType = net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE.getValue(net.minecraft.resources.Identifier.parse(type));
+            Entity vehicle = entityType == null ? null : entityType.create(level, EntitySpawnReason.LOAD);
+            if (vehicle != null) vehicle.setPos(x, y, z);
+            return vehicle;
+        } catch (Throwable t) {
+            if (HorizonServer.failedOnce("vehicle " + type)) Natives.log("Java mods: a vehicle (" + type + ") couldn't be copied: " + t);
+            return null;
+        }
+    }
+
+    private static java.lang.reflect.Field vehicleField;
+
+    /** Sets a mirrored player's vehicle for a call (it never rides on the mirror). */
+    private static void setVehicle(Entity rider, Entity vehicle) {
+        try {
+            if (vehicleField == null) {
+                vehicleField = Entity.class.getDeclaredField("vehicle");
+                vehicleField.setAccessible(true);
+            }
+            vehicleField.set(rider, vehicle);
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    /**
+     * A player gets off Horizon's vehicle (sneaking: Player.rideTick's stopRiding, which calls
+     * removeVehicle). Before Horizon does ({@code after} false): the mods' injections at the
+     * heads of LivingEntity/Entity.stopRiding and Player/Entity.removeVehicle, the player sitting
+     * in a copy of the vehicle; true when one cancelled (it stays on). After it did: their
+     * ends, in vanilla's order back out.
+     */
+    public static boolean dismount(String uuid, String dimension, String type, double x, double y, double z, String snbt,
+                                   boolean after) {
+        Thread.currentThread().setContextClassLoader(HorizonVanillaActions.class.getClassLoader());
+        ServerPlayer player = HorizonServer.player(UUID.fromString(uuid));
+        String entity = "net/minecraft/world/entity/Entity", living = "net/minecraft/world/entity/LivingEntity",
+                playerClass = "net/minecraft/world/entity/player/Player";
+        if (player == null || !HorizonHooks.hooked(entity, "stopRiding") && !HorizonHooks.hooked(living, "stopRiding")
+                && !HorizonHooks.hooked(entity, "removeVehicle") && !HorizonHooks.hooked(playerClass, "removeVehicle")) {
+            return false;
+        }
+        ServerLevel level = HorizonServer.level(dimension);
+        Entity vehicle = vehicleCopy(level, type, x, y, z, snbt);
+        if (vehicle == null) return false;
+        Object[] none = {};
+        boolean cancelled = false;
+        // The rider sits in it before (the heads see getVehicle()); after, it's off.
+        if (!after) setVehicle(player, vehicle);
+        try {
+            if (!after) {
+                Object[][] chain = {{net.minecraft.world.entity.LivingEntity.class, "stopRiding"}, {Entity.class, "stopRiding"},
+                        {Player.class, "removeVehicle"}, {Entity.class, "removeVehicle"}};
+                for (Object[] c : chain) {
+                    Class<?> owner = (Class<?>) c[0];
+                    if (!HorizonHooks.hooked(owner.getName().replace('.', '/'), (String) c[1])) continue;
+                    if (HorizonHooks.fire(player, owner, (String) c[1], "()V", "HEAD", none, null, true).cancelled()) {
+                        cancelled = true;
+                        break;
+                    }
+                }
+            } else {
+                Object[][] chain = {{Entity.class, "removeVehicle"}, {Player.class, "removeVehicle"}, {Entity.class, "stopRiding"},
+                        {net.minecraft.world.entity.LivingEntity.class, "stopRiding"}};
+                for (Object[] c : chain) {
+                    Class<?> owner = (Class<?>) c[0];
+                    if (!HorizonHooks.hooked(owner.getName().replace('.', '/'), (String) c[1])) continue;
+                    for (String at : new String[] {"RETURN", "TAIL"}) HorizonHooks.fire(player, owner, (String) c[1], "()V", at, none, null, true);
+                }
+            }
+        } finally {
+            setVehicle(player, null);
+        }
+        HorizonServer.afterCall();
+        if (DEBUG) Natives.log("entities: " + player.getName().getString() + (after ? " got off " : " gets off ") + vehicle
+                + " holding " + player.getMainHandItem() + (cancelled ? ": stopped" : ""));
+        return cancelled;
+    }
+
+    // ---- Effects ---------------------------------------------------------------------------
+
+    /**
+     * Horizon adds effect {@code id} to a player (potions, food, totems, /effect): the mods'
+     * injections at the head of LivingEntity.addEffect, with the instance as vanilla would
+     * make it; true when one cancelled (Spell Engine's immunities, Open Parties and Claims'
+     * protection).
+     */
+    public static boolean addEffect(String uuid, String id, int duration, int amplifier, boolean ambient, boolean visible) {
+        Thread.currentThread().setContextClassLoader(HorizonVanillaActions.class.getClassLoader());
+        String owner = "net/minecraft/world/entity/LivingEntity";
+        ServerPlayer player = HorizonServer.player(UUID.fromString(uuid));
+        if (player == null || !HorizonHooks.hooked(owner, "addEffect")) return false;
+        var effect = BuiltInRegistries.MOB_EFFECT.get(Identifier.parse(id));
+        if (effect.isEmpty()) return false;
+        var instance = new net.minecraft.world.effect.MobEffectInstance(effect.get(), duration, amplifier, ambient, visible);
+        boolean cancelled = HorizonHooks.fire(player, LivingEntity.class, "addEffect",
+                "(Lnet/minecraft/world/effect/MobEffectInstance;Lnet/minecraft/world/entity/Entity;)Z", "HEAD",
+                new Object[] {instance, null}, null, true).cancelled();
+        HorizonServer.afterCall();
+        if (DEBUG) Natives.log("entities: " + player.getName().getString() + " gets " + instance + (cancelled ? ": stopped" : ""));
+        return cancelled;
+    }
+
+    // ---- Fall damage --------------------------------------------------------------------
+
+    private static Boolean fallRouted;
+    /** The player whose routed fall runs now, with Horizon's {safe distance, damage multiplier, immune}. */
+    private static LivingEntity falling;
+    private static double[] fallAttributes;
+    private static float fallCaught;
+
+    /**
+     * Whether a player's fall damage goes to the mirror: a mod patches causeFallDamage or
+     * calculateFallDamage (Moving Elevators, Mythic Upgrades, Balm's and Puzzles Lib's events).
+     */
+    public static boolean fallRouted() {
+        if (fallRouted == null) {
+            Set<String> methods = Set.of("causeFallDamage", "calculateFallDamage");
+            fallRouted = HorizonMixinTable.patchedInside(ServerPlayer.class, methods, Set.of());
+            if (fallRouted) Natives.log("Fall damage goes to the mods (" + HorizonMixinTable.mods("net/minecraft/world/entity/LivingEntity", "causeFallDamage")
+                    + HorizonMixinTable.mods("net/minecraft/world/entity/LivingEntity", "calculateFallDamage") + ")");
+        }
+        return fallRouted;
+    }
+
+    /**
+     * A player lands: vanilla's {@code causeFallDamage(distance, multiplier, source)} runs on
+     * the mirrored player with the mods' patches. calculateFallDamage answers with Horizon's
+     * safe fall distance, damage multiplier and immunity (the mirror doesn't keep effects and
+     * attributes); what reaches hurtServer is caught, not applied (FallCaptureMixin). The
+     * damage Horizon deals (0: none).
+     */
+    public static float fall(String uuid, String dimension, double distance, float multiplier, boolean stalagmite,
+                             double safe, double damageMultiplier, boolean immune) {
+        Thread.currentThread().setContextClassLoader(HorizonVanillaActions.class.getClassLoader());
+        ServerPlayer player = HorizonServer.player(UUID.fromString(uuid));
+        if (player == null) return -1;
+        ServerLevel level = HorizonServer.level(dimension);
+        var sources = level.damageSources();
+        fallAttributes = new double[] {safe, damageMultiplier, immune ? 1 : 0};
+        fallCaught = 0;
+        falling = player;
+        try {
+            player.causeFallDamage(distance, multiplier, stalagmite ? sources.stalagmite() : sources.fall());
+        } finally {
+            falling = null;
+        }
+        HorizonServer.afterCall();
+        if (DEBUG) Natives.log("entities: " + player.getName().getString() + " falls " + distance + " (x" + multiplier + "): " + fallCaught);
+        return fallCaught;
+    }
+
+    /** Whether {@code entity} is the player in a routed fall (FallCaptureMixin). */
+    public static boolean falling(Object entity) {
+        return entity == falling;
+    }
+
+    /** LivingEntity.calculateFallDamage with Horizon's attributes, for the routed fall. */
+    public static int fallDamage(double distance, float multiplier) {
+        if (fallAttributes[2] != 0) return 0;
+        return (int) Math.floor((distance + 1.0E-6 - fallAttributes[0]) * multiplier * fallAttributes[1]);
+    }
+
+    /** The routed fall's damage reached hurtServer. */
+    public static void caughtFall(float amount) {
+        fallCaught += amount;
     }
 
     // ---- Precipitation: biome weather and snow --------------------------------------------

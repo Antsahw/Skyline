@@ -244,3 +244,32 @@ tests pass; fmt and clippy `-D warnings` clean (horizon-client, horizon-jvm).
   (it waits on chunk 0 0, which Horizon hasn't loaded), so `held_joins` (game/lan.rs) lets
   the player in at y -63 and it falls out of the world. The hold should also wait for a load
   function deferred on an unloaded chunk.
+
+- **mixins 1** (`bridge-mixins-1`), by Claude for iaxivers: getting off vehicles and Better
+  Combat's sweep. Works: sneaking in a boat runs the heads of `stopRiding`/`removeVehicle`
+  (mixinmod keeps a player holding a stick seated, lets go with empty hands); one Better
+  Combat swing hurts all three zombies in a row (the mirror's box queries didn't list the
+  copies of Horizon's mobs). Doesn't: passive mobs aren't swept (Better Combat's own rule);
+  each tick of a held sneak asks Java once. Outside the area: `HorizonServer.entities`'
+  `candidates` (3 lines). Test: `regress.py --jars <jars> sweep dismount` (Better Combat,
+  Cloth Config, playerAnimator; the mixinmod fixture).
+
+- **mixins 2** (`bridge-mixins-2`, on top of `bridge-mixins-1`), by Claude for iaxivers: the
+  most-patched "Rust does" lines of the 107-jar table, after `Player.attack` (done):
+  `LivingEntity.addEffect` (6 mods) and `causeFallDamage` (5). Works: a player's fall damage
+  goes through vanilla's `causeFallDamage` on the mirror when a mod patches it (mixinmod: no
+  damage holding a feather, half the distance with a slime ball, 7 for 10 blocks with empty
+  hands); potions, food, totems and `/effect` ask the heads of `addEffect` (mixinmod's poison
+  immunity holds). Doesn't: beacons, conduits, raids and the Warden add effects without
+  asking; mace/wind-charge falls and in-frame single player stay Rust's. Outside the area:
+  the client lib's `landing.rs`/`motion.rs` (a `route_fall` flag and `FallEvent::Routed`),
+  `lan_actions.rs`, `potions.rs` (a few lines each). Test: `regress.py --jars <jars> fall
+  effects`.
+
+- **mixins 3** (`bridge-mixins-3`, on top of `bridge-mixins-2`), by Claude for iaxivers: a
+  regress case per routed action. Works: the new fixture case `mixins1` covers breaking,
+  pickup, crop random ticks and entity use (new `MilkMixin`); with it every routed action has
+  a case (list in docs/java-bridge.md), the fixture ones without downloaded jars. All 16
+  mixin cases pass headless. Doesn't: use-on, orbs and precipitation are still only checked
+  with real mods (Right Click Harvest, Clumps, Serene Seasons). Test: `regress.py --jars
+  <jars> mixins1` (or the whole list).

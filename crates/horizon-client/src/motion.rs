@@ -282,6 +282,10 @@ pub struct PlayerMotion {
     pub fall_distance: f64,
     /// The block fallOn currently running, consumed by its damage call.
     pub(crate) block_landing: Option<(BlockStateId, BlockPos, f64)>,
+    /// Java mods patch fall damage (the server sets it for a tick's moves): a landing that
+    /// would hurt leaves a [`crate::landing::FallEvent::Routed`] instead, and the game asks
+    /// the mods for the damage ([`MotionWorld::routed_fall_damage`]).
+    pub route_fall: bool,
     pub stuck_multiplier: Vec3,
     /// `Entity.pistonDeltas` and `pistonDeltasGameTime`: how far a moving
     /// block has pushed this entity this tick (0.51 at most on any axis).
@@ -522,6 +526,7 @@ impl PlayerMotion {
             history: MovementHistory::default(),
             fall_distance: 0.0,
             block_landing: None,
+            route_fall: false,
             stuck_multiplier: Vec3::ZERO,
             piston: Default::default(),
             yaw: 0.0,

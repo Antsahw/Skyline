@@ -43,7 +43,8 @@
     "RespawnDataMixin",
     "MirrorUpdatesMixin",
     "MirrorConnectionMixin",
-    "CombatCaptureMixin"
+    "CombatCaptureMixin",
+    "FallCaptureMixin"
   ],
   "injectors": {
     "defaultRequire": 1
