@@ -736,6 +736,18 @@ public final class HorizonServer {
         return HorizonWorldgen.start(dimension, seed, structures);
     }
 
+    public static String[] worldgenLodTops(String dimension, int[] xyz, int[] waterHeights) {
+        return HorizonWorldgen.lodTops(dimension, xyz, waterHeights);
+    }
+
+    public static String[] worldgenLodMaterials(String dimension) {
+        return HorizonWorldgen.lodMaterials(dimension);
+    }
+
+    public static String[] worldgenLodColumns(String dimension, int[] xz) {
+        return HorizonWorldgen.lodColumns(dimension, xz);
+    }
+
     public static int[] worldgenOrigin(String dimension) {
         return HorizonWorldgen.origin(dimension);
     }

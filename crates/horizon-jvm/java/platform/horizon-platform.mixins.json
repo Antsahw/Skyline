@@ -32,6 +32,7 @@
     "WorldGenRegionMixin",
     "NoiseFillMixin",
     "ChunkGeneratorMixin",
+    "MaterialSystemMixin",
     "EntitySelectorMixin",
     "BlockScanMixin",
     "ChunkMapMixin",

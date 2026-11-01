@@ -1407,6 +1407,9 @@ pub struct WorldgenOrigin {
     pub z: i32,
     pub height: i32,
     pub custom: bool,
+    /// The generator is vanilla's noise generator or a mod's on it (Grid World's): its land's
+    /// shape is the noise's, so Horizon's far terrain stands for it.
+    pub noise: bool,
 }
 
 /// [`WorldgenOrigin`] of `dimension`; None if the mods don't generate it.
@@ -1425,8 +1428,8 @@ pub fn worldgen_origin(dimension: &str) -> Result<Option<WorldgenOrigin>, String
             return Ok(None);
         }
         let array = jni::objects::JIntArray::from(array);
-        let mut out = [0i32; 4];
-        if env.get_array_length(&array)? < 4 {
+        let mut out = [0i32; 5];
+        if env.get_array_length(&array)? < 5 {
             return Ok(None);
         }
         env.get_int_array_region(&array, 0, &mut out)?;
@@ -1435,6 +1438,7 @@ pub fn worldgen_origin(dimension: &str) -> Result<Option<WorldgenOrigin>, String
             z: out[1],
             height: out[2],
             custom: out[3] != 0,
+            noise: out[4] != 0,
         }))
     })?;
     Ok(found.flatten())
@@ -1573,6 +1577,102 @@ pub fn worldgen_biomes(
         optional_string_array(env, names)
     })?;
     Ok(names.flatten())
+}
+
+/// The mods' surface rules' top block at each far column's land top (`HorizonWorldgen.lodTops`:
+/// x y z of the top block, the height water reaches over it or `i32::MIN`): a state
+/// (`name[props]`) or None where the rules leave it. None if the mods don't generate the
+/// dimension with a noise generator.
+pub fn worldgen_lod_tops(
+    dimension: &str,
+    tops: &[[i32; 3]],
+    water: &[i32],
+) -> Result<Option<Vec<Option<String>>>, String> {
+    let flat: Vec<i32> = tops.iter().flatten().copied().collect();
+    let states = with_server(|env, class| {
+        let dimension = env.new_string(dimension)?;
+        let array = env.new_int_array(flat.len() as sys::jsize)?;
+        env.set_int_array_region(&array, 0, &flat)?;
+        let heights = env.new_int_array(water.len() as sys::jsize)?;
+        env.set_int_array_region(&heights, 0, water)?;
+        let states = env
+            .call_static_method(
+                class,
+                "worldgenLodTops",
+                "(Ljava/lang/String;[I[I)[Ljava/lang/String;",
+                &[
+                    JValue::Object(&dimension),
+                    JValue::Object(&array),
+                    JValue::Object(&heights),
+                ],
+            )?
+            .l()?;
+        optional_string_array(env, states)
+    })?;
+    Ok(states.flatten())
+}
+
+/// The blocks a dimension's surface rules can give and its default block
+/// (`HorizonWorldgen.lodMaterials`): a far column's land, under its features. None if the
+/// mods don't generate it with a noise generator.
+pub fn worldgen_lod_materials(dimension: &str) -> Result<Option<Vec<String>>, String> {
+    let names = with_server(|env, class| {
+        let dimension = env.new_string(dimension)?;
+        let names = env
+            .call_static_method(
+                class,
+                "worldgenLodMaterials",
+                "(Ljava/lang/String;)[Ljava/lang/String;",
+                &[JValue::Object(&dimension)],
+            )?
+            .l()?;
+        if names.is_null() {
+            return Ok(None);
+        }
+        string_array(env, names).map(Some)
+    })?;
+    Ok(names.flatten())
+}
+
+/// Far columns of a dimension a mod's own generator makes (`HorizonWorldgen.lodColumns`:
+/// ChunkGenerator.getBaseColumn), each as runs from the bottom, `(from_y, to_y, state)` with
+/// `to_y` exclusive. None if the mods don't generate the dimension.
+#[allow(clippy::type_complexity)]
+pub fn worldgen_lod_columns(
+    dimension: &str,
+    columns: &[(i32, i32)],
+) -> Result<Option<Vec<Vec<(i32, i32, String)>>>, String> {
+    let flat: Vec<i32> = columns.iter().flat_map(|&(x, z)| [x, z]).collect();
+    let runs = with_server(|env, class| {
+        let dimension = env.new_string(dimension)?;
+        let array = env.new_int_array(flat.len() as sys::jsize)?;
+        env.set_int_array_region(&array, 0, &flat)?;
+        let runs = env
+            .call_static_method(
+                class,
+                "worldgenLodColumns",
+                "(Ljava/lang/String;[I)[Ljava/lang/String;",
+                &[JValue::Object(&dimension), JValue::Object(&array)],
+            )?
+            .l()?;
+        optional_string_array(env, runs)
+    })?;
+    Ok(runs.flatten().map(|columns| {
+        columns
+            .into_iter()
+            .map(|runs| {
+                runs.unwrap_or_default()
+                    .split(';')
+                    .filter_map(|run| {
+                        let mut parts = run.splitn(3, ' ');
+                        let from = parts.next()?.parse().ok()?;
+                        let to = parts.next()?.parse().ok()?;
+                        Some((from, to, parts.next()?.to_owned()))
+                    })
+                    .collect()
+            })
+            .collect()
+    }))
 }
 
 /// The biomes a dimension the mods generate can have; None if they don't generate it.

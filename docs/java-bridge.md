@@ -706,6 +706,40 @@ the selected packs).
 (vanilla's bastion is `minecraft:bastion_remnant`, found at 599 blocks with the mods'
 Nether); an unknown tag now says so (`commands.locate.structure.invalid`).
 
+Surface rules, faster (2026-11-01, bridge-worldgen-speed2): `HorizonSurface` runs
+MaterialSystem.buildSurface's walk (`MaterialSystemMixin`, its head) with the same rules on
+the same blocks, for less: blocks read and written in the sections directly (ProtoChunk's
+getBlockState/setBlockState checked the height, took the section's lock and updated both
+generation heightmaps on every write), a write of the state already there skipped, the fluid
+check once per state run, and a block's biome (BiomeManager.getBiome: eight seeded corner
+hashes) taken straight from the noise biomes when its eight corners agree.
+`HORIZON_JAVA_SURFACE_CHECK=1` runs both walks on every chunk (alternating which goes first:
+the first fills the noise chunk's caches) and compares blocks, generation heightmaps and
+post-processing marks, vanilla's result kept: 0 of 2700 chunks differ with BOP (8.1 ms a
+chunk against vanilla's 10.2), 0 of 2600 with BOP + BetterNether + BetterEnd over the
+overworld, Nether and End (4.5 against 8.6). `HORIZON_JAVA_SURFACE=vanilla` turns it off;
+another mod's mixin into MaterialSystem turns it off too (logged). What's left of the walk
+(JFR): the rules themselves (TerraBlender's dispatch and vanilla's condition tree, ~60%) and
+the ore veins' density volumes they sample (~20%, vanilla's density functions): changing
+those would mean evaluating the mods' rules differently.
+Far terrain (LOD) of mods' worlds: the land is Horizon's noise (the mods' when their
+generator is vanilla's or on it), the biomes the mods' (as before), and now in the mods'
+biomes the land's top block is their surface rules' (`HorizonWorldgen.lodTops`: the rule at
+the column's land top, flat around it, water over it to its height; the land top is the
+highest run of a block the rules can give, `lodMaterials`, so trees and plants stay). Vanilla
+biomes keep Horizon's own (they are vanilla's rules). BOP areas: grass to podzol in coniferous
+forests, sand to dirt or gravel by its marshes, dried salt; ~3 ms a batch of columns on a far
+terrain thread. A mod's own generator off the noise (One Block) draws its base columns
+(`lodColumns`: ChunkGenerator.getBaseColumn): the void stays empty. Grid World is on the
+noise and shows as whole land far away (its holes are its own doFill).
+Lost blocks: a column generated again while it is loaded now leaves the loaded one (and
+warns); a decorated region's protos of columns already in the world are dropped, and so is a
+far proto of a loaded column instead of saved over its save. Repro (`setblock` of 36 marker
+blocks right after spawn with FD, 25 s later each read back): 4 lost in one of 17 runs
+before (none in the 15 of those that logged a column landing on a loaded one), none in 4
+runs since; the race wasn't caught in the act, so these are guards on the paths a proto
+could take over a loaded column, not a proven cause.
+
 Worldgen speed (2026-11-01, bridge-worldgen-speed, 2 cores, BOP): where Java worldgen's
 CPU goes (JFR, `-XX:StartFlightRecording` in `JAVA_TOOL_OPTIONS`, `duration=` since the game
 doesn't exit the JVM): terrain 60% (noise fill 31, surface rules 25, carvers ~4), features
@@ -793,17 +827,16 @@ the client's tick (`ClientTickEvents`, mods' `runTick`/`tick` injections; Xaero'
 not frozen yet!" is gone) work.
 
 Next (top failure of the pack, in order):
-1. Mods' worldgen gaps: far terrain's blocks and trees are still Horizon's (vanilla's surface
-   rules and features under the mods' biome colours); `/locate structure` from one
+1. Mods' worldgen gaps: far terrain's trees are still Horizon's (vanilla's features under the
+   mods' biome colours; its top blocks are the mods' now); `/locate structure` from one
    dimension into another (`execute in … run locate`) asks the current dimension's
    generator; a world made before the mods keeps the mods' default preset (WorldWeaver's)
    on the Java side, not its own (a world made with a mod's world type keeps that one).
    The tick passes `world()` the dimension's folder and worldgen the world's, so `worldDir`
    flips between the two (the stores are made again each time).
-   Seen once in five `SCENE=ber` runs (with FD, whose features route the overworld through
-   Java): the stove placed by the scene was gone a few seconds later, its outline left. A
-   chunk generated on the Java side landing after a block was set in it would do that: check
-   that a finished proto never replaces a chunk Horizon already has.
+   Seen once in five `SCENE=ber` runs (with FD): the stove placed by the scene was gone a few
+   seconds later. Guarded since (Status: Lost blocks); watch for "generated again while
+   loaded" in the log.
 2. Chunk Loaders: cells toggle (`SCENE=loader`), owner name and panel show, its floating
    core turns and bobs (its block entity renderer's block model).
    No list of Java mods' settings in Horizon's own menus yet (`/modconfig` is the way in).
