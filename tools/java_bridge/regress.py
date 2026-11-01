@@ -56,6 +56,10 @@ MODS = {
     "codxlib": ["codxlib*"],
     "skyblock": ["skyblock-infinite*"],
     "simplyoneblock": ["simply_oneblock*", "simply-oneblock*"],
+    "xaero": ["xaerominimap*", "xaeros-minimap*", "xaeros_minimap*"],
+    "trinkets": ["trinkets*"],
+    "journeymap": ["journeymap*"],
+    "voxelmap": ["voxelmap*"],
 }
 
 
@@ -279,6 +283,31 @@ CASES = {
                '$C key escape tap >/dev/null; sleep 1; $C inventory > $S/craft.json'],
         checks=[check_file("snow.json", r'"minecraft:snowball":\s*4', "the snowballs stayed (not thrown)"),
                 check_file("craft.json", r'"minecraft:emerald":\s*1', "an emerald with the planks")],
+    ),
+    "maps": dict(
+        about="Xaero's minimap with Trinkets: the models load (Yumi's client init, Trinkets' reloader) and the map draws",
+        mods=["xaero", "trinkets"], scene="none", env={"HORIZON_JAVA_DEBUG": "gpu"},
+        steps=['sleep 30'],
+        checks=[check_log(r"block and item models loaded", "the models' reload ends"),
+                check_log(r"gpu: a blit of horizon:dynamic/gpu", "the minimap's picture reaches the HUD")],
+        forbid=[r"models' reload didn't end", r"handler\$\w+\$xaerominimap\$\w+\): java"],
+        look="Xaero's minimap at the top left: land in its colours, N/E/S/W",
+    ),
+    "journeymap": dict(
+        about="JourneyMap (with Trinkets): it maps the chunks around (its task thread reads the client's chunks)",
+        mods=["journeymap", "trinkets"], scene="none",
+        steps=['sleep 90; find $S/journeymap/data -name "c.*.jmc" > $S/jm.txt'],
+        checks=[check_log(r"block and item models loaded", "the models' reload ends"),
+                check_file("jm.txt", r"\.jmc", "JourneyMap saved mapped chunks")],
+        look="JourneyMap's round minimap at the top right, filled in",
+    ),
+    "voxelmap": dict(
+        about="VoxelMap: its minimap draws through the feature dispatcher",
+        mods=["voxelmap"], scene="none", env={"HORIZON_JAVA_DEBUG": "gpu"},
+        steps=['sleep 40'],
+        checks=[check_log(r"gpu: a blit of horizon:dynamic/gpu", "VoxelMap's HUD target reaches the HUD")],
+        forbid=[r"voxelmap\$onTick\): java"],
+        look="VoxelMap's round minimap at the top right: land, arrow, coordinates",
     ),
     "bigpack": dict(
         about="A whole pack (--pack): Java starts, the registries load, a player joins in time, the mods' worldgen runs",

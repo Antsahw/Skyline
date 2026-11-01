@@ -686,6 +686,14 @@ gets SPIR-V, vertex layouts and uniform lists.
 - Text components are resolved on the Java side (`getVisualOrderText`, styles kept): a LAN
   guest's or a dedicated server player's game has no mod's lang files ("jm.minimap.compass.n").
   Vanilla keys in mods' HUD text now come in the server's language.
+- Mods' injections into Minecraft's constructor at its options (`INVOKE Options.<init>`:
+  Yumi runs its mods' `yumi:client_init` there, Trinkets Updated's) run after the registries'
+  freeze (`HorizonHooks.START_OPTIONS`, from FabricBoot): Yumi's common init runs at the
+  freeze, and the client init registers receivers of payloads it made.
+- The mods' client reload listeners ordered after the models (`getFabricDependencies`) run in
+  the models' reload, after them, each failing alone (`failingAlone`); they used to be left out.
+- The client player's `levelCallback` is a no-op callback, not `NULL` (a copy of the server
+  player's): JourneyMap gives no mapping task to a player not in a level (its map stayed empty).
 - The keys mods bind are read again every 100 server ticks and resent when they change
   (JourneyMap registers its keys at its first client tick, after the first join).
 - **Mixin strips the injector annotations off merged handlers**: only `@MixinMerged` (mixin,
@@ -1154,9 +1162,10 @@ shows them (`/recipes justhammers:iron_hammer`). Fixed since (bridge-pack3): Ope
 Claims (a mirrored connection isn't "connecting"), FrozenLib capes (no downloads), Better
 Combat / Spell Engine / Player Animation Lib on the client player, and the server tick that
 froze while the client's models reloaded (now prepared on background workers, applied by
-`tasks()`). Left: with Trinkets installed the models' reload never ends (its model discovery
-renews a future its client manager completes, which this reload doesn't run): Xaero's
-minimap gets no baked models.
+`tasks()`). With Trinkets installed the models' reload never ended (bridge-gpu-1 fixed it:
+Trinkets Updated's client init is a Yumi entrypoint run from Minecraft's constructor at its
+options, which never ran, so its client manager, whose preparation the models wait for, was
+never registered).
 
 A 137-jar pack (`big4t`, 2026-11-01, bridge-pack4: `big3` plus RFTools Base/Builder,
 Entangled, Hopper Gadgetry, Copper Hopper, Item Collectors, Simple Magnets, Paladins, Rogues,
@@ -1172,7 +1181,7 @@ was sea), Puzzles Lib's join (the client player has its connection), Combat Roll
 `RollManager` (mixin field initializers run on mirror objects). Left: Lithostitched's
 `wrapNoiseRouter` constructor wrap fails (it wants a registry the mirror's chunk map lacks;
 no worse than before, when it never ran); CCA's scoreboard client tick wants a scoreboard;
-the vanilla HUD's vehicle hearts (`this.variables` null); Xaero's HUD models (Trinkets, above).
+the vanilla HUD's vehicle hearts (`this.variables` null).
 Item Alchemy is out: its library bundles CompatDatapacks, which rewrites every recipe's
 `result.item` to `id` and breaks BCLib's recipes (BetterEnd's alloying and infusion: the
 registries don't load), a conflict on real Fabric too; Item Alchemy's own recipes need that

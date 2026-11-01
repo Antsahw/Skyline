@@ -131,6 +131,16 @@ public final class FabricBoot {
             loader.invokeEntrypoints("server", DedicatedServerModInitializer.class, DedicatedServerModInitializer::onInitializeServer);
         }
         freezeRegistries();
+        if (env == EnvType.CLIENT) {
+            // Minecraft's constructor goes on to its options: the mods' injections there.
+            try {
+                Class.forName("dev.horizonlab.platform.HorizonClient", true, gameLoader).getMethod("optionsStart").invoke(null);
+            } catch (ClassNotFoundException e) {
+                // No platform mod.
+            } catch (ReflectiveOperationException e) {
+                Natives.log("The client's start at its options failed: " + (e.getCause() != null ? e.getCause() : e));
+            }
+        }
         List<String> mods = new ArrayList<>();
         for (ModContainer mod : loader.getAllMods()) {
             mods.add(mod.getMetadata().getId() + " " + mod.getMetadata().getVersion().getFriendlyString());

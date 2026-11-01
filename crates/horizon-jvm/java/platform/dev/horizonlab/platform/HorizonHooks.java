@@ -312,12 +312,21 @@ public final class HorizonHooks {
     /** The game's start point, before and after Fabric's entrypoints (fireClient's methods). */
     public static final String START_BEFORE = "<start before entrypoints>";
     public static final String START_AFTER = "<start after entrypoints>";
+    /**
+     * Minecraft's constructor where it makes the options: after the entrypoints and the
+     * registries' freeze (FabricBoot runs it then). Yumi runs its mods' client initializers
+     * there (Trinkets Updated's), which register receivers of payloads its common init made.
+     */
+    public static final String START_OPTIONS = "<start at the options>";
 
     /** START_BEFORE or START_AFTER for an @At at Minecraft.<init>'s first Thread.currentThread(); else null. */
     private static String startPoint(Object at) {
         List<?> ats = at instanceof List<?> l ? l : at == null ? List.of() : List.of(at);
         if (ats.size() != 1 || !(ats.get(0) instanceof AnnotationNode node)) return null;
         if (!"INVOKE".equals(get(node, "value"))) return null;
+        // The options' construction comes after the entrypoints (Yumi runs its mods' client
+        // initializers there: Trinkets Updated's).
+        if (String.valueOf(get(node, "target")).startsWith("Lnet/minecraft/client/Options;<init>(")) return START_OPTIONS;
         if (!"Ljava/lang/Thread;currentThread()Ljava/lang/Thread;".equals(get(node, "target"))) return null;
         Object ordinal = get(node, "ordinal");
         if (ordinal instanceof Integer o && o != 0) return null;
@@ -377,7 +386,12 @@ public final class HorizonHooks {
                         : method.equals("runTick")
                                 ? (params.length == 2 && params[0] == boolean.class && CallbackInfo.class.isAssignableFrom(params[1]))
                                         || (params.length == 1 && CallbackInfo.class.isAssignableFrom(params[0]))
-                                : params.length == 1 && CallbackInfo.class.isAssignableFrom(params[0]);
+                                // The constructor's: its GameConfig may be taken (null here).
+                                : method.equals(START_AFTER) || method.equals(START_BEFORE) || method.equals(START_OPTIONS)
+                                        ? (params.length == 1 && CallbackInfo.class.isAssignableFrom(params[0]))
+                                                || (params.length == 2 && params[0] == net.minecraft.client.main.GameConfig.class
+                                                        && CallbackInfo.class.isAssignableFrom(params[1]))
+                                        : params.length == 1 && CallbackInfo.class.isAssignableFrom(params[0]);
                 if (!fits) {
                     Natives.log("Mixin census: " + h.mod() + "'s " + h.handler() + " in the client's " + method
                             + " takes what Horizon can't give; not run");

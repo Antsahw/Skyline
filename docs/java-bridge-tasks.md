@@ -68,3 +68,12 @@ Never write as the user; mark what you post (CLAUDE.md). Never run mod jars the 
 ## Reports
 
 (Newest last. One short entry per task: area, task, branch, works / doesn't / how to test.)
+
+- **gpu 1, map mods with Trinkets** (`bridge-gpu-1`). Works: Xaero's minimap, JourneyMap and
+  VoxelMap with Trinkets Updated 4.2.1: the models load in ~9 s. Cause: Trinkets' client init is
+  a Yumi entrypoint run from `Minecraft.<init>` at its options, which never ran; now fired after
+  the registries' freeze. Also: client reload listeners after the models now run with them;
+  JourneyMap's map was empty on `java-bridge` (the client player's `levelCallback` was `NULL`:
+  no mapping task), fixed. Regress cases `maps`, `journeymap`, `voxelmap` (jars: Xaero's
+  Minimap, Trinkets, JourneyMap, VoxelMap). Test: those four in `~/hz-test/mods-java`, join,
+  wait ~1 minute: Xaero's map top left, JourneyMap's/VoxelMap's top right.

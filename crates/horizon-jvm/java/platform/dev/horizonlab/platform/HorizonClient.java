@@ -54,6 +54,11 @@ public final class HorizonClient {
         HorizonHooks.fireClient(minecraft, after ? HorizonHooks.START_AFTER : HorizonHooks.START_BEFORE);
     }
 
+    /** Minecraft's constructor at its options, after the registries' freeze (FabricBoot). */
+    public static void optionsStart() {
+        HorizonHooks.fireClient(minecraft, HorizonHooks.START_OPTIONS);
+    }
+
     public static void finish() throws ReflectiveOperationException {
         Minecraft mc = minecraft;
         // options.txt is brought up to date by the game's data fixer, as the server's saves are.
@@ -631,6 +636,9 @@ public final class HorizonClient {
             } finally {
                 set(net.minecraft.world.entity.Entity.class, local, "level", player.level());
             }
+            // In its level, as a client player is once added to it (JourneyMap maps only for a
+            // player whose levelCallback isn't NULL, which the server player's copy is).
+            set(net.minecraft.world.entity.Entity.class, local, "levelCallback", IN_LEVEL);
             PLAYERS.put(player.getUUID(), local);
         }
         SERVER_PLAYERS.put(local, player);
@@ -1347,11 +1355,15 @@ public final class HorizonClient {
                 if (!id.equals(net.minecraft.client.renderer.Sheets.GUI_SHEET)) byTexture.put(id, entry);
             });
             // With the colour maps biome tints read (grass, foliage: GrassColor.pixels...).
-            java.util.List<net.minecraft.server.packs.resources.PreparableReloadListener> listeners = java.util.List.of(
+            java.util.List<net.minecraft.server.packs.resources.PreparableReloadListener> listeners = new java.util.ArrayList<>(java.util.List.of(
                     atlases, models,
                     new net.minecraft.client.resources.GrassColorReloadListener(),
                     new net.minecraft.client.resources.FoliageColorReloadListener(),
-                    new net.minecraft.client.resources.DryFoliageColorReloadListener());
+                    new net.minecraft.client.resources.DryFoliageColorReloadListener()));
+            // The mods' listeners that come after the models (Trinkets' client manager, whose
+            // preparation the models' reload waits for: without it the reload never ended),
+            // in the same reload as vanilla runs them; one that fails is left out alone.
+            for (var listener : AFTER_MODELS) listeners.add(failingAlone(listener));
             // Prepared on the game's background workers, applied on the client's thread (the
             // server's: Minecraft.execute, which tasks() runs each tick), where the atlases
             // upload to the GPU (never a pool thread: "Rendersystem called from wrong thread",
@@ -1368,6 +1380,39 @@ public final class HorizonClient {
             Natives.log("Horizon's client: the models couldn't be loaded: " + root);
             for (var f : root.getStackTrace()) Natives.log("    at " + f);
         }
+    }
+
+    /** The mods' client reload listeners that come after the models (reloadClientResources). */
+    private static final java.util.List<net.minecraft.server.packs.resources.PreparableReloadListener> AFTER_MODELS =
+            new java.util.ArrayList<>();
+
+    /** A mod's reload listener whose failure (after its preparation) is logged, not the reload's. */
+    private static net.minecraft.server.packs.resources.PreparableReloadListener failingAlone(
+            net.minecraft.server.packs.resources.PreparableReloadListener listener) {
+        return (net.minecraft.server.packs.resources.PreparableReloadListener) java.lang.reflect.Proxy.newProxyInstance(
+                HorizonClient.class.getClassLoader(),
+                new Class<?>[] {net.minecraft.server.packs.resources.PreparableReloadListener.class},
+                (proxy, method, args) -> {
+                    Object result;
+                    try {
+                        result = method.invoke(listener, args);
+                    } catch (java.lang.reflect.InvocationTargetException e) {
+                        if (!method.getName().equals("reload")) throw e.getCause();
+                        // Failed at once: the others mustn't wait for it at the barrier.
+                        Natives.log("Horizon's client: a mod's resource reload (" + listener.getClass().getName() + ") failed: " + e.getCause());
+                        return ((net.minecraft.server.packs.resources.PreparableReloadListener.PreparationBarrier) args[2])
+                                .wait(net.minecraft.util.Unit.INSTANCE).thenAccept(unit -> { });
+                    }
+                    if (result instanceof java.util.concurrent.CompletableFuture<?> future) {
+                        return future.exceptionally(t -> {
+                            Throwable root = t;
+                            while (root.getCause() != null && root.getCause() != root) root = root.getCause();
+                            Natives.log("Horizon's client: a mod's resource reload (" + listener.getClass().getName() + ") failed: " + root);
+                            return null;
+                        });
+                    }
+                    return result;
+                });
     }
 
     /** The models' reload under way: reload, model manager, atlas manager, start time, skins. */
@@ -1405,6 +1450,16 @@ public final class HorizonClient {
         }
     }
     private static boolean gpuParts;
+
+    /** A client player's place in its level: moves and removals are the server's business. */
+    private static final net.minecraft.world.level.entity.EntityInLevelCallback IN_LEVEL =
+            new net.minecraft.world.level.entity.EntityInLevelCallback() {
+                @Override
+                public void onMove() {}
+
+                @Override
+                public void onRemove(net.minecraft.world.entity.Entity.RemovalReason reason) {}
+            };
 
     /**
      * The game renderer's feature dispatcher (its render buffers, the real models and atlases,
@@ -1669,6 +1724,9 @@ public final class HorizonClient {
         int skipped = 0;
         for (var listener : new java.util.ArrayList<>(listeners)) {
             if (afterModels(listener)) {
+                // Run with the models' reload instead (models()), after them as Fabric orders
+                // it: Trinkets' model discovery waits for its manager's preparation.
+                AFTER_MODELS.add(listener);
                 skipped++;
                 continue;
             }
@@ -1683,7 +1741,7 @@ public final class HorizonClient {
             }
         }
         Natives.log("Horizon's client: " + ran + " of the mods' resource reload listeners ran over " + packs.size()
-                + " packs" + (skipped > 0 ? "; " + skipped + " that read baked models or textures left out" : ""));
+                + " packs" + (skipped > 0 ? "; " + skipped + " that read baked models or textures run with the models" : ""));
     }
 
     /**
