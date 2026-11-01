@@ -639,6 +639,21 @@ gets SPIR-V, vertex layouts and uniform lists.
   abilities on the local player, a mouse handler from the start (its window events are
   cancelled: `MouseHandlerMixin`), the client level's spawn (`ClientLevelData.setSpawn`), an
   empty player list on each connection, a camera at the origin with no player.
+- JourneyMap remakes its full-screen map's buttons, and clears its map, every frame while a
+  button's texture `hasImage()` is false: that needs `AbstractTexture.texture` set, which the
+  headless dynamic textures now have (`HorizonTextures.Texture`, a GPU texture of nothing).
+- `TextureManager.getTexture(id)` of a resource is a `SimpleTexture` (`HorizonTextures.Named`):
+  VoxelMap reads the resource itself for a `ReloadableTexture` and gets nothing otherwise.
+- `GameRenderer.featureRenderDispatcher` (real render buffers, models, atlases, font) is made
+  with the models: VoxelMap's `SubmitPass` draws its HUD through `prepareFrame` and
+  `renderAllFeatures`.
+- `ClientLevel.hasChunk` is Horizon's (a held copy exists): VoxelMap maps only chunks it has.
+- Threads without a view (mods' own: VoxelMap's map thread) read blocks from the held client
+  chunks (`HorizonServer.blockState` falls back to `HorizonChunks.heldBlock`); before, every
+  block there was air (the map stayed black).
+- Text components are resolved on the Java side (`getVisualOrderText`, styles kept): a LAN
+  guest's or a dedicated server player's game has no mod's lang files ("jm.minimap.compass.n").
+  Vanilla keys in mods' HUD text now come in the server's language.
 - The keys mods bind are read again every 100 server ticks and resent when they change
   (JourneyMap registers its keys at its first client tick, after the first join).
 
@@ -1034,11 +1049,16 @@ Map mods (2026-11-01, `bridge-gpu2`, headless, llvmpipe):
   pipelines into a window-sized target, the explored land around in its colours.
 - JourneyMap 6.0.10: its minimap (circle, compass, coordinates, biome, the map in its colours,
   filling in over ~2 minutes as it maps the chunks around) draws on the HUD. J opens its
-  full-screen map (first its About screen, Escape for the map): its frame and texts draw but no
-  tiles yet (only the grid; "Map Zoom: 512"). Its server side's `LoadedChunkOverlayPlugin`
-  fails each tick (`ChunkMap` of the mirror).
-- VoxelMap 1.16.13: fails at its first client tick (`EntityMapImageManager`: an image it reads
-  from a texture is null); not started.
+  full-screen map (the first time its About screen, Escape for the map): toolbars, the map,
+  the key list (2026-11-01, `bridge-gpu3`; "Map Zoom: 512" is its normal 1:1). Its server
+  side's `LoadedChunkOverlayPlugin` fails each tick (`ChunkMap` of the mirror).
+- VoxelMap 1.16.13 (`bridge-gpu3`): its minimap draws (map, frame, arrow, compass,
+  coordinates), through the game renderer's feature dispatcher.
+- Per player (host and LAN guest, `bridge-gpu3`): Xaero's minimap is each player's own.
+  JourneyMap's map is centred on each player, but its coordinates label is the other
+  player's (one player cache: `DataCache`). VoxelMap shares one map image between players: it
+  shifts by each player's moves in turn and shows black gaps. Both are written for one client;
+  per-player copies of their state are left.
 
 Left: the client tick is ~35 ms with the minimap on llvmpipe (the frame's start ~25: Xaero's
 writer, the HUD ~10: the picture drawn and read back at 10 Hz).

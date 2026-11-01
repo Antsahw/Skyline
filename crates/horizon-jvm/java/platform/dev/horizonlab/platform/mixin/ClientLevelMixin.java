@@ -38,6 +38,17 @@ public abstract class ClientLevelMixin {
         if (HorizonServer.isMirror(this)) cir.setReturnValue(horizon$server().getScoreboard());
     }
 
+    /**
+     * Whether the client has a chunk: whether Horizon has it (its chunk source, a client chunk
+     * cache, has none of Horizon's). VoxelMap maps only chunks it has.
+     */
+    @Inject(method = "hasChunk", at = @At("HEAD"), cancellable = true)
+    private void horizon$hasChunk(int x, int z, CallbackInfoReturnable<Boolean> cir) {
+        if (HorizonServer.isMirror(this) && horizon$server() instanceof net.minecraft.server.level.ServerLevel server) {
+            cir.setReturnValue(dev.horizonlab.platform.HorizonChunks.chunk(server, x, z, (ClientLevel) (Object) this) != null);
+        }
+    }
+
     /** A packet a mod's client code sends through the level: no connection to take it. */
     @Inject(method = "sendPacketToServer", at = @At("HEAD"), cancellable = true)
     private void horizon$send(net.minecraft.network.protocol.Packet<?> packet, org.spongepowered.asm.mixin.injection.callback.CallbackInfo ci) {

@@ -1879,7 +1879,15 @@ public final class HorizonServer {
             }
         }
         Section section = section(level, pos.getX(), pos.getY(), pos.getZ());
-        if (section == null) return net.minecraft.world.level.block.Blocks.AIR.defaultBlockState();
+        if (section == null) {
+            // A mod's own thread (VoxelMap's map, JourneyMap's tasks) can't read Horizon's world:
+            // the chunks its client was given (HorizonChunks.held) answer.
+            if (SECTIONS.get().noView && level instanceof ServerLevel server) {
+                BlockState held = HorizonChunks.heldBlock(server, pos);
+                if (held != null) return held;
+            }
+            return net.minecraft.world.level.block.Blocks.AIR.defaultBlockState();
+        }
         HorizonProfile.cached();
         return section.get((pos.getY() & 15) << 8 | (pos.getZ() & 15) << 4 | (pos.getX() & 15));
     }
@@ -1933,6 +1941,8 @@ public final class HorizonServer {
         final Map<Level, it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap<Section>> levels = new IdentityHashMap<>();
         /** This view's chunks' revisions (Natives.chunkRevision), asked once a chunk. */
         final Map<Level, it.unimi.dsi.fastutil.longs.Long2LongOpenHashMap> revisions = new IdentityHashMap<>();
+        /** This thread has no view of Horizon's world (a mod's own thread). */
+        boolean noView;
     }
 
     private static final Section NONE = new Section(new int[0], new BlockState[0]);
@@ -1956,7 +1966,10 @@ public final class HorizonServer {
             sections.revisions.clear();
             sections.epoch = epoch;
             sections.last = null;
+            sections.noView = false;
         }
+        // A thread with no view of Horizon's world (a mod's own: VoxelMap's) reads nothing.
+        if (sections.noView) return null;
         long key = net.minecraft.core.SectionPos.asLong(x >> 4, y >> 4, z >> 4);
         if (sections.lastLevel == level && sections.lastKey == key && sections.last != null) {
             return sections.last == NONE ? null : sections.last;
@@ -1995,6 +2008,11 @@ public final class HorizonServer {
         if (section == null) {
             long started = HorizonProfile.ON ? System.nanoTime() : 0L;
             section = fetch(level, dimension, x, y, z);
+            if (revision == -1 && section == NONE) {
+                // No view on this thread: nothing of Horizon's world can be read here.
+                sections.noView = true;
+                return null;
+            }
             if (HorizonProfile.ON) HorizonProfile.read(System.nanoTime() - started);
             if (revision >= 0 && section != NONE) {
                 synchronized (KEPT) {

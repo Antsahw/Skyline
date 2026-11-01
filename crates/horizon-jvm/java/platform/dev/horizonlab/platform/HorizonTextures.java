@@ -49,9 +49,31 @@ public final class HorizonTextures {
         public void close() {}
     }
 
-    private static final class Named extends AbstractTexture {
+    /**
+     * The texture behind a named view, for code that asks an AbstractTexture for its texture
+     * (JourneyMap's hasImage: buttons with none are remade every frame). Nothing is on a GPU.
+     */
+    public record Texture(View view) implements com.mojang.renderpearl.api.textures.GpuTexture {
+        @Override public int getWidth(int mip) { return view.width() >> mip; }
+        @Override public int getHeight(int mip) { return view.height() >> mip; }
+        @Override public int getDepthOrLayers() { return 1; }
+        @Override public int getMipLevels() { return 1; }
+        @Override public com.mojang.renderpearl.api.GpuFormat getFormat() { return com.mojang.renderpearl.api.GpuFormat.RGBA8_UNORM; }
+        @Override public int usage() { return USAGE_TEXTURE_BINDING | USAGE_COPY_DST; }
+        @Override public String getLabel() { return view.name(); }
+        @Override public boolean isClosed() { return false; }
+        @Override public void close() {}
+    }
+
+    /**
+     * A texture of the resources under its name: a SimpleTexture, as vanilla's (mods read the
+     * resource itself for one: VoxelMap's radar icons), whose pixels are never loaded here.
+     */
+    private static final class Named extends net.minecraft.client.renderer.texture.SimpleTexture {
         Named(View view) {
+            super(Identifier.parse(view.name()));
             this.textureView = view;
+            this.texture = new Texture(view);
         }
     }
 

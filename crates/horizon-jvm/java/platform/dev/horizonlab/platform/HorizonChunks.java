@@ -124,12 +124,45 @@ public final class HorizonChunks {
         if (held != null && revision >= 0 && (long) held[1] == revision) return (LevelChunk) held[0];
         if (revision == -2) {
             chunks.remove(key);
+            var byServer = HELD_BY_SERVER.get(level);
+            if (byServer != null) byServer.remove(key);
             return null;
         }
         LevelChunk copy = copy(level, view, cx, cz);
         if (copy instanceof Copy c) c.ensure();
-        if (copy != null) chunks.put(key, new Object[] {copy, revision});
+        var byServer = HELD_BY_SERVER.computeIfAbsent(level, l -> new java.util.concurrent.ConcurrentHashMap<>());
+        VIEW_OF.put(level, view);
+        if (copy != null) {
+            chunks.put(key, new Object[] {copy, revision});
+            if (byServer.size() > 8192) byServer.clear();
+            byServer.put(key, copy);
+        } else {
+            byServer.remove(key);
+        }
         return copy;
+    }
+
+    /** The held chunks by Horizon's level (what threads without a view read) and a client level of each. */
+    private static final Map<ServerLevel, java.util.concurrent.ConcurrentHashMap<Long, LevelChunk>> HELD_BY_SERVER =
+            new java.util.concurrent.ConcurrentHashMap<>();
+    private static final Map<ServerLevel, net.minecraft.world.level.Level> VIEW_OF = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * A block as a client of {@code level} was given it (a held chunk), for a thread that can't
+     * read Horizon's world; null where none is held (then wanted, made at the next client tick).
+     */
+    public static BlockState heldBlock(ServerLevel level, BlockPos pos) {
+        var chunks = HELD_BY_SERVER.get(level);
+        long key = ChunkPos.pack(pos.getX() >> 4, pos.getZ() >> 4);
+        LevelChunk chunk = chunks == null ? null : chunks.get(key);
+        if (chunk != null) return chunk.getBlockState(pos);
+        var view = VIEW_OF.get(level);
+        if (view != null) {
+            synchronized (COPIES) {
+                WANTED.computeIfAbsent(view, l -> new java.util.LinkedHashSet<>()).add(key);
+            }
+        }
+        return null;
     }
 
     /** Makes up to {@code most} of the chunks of client levels mods asked for off the game's threads. */

@@ -21,6 +21,7 @@ public abstract class DynamicTextureMixin extends AbstractTexture {
         if (!HorizonClient.headless()) return;
         ci.cancel();
         this.textureView = HorizonTextures.dynamic((DynamicTexture) (Object) this);
+        this.texture = new HorizonTextures.Texture((HorizonTextures.View) this.textureView);
     }
 
     @Inject(method = "createTexture(Ljava/util/function/Supplier;)V", at = @At("HEAD"), cancellable = true)
@@ -28,6 +29,7 @@ public abstract class DynamicTextureMixin extends AbstractTexture {
         if (!HorizonClient.headless()) return;
         ci.cancel();
         this.textureView = HorizonTextures.dynamic((DynamicTexture) (Object) this);
+        this.texture = new HorizonTextures.Texture((HorizonTextures.View) this.textureView);
     }
 
     @Inject(method = "upload", at = @At("HEAD"), cancellable = true)
