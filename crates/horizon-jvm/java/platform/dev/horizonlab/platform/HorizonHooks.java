@@ -341,10 +341,11 @@ public final class HorizonHooks {
                 handler.invoke(Modifier.isStatic(handler.getModifiers()) ? null : minecraft, call);
             } catch (Throwable t) {
                 Throwable cause = t instanceof java.lang.reflect.InvocationTargetException ite && ite.getCause() != null ? ite.getCause() : t;
+                while (cause.getCause() != null && cause.getCause() != cause) cause = cause.getCause();
                 if (FAILURES.merge(handler.toString(), 1, Integer::sum) <= 3) {
                     Natives.log("A mod failed in the client's " + method + " (" + handler.getName() + "): " + cause);
                     StackTraceElement[] frames = cause.getStackTrace();
-                    for (int f = 0; f < Math.min(frames.length, 8); f++) Natives.log("    at " + frames[f]);
+                    for (int f = 0; f < Math.min(frames.length, 14); f++) Natives.log("    at " + frames[f]);
                 }
             }
         }
@@ -361,8 +362,10 @@ public final class HorizonHooks {
                 Class<?>[] params = m.getParameterTypes();
                 boolean fits = h.modifyArg()
                         ? params.length == 1 && params[0] == boolean.class
+                        // runTick's handlers may take its boolean or leave it out, as Mixin allows.
                         : method.equals("runTick")
-                                ? params.length == 2 && params[0] == boolean.class && CallbackInfo.class.isAssignableFrom(params[1])
+                                ? (params.length == 2 && params[0] == boolean.class && CallbackInfo.class.isAssignableFrom(params[1]))
+                                        || (params.length == 1 && CallbackInfo.class.isAssignableFrom(params[0]))
                                 : params.length == 1 && CallbackInfo.class.isAssignableFrom(params[0]);
                 if (!fits) {
                     Natives.log("Mixin census: " + h.mod() + "'s " + h.handler() + " in the client's " + method

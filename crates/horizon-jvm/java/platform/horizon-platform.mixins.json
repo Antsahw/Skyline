@@ -60,6 +60,7 @@
     "ClientPlayerMixin",
     "RecipeBookComponentMixin",
     "TextInputManagerMixin",
+    "MouseHandlerMixin",
     "ClientPlayNetworkingMixin",
     "ItemModelResolverMixin",
     "ItemStackRenderStateMixin",

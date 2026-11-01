@@ -280,9 +280,14 @@ gets SPIR-V, vertex layouts and uniform lists.
   second per player (`PIP_INTERVAL`); in between the last blit is repeated.
 - Textures the headless client never uploaded (`HorizonTextures.View`: a mod's PNG, a dynamic
   texture) are uploaded the first time a pass samples them; atlases' views bind white.
-- Horizon's window draws images over 64 pixels from 4 slots of 256 (`JAVA_BIG_IMAGE_SLOTS`).
-  Only render targets (textures drawn into, up to 1024 square) become HUD images; real atlases'
-  quads go the headless sprites' way.
+- Horizon's window draws images over 64 pixels from 8 slots of 512 (`JAVA_BIG_IMAGE_SLOTS`).
+  Only textures a render pass drew into (`HorizonGpu.drawnInto`: not atlases, which
+  `TextureAtlas` also draws with passes, nor textures written from memory) become HUD images;
+  real atlases' quads go the headless sprites' way. A bigger one (a full-screen map's target,
+  the window's 1281x720) is read at most 10 times a second per player and sent shrunk
+  (`HorizonGraphics.shrink`, box filter) to 512.
+- Mods' blits of a screen-sized target land in `gameRenderState().guiRenderState` (Xaero's
+  World Map): the capture's `GuiRenderState` stands there while a screen or the HUD draws.
 - `HORIZON_JAVA_GPU=0` turns the device off. `HORIZON_JAVA_DEBUG=gpu` logs textures,
   pipelines and GPU blits (and saves one in 100 as `/tmp/horizon-gpu-N.png`);
   `HORIZON_GPU_TRACE=1` logs each pass (targets, draws, pipelines, its first draw's vertices and
@@ -516,6 +521,28 @@ gets SPIR-V, vertex layouts and uniform lists.
   `GameRenderer.extract` HEAD and draws in a picture in picture (`MinimapPipRenderer`), reading
   `gameRenderer.guiRenderer`'s projection, `lighting()`, `mainRenderTarget()`, a client level's
   `clockManager()` (`ClientPacketListener.clockManager`) and `Minecraft.getResourceManager()`.
+
+- `Minecraft.running` must be true (`isRunning`): mods' own threads loop on it (Xaero's
+  World Map's `MapRunner`, started once and gone at once otherwise: "Preparing World Map..."
+  for ever).
+- A client level's chunks (`Level.getChunk` on a headless client level) are Horizon's copies
+  whose `getLevel()` is that client level (JourneyMap maps only chunks of the player's level),
+  kept (`HorizonChunks.held`) until Horizon's chunk changes (`Natives.chunkRevision`). Mods
+  read them on their own threads, where Horizon's world can't be read (no view: revision -1):
+  those get what was made; one never made is wanted and made on the next client tick
+  (`serveWanted`). Copies are filled at once for that.
+- The login's chunk radius is the client's `serverRenderDistance` (`getEffectiveRenderDistance`):
+  0 makes JourneyMap map one chunk.
+- `TextureManager.byPath` mirrors what mods register (JourneyMap reads it with an accessor and
+  makes a new texture each frame otherwise, which pushes the GPU images out of the window's
+  slots). Each new dynamic texture is a new `horizon:dynamic/N`.
+- What else the headless client carries for map mods: a monitor (`HorizonMonitors`: SDL's
+  `findBestMonitor` otherwise), a debug overlay and a chat component on the HUD, chat
+  abilities on the local player, a mouse handler from the start (its window events are
+  cancelled: `MouseHandlerMixin`), the client level's spawn (`ClientLevelData.setSpawn`), an
+  empty player list on each connection, a camera at the origin with no player.
+- The keys mods bind are read again every 100 server ticks and resent when they change
+  (JourneyMap registers its keys at its first client tick, after the first join).
 
 - **The client level needs a connection.** REI (and others) read the client's registries as
   `minecraft.level.connection.registryAccess()` once there is a level; with a null one REI
@@ -769,6 +796,17 @@ map listeners (`GrassColorReloadListener`...), and a real `FontManager` (`fonts`
 client's Font answers with its glyphs from then on (text drawn on the GPU shows). The real
 atlases join the headless GUI one in `Minecraft.getAtlasManager()`. Client levels get a
 `BiomeManager` over their own chunks with the world's seed.
+
+Map mods (2026-11-01, `bridge-gpu2`, headless, llvmpipe):
+- Xaero's World Map 1.47.2 (with the minimap): M opens the full-screen map, drawn by its own
+  pipelines into a window-sized target, the explored land around in its colours.
+- JourneyMap 6.0.10: its minimap (circle, compass, coordinates, biome, the map in its colours,
+  filling in over ~2 minutes as it maps the chunks around) draws on the HUD. J opens its
+  full-screen map (first its About screen, Escape for the map): its frame and texts draw but no
+  tiles yet (only the grid; "Map Zoom: 512"). Its server side's `LoadedChunkOverlayPlugin`
+  fails each tick (`ChunkMap` of the mirror).
+- VoxelMap 1.16.13: fails at its first client tick (`EntityMapImageManager`: an image it reads
+  from a texture is null); not started.
 
 Left: the client tick is ~35 ms with the minimap on llvmpipe (the frame's start ~25: Xaero's
 writer, the HUD ~10: the picture drawn and read back at 10 Hz).

@@ -24,6 +24,8 @@ public final class HorizonClient {
         minecraft = mc;
         File dir = new File(gameDir);
         set(Minecraft.class, mc, "gameDirectory", dir);
+        // Running (isRunning): mods' own threads loop while it is (Xaero's World Map's MapRunner).
+        set(Minecraft.class, mc, "running", true);
         // What Minecraft's constructor sets before Fabric's client entrypoints run, which
         // mods' client initializers read. Its task queue (Minecraft.execute: a mod's client
         // receiver, or initializer, hands work to the client's thread), which the server
@@ -67,7 +69,11 @@ public final class HorizonClient {
         set(Minecraft.class, mc, "narrator", narrator);
         set(Minecraft.class, mc, "atlasManager", atlases());
         // Its textures: named, never uploaded (TextureManagerMixin, HorizonTextures).
-        set(Minecraft.class, mc, "textureManager", Natives.allocate(net.minecraft.client.renderer.texture.TextureManager.class));
+        var textures = Natives.allocate(net.minecraft.client.renderer.texture.TextureManager.class);
+        // Its maps, empty (mods' accessors read them: JourneyMap's getTex).
+        set(net.minecraft.client.renderer.texture.TextureManager.class, textures, "byPath", new java.util.HashMap<>());
+        set(net.minecraft.client.renderer.texture.TextureManager.class, textures, "tickableTextures", new java.util.HashSet<>());
+        set(Minecraft.class, mc, "textureManager", textures);
         // Its skins: each profile's default (SkinManagerMixin).
         set(Minecraft.class, mc, "skinManager", Natives.allocate(net.minecraft.client.resources.SkinManager.class));
         // The in-game GUI's object (screens reach its HUD), made without its constructor.
@@ -84,6 +90,26 @@ public final class HorizonClient {
         var bosses = Natives.allocate(net.minecraft.client.gui.components.BossHealthOverlay.class);
         set(net.minecraft.client.gui.components.BossHealthOverlay.class, bosses, "events", new java.util.LinkedHashMap<>());
         set(net.minecraft.client.gui.Hud.class, hud, "bossOverlay", bosses);
+        // The debug overlay (F3), which mods ask whether it shows (JourneyMap hides under it):
+        // reading the client's debug entries below.
+        var debug = Natives.allocate(net.minecraft.client.gui.components.DebugScreenOverlay.class);
+        set(net.minecraft.client.gui.components.DebugScreenOverlay.class, debug, "minecraft", mc);
+        set(net.minecraft.client.gui.Hud.class, hud, "debugOverlay", debug);
+        // The chat (mods' screens read its recent lines: JourneyMap's map; add messages to it),
+        // empty and never drawn.
+        try {
+            Class<?> chatClass = net.minecraft.client.gui.components.ChatComponent.class;
+            var chat = Natives.allocate(chatClass);
+            set(chatClass, chat, "minecraft", mc);
+            set(chatClass, chat, "recentChat", new net.minecraft.util.ArrayListDeque<String>(100));
+            set(chatClass, chat, "allMessages", new java.util.ArrayList<>());
+            set(chatClass, chat, "trimmedMessages", new java.util.ArrayList<>());
+            set(chatClass, chat, "messageDeletionQueue", new java.util.ArrayList<>());
+            set(chatClass, chat, "visibleMessageFilter", (java.util.function.Predicate<Object>) m -> true);
+            set(net.minecraft.client.gui.Hud.class, hud, "chat", chat);
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            Natives.log("Horizon's client: no chat component: " + e);
+        }
         set(net.minecraft.client.gui.Gui.class, gui, "hud", hud);
         set(Minecraft.class, mc, "gui", gui);
         // Screens click through the game mode (handleContainerInput): GameModeClientMixin.
@@ -119,6 +145,8 @@ public final class HorizonClient {
         set(Minecraft.class, mc, "levelExtractor", Natives.allocate(net.minecraft.client.renderer.extract.LevelExtractor.class));
         set(Minecraft.class, mc, "window", Natives.allocate(com.mojang.blaze3d.platform.Window.class));
         windowSize();
+        // Its mouse and keyboard handlers (mods' screens call them: JourneyMap's onButton).
+        mouseAt(0, 0);
         registerCommands();
         // The language manager (mods' translation hooks ask it which language is chosen:
         // Server Translations API's Language.inject), with no resource reloads behind it.
@@ -462,6 +490,7 @@ public final class HorizonClient {
             set(owner, window, "guiScaledHeight", height);
             set(owner, window, "guiScale", scale);
             set(owner, window, "focused", true);
+            set(owner, window, "monitorManager", Natives.allocate(HorizonMonitors.class));
         } catch (ReflectiveOperationException e) {
             Natives.log("Horizon's client: the window's size could not be set: " + e);
         }
@@ -517,6 +546,9 @@ public final class HorizonClient {
             set(net.minecraft.world.entity.player.Player.class, local, "gameProfile", player.getGameProfile());
             // Its keys (isShiftKeyDown: a collision context's descending): none pressed.
             set(net.minecraft.client.player.LocalPlayer.class, local, "input", new net.minecraft.client.player.ClientInput());
+            // What its chat may do (ChatScreen asks: JourneyMap's map has one): anything.
+            set(net.minecraft.client.player.LocalPlayer.class, local, "chatAbilities",
+                    net.minecraft.client.multiplayer.chat.ChatAbilities.NO_RESTRICTIONS);
             // Its own connection (Minecraft.getConnection: mods' per-client state).
             var own = connection(player);
             if (own != null) set(net.minecraft.client.player.LocalPlayer.class, local, "connection", own);
@@ -698,6 +730,7 @@ public final class HorizonClient {
             // Xaero's sun brightness).
             set(net.minecraft.client.multiplayer.ClientPacketListener.class, connection, "clockManager",
                     new net.minecraft.client.ClientClockManager());
+            players(connection);
             if (minecraft.gameMode != null) {
                 set(net.minecraft.client.multiplayer.MultiPlayerGameMode.class, minecraft.gameMode, "connection", connection);
             }
@@ -706,6 +739,13 @@ public final class HorizonClient {
             Natives.log("Horizon's client: no client connection: " + t);
         }
         return searchConnection;
+    }
+
+    /** A connection's player list (getPlayerInfo: JourneyMap's skins), empty. */
+    private static void players(net.minecraft.client.multiplayer.ClientPacketListener connection) throws ReflectiveOperationException {
+        Class<?> owner = net.minecraft.client.multiplayer.ClientPacketListener.class;
+        set(owner, connection, "playerInfoMap", new java.util.concurrent.ConcurrentHashMap<>());
+        set(owner, connection, "listedPlayers", new java.util.LinkedHashSet<>());
     }
 
     /** Runs {@code run} with the player's own client player as Minecraft.player. */
@@ -1045,6 +1085,7 @@ public final class HorizonClient {
         // client at its title screen.
         var players = HorizonServer.players();
         if (players.isEmpty()) {
+            rest(null);
             tickOnce();
             return;
         }
@@ -1057,6 +1098,8 @@ public final class HorizonClient {
                     long t = HorizonProfile.start();
                     tickOnce();
                     t = HorizonProfile.add("client: tick", t);
+                    // The chunks mods asked for on their own threads (JourneyMap's mapping).
+                    HorizonChunks.serveWanted(64);
                     // A frame: the mods' work at its start and end (GameRenderer.extract), its HUD
                     // between.
                     HorizonHooks.fireFrame(minecraft.gameRenderer, true);
@@ -1075,6 +1118,36 @@ public final class HorizonClient {
                     for (StackTraceElement frame : root.getStackTrace()) Natives.log("    at " + frame);
                 }
             }
+        }
+        rest(players.get(0));
+    }
+
+    /**
+     * Between ticks the client stands as the first player's (Minecraft.player, level, screen),
+     * as a game's client always has one: mods' own threads read it (Xaero's World Map's map
+     * runner finds its session through Minecraft.player). Ticks and frames still run as each
+     * player in turn (as()).
+     */
+    private static void rest(net.minecraft.server.level.ServerPlayer player) {
+        try {
+            if (player == null) {
+                if (minecraft.player != null) {
+                    set(Minecraft.class, minecraft, "player", null);
+                    minecraft.level = null;
+                    set(net.minecraft.client.gui.Gui.class, minecraft.gui, "screen", null);
+                }
+                return;
+            }
+            var local = localPlayer(player);
+            var level = clientLevel(player.level());
+            set(Minecraft.class, minecraft, "player", local);
+            minecraft.level = level;
+            set(net.minecraft.world.entity.Entity.class, local, "level", level);
+            var screen = SCREENS.get(player.getUUID());
+            if (screen == null) screen = OVERLAYS.get(player.getUUID());
+            set(net.minecraft.client.gui.Gui.class, minecraft.gui, "screen", screen);
+        } catch (Throwable t) {
+            Natives.log("Horizon's client: the client couldn't rest as a player: " + t);
         }
     }
 
@@ -1205,6 +1278,7 @@ public final class HorizonClient {
                 }
                 set(net.minecraft.client.multiplayer.ClientPacketListener.class, copy, "clockManager",
                         new net.minecraft.client.ClientClockManager());
+                players(copy);
                 if (!(HorizonServer.server() instanceof net.minecraft.client.server.IntegratedServer)) {
                     set(net.minecraft.client.multiplayer.ClientCommonPacketListenerImpl.class, copy, "serverData",
                             new net.minecraft.client.multiplayer.ServerData("Horizon", "horizon",
@@ -1242,12 +1316,32 @@ public final class HorizonClient {
         // Xaero keeps the session of the client that joined last in a static and ends it at the
         // next join (one client a game): each player's client keeps its own here.
         clearStatic("xaero.common.core.XaeroMinimapCore", "currentSession");
-        fireConnection(connection, net.minecraft.network.protocol.game.ClientboundLoginPacket.class, null, "handleLogin");
+        // The login's chunk radius (handleLogin sets it on a real client): mods map that far
+        // (JourneyMap: getEffectiveRenderDistance, 1 chunk without it).
+        minecraft.options.setServerRenderDistance(LOGIN_RADIUS);
+        fireConnection(connection, net.minecraft.network.protocol.game.ClientboundLoginPacket.class, loginPacket(player), "handleLogin");
         try {
             var spawn = new net.minecraft.network.protocol.game.ClientboundSetDefaultSpawnPositionPacket(player.level().getRespawnData());
             fireConnection(connection, net.minecraft.network.protocol.game.ClientboundSetDefaultSpawnPositionPacket.class, spawn, "handleSetSpawn");
         } catch (Throwable t) {
             Natives.log("Horizon's client: no spawn for the client's join: " + t);
+        }
+    }
+
+    /** The chunk radius of the login packet: Horizon's view distance. */
+    private static final int LOGIN_RADIUS = 12;
+
+    /** The login packet the server sends the player (PlayerList.placeNewPlayer's), or null. */
+    private static net.minecraft.network.protocol.game.ClientboundLoginPacket loginPacket(net.minecraft.server.level.ServerPlayer player) {
+        try {
+            var server = HorizonServer.server();
+            var level = player.level();
+            return new net.minecraft.network.protocol.game.ClientboundLoginPacket(player.getId(), level.getLevelData().isHardcore(),
+                    server.levelKeys(), server.getMaxPlayers(), LOGIN_RADIUS, LOGIN_RADIUS, false, true, false,
+                    player.createCommonSpawnInfo(level), false, false);
+        } catch (Throwable t) {
+            Natives.log("Horizon's client: no login packet for the client's join: " + t);
+            return null;
         }
     }
 
@@ -1328,6 +1422,15 @@ public final class HorizonClient {
             return;
         }
         var manager = new net.minecraft.server.packs.resources.MultiPackResourceManager(type, packs);
+        // The resource pack list (Minecraft.getResourcePackRepository: Xaero's World Map hashes the
+        // selected ones): none chosen, as a new game's.
+        try {
+            var repository = new net.minecraft.server.packs.repository.PackRepository();
+            repository.reload();
+            set(Minecraft.class, minecraft, "resourcePackRepository", repository);
+        } catch (Throwable t) {
+            Natives.log("Horizon's client: no resource pack repository: " + t);
+        }
         // The client's resource manager (Minecraft.getResourceManager: Xaero reads its radar
         // icons' definitions there), over the same packs.
         try {
@@ -1516,6 +1619,8 @@ public final class HorizonClient {
             var clientData = new net.minecraft.client.multiplayer.ClientLevel.ClientLevelData(
                     server.getDifficulty(), serverData.isHardcore(), false);
             clientData.setGameTime(server.getGameTime());
+            // Its spawn (ClientboundSetDefaultSpawnPositionPacket's: JourneyMap's UIState).
+            clientData.setSpawn(server.getRespawnData());
             access.horizon$setLevelData(clientData);
             Class<?> owner = net.minecraft.client.multiplayer.ClientLevel.class;
             try {
@@ -1530,6 +1635,15 @@ public final class HorizonClient {
                 set(owner, level, "worldBorder", new net.minecraft.world.level.border.WorldBorder());
                 set(owner, level, "environmentAttributes", server.environmentAttributes());
                 set(owner, level, "seaLevel", server.getSeaLevel());
+                // Its chunk source (mods ask it for the light engine: Xaero's World Map), its
+                // light Horizon's as the level's own (LevelMixin).
+                try {
+                    var cache = new net.minecraft.client.multiplayer.ClientChunkCache(level, 12);
+                    set(net.minecraft.client.multiplayer.ClientChunkCache.class, cache, "lightEngine", HorizonServer.light(level));
+                    set(owner, level, "chunkSource", cache);
+                } catch (Throwable t) {
+                    Natives.log("Horizon's client: a client level has no chunk source: " + t);
+                }
                 // Its biomes (biome tints: grass, foliage, water), from its chunks (Horizon's),
                 // zoomed with the world's seed as a client's are.
                 long seed = server instanceof net.minecraft.server.level.ServerLevel serverLevel ? serverLevel.getSeed() : 0L;
@@ -1696,6 +1810,14 @@ public final class HorizonClient {
             hudPart("extractRenderState", () -> HorizonHooks.fireHud(hud, "extractRenderState", graphics, delta));
         }
         if (DEBUG_HUD) {
+            StringBuilder seq = new StringBuilder("hud ops:");
+            for (var op : graphics.ops()) {
+                var o = op.getAsJsonObject();
+                seq.append(' ').append(o.has("op") ? o.get("op").getAsString() : "?");
+                if (o.has("texture")) seq.append('(').append(o.get("texture").getAsString()).append(')');
+                if (o.has("width")) seq.append('[').append(o.get("width")).append('x').append(o.get("height")).append(']');
+            }
+            Natives.log(seq.toString());
             Natives.log("hud: " + graphics.ops().size() + " ops kept, " + graphics.dropped + " vanilla ones left out; parts "
                     + hooked + "; looking at " + (minecraft.hitResult instanceof net.minecraft.world.phys.BlockHitResult b
                     ? b.getBlockPos().toShortString() + " " + minecraft.level.getBlockState(b.getBlockPos())
