@@ -718,6 +718,11 @@ public final class HorizonServer {
         }
     }
 
+    /** Whether the mods' load functions have run (Horizon places a new player after them). */
+    public static boolean functionsReady() {
+        return HorizonFunctions.ready();
+    }
+
     public static boolean worldgenStart(String dimension, long seed, boolean structures, String world) {
         Thread.currentThread().setContextClassLoader(HorizonServer.class.getClassLoader());
         ensureServer();

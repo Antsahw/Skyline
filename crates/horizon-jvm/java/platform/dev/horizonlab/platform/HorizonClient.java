@@ -75,7 +75,11 @@ public final class HorizonClient {
         set(net.minecraft.client.renderer.texture.TextureManager.class, textures, "tickableTextures", new java.util.HashSet<>());
         set(Minecraft.class, mc, "textureManager", textures);
         // Its skins: each profile's default (SkinManagerMixin).
-        set(Minecraft.class, mc, "skinManager", Natives.allocate(net.minecraft.client.resources.SkinManager.class));
+        var skins = Natives.allocate(net.minecraft.client.resources.SkinManager.class);
+        // Its downloader (FrozenLib's capes): downloads nothing (SkinDownloaderMixin).
+        set(net.minecraft.client.resources.SkinManager.class, skins, "skinTextureDownloader",
+                Natives.allocate(net.minecraft.client.renderer.texture.SkinTextureDownloader.class));
+        set(Minecraft.class, mc, "skinManager", skins);
         // The in-game GUI's object (screens reach its HUD), made without its constructor.
         var gui = (net.minecraft.client.gui.Gui) Natives.allocate(net.minecraft.client.gui.Gui.class);
         var hud = (net.minecraft.client.gui.Hud) Natives.allocate(net.minecraft.client.gui.Hud.class);
@@ -572,55 +576,27 @@ public final class HorizonClient {
             for (String f : new String[] {"attributes", "activeEffects"}) {
                 set(net.minecraft.world.entity.LivingEntity.class, local, f, field(net.minecraft.world.entity.LivingEntity.class, player, f));
             }
-            // What mods add at the end of its constructors (Spell Engine's cast controller on
-            // LocalPlayer), as for a mirrored level.
-            HorizonHooks.constructed(local, minecraft, player.level());
-            // And what their field initializers make, which mixins merge into the constructors
-            // (Spell Engine's `castController = new ClientCastController(player)`): empty
-            // collections, and objects of mods' types made from the player where their class
-            // has such a constructor.
+            // What mods' mixins add to entities and players, set in constructors this player
+            // never ran (field initializers are merged into them, and constructor-end
+            // injections), in their order: the server player's mod objects where the client's
+            // has none (Trinkets' equipment attachment, which Traveler's Backpack's keys and HUD
+            // read); empty collections; mod objects from their factory methods (Player
+            // Animation Lib's `animationManager = createAnimationStack()`, which fills its
+            // animation map) or a constructor taking the player (Spell Engine's cast
+            // controller); then the constructors' end (Better Combat's and Spell Engine's
+            // animation stacks, read from that map).
             HorizonServer.emptyCollections(local, net.minecraft.client.player.LocalPlayer.class);
-            for (Class<?> c : new Class<?>[] {net.minecraft.client.player.LocalPlayer.class,
-                    net.minecraft.client.player.AbstractClientPlayer.class}) {
-                for (Field f : c.getDeclaredFields()) {
-                    if (java.lang.reflect.Modifier.isStatic(f.getModifiers()) || f.getType().isPrimitive()
-                            || f.getType().isInterface() || f.getType().getName().startsWith("net.minecraft.")
-                            || f.getType().getName().startsWith("java.") || f.getType().getName().startsWith("com.mojang.")) continue;
-                    try {
-                        f.setAccessible(true);
-                        if (f.get(local) != null) continue;
-                        for (var make : f.getType().getDeclaredConstructors()) {
-                            Class<?>[] params = make.getParameterTypes();
-                            if (params.length == 1 && params[0].isInstance(local)) {
-                                make.setAccessible(true);
-                                f.set(local, make.newInstance(local));
-                                break;
-                            }
-                        }
-                    } catch (ReflectiveOperationException | RuntimeException | LinkageError e) {
-                        // Left empty.
-                    }
-                }
-            }
-            // What mods' mixins add to entities and players (Trinkets' equipment attachment,
-            // which Traveler's Backpack's keys and HUD read), set in constructors this player
-            // never ran: the server player's, where the client's has none.
-            for (Class<?> c : new Class<?>[] {net.minecraft.world.entity.Entity.class,
-                    net.minecraft.world.entity.LivingEntity.class, net.minecraft.world.entity.player.Player.class}) {
-                for (Field f : c.getDeclaredFields()) {
-                    if (java.lang.reflect.Modifier.isStatic(f.getModifiers()) || f.getType().isPrimitive()) continue;
-                    // A mod's own type (vanilla's and the JDK's fields the client sets itself).
-                    String type = f.getType().getName();
-                    if (type.startsWith("net.minecraft.") || type.startsWith("com.mojang.") || type.startsWith("java.")
-                            || type.startsWith("javax.") || type.startsWith("org.joml.") || type.startsWith("it.unimi.")
-                            || f.getType().isArray()) continue;
-                    try {
-                        f.setAccessible(true);
-                        if (f.get(local) == null && f.get(player) != null) f.set(local, f.get(player));
-                    } catch (ReflectiveOperationException | RuntimeException e) {
-                        // A field it can't reach stays empty.
-                    }
-                }
+            // In a client level while they run, as a client player's constructors are (Player
+            // Animation Lib prepares its layers only on the client side).
+            var client = clientLevel(player.level());
+            if (client != null) set(net.minecraft.world.entity.Entity.class, local, "level", client);
+            try {
+                makeModFields(local, true);
+                copyModFields(player, local);
+                makeModFields(local, false);
+                HorizonHooks.constructed(local, minecraft, client, player.getGameProfile(), player.level());
+            } finally {
+                set(net.minecraft.world.entity.Entity.class, local, "level", player.level());
             }
             PLAYERS.put(player.getUUID(), local);
         }
@@ -694,6 +670,79 @@ public final class HorizonClient {
 
     public static synchronized net.minecraft.client.multiplayer.ClientPacketListener searchConnection() {
         return searchConnection;
+    }
+
+    /** A mod's own type (vanilla's and the JDK's fields the client sets itself). */
+    private static boolean modType(Class<?> type) {
+        String name = type.getName();
+        return !type.isPrimitive() && !type.isArray() && !name.startsWith("net.minecraft.") && !name.startsWith("com.mojang.")
+                && !name.startsWith("java.") && !name.startsWith("javax.") && !name.startsWith("org.joml.")
+                && !name.startsWith("it.unimi.");
+    }
+
+    /**
+     * The server player's fields where the client player's are empty (Entity, LivingEntity,
+     * Avatar, Player): the player is the server's; its client copy shares what it lacks
+     * (Trinkets' attachment, the arm's swing state Better Combat reads).
+     */
+    private static void copyModFields(net.minecraft.server.level.ServerPlayer player, net.minecraft.client.player.LocalPlayer local) {
+        for (Class<?> c = net.minecraft.world.entity.player.Player.class; c != Object.class; c = c.getSuperclass()) {
+            for (Field f : c.getDeclaredFields()) {
+                if (java.lang.reflect.Modifier.isStatic(f.getModifiers()) || f.getType().isPrimitive()) continue;
+                try {
+                    f.setAccessible(true);
+                    if (f.get(local) == null && f.get(player) != null) f.set(local, f.get(player));
+                } catch (ReflectiveOperationException | RuntimeException e) {
+                    // A field it can't reach stays empty.
+                }
+            }
+        }
+    }
+
+    /**
+     * The client player's empty mod-typed fields, up its classes: from a no-argument method of
+     * its classes that makes one ("create..."), or a constructor of the field's class taking
+     * the player.
+     */
+    private static void makeModFields(net.minecraft.client.player.LocalPlayer local, boolean byFactory) {
+        java.util.List<java.lang.reflect.Method> factories = new java.util.ArrayList<>();
+        for (Class<?> c = local.getClass(); c != Object.class; c = c.getSuperclass()) {
+            for (java.lang.reflect.Method m : c.getDeclaredMethods()) {
+                if (m.getParameterCount() == 0 && !java.lang.reflect.Modifier.isStatic(m.getModifiers())
+                        && m.getName().toLowerCase(java.util.Locale.ROOT).contains("create") && modType(m.getReturnType())) {
+                    factories.add(m);
+                }
+            }
+        }
+        for (Class<?> c = local.getClass(); c != Object.class; c = c.getSuperclass()) {
+            for (Field f : c.getDeclaredFields()) {
+                if (java.lang.reflect.Modifier.isStatic(f.getModifiers()) || !modType(f.getType()) || f.getType().isInterface()) continue;
+                try {
+                    f.setAccessible(true);
+                    if (f.get(local) != null) continue;
+                    Object made = null;
+                    for (java.lang.reflect.Method m : byFactory ? factories : java.util.List.<java.lang.reflect.Method>of()) {
+                        if (m.getReturnType() != f.getType()) continue;
+                        m.setAccessible(true);
+                        made = m.invoke(local);
+                        break;
+                    }
+                    if (made == null && !byFactory) {
+                        for (var make : f.getType().getDeclaredConstructors()) {
+                            Class<?>[] params = make.getParameterTypes();
+                            if (params.length == 1 && params[0].isInstance(local)) {
+                                make.setAccessible(true);
+                                made = make.newInstance(local);
+                                break;
+                            }
+                        }
+                    }
+                    if (made != null) f.set(local, made);
+                } catch (ReflectiveOperationException | RuntimeException | LinkageError e) {
+                    // Left empty.
+                }
+            }
+        }
     }
 
     /** Recipe search, over the recipe book every player's client has (they all know all). */
@@ -1092,6 +1141,7 @@ public final class HorizonClient {
             HorizonServer.fireEach("ClientLifecycleEvents.CLIENT_STARTED",
                     net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents.CLIENT_STARTED, l -> l.onClientStarted(minecraft));
         }
+        finishModels();
         // Each player's game is a client of its own: its tick runs as that player
         // (Minecraft.player, the open screen), with its own keys (bindings). With no player, a
         // client at its title screen.
@@ -1185,41 +1235,13 @@ public final class HorizonClient {
             Natives.log("Horizon's client: the client's bootstrap stopped at " + t);
         }
         try {
-            // The client registries models read (atlas sources, item models and their properties):
-            // Minecraft's start bootstraps them.
-            net.minecraft.client.ClientBootstrap.bootstrap();
             var colors = net.minecraft.client.color.block.BlockColors.createDefault();
             set(Minecraft.class, minecraft, "blockColors", colors);
             var atlases = new net.minecraft.client.resources.model.sprite.AtlasManager(minecraft.getTextureManager(), 0);
             var skins = (net.minecraft.client.renderer.PlayerSkinRenderCache) Natives.allocate(net.minecraft.client.renderer.PlayerSkinRenderCache.class);
             var models = new net.minecraft.client.resources.model.ModelManager(colors, atlases, skins);
-            // The reload's main-thread steps (the atlases' uploads, which assert the render
-            // thread) run on this thread: queued, and run here until the reload is done. A
-            // preparation finishing on a pool thread ran them there ("Rendersystem called from
-            // wrong thread", now and then: no models, and a broken GUI atlas).
-            java.util.concurrent.Executor here = Runnable::run;
-            // With the colour maps biome tints read (grass, foliage: GrassColor.pixels...).
-            var queue = new java.util.concurrent.LinkedBlockingQueue<Runnable>();
-            var reload = net.minecraft.server.packs.resources.SimpleReloadInstance.of(minecraft.getResourceManager(), java.util.List.of(atlases, models,
-                            new net.minecraft.client.resources.GrassColorReloadListener(),
-                            new net.minecraft.client.resources.FoliageColorReloadListener(),
-                            new net.minecraft.client.resources.DryFoliageColorReloadListener()),
-                    here, queue::add, java.util.concurrent.CompletableFuture.completedFuture(net.minecraft.util.Unit.INSTANCE));
-            // Bounded all the same: with a big pack a part of the reload once waited for
-            // something that never ran (2026-11-01, before the steps ran on this thread), and
-            // the server tick stopped there for good.
-            long deadline = System.nanoTime() + 90_000_000_000L;
-            while (!reload.isDone() || !queue.isEmpty()) {
-                if (System.nanoTime() > deadline) {
-                    Natives.log("Horizon's client: the models' reload didn't end in 90 s; mods that read baked models see none");
-                    return;
-                }
-                Runnable task = queue.poll(20, java.util.concurrent.TimeUnit.MILLISECONDS);
-                if (task != null) task.run();
-            }
-            reload.done().join();
-            set(Minecraft.class, minecraft, "modelManager", models);
-            // The real atlases beside the headless GUI one.
+            // The real atlases beside the headless GUI one, from the start: mods ask the
+            // client's atlas manager for them as they stitch (Xaero's, for the blocks').
             Class<?> owner = net.minecraft.client.resources.model.sprite.AtlasManager.class;
             var headless = minecraft.getAtlasManager();
             @SuppressWarnings("unchecked")
@@ -1236,7 +1258,54 @@ public final class HorizonClient {
             realByTexture.forEach((id, entry) -> {
                 if (!id.equals(net.minecraft.client.renderer.Sheets.GUI_SHEET)) byTexture.put(id, entry);
             });
-            set(owner, headless, "spriteLookup", field(owner, atlases, "spriteLookup"));
+            // With the colour maps biome tints read (grass, foliage: GrassColor.pixels...).
+            java.util.List<net.minecraft.server.packs.resources.PreparableReloadListener> listeners = java.util.List.of(
+                    atlases, models,
+                    new net.minecraft.client.resources.GrassColorReloadListener(),
+                    new net.minecraft.client.resources.FoliageColorReloadListener(),
+                    new net.minecraft.client.resources.DryFoliageColorReloadListener());
+            // Prepared on the game's background workers, applied on the client's thread (the
+            // server's: Minecraft.execute, which tasks() runs each tick), where the atlases
+            // upload to the GPU (never a pool thread: "Rendersystem called from wrong thread",
+            // no models and a broken GUI atlas).
+            var reload = net.minecraft.server.packs.resources.SimpleReloadInstance.of(minecraft.getResourceManager(),
+                    listeners, net.minecraft.util.Util.backgroundExecutor(), minecraft,
+                    java.util.concurrent.CompletableFuture.completedFuture(net.minecraft.util.Unit.INSTANCE));
+            // It runs on while the server ticks (finishModels each client tick): one that
+            // waits for something it never gets (the 107-jar pack's) mustn't hold the server.
+            pendingModels = new Object[] {reload, models, atlases, started, skins};
+        } catch (Throwable t) {
+            Throwable root = t;
+            while (root.getCause() != null && root.getCause() != root) root = root.getCause();
+            Natives.log("Horizon's client: the models couldn't be loaded: " + root);
+            for (var f : root.getStackTrace()) Natives.log("    at " + f);
+        }
+    }
+
+    /** The models' reload under way: reload, model manager, atlas manager, start time, skins. */
+    private static Object[] pendingModels;
+
+    /** The models' reload, once it ended: the client's model manager, atlases and fonts from it. */
+    private static void finishModels() {
+        if (pendingModels == null) return;
+        var reload = (net.minecraft.server.packs.resources.ReloadInstance) pendingModels[0];
+        long started = (long) pendingModels[3];
+        if (!reload.done().isDone()) {
+            if (System.nanoTime() - started > 120_000_000_000L) {
+                pendingModels = null;
+                Natives.log("Horizon's client: the models' reload didn't end in 2 minutes; the mods get no baked models");
+            }
+            return;
+        }
+        var models = (net.minecraft.client.resources.model.ModelManager) pendingModels[1];
+        var atlases = (net.minecraft.client.resources.model.sprite.AtlasManager) pendingModels[2];
+        var skins = (net.minecraft.client.renderer.PlayerSkinRenderCache) pendingModels[4];
+        pendingModels = null;
+        try {
+            reload.done().join();
+            set(Minecraft.class, minecraft, "modelManager", models);
+            Class<?> owner = net.minecraft.client.resources.model.sprite.AtlasManager.class;
+            set(owner, minecraft.getAtlasManager(), "spriteLookup", field(owner, atlases, "spriteLookup"));
             fonts(atlases, skins);
             Natives.log("Horizon's client: block and item models loaded in " + (System.nanoTime() - started) / 1_000_000 + " ms");
         } catch (Throwable t) {

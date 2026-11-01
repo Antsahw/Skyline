@@ -1397,8 +1397,22 @@ mod run {
                         // LevelData.setRespawnData, as /setworldspawn sets it (the
                         // overworld's: Horizon's world spawn is the overworld's).
                         if dimension == "minecraft:overworld" {
-                            self.level.world_spawn = Some(position);
+                            let old = self.level.world_spawn.replace(position);
                             self.level.world_spawn_angle = [yaw, pitch];
+                            // Players respawning at the world spawn follow it (as
+                            // /setworldspawn's `spawn`), and so do the ones not placed yet.
+                            let floor = |s: horizon_core::geometry::Vec3| {
+                                [s.x.floor() as i32, s.y.floor() as i32, s.z.floor() as i32]
+                            };
+                            if self.spawn.map(floor) == old || self.spawn.is_none() {
+                                let [x, y, z] = position;
+                                self.spawn = Some(horizon_core::geometry::Vec3::new(
+                                    f64::from(x) + 0.5,
+                                    f64::from(y),
+                                    f64::from(z) + 0.5,
+                                ));
+                                self.level.spawn = Some([f64::from(x), f64::from(y), f64::from(z)]);
+                            }
                         }
                     }
                     teleport @ horizon_jvm::events::Action::Teleport { .. } => {

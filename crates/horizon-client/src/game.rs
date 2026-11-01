@@ -1586,6 +1586,9 @@ struct Game<'a> {
     loading_progress: f32,
     /// The world spawn search's origin chunk and fallback height, once known.
     spawn_origin: Option<((i32, i32), i32)>,
+    /// Players who joined while the Java mods' data-pack load functions hadn't run, with the
+    /// ticks they have waited, and the ticks since the functions ran (`hold_join`).
+    held_joins: Vec<(u32, u32, u32)>,
     spawn_spiral: horizon_client::world_spawn::ChunkSpiral,
     /// A new player's spawn search, while its candidates' chunks load.
     player_spawn: Option<horizon_client::world_spawn::PlayerSpawnFinder>,
@@ -14054,6 +14057,7 @@ impl<'a> Game<'a> {
             lectern_pulses: Vec::new(),
             loading_progress: 0.0,
             spawn_origin: None,
+            held_joins: Vec::new(),
             spawn_spiral: Default::default(),
             player_spawn: None,
             spawn_wait: Vec::new(),

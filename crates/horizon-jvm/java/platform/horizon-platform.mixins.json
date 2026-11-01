@@ -38,12 +38,14 @@
     "FunctionsMixin",
     "TimerCallbackMixin",
     "RespawnDataMixin",
-    "MirrorUpdatesMixin"
+    "MirrorUpdatesMixin",
+    "MirrorConnectionMixin"
   ],
   "injectors": {
     "defaultRequire": 1
   },
   "client": [
+    "SkinDownloaderMixin",
     "LocalPlayerMessagesMixin",
     "HudMixin",
     "GuiMixin",

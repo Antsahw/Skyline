@@ -1440,6 +1440,18 @@ pub fn worldgen_origin(dimension: &str) -> Result<Option<WorldgenOrigin>, String
     Ok(found.flatten())
 }
 
+/// Whether the mods' data-pack load functions have run on the mirror (or there is nothing to
+/// run, or they can't): `HorizonServer.functionsReady`.
+pub fn functions_ready() -> bool {
+    with_server(|env, class| {
+        env.call_static_method(class, "functionsReady", "()Z", &[])?
+            .z()
+    })
+    .ok()
+    .flatten()
+    .unwrap_or(true)
+}
+
 /// Brings chunk `x z` of `dimension` to vanilla's TERRAIN status on the Java side and holds
 /// it: a token for [`worldgen_finish`] and [`worldgen_forget`], None when it failed.
 pub fn worldgen_proto(dimension: &str, x: i32, z: i32) -> Result<Option<i64>, String> {
