@@ -68,3 +68,10 @@ Never write as the user; mark what you post (CLAUDE.md). Never run mod jars the 
 ## Reports
 
 (Newest last. One short entry per task: area, task, branch, works / doesn't / how to test.)
+
+- worldgen 2, Grid World's far terrain (`bridge-worldgen-2`, by the worldgen chat): far
+  columns are cut as its `doFill` cuts land (from its `getConfig()`): pillars whole, lines as
+  their layers every 5 blocks, the rest gone; coarse far tiles show the layers (a tile can't
+  show 4-block holes). Regress case `gridlod` (needs `gridgen*.jar`), unit test
+  `grid_mask_keeps_pillars_layers_and_nothing_else`. Test: Grid World with `lodDistance:256`,
+  fly up: the grid near, thin layers far, no solid land.

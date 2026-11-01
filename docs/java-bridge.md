@@ -828,7 +828,10 @@ biomes keep Horizon's own (they are vanilla's rules). BOP areas: grass to podzol
 forests, sand to dirt or gravel by its marshes, dried salt; ~3 ms a batch of columns on a far
 terrain thread. A mod's own generator off the noise (One Block) draws its base columns
 (`lodColumns`: ChunkGenerator.getBaseColumn): the void stays empty. Grid World is on the
-noise and shows as whole land far away (its holes are its own doFill).
+noise; far away its land is cut by the grid too (`HorizonWorldgen.lodMask`: the generator's
+`getConfig()` spacings and replacement block, `GridMask` in `java_worldgen.rs`): a column on
+two grid lines whole, on one its layers every `ySpacing` blocks, else gone; a coarse far
+tile (wider than a spacing) holds lines, so it shows the layers (regress case `gridlod`).
 Lost blocks: a column generated again while it is loaded now leaves the loaded one (and
 warns); a decorated region's protos of columns already in the world are dropped, and so is a
 far proto of a loaded column instead of saved over its save. Repro (`setblock` of 36 marker

@@ -715,6 +715,31 @@ public final class HorizonWorldgen {
     }
 
     /**
+     * What a mod's generator on the noise cuts out of the noise's land, for far terrain:
+     * Grid World's grid ({@code getConfig()} with {@code xSpacing}, {@code ySpacing},
+     * {@code zSpacing} and the {@code replacementBlock} the rest becomes): {"grid", x, y, z,
+     * state}. Null for none (or a generator not known to cut).
+     */
+    public static String[] lodMask(String dimension) {
+        Dimension d = DIMENSIONS.get(dimension);
+        if (d == null) return null;
+        try {
+            var config = d.generator.getClass().getMethod("getConfig").invoke(d.generator);
+            if (config == null) return null;
+            Class<?> type = config.getClass();
+            int x = type.getField("xSpacing").getInt(config);
+            int y = type.getField("ySpacing").getInt(config);
+            int z = type.getField("zSpacing").getInt(config);
+            Object replacement = type.getField("replacementBlock").get(config);
+            if (x <= 0 || y <= 0 || z <= 0 || !(replacement instanceof BlockState state)) return null;
+            return new String[] {"grid", Integer.toString(x), Integer.toString(y), Integer.toString(z),
+                    net.minecraft.commands.arguments.blocks.BlockStateParser.serialize(state)};
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            return null;
+        }
+    }
+
+    /**
      * Far columns of a dimension a mod's own generator makes (not a noise generator: One
      * Block's void): ChunkGenerator.getBaseColumn at each x z pair, as runs from the bottom,
      * "fromY toY state" (toY exclusive) separated by ';', "" for an empty column. Null if the

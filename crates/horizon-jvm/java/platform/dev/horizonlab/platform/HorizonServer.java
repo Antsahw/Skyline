@@ -792,6 +792,10 @@ public final class HorizonServer {
         return HorizonWorldgen.lodMaterials(dimension);
     }
 
+    public static String[] worldgenLodMask(String dimension) {
+        return HorizonWorldgen.lodMask(dimension);
+    }
+
     public static String[] worldgenLodColumns(String dimension, int[] xz) {
         return HorizonWorldgen.lodColumns(dimension, xz);
     }
