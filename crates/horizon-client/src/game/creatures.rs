@@ -526,6 +526,11 @@ impl Game<'_> {
                 Arc::make_mut(c).fresh = false;
             }
             self.spawn_generation_creatures(key.0, key.1);
+            // The mods' creatures of its biome spawn too (HorizonSpawner.generated).
+            #[cfg(feature = "java-mods")]
+            if horizon_jvm::events::ready() {
+                horizon_jvm::world::fresh_chunk(self.dim.id(), key.0, key.1);
+            }
         }
         self.tick_leads();
         self.spawn_natural();

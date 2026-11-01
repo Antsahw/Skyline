@@ -53,7 +53,7 @@ final class HorizonJson {
         }
     }
 
-    private static void number(Number n, StringBuilder out) {
+    static void number(Number n, StringBuilder out) {
         if (n instanceof Integer || n instanceof Long || n instanceof Short || n instanceof Byte) {
             out.append(n.longValue());
             return;
@@ -93,7 +93,7 @@ final class HorizonJson {
         }
     }
 
-    private static void string(String s, StringBuilder out) {
+    static void string(String s, StringBuilder out) {
         out.append('"');
         for (int i = 0; i < s.length(); i++) {
             char c = s.charAt(i);

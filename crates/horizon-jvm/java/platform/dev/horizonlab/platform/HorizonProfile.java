@@ -40,7 +40,8 @@ public final class HorizonProfile {
     /** Block reads that went to Horizon (Natives.blockState): count, time. */
     private static final long[] READS = new long[2];
     /** Block reads answered by the tick's section copies (HorizonServer.blockState). */
-    private static final long[] CACHED = new long[1];
+    /** Block reads served (counted on any thread; a LongAdder: no lock per read). */
+    private static final java.util.concurrent.atomic.LongAdder CACHED = new java.util.concurrent.atomic.LongAdder();
 
     /** An entity of {@code type} ticked in {@code nanos}. */
     public static void entity(String type, long nanos) {
@@ -85,8 +86,8 @@ public final class HorizonProfile {
     /** A block read the section copies answered. */
     public static void cached() {
         if (!ON) return;
-        synchronized (CACHED) {
-            CACHED[0]++;
+        {
+            CACHED.increment();
         }
     }
 
@@ -135,10 +136,10 @@ public final class HorizonProfile {
         synchronized (READS) {
             Natives.log(String.format("Java profile (block reads): %.0f section fetches a tick from Horizon, %.2f ms (%.2f us each); %.0f kept from earlier ticks; %.0f block reads a tick from them",
                     (double) READS[0] / ticks, READS[1] / 1e6 / ticks, READS[1] / 1e3 / Math.max(1, READS[0]),
-                    (double) REUSED[0] / ticks, (double) CACHED[0] / ticks));
+                    (double) REUSED[0] / ticks, (double) CACHED.sum() / ticks));
             REUSED[0] = 0;
             READS[0] = READS[1] = 0;
-            CACHED[0] = 0;
+            CACHED.reset();
         }
         ticks = 0;
     }

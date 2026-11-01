@@ -581,6 +581,19 @@ mod run {
                 .get(&(cx, cz))
                 .map_or(-2, |chunk| chunk.block_revision.get() as i64)
         }
+        fn surface(&self, dimension: &str, x: i32, z: i32) -> Option<i32> {
+            let (_, chunks) = self.dims.iter().find(|(d, _)| *d == dimension)?;
+            let chunk = chunks.get(&(x >> 4, z >> 4))?;
+            let registry = self.registry;
+            Some(chunk.world_surface(x & 15, z & 15, |v| {
+                registry.state(BlockStateId(v)).is_some_and(|s| {
+                    matches!(
+                        s.name.as_str(),
+                        "minecraft:air" | "minecraft:cave_air" | "minecraft:void_air"
+                    )
+                })
+            }))
+        }
         fn state_name(&self, id: i32) -> Option<String> {
             let id = u32::try_from(id).ok()?;
             self.registry
@@ -1117,6 +1130,10 @@ mod run {
                 to: HashMap<u32, HashSet<String>>,
                 /// Connections last sent some entities (an empty list clears theirs).
                 showing: HashSet<u32>,
+                /// Each entity's last whole entry (Java sends "keep" while it looks the same),
+                /// and per connection the entities whose look its game has.
+                looks: HashMap<i64, String>,
+                has: HashMap<u32, HashSet<i64>>,
             }
             /// A snapshot entry as Java routes it (`HorizonEntityRender.routed`): where, its
             /// model trees, then the entry passed on untouched.
@@ -1127,6 +1144,12 @@ mod run {
                 z: f64,
                 #[serde(default, borrow)]
                 keys: Vec<&'a str>,
+                /// A mod entity's id (block entities have none).
+                #[serde(default)]
+                id: Option<i64>,
+                /// It looks as when last sent whole: `e` has its position only.
+                #[serde(default)]
+                keep: bool,
                 #[serde(borrow)]
                 e: &'a RawValue,
             }
@@ -1149,8 +1172,24 @@ mod run {
                 trees: HashMap::new(),
                 to: HashMap::new(),
                 showing: HashSet::new(),
+                looks: HashMap::new(),
+                has: HashMap::new(),
             });
             sent.trees.extend(snapshot.models);
+            // Whole entries kept for players that haven't had an entity's look; entities gone
+            // go with theirs.
+            let present: HashSet<i64> = snapshot
+                .dims
+                .values()
+                .flatten()
+                .filter_map(|e| e.id)
+                .collect();
+            sent.looks.retain(|id, _| present.contains(id));
+            for e in snapshot.dims.values().flatten() {
+                if let (Some(id), false) = (e.id, e.keep) {
+                    sent.looks.insert(id, e.e.get().to_owned());
+                }
+            }
             // A player's entries: those of its level within 160 blocks (the entries' JSON,
             // passed on as Java wrote it).
             let near = |dimension: &str, at: [f64; 3]| -> Vec<&Entry> {
@@ -1166,17 +1205,33 @@ mod run {
                     .collect()
             };
             let payload = |sent: &mut Sent, who: u32, entries: &[&Entry]| -> Vec<u8> {
-                let have = sent.to.entry(who).or_default();
+                let had = sent.has.remove(&who).unwrap_or_default();
+                let mut has = HashSet::with_capacity(entries.len());
                 let mut out = String::with_capacity(
                     entries.iter().map(|e| e.e.get().len() + 1).sum::<usize>() + 64,
                 );
                 out.push_str("{\"entities\":[");
-                for (i, e) in entries.iter().enumerate() {
-                    if i > 0 {
+                let mut first = true;
+                for e in entries {
+                    // A "keep" its game can't keep (it hasn't had the look): the last whole one.
+                    let entry = match e.id {
+                        Some(id) if e.keep && !had.contains(&id) => match sent.looks.get(&id) {
+                            Some(whole) => whole.as_str(),
+                            None => continue,
+                        },
+                        _ => e.e.get(),
+                    };
+                    if let Some(id) = e.id {
+                        has.insert(id);
+                    }
+                    if !first {
                         out.push(',');
                     }
-                    out.push_str(e.e.get());
+                    first = false;
+                    out.push_str(entry);
                 }
+                sent.has.insert(who, has);
+                let have = sent.to.entry(who).or_default();
                 out.push_str("],\"models\":{");
                 let mut first = true;
                 for e in entries {
@@ -1213,6 +1268,7 @@ mod run {
             // Connections gone: what they had goes with them (a new one starts empty).
             let conns: HashSet<u32> = host.hub.guests.iter().map(|g| g.conn).collect();
             sent.to.retain(|c, _| conns.contains(c) || *c == u32::MAX);
+            sent.has.retain(|c, _| conns.contains(c) || *c == u32::MAX);
             sent.showing.retain(|c| conns.contains(c));
             for g in &host.hub.guests {
                 let entities = near(&g.dimension, g.position);

@@ -113,6 +113,12 @@ public final class Natives {
     /** The state a sectionIds id is ({@code minecraft:oak_log[axis=y]}), or null. */
     public static native String stateName(int id);
 
+    /** WORLD_SURFACE's height at x z (one above the highest non-air block); MIN_VALUE where unloaded. */
+    public static native int surface(String dimension, int x, int z);
+
+    /** The chunks of the dimension Horizon generated since the last call: cx, cz pairs. */
+    public static native int[] freshChunks(String dimension);
+
     /** A mod set a block of a mirrored level: Horizon makes it, as /setblock does. */
     public static native void setBlock(String dimension, int x, int y, int z, String state);
 

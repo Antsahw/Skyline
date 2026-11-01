@@ -1705,7 +1705,12 @@ public final class HorizonServer {
     private static final Map<Long, Long> WRITTEN_AT = new java.util.HashMap<>();
     private static volatile long currentTick;
 
-    private static String dimensionOf(Level level) {
+    /** The mirror's tick count (each server tick), for what is kept a tick. */
+    static long tickCount() {
+        return currentTick;
+    }
+
+    static String dimensionOf(Level level) {
         return level.dimension().identifier().toString();
     }
 
@@ -1781,6 +1786,10 @@ public final class HorizonServer {
      */
     private static final class Sections {
         long epoch = Long.MIN_VALUE;
+        /** The last section read (most reads are near the one before). */
+        Level lastLevel;
+        long lastKey;
+        Section last;
         final Map<Level, it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap<Section>> levels = new IdentityHashMap<>();
         /** This view's chunks' revisions (Natives.chunkRevision), asked once a chunk. */
         final Map<Level, it.unimi.dsi.fastutil.longs.Long2LongOpenHashMap> revisions = new IdentityHashMap<>();
@@ -1806,11 +1815,20 @@ public final class HorizonServer {
             sections.levels.clear();
             sections.revisions.clear();
             sections.epoch = epoch;
+            sections.last = null;
+        }
+        long key = net.minecraft.core.SectionPos.asLong(x >> 4, y >> 4, z >> 4);
+        if (sections.lastLevel == level && sections.lastKey == key && sections.last != null) {
+            return sections.last == NONE ? null : sections.last;
         }
         var map = sections.levels.computeIfAbsent(level, l -> new it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap<>());
-        long key = net.minecraft.core.SectionPos.asLong(x >> 4, y >> 4, z >> 4);
         Section section = map.get(key);
-        if (section != null) return section == NONE ? null : section;
+        if (section != null) {
+            sections.lastLevel = level;
+            sections.lastKey = key;
+            sections.last = section;
+            return section == NONE ? null : section;
+        }
         String dimension = dimensionOf(level);
         var revisions = sections.revisions.computeIfAbsent(level, l -> {
             var m = new it.unimi.dsi.fastutil.longs.Long2LongOpenHashMap();
@@ -2007,6 +2025,7 @@ public final class HorizonServer {
         return new net.minecraft.world.level.entity.LevelEntityGetter<>() {
             private List<net.minecraft.world.entity.Entity> all() {
                 List<ServerPlayer> players = LEVEL_PLAYERS.get(level);
+                if (players == null || players.isEmpty()) return HorizonEntities.of(level);
                 List<net.minecraft.world.entity.Entity> all = new ArrayList<>();
                 if (players != null) all.addAll(players);
                 all.addAll(HorizonEntities.of(level));
@@ -2040,17 +2059,31 @@ public final class HorizonServer {
                 }
             }
 
+            /** The level's players, then its mods' entities near the box (HorizonEntities.near). */
+            private void candidates(net.minecraft.world.phys.AABB box, java.util.function.Consumer<net.minecraft.world.entity.Entity> out) {
+                List<ServerPlayer> players = LEVEL_PLAYERS.get(level);
+                if (players != null) for (var p : players) out.accept(p);
+                HorizonEntities.near(level, box, out);
+            }
+
             @Override
             public void get(net.minecraft.world.phys.AABB box, java.util.function.Consumer<net.minecraft.world.entity.Entity> out) {
-                for (var e : all()) if (e.getBoundingBox().intersects(box)) out.accept(e);
+                List<net.minecraft.world.entity.Entity> found = new ArrayList<>();
+                candidates(box, e -> {
+                    if (e.getBoundingBox().intersects(box)) found.add(e);
+                });
+                for (var e : found) out.accept(e);
             }
 
             @Override
             public <U extends net.minecraft.world.entity.Entity> void get(
                     net.minecraft.world.level.entity.EntityTypeTest<net.minecraft.world.entity.Entity, U> test,
                     net.minecraft.world.phys.AABB box, net.minecraft.util.AbortableIterationConsumer<U> out) {
-                for (var e : all()) {
-                    if (!e.getBoundingBox().intersects(box)) continue;
+                List<net.minecraft.world.entity.Entity> found = new ArrayList<>();
+                candidates(box, e -> {
+                    if (e.getBoundingBox().intersects(box)) found.add(e);
+                });
+                for (var e : found) {
                     U u = test.tryCast(e);
                     if (u != null && out.accept(u).shouldAbort()) return;
                 }

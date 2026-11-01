@@ -1094,7 +1094,15 @@ public final class HorizonClient {
             var queue = new java.util.concurrent.LinkedBlockingQueue<Runnable>();
             var reload = net.minecraft.server.packs.resources.SimpleReloadInstance.of(minecraft.getResourceManager(), java.util.List.of(atlases, models),
                     here, queue::add, java.util.concurrent.CompletableFuture.completedFuture(net.minecraft.util.Unit.INSTANCE));
+            // Bounded all the same: with a big pack a part of the reload once waited for
+            // something that never ran (2026-11-01, before the steps ran on this thread), and
+            // the server tick stopped there for good.
+            long deadline = System.nanoTime() + 90_000_000_000L;
             while (!reload.isDone() || !queue.isEmpty()) {
+                if (System.nanoTime() > deadline) {
+                    Natives.log("Horizon's client: the models' reload didn't end in 90 s; mods that read baked models see none");
+                    return;
+                }
                 Runnable task = queue.poll(20, java.util.concurrent.TimeUnit.MILLISECONDS);
                 if (task != null) task.run();
             }
