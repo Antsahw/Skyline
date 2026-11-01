@@ -159,6 +159,24 @@ public final class HorizonWorldgen {
     }
 
     /**
+     * ChunkGenerator.getOrigin of a dimension the mods generate, on its random state: the chunk
+     * MinecraftServer.setInitialSpawn starts its search from (the climate's spawn target, which
+     * a mod's noise router moves: Tectonic's land is not vanilla's). [x, z]; null for a
+     * dimension that generates as vanilla's, or when it fails.
+     */
+    public static synchronized int[] origin(String dimension) {
+        Dimension d = DIMENSIONS.get(dimension);
+        if (d == null) return null;
+        try {
+            var pos = d.generator.getOrigin(d.level.getChunkSource().randomState());
+            return new int[] {pos.x(), pos.z()};
+        } catch (Throwable t) {
+            Natives.log("Java mods: no spawn origin for " + dimension + ": " + t);
+            return null;
+        }
+    }
+
+    /**
      * What MinecraftServer's constructor gives world generation, on the mirrored server: the
      * world's settings (seed, structures), the structure templates, the data fixer; then the
      * mods' injections at the constructor's end, where world-generation mods set up

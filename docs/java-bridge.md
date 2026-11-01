@@ -656,6 +656,28 @@ gets SPIR-V, vertex layouts and uniform lists.
   Vanilla keys in mods' HUD text now come in the server's language.
 - The keys mods bind are read again every 100 server ticks and resent when they change
   (JourneyMap registers its keys at its first client tick, after the first join).
+- **Mixin strips the injector annotations off merged handlers**: only `@MixinMerged` (mixin,
+  priority) is left on the target's method. What a handler is (`@WrapOperation`, its `at`) is
+  read from the mixin class in the mod's jar (the census, `HorizonHooks.scan`).
+- Mods' `@WrapOperation`s on calls inside a constructor don't run on mirror objects either:
+  `HorizonHooks.constructed` runs them (levels, chunk maps; not entities) before the TAIL
+  injections, the receiver and arguments from the object's fields, an `Operation` calling the
+  wrapped method. Biolith seeds its biome noise in one in ServerLevel's (without it every Java
+  worldgen chunk failed with an NPE in `OverworldBiomePlacement.getLocalNoise`).
+- Mixins' field initializers (`private RollManager rollManager = new RollManager();`) are
+  merged into the target's constructors: `HorizonHooks.initFields` makes the no-argument ones
+  on mirror objects (recorded from the mixins' own `<init>` by the census).
+- `Minecraft.getConnection()` is `player.connection` (null for a player without one): the
+  headless client's players have `HorizonClient.connection(level)`, whose network
+  `Connection` is a mirror one (`HorizonServer.clientConnection`).
+- The content cache's stamp is the jars' names, sizes and mtimes: copying the jars without
+  keeping mtimes (`cp` without `-p`) makes the content again (minutes for a big pack).
+  `launch.sh`: `CACHE=dir` keeps it across scratch folders, a `config/` beside `MODS` is copied.
+- The world spawn's search (`find_world_spawn`) starts from the generator's origin
+  (`ChunkGenerator.getOrigin`, the climate's spawn target): with Java worldgen it is the mods'
+  (`HorizonWorldgen.origin`), asked once the first chunk has started their generation.
+- `horizon-ctl launch` waits 300 s for the game's socket; `HORIZON_CTL_LAUNCH_TIMEOUT` (s)
+  for a pack that makes its content first.
 
 - **The client level needs a connection.** REI (and others) read the client's registries as
   `minecraft.level.connection.registryAccess()` once there is a level; with a null one REI
@@ -1100,7 +1122,35 @@ Combat / Spell Engine / Player Animation Lib on the client player, and the serve
 froze while the client's models reloaded (now prepared on background workers, applied by
 `tasks()`). Left: with Trinkets installed the models' reload never ends (its model discovery
 renews a future its client manager completes, which this reload doesn't run): Xaero's
-minimap gets no baked models; Puzzles Lib's join hook wants the client player's connection.
+minimap gets no baked models.
+
+A 137-jar pack (`big4t`, 2026-11-01, bridge-pack4: `big3` plus RFTools Base/Builder,
+Entangled, Hopper Gadgetry, Copper Hopper, Item Collectors, Simple Magnets, Paladins, Rogues,
+Construction Wand, Enderscape, Heart Crystals, Disenchanting Table, Cooking for Blockheads,
+Echo Chest, Inventory Management, Storage Delight, Items Displayed, Beautify, Promenade,
+Villages and Pillages, Xaero's World Map, Tectonic, Advanced Netherite, Combat Roll): 231,940
+block states, 12,929 items; Java starts, the overworld generates through the mods (Tectonic,
+Biolith, TerraBlender) with no failed chunk, and the player joins on land 255 s after the
+start (`regress.py --pack … bigpack`). Fixed for it: Biolith's biome noise (every Java chunk
+failed: its seeding is a `@WrapOperation` in ServerLevel's constructor, now run), the world
+spawn's search starts from the mods' generator's origin (Tectonic's land: the vanilla origin
+was sea), Puzzles Lib's join (the client player has its connection), Combat Roll's
+`RollManager` (mixin field initializers run on mirror objects). Left: Lithostitched's
+`wrapNoiseRouter` constructor wrap fails (it wants a registry the mirror's chunk map lacks;
+no worse than before, when it never ran); CCA's scoreboard client tick wants a scoreboard;
+the vanilla HUD's vehicle hearts (`this.variables` null); Xaero's HUD models (Trinkets, above).
+Item Alchemy is out: its library bundles CompatDatapacks, which rewrites every recipe's
+`result.item` to `id` and breaks BCLib's recipes (BetterEnd's alloying and infusion: the
+registries don't load), a conflict on real Fabric too; Item Alchemy's own recipes need that
+rewrite.
+
+Memory is what limits a pack's size: Horizon keeps several per-state tables (client and its
+server thread) and the content build exports every state. The full 157-jar set (`big4`) has
+577,094 states (Rechiseled 111,669, Diagonal Fences 86,528, Stoneworks 53,510, XNet 29,207
+from 12 blocks, the Macaw's sets ~70,000): it needs more than this sandbox's 8 GB (the 137-jar
+pack peaks at 5.8 GB with its content made in the same run). A 32 GB PC runs it. The content
+root's per-state tables now keep new rows as text and stream to disk (they took over 6 GB as
+trees: `J::Raw` in `mod_content.rs`).
 
 Mods' sounds and particles (2026-10-31): a mod's sound event plays by name (its
 `sounds.json` and `.ogg` files are carried into the content mod, which Horizon's sound
@@ -1131,6 +1181,10 @@ horizon-ctl reports and the log, and prints `pass`/`FAIL`; screenshots and logs 
 `/tmp/hz-regress/<case>/` (a `look` line names what to see on one). A new scene that works gets
 a case in `CASES`. A case's `config` writes mods' config files before the game starts
 (`launch.sh`'s `CONFIG`: a folder copied over the game's `config/`). `skyblock` and `oneblock` take Skyblock Infinite's and Simply OneBlock's jars.
+`bigpack` plays a whole pack: `--pack <mods folder>` (a `config/` beside it is the mods'
+configs), and checks that Java starts, the registries load, no Java worldgen chunk fails and a
+player joins within `--join-within` seconds (default 900; the first run of a set of jars also
+makes its content, minutes; it is kept in `/tmp/hz-regress/pack-cache`).
 
 ### Play a Prism instance
 

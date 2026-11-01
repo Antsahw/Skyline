@@ -542,6 +542,10 @@ public final class HorizonClient {
             local = (net.minecraft.client.player.LocalPlayer) Natives.allocate(net.minecraft.client.player.LocalPlayer.class);
             set(net.minecraft.client.player.LocalPlayer.class, local, "recipeBook", recipeBook(player));
             set(net.minecraft.client.player.LocalPlayer.class, local, "minecraft", minecraft);
+            // Its connection: Minecraft.getConnection() is the player's (Puzzles Lib's join
+            // reads getConnection().getConnection()).
+            var listener = connection(player.level());
+            if (listener != null) set(net.minecraft.client.player.LocalPlayer.class, local, "connection", listener);
             // Who it is (a screen checks a chunk's owner against it: Chunk Loaders): the
             // server player's id, UUID and profile.
             set(net.minecraft.world.entity.Entity.class, local, "uuid", player.getUUID());
@@ -783,6 +787,10 @@ public final class HorizonClient {
             set(net.minecraft.client.multiplayer.ClientPacketListener.class, connection, "clockManager",
                     new net.minecraft.client.ClientClockManager());
             players(connection);
+            // Its network connection: a mirror one with no channel, as the players' are
+            // (connected, not connecting: MirrorConnectionMixin).
+            set(net.minecraft.client.multiplayer.ClientCommonPacketListenerImpl.class, connection, "connection",
+                    HorizonServer.clientConnection());
             if (minecraft.gameMode != null) {
                 set(net.minecraft.client.multiplayer.MultiPlayerGameMode.class, minecraft.gameMode, "connection", connection);
             }

@@ -22,7 +22,11 @@ if [ -n "$old" ] && [ -d "$old" ]; then
 fi
 S=$(mktemp -d /tmp/hz-bridge.XXXX)
 mkdir -p "$S/mods-java" "$S/home" "$S/lh" "$S/data" "$S/conf"
-cp "$MODS"/*.jar "$S/mods-java/"
+cp -p "$MODS"/*.jar "$S/mods-java/"
+# The pack's mod configs: a config/ folder beside MODS (as in a launcher instance).
+[ -d "$MODS/../config" ] && cp -r "$MODS/../config" "$S/config"
+# CACHE=dir keeps the mods' content (made once per set of jars: minutes for a big pack) across runs.
+[ -n "$CACHE" ] && mkdir -p "$CACHE" && ln -s "$CACHE" "$S/.horizon-cache"
 [ -n "$OPTS" ] && cp "$OPTS" "$S/options.txt"
 [ -n "$GRAPHICS" ] && cp "$GRAPHICS" "$S/horizon-graphics.txt"
 # CONFIG: a folder copied over the game folder's config/ (mods' settings before they start).

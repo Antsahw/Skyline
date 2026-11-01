@@ -1592,6 +1592,8 @@ struct Game<'a> {
     loading_progress: f32,
     /// The world spawn search's origin chunk and fallback height, once known.
     spawn_origin: Option<((i32, i32), i32)>,
+    /// Whether the spawn search asked the Java mods' generator for its origin (they move it).
+    spawn_origin_asked: bool,
     /// Players who joined while the Java mods' data-pack load functions hadn't run, with the
     /// ticks they have waited, and the ticks since the functions ran (`hold_join`).
     held_joins: Vec<(u32, u32, u32)>,
@@ -9316,6 +9318,7 @@ impl Game<'_> {
             .as_ref()
             .map(respawn_anchor::RespawnConfig::from_saved);
         self.spawn_origin = None;
+        self.spawn_origin_asked = false;
         self.spawn_spiral = Default::default();
         self.player_spawn = None;
         self.creatures.reset_trader();
@@ -14150,6 +14153,7 @@ impl<'a> Game<'a> {
             lectern_pulses: Vec::new(),
             loading_progress: 0.0,
             spawn_origin: None,
+            spawn_origin_asked: false,
             held_joins: Vec::new(),
             spawn_spiral: Default::default(),
             player_spawn: None,

@@ -230,6 +230,14 @@ public final class HorizonServer {
         return allocate(type);
     }
 
+    private static net.minecraft.network.Connection clientConnection;
+
+    /** The headless client's network connection (its packet listener's): a mirror one. */
+    static synchronized net.minecraft.network.Connection clientConnection() {
+        if (clientConnection == null) clientConnection = allocate(net.minecraft.network.Connection.class);
+        return clientConnection;
+    }
+
     private static <T> T allocate(Class<T> type) {
         T object = type.cast(Natives.allocate(type));
         mirror(object);
@@ -788,6 +796,7 @@ public final class HorizonServer {
         return HorizonWorldgen.lodColumns(dimension, xz);
     }
 
+    /** The world spawn's first chunk in a dimension the mods generate (HorizonWorldgen.origin): [x, z] or null. */
     public static int[] worldgenOrigin(String dimension) {
         return HorizonWorldgen.origin(dimension);
     }

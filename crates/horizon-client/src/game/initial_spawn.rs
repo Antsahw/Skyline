@@ -102,7 +102,8 @@ impl Game<'_> {
     /// valid respawn column gives the world spawn, else the origin chunk's
     /// centre at the spawn height. None while a chunk to test is loading.
     pub(super) fn find_world_spawn(&mut self) -> Result<Option<[i32; 3]>> {
-        let ((ox, oz), height) = match self.spawn_origin {
+        #[cfg_attr(not(feature = "java-mods"), allow(unused_mut))]
+        let ((mut ox, mut oz), height) = match self.spawn_origin {
             Some(origin) => origin,
             None => {
                 // Java mods may generate the overworld with a generator of their own (a mod's
@@ -113,6 +114,30 @@ impl Game<'_> {
                 *self.spawn_origin.insert(self.spawn_origin()?)
             }
         };
+        // When Java mods generate the overworld, their generator's origin (its climate's spawn
+        // target: a mod's noise router moves the land, and Horizon's vanilla origin can be sea
+        // there). Asked once the first chunk is made: that chunk starts the mods' generation.
+        #[cfg(feature = "java-mods")]
+        if !self.spawn_origin_asked && super::java_mods::has_java_mods() {
+            if !self.streaming.is_lit(ox, oz) {
+                self.streaming.center = (ox, oz);
+                return Ok(None);
+            }
+            self.spawn_origin_asked = true;
+            if let Some((x, z)) = horizon_jvm::events::worldgen_origin("minecraft:overworld")
+                .ok()
+                .flatten()
+                .map(|o| (o.x, o.z))
+                && (x, z) != (ox, oz)
+            {
+                log::info!(
+                    "Java mods: the world spawn's search starts at chunk {x} {z} (their generator's)"
+                );
+                (ox, oz) = (x, z);
+                self.spawn_origin = Some(((x, z), height));
+                self.spawn_spiral = Default::default();
+            }
+        }
         while let Some((dx, dz)) = self.spawn_spiral.current() {
             if self.spawn_spiral.tested() {
                 let (cx, cz) = (ox + dx, oz + dz);
