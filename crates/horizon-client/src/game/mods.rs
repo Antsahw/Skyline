@@ -98,7 +98,10 @@ pub(super) fn content_root(
             log::warn!("Horizon: mod {} content not loaded: {e}", m.id);
         }
     }
-    match mod_content::resource_root(root, &mods, &here.join(".horizon-cache")) {
+    let built = mod_content::resource_root(root, &mods, &horizon_cache());
+    #[cfg(feature = "java-mods")]
+    super::java_mods::start_early();
+    match built {
         Ok(out) => {
             #[cfg(feature = "java-mods")]
             if out != root {
@@ -313,6 +316,18 @@ impl Game<'_> {
 /// so breaking it would never remove it: the block gets none.
 pub(super) fn warn_no_block_entity(block: &str, id: &str) {
     log::warn!("{block}: no block entity {id}, its template has none (copy a chest or furnace)");
+}
+
+/// The game's cache folder (`.horizon-cache` in the working directory), by its real path: what
+/// is built there (the mods' content, the content root) names files by it and is stamped with
+/// it, so a cache reached through a link (a launcher's or a test's per-run folder linking a
+/// kept cache) is found again under the same name the next time.
+pub(super) fn horizon_cache() -> std::path::PathBuf {
+    let here = std::env::current_dir()
+        .unwrap_or_default()
+        .join(".horizon-cache");
+    let _ = std::fs::create_dir_all(&here);
+    std::fs::canonicalize(&here).unwrap_or(here)
 }
 
 #[cfg(test)]

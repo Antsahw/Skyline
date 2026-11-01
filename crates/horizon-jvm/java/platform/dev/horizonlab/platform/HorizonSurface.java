@@ -90,12 +90,14 @@ public final class HorizonSurface {
             seed = managers.findVarHandle(BiomeManager.class, "biomeZoomSeed", long.class);
             ready = true;
             // Another mod's injection into the walk would be skipped: vanilla's runs then.
+            Set<String> others = new java.util.TreeSet<>();
             for (var method : MaterialSystem.class.getDeclaredMethods()) {
                 var merged = method.getAnnotation(org.spongepowered.asm.mixin.transformer.meta.MixinMerged.class);
-                if (merged != null && !merged.mixin().startsWith("dev.horizonlab.")) {
-                    Natives.log("Java mods' worldgen: " + merged.mixin() + " changes MaterialSystem: vanilla's surface walk runs");
-                    ready = false;
-                }
+                if (merged != null && !merged.mixin().startsWith("dev.horizonlab.")) others.add(merged.mixin());
+            }
+            if (!others.isEmpty()) {
+                Natives.log("Java mods' worldgen: " + String.join(", ", others) + " change MaterialSystem: vanilla's surface walk runs");
+                ready = false;
             }
         } catch (ReflectiveOperationException | RuntimeException e) {
             Natives.log("Java mods' worldgen: the faster surface walk is off (" + e + "): vanilla's runs");

@@ -159,3 +159,13 @@ tests pass; fmt and clippy `-D warnings` clean (horizon-client, horizon-jvm).
   on the Mods page (`getProvidedConfigScreenFactories`: client area). Test: `regress.py --jars
   … tech` (BuildCraft, Large Fluid Tank, Scalable Cat's Force jars), or the tech mods in
   `~/hz-test/mods-java`: `/setblock ~2 ~ ~ buildcraftbuilders:quarry`.
+
+- worldgen 1, startup time (`bridge-worldgen-1`, by the worldgen chat): a 110-jar pack (the
+  137's named mods from Modrinth; content made) went from 193 s to ~120 s to the join on 2
+  cores. The content root was rebuilt on every run in a new folder (its stamp went through
+  the `.horizon-cache` link): now reused (−40 s). Java starts right after the content root
+  instead of after the first frame (−15 s here, more with more cores; peak 5.4 GB).
+  `HORIZON_JAVA_EARLY_START=0` turns that off. Left: ~10 s of Fabric biome modifications ×
+  TerraBlender at the overworld's start (mod code), and the spawn's chunks. Test: start the
+  pack twice; the second log says "content from N mod(s)" within seconds, and "Hello from
+  Java" comes before "load assets".

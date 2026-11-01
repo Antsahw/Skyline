@@ -1220,6 +1220,20 @@ Item Alchemy is out: its library bundles CompatDatapacks, which rewrites every r
 registries don't load), a conflict on real Fabric too; Item Alchemy's own recipes need that
 rewrite.
 
+Startup (2026-11-01, bridge-worldgen-1; a 110-jar pack like `big4t`'s, 2 cores, content
+already made): 193 s to the join before, ~120 s now. Two things: the content root (the
+mods' assets and tables merged over the game's, ~40 s to build) was built again on every
+run whose working folder differed (its stamp named files through the folder's
+`.horizon-cache`, a link to the kept cache in `launch.sh`/`regress.py`): the cache's real
+path is used now (`mods::horizon_cache`), so a kept content root is reused; and Java and
+Fabric (~75 s of bootstrap, entrypoints and data for this pack) start as soon as the content
+root is there (`java_mods::start_early`), beside the rest of the resources' load, instead
+of after the window's first frame (`HORIZON_JAVA_EARLY_START=0`: as before). Not beside the
+content root's build: the two at once outgrew this sandbox's 6 GB. Left after Java is up
+(~35 s here): the overworld's start (~10 s, mostly Fabric's biome modifications asking
+TerraBlender's `possibleBiomes` per biome, mod code), then the spawn's chunks. In this pack
+Biolith and Lithostitched patch MaterialSystem, so the faster surface walk stays off.
+
 Memory is what limits a pack's size: Horizon keeps several per-state tables (client and its
 server thread) and the content build exports every state. The full 157-jar set (`big4`) has
 577,094 states (Rechiseled 111,669, Diagonal Fences 86,528, Stoneworks 53,510, XNet 29,207
