@@ -36,7 +36,7 @@ own files stay one-line calls into our files. Upstream's code wins where both bu
 
 ### entities
 1. Riding: other players see the rider sitting (Horizon's tracker learns the mod's vehicle),
-   horse-style charged jumps, and `--in-frame`.
+   horse-style charged jumps. (`--in-frame` is deprecated upstream: skip it.)
 2. Mod mobs and Horizon's own mobs seeing each other (targets, fleeing, attacks both ways).
 3. A bigger mob pack (the 137-jar pack's mobs plus 10 more mob mods): measure, cut the top three.
 4. The `mount` case is flaky in a full run: the scene's ground slopes, so "drove" and "off"
@@ -69,8 +69,8 @@ own files stay one-line calls into our files. Upstream's code wins where both bu
    java-bridge.md "Hooks in Horizon's shared files": random tick, hurt, block break/place,
    clicks, commands, deaths). One at a time, a regress case each.
 2. Effects from beacons, conduits, raids and the Warden ask the mods too.
-3. Falls: `--in-frame`, maces and wind charges routed; the routed fall's block contact (upstream's
-   `mod_block_fall`).
+3. Falls: maces and wind charges routed; the routed fall's block contact (upstream's
+   `mod_block_fall`). (`--in-frame` is deprecated upstream: skip it.)
 
 ### gpu
 1. XaeroPlus and MiniHUD (with MaLiLib).
