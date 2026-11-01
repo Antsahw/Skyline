@@ -37,12 +37,20 @@ public final class HorizonSpawner {
     private static final Map<ServerLevel, Long> BIOMES_SEED = new IdentityHashMap<>();
     private static boolean modified;
     private static int ticks;
+    /** Mods' mobs spawned with chunks' generation and near players, logged once a minute. */
+    private static int generatedSpawns, naturalSpawns;
 
     /** Each server tick: the levels' biomes, then spawning near each player. */
     public static void tick() {
         ticks++;
+        if (ticks % 1200 == 0 && generatedSpawns + naturalSpawns > 0) {
+            Natives.log("Java mods: the last minute's spawns of mods' mobs: " + generatedSpawns
+                    + " with generated chunks, " + naturalSpawns + " near players");
+            generatedSpawns = naturalSpawns = 0;
+        }
         for (ServerLevel level : HorizonServer.levels()) {
             biomes(level);
+            generated(level);
             if (level.players().isEmpty()) continue;
             boolean mobs;
             try {
@@ -57,7 +65,9 @@ public final class HorizonSpawner {
                     if (category == MobCategory.MISC) continue;
                     if (category.isPersistent() && ticks % 400 != 0) continue;
                     try {
-                        spawn(level, player, category);
+                        for (int i = category.isPersistent() ? 48 : 6; i > 0; i--) {
+                            if (!spawn(level, player, category)) break;
+                        }
                     } catch (Throwable t) {
                         HorizonServer.fire("natural spawning (" + category.getName() + ")", () -> { throw new RuntimeException(t); });
                     }
@@ -103,22 +113,29 @@ public final class HorizonSpawner {
         }
     }
 
-    private static void spawn(ServerLevel level, ServerPlayer player, MobCategory category) {
+    /**
+     * One NaturalSpawner.spawnCategoryForChunk try for a chunk near the player. False when the
+     * category is at its cap (no more tries this tick).
+     */
+    private static boolean spawn(ServerLevel level, ServerPlayer player, MobCategory category) {
         // The cap: the category's per-chunk cap (vanilla's mob cap per player), mods' mobs only.
         int cap = category.getMaxInstancesPerChunk();
         int count = 0;
         for (Entity e : HorizonEntities.of(level)) {
             if (e.getType().getCategory() == category && e.distanceToSqr(player) < 128 * 128) count++;
         }
-        if (count >= cap) return;
-        // A chunk within 8 of the player's, a position in it near the player's height.
+        if (count >= cap) return false;
+        // A chunk within 8 of the player's; a position in it as NaturalSpawner.getRandomPosWithin
+        // picks it: any height from the bottom to the surface (Horizon's WORLD_SURFACE heightmap).
         int cx = (player.getBlockX() >> 4) + RANDOM.nextInt(17) - 8;
         int cz = (player.getBlockZ() >> 4) + RANDOM.nextInt(17) - 8;
         int x = (cx << 4) + RANDOM.nextInt(16);
         int z = (cz << 4) + RANDOM.nextInt(16);
-        int y = Math.max(level.getMinY(), Math.min(level.getMaxY(), player.getBlockY() + RANDOM.nextInt(49) - 24));
+        int top = Natives.surface(HorizonServer.dimensionOf(level), x, z);
+        if (top == Integer.MIN_VALUE) return true;
+        int y = level.getMinY() + RANDOM.nextInt(Math.max(1, top + 1 - level.getMinY()));
         BlockPos center = new BlockPos(x, y, z);
-        if (!level.isLoaded(center)) return;
+        if (!level.isLoaded(center)) return true;
         // NaturalSpawner.spawnCategoryForPosition: up to 3 groups, each up to 4 tries around.
         MobSpawnSettings.SpawnerData data = null;
         int size = 0;
@@ -133,13 +150,73 @@ public final class HorizonSpawner {
                 if (player.distanceToSqr(dx, pos.getY(), dz) <= 24 * 24) continue;
                 if (data == null) {
                     var settings = level.environmentAttributes().getValue(EnvironmentAttributes.NATURAL_MOB_SPAWNS, pos);
-                    if (!(settings instanceof MobSpawnSettings mobs)) return;
+                    if (!(settings instanceof MobSpawnSettings mobs)) return true;
                     data = mobs.getMobsToSpawn(category).getRandom(RANDOM).orElse(null);
                     // Horizon spawns vanilla's own mobs.
-                    if (data == null || !HorizonEntities.modded(data.type())) return;
+                    if (data == null || !HorizonEntities.modded(data.type())) return true;
                     size = data.count().sample(RANDOM);
                 }
-                if (spawnOne(level, data.type(), category, pos, dx, dz) && --size <= 0) return;
+                if (spawnOne(level, data.type(), category, pos, dx, dz, EntitySpawnReason.NATURAL) && --size <= 0) return true;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * NaturalSpawner.spawnMobsForChunkGeneration for the chunks Horizon generated since the
+     * last tick (Natives.freshChunks): while a draw is under the biome's creature probability,
+     * a group of a creature its spawn list picks, each member on the surface of a column in
+     * the chunk. Only the mods' creatures (Horizon spawns vanilla's).
+     */
+    private static void generated(ServerLevel level) {
+        int[] fresh;
+        try {
+            fresh = Natives.freshChunks(HorizonServer.dimensionOf(level));
+        } catch (Throwable t) {
+            return;
+        }
+        if (fresh == null) return;
+        String dimension = HorizonServer.dimensionOf(level);
+        for (int i = 0; i + 1 < fresh.length; i += 2) {
+            int cx = fresh[i], cz = fresh[i + 1];
+            try {
+                int sx = (cx << 4) + 8, sz = (cz << 4) + 8;
+                int top = Natives.surface(dimension, sx, sz);
+                if (top == Integer.MIN_VALUE) continue;
+                BlockPos at = new BlockPos(sx, top, sz);
+                var settings = level.environmentAttributes().getValue(EnvironmentAttributes.NATURAL_MOB_SPAWNS, at);
+                if (!(settings instanceof MobSpawnSettings mobs)) continue;
+                Float probability = level.environmentAttributes().getValue(EnvironmentAttributes.CREATURE_WORLD_GEN_SPAWN_PROBABILITY, at);
+                float chance = probability == null ? MobSpawnSettings.DEFAULT_CREATURE_WORLD_GEN_SPAWN_PROBABILITY : probability;
+                var creatures = mobs.getMobsToSpawn(MobCategory.CREATURE);
+                if (creatures.isEmpty()) continue;
+                while (RANDOM.nextFloat() < chance) {
+                    MobSpawnSettings.SpawnerData data = creatures.getRandom(RANDOM).orElse(null);
+                    if (data == null) break;
+                    int size = data.count().sample(RANDOM);
+                    int x = (cx << 4) + RANDOM.nextInt(16), z = (cz << 4) + RANDOM.nextInt(16);
+                    int ox = x, oz = z;
+                    if (!HorizonEntities.modded(data.type())) continue;
+                    for (int member = 0; member < size; member++) {
+                        for (int attempt = 0; attempt < 4; attempt++) {
+                            int y = Natives.surface(dimension, x, z);
+                            BlockPos pos = y == Integer.MIN_VALUE ? null : ground(level, new BlockPos(x, y, z));
+                            if (pos != null && spawnOne(level, data.type(), MobCategory.CREATURE, pos, x + 0.5, z + 0.5,
+                                    EntitySpawnReason.CHUNK_GENERATION)) {
+                                break;
+                            }
+                            // Jittered within the chunk, as vanilla's.
+                            x += RANDOM.nextInt(5) - RANDOM.nextInt(5);
+                            z += RANDOM.nextInt(5) - RANDOM.nextInt(5);
+                            while (x < (cx << 4) || x >= (cx << 4) + 16 || z < (cz << 4) || z >= (cz << 4) + 16) {
+                                x = ox + RANDOM.nextInt(5) - RANDOM.nextInt(5);
+                                z = oz + RANDOM.nextInt(5) - RANDOM.nextInt(5);
+                            }
+                        }
+                    }
+                }
+            } catch (Throwable t) {
+                HorizonServer.fire("spawns of a generated chunk", () -> { throw new RuntimeException(t); });
             }
         }
     }
@@ -161,20 +238,26 @@ public final class HorizonSpawner {
         return null;
     }
 
-    private static boolean spawnOne(ServerLevel level, EntityType<?> type, MobCategory category, BlockPos pos, double x, double z) {
+    private static boolean spawnOne(ServerLevel level, EntityType<?> type, MobCategory category, BlockPos pos, double x, double z,
+                                    EntitySpawnReason reason) {
         if (!type.canSummon() || type.getCategory() != category) return false;
         if (!SpawnPlacements.isSpawnPositionOk(type, level, pos)) return false;
-        if (!SpawnPlacements.checkSpawnRules(type, level, EntitySpawnReason.NATURAL, pos, RANDOM)) return false;
+        if (reason == EntitySpawnReason.NATURAL && !SpawnPlacements.checkSpawnRules(type, level, reason, pos, RANDOM)) return false;
         if (!level.noCollision(type.getSpawnAABB(x, pos.getY(), z))) return false;
-        Entity entity = type.create(level, EntitySpawnReason.NATURAL);
+        Entity entity = type.create(level, reason);
         if (!(entity instanceof Mob mob)) {
             if (entity != null) entity.discard();
             return false;
         }
         mob.snapTo(x, pos.getY(), z, RANDOM.nextFloat() * 360.0F, 0.0F);
-        if (!mob.checkSpawnRules(level, EntitySpawnReason.NATURAL) || !mob.checkSpawnObstruction(level)) return false;
-        mob.finalizeSpawn(level, level.getCurrentDifficultyAt(mob.blockPosition()), EntitySpawnReason.NATURAL, null);
+        if (!mob.checkSpawnRules(level, reason) || !mob.checkSpawnObstruction(level)) {
+            mob.discard();
+            return false;
+        }
+        mob.finalizeSpawn(level, level.getCurrentDifficultyAt(mob.blockPosition()), reason, null);
         level.addFreshEntityWithPassengers(mob);
+        if (reason == EntitySpawnReason.CHUNK_GENERATION) generatedSpawns++;
+        else naturalSpawns++;
         return true;
     }
 }

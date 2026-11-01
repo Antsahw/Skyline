@@ -730,8 +730,18 @@ Known gaps of mod entities: vanilla mobs don't see them nor they vanilla mobs (a
 won't hunt Horizon's sheep); worn armour, fire, leashes and sprite-atlas models
 (`UvMapping`) aren't drawn; custom geometry is sent whole each tick (fine for a few
 GeckoLib mobs, heavy for many); a mod's particle types are drawn as a generic particle
-(its sprites, not its provider's motion); natural spawns pick a height near the player (no heightmap), and spawn on
-world generation doesn't happen; in-frame single player is untested.
+(its sprites, not its provider's motion); Horizon's `/gamerule spawn_mobs` doesn't reach the
+mods' spawner; in-frame single player is untested.
+
+Natural spawning of mods' mobs (`HorizonSpawner`, 2026-11-01): heights as
+`NaturalSpawner.getRandomPosWithin` picks them, up to Horizon's WORLD_SURFACE heightmap
+(`Natives.surface`), 6 tries a player a category a tick (48 for creatures every 400 ticks:
+vanilla tries every chunk in range). Chunks Horizon generates (`Chunk::fresh`, also the
+mods' Java-generated ones) are queued (`horizon_jvm::world::fresh_chunk`, from
+`tick_creatures`) and get `spawnMobsForChunkGeneration`'s creature groups of the mods' types
+(`Natives.freshChunks`, the biome's `CREATURE_WORLD_GEN_SPAWN_PROBABILITY`). A minute's count
+is logged: `Java mods: the last minute's spawns of mods' mobs: N with generated chunks, M near
+players` (big pack, walking: ~20 of each).
 
 Client HUD mods (tested headless, survival): Jade's tooltip for the block looked at (box,
 name, mod, item icon), AppleSkin's food overlays over Horizon's food bar.
@@ -924,6 +934,42 @@ Now (same container): dense 100 critters 15 ms a tick on the server thread (AI 7
 Per mob: AI ~0.06–0.08 ms, snapshot ~0.03 ms. The container is two shared cores; a desktop
 core should be 2–3x faster. Left: the snapshot's fixed part (~2 ms: JSON for all, block
 entity scan), the player's game parsing ~1–2 ms on its own thread, and the mobs' own AI.
+
+### The 106-jar pack's mobs (2026-11-01, bridge-mob-perf2)
+
+`HORIZON_JAVA_PROFILE=1` on the big pack (standing, walking, standing; Naturalist, Friends&Foes,
+Mutant Monsters, Ecologics spawning): Naturalist's bass ~3.5 ms each a tick, butterflies ~5 ms,
+the rest of its mobs 0.3–1.3 ms; 40 mobs 42–75 ms. Not their AI: a Polymer mixin in
+`LevelChunk`'s constructor reads every section (`polymer$generatePolymerBlockSet`), which filled
+each lazy `HorizonChunks` copy (98k blocks, lithium's state tracking on each), on every
+`getChunk` of every mob that moves. Fixed:
+- `HorizonChunks.Copy` answers its constructor's mixins with the empty sections the constructor
+  made (a `made` flag); copies are kept across ticks while Horizon's chunk revision stays (512 a
+  level, LRU; the calls' unapplied writes followed again on reuse).
+- The mirror level's entity searches use a chunk-column grid made once a tick
+  (`HorizonEntities.near`; each entity in the column it stands in, searches grown by its widest
+  box + 8 blocks), the entity list is kept between changes (`HorizonEntities.of` made a new
+  list on every `getEntities`).
+- The last section read is kept per thread (most block reads follow one another).
+- Snapshot: an entity whose look is the same as last sent (standing, resting) goes as `"keep"`
+  with its position only; a standing one is drawn every other tick (idle animations at 10 Hz,
+  lerped); Rust sends the last whole entry to a player that hasn't had it
+  (`send_java_entities`: `looks`, `has`). The snapshot is written straight to one string.
+- The profile's block read counter is a `LongAdder` (it took a lock per read).
+
+Now: bass 0.1 ms, butterfly 0.15, whale ~1 (its body parts' collisions), the rest ~0.1–0.2;
+the natural 40 mobs ~7–10 ms of ticks + ~2.3 ms of snapshot. 100 mixed Naturalist mobs
+summoned within 24 blocks (`mix_load` test: all active): ticks 10.5–11.6 ms (~0.11 each),
+snapshot 4.6–4.8 ms (~80 drawn a tick), Rust ~1 ms, payload 22 KB a tick; on two cores shared
+with the mods' worldgen (30–45 ms a tick of Java terrain there). Left above 5 ms: the mobs' own
+AI (goals, pathfinding, lithium's collision sweeps: ~0.1 ms each here), and a fill each time a
+chunk's revision changes (grass, crops).
+
+Big pack traps: the first client tick's model reload (`HorizonClient.models`, with a GPU
+device) never ended with 106 jars (a future waiting on nothing; the server tick stopped there
+for good): it is now bounded at 30 s. Not mobs, but in the mirror tick: the headless
+client's tick, 7–24 ms (the mods' frame-start hooks up to 19 ms in the first minutes, ~5 ms of
+HUD).
 
 ## Working on it
 

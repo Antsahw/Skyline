@@ -57,6 +57,11 @@ pub trait Blocks {
     fn state_name(&self, _id: i32) -> Option<String> {
         None
     }
+    /// `getHeight(Heightmap.Types.WORLD_SURFACE, x, z)`: one above the column's highest
+    /// block that isn't air. None where the chunk isn't loaded.
+    fn surface(&self, _dimension: &str, _x: i32, _z: i32) -> Option<i32> {
+        None
+    }
     /// The biomes of chunk `cx cz` as [`Blocks::column`] gives its blocks, one a quart (4x4x4
     /// blocks; `i` = `((qy - min_y / 4) * 4 + qz) * 4 + qx`), with a palette of biome ids.
     fn column_biomes(
@@ -118,6 +123,40 @@ pub(crate) fn state_name(id: i32) -> Option<String> {
     // SAFETY: a view in VIEW is alive (with_blocks).
     VIEW.get()
         .and_then(|view| unsafe { (*view).state_name(id) })
+}
+
+/// [`Blocks::surface`] of this thread's view.
+pub(crate) fn surface(dimension: &str, x: i32, z: i32) -> Option<i32> {
+    // SAFETY: a view in VIEW is alive (with_blocks).
+    VIEW.get()
+        .and_then(|view| unsafe { (*view).surface(dimension, x, z) })
+}
+
+/// Chunks Horizon generated (not loaded from a save) since Java last asked, by dimension:
+/// `NaturalSpawner.spawnMobsForChunkGeneration` for the mods' mobs (`HorizonSpawner`).
+static FRESH: std::sync::Mutex<Vec<(String, i32, i32)>> = std::sync::Mutex::new(Vec::new());
+
+/// A chunk of `dimension` newly generated. Kept up to 4096 (Java takes them each tick).
+pub fn fresh_chunk(dimension: &str, cx: i32, cz: i32) {
+    let mut fresh = FRESH.lock().unwrap_or_else(|e| e.into_inner());
+    if fresh.len() < 4096 {
+        fresh.push((dimension.to_owned(), cx, cz));
+    }
+}
+
+/// The fresh chunks of `dimension`, taken.
+pub(crate) fn take_fresh(dimension: &str) -> Vec<i32> {
+    let mut fresh = FRESH.lock().unwrap_or_else(|e| e.into_inner());
+    let mut out = Vec::new();
+    fresh.retain(|(d, cx, cz)| {
+        if d == dimension {
+            out.extend([*cx, *cz]);
+            false
+        } else {
+            true
+        }
+    });
+    out
 }
 
 /// [`Blocks::column_biomes`] of this thread's view; None outside one.

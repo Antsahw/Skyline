@@ -44,11 +44,49 @@ public final class HorizonChunks {
             long key = ChunkPos.pack(cx, cz);
             LevelChunk copy = copies.get(key);
             if (copy == null && !copies.containsKey(key)) {
-                copy = copy(level, cx, cz);
+                copy = kept(level, cx, cz);
                 copies.put(key, copy);
             }
             return copy;
         }
+    }
+
+    /** A copy made in an earlier view, by the revision of Horizon's chunk it copied. */
+    private record Kept(long revision, Copy copy) {}
+
+    /** Copies kept across views (ticks), the last 512 a level. */
+    private static final Map<ServerLevel, Map<Long, Kept>> KEPT = new IdentityHashMap<>();
+
+    /**
+     * The copy of chunk cx cz: the one an earlier view made while Horizon's chunk is the same
+     * (Natives.chunkRevision: a mob reads the same chunks tick after tick, and a filled copy
+     * is 98k blocks), else a new one. The calls' writes Horizon hasn't taken yet are applied.
+     */
+    private static LevelChunk kept(ServerLevel level, int cx, int cz) {
+        String dimension = HorizonServer.dimensionOf(level);
+        long revision = Natives.chunkRevision(dimension, cx, cz);
+        if (revision == -2) return null;
+        long key = ChunkPos.pack(cx, cz);
+        Map<Long, Kept> kept = KEPT.computeIfAbsent(level, l -> new java.util.LinkedHashMap<>(64, 0.75F, true) {
+            @Override
+            protected boolean removeEldestEntry(Map.Entry<Long, Kept> eldest) {
+                return size() > 512;
+            }
+        });
+        Kept had = revision >= 0 ? kept.get(key) : null;
+        if (had != null && had.revision() == revision) {
+            Map<Long, BlockState> written = HorizonServer.written(level);
+            if (written != null) {
+                written.forEach((at, state) -> {
+                    BlockPos pos = BlockPos.of(at);
+                    if (pos.getX() >> 4 == cx && pos.getZ() >> 4 == cz) had.copy().follow(pos, state);
+                });
+            }
+            return had.copy();
+        }
+        LevelChunk copy = copy(level, cx, cz);
+        if (copy instanceof Copy c && revision >= 0) kept.put(key, new Kept(revision, c));
+        return copy;
     }
 
     /** A block a call set on a mirrored level: the copy of its chunk (if made) follows. */
@@ -130,13 +168,20 @@ public final class HorizonChunks {
      */
     private static final class Copy extends LevelChunk {
         private boolean filled;
+        /**
+         * Set when the constructor is done. Mixins into LevelChunk's constructor read its
+         * sections (Polymer's polymer$generatePolymerBlockSet): they get the empty ones the
+         * constructor made, not a fill (which a copy for one block read doesn't need).
+         */
+        private final boolean made;
 
         Copy(ServerLevel level, ChunkPos pos) {
             super(level, pos);
+            made = true;
         }
 
         private void ensure() {
-            if (filled) return;
+            if (filled || !made) return;
             filled = true;
             fill(this);
         }

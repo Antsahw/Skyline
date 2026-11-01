@@ -233,9 +233,6 @@ public final class HorizonEntityRender {
         return out;
     }
 
-    /** Entities drawn at least once (a resting one's look is then kept by Horizon). */
-    private static final java.util.Set<Entity> DRAWN = java.util.Collections.newSetFromMap(new java.util.WeakHashMap<>());
-
     /** A float sent each tick (a matrix, a pose): to 1e-4, which is all a model needs. */
     static float round(float f) {
         return Math.round(f * 10000.0F) / 10000.0F;
@@ -272,72 +269,135 @@ public final class HorizonEntityRender {
         }
     }
 
+    /**
+     * What each entity looked like when last sent whole: its entry without id, type and
+     * position (HorizonJson), and its model keys. An entity that looks the same (standing,
+     * resting) is sent as a "keep" entry: its position only, the player's game keeps the look
+     * (Horizon's side sends the whole entry to a player that hasn't had it).
+     */
+    private record Look(String json, String keys, double x, double y, double z, float yaw, float pitch, float head) {
+        /** Standing as when this look was made: the same place and facing, not hurt. */
+        boolean still(Entity e) {
+            return e.getX() == x && e.getY() == y && e.getZ() == z && e.getYRot() == yaw && e.getXRot() == pitch
+                    && e.getYHeadRot() == head && !(e instanceof net.minecraft.world.entity.LivingEntity l && (l.hurtTime > 0 || l.deathTime > 0));
+        }
+    }
+
+    private static final Map<Entity, Look> LOOKS = java.util.Collections.synchronizedMap(new java.util.WeakHashMap<>());
+
     private static String snapshotNow() {
-        JsonObject dims = new JsonObject();
-        for (var e : HorizonEntities.all().entrySet()) {
-            ServerLevel level = e.getKey();
-            JsonArray list = new JsonArray();
-            for (Entity entity : e.getValue()) {
-                if (entity.isRemoved()) continue;
-                JsonObject o = new JsonObject();
-                o.addProperty("id", entity.getId());
-                o.addProperty("type", BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString());
-                o.addProperty("x", entity.getX());
-                o.addProperty("y", entity.getY());
-                o.addProperty("z", entity.getZ());
-                // It didn't tick (far and idle, HorizonEntities.active): it looks as it did,
-                // which the player's game keeps.
-                if (HorizonEntities.resting(entity) && DRAWN.contains(entity)) {
-                    o.addProperty("keep", true);
-                    list.add(routed(o));
-                    continue;
-                }
-                DRAWN.add(entity);
-                o.addProperty("w", entity.getBbWidth());
-                o.addProperty("h", entity.getBbHeight());
-                JsonArray items = new JsonArray();
-                long started = HorizonProfile.start();
-                o.add("models", models(entity, items));
-                if (HorizonProfile.ON) HorizonProfile.render(
-                        BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString(), System.nanoTime() - started);
-                if (!items.isEmpty()) o.add("items", items);
-                // Its custom name, when its renderer couldn't say (Horizon shows it as its own
-                // mobs': visible, or looked at).
-                if (!extracted && entity.getCustomName() != null) {
-                    o.add("name", com.google.gson.JsonParser.parseString(HorizonServer.json(entity.getCustomName())));
-                    o.addProperty("name_visible", entity.isCustomNameVisible());
-                }
-                // The name tag its renderer gives (a custom name, or a mod's own: a pet's
-                // owner, health): shown always, or when looked at; above its box, or where
-                // the renderer attaches it.
-                if (lastTag != null) {
-                    o.add("tag", com.google.gson.JsonParser.parseString(HorizonServer.json(lastTag)));
-                    if (lastTagAlways) o.addProperty("tag_always", true);
-                    if (lastTagY >= 0.0) o.addProperty("tag_y", lastTagY);
-                }
-                float shadow = lastShadow;
-                if (shadow > 0.0F) o.addProperty("shadow", shadow);
-                list.add(routed(o));
-            }
-            if (!list.isEmpty()) dims.add(level.dimension().identifier().toString(), list);
-        }
-        // Mods' block entities their renderers draw (a cutting board's item, a stove's food),
-        // as entities marked "block" at the block's corner.
+        StringBuilder out = new StringBuilder(16384);
+        out.append("{\"dims\":{");
+        boolean firstDim = true;
+        var all = HorizonEntities.all();
         for (ServerLevel level : HorizonServer.levels()) {
-            JsonArray blocks = blockEntities(level);
-            if (blocks.isEmpty()) continue;
-            String key = level.dimension().identifier().toString();
-            JsonArray list = dims.has(key) ? dims.getAsJsonArray(key) : new JsonArray();
-            for (var b : blocks) list.add(routed(b.getAsJsonObject()));
-            dims.add(key, list);
+            String dimension = level.dimension().identifier().toString();
+            int mark = out.length();
+            if (!firstDim) out.append(',');
+            HorizonJson.string(dimension, out);
+            out.append(":[");
+            int listStart = out.length();
+            var entities = all.get(level);
+            if (entities != null) {
+                for (Entity entity : entities) {
+                    if (entity.isRemoved()) continue;
+                    if (out.length() > listStart) out.append(',');
+                    entry(entity, out);
+                }
+            }
+            // Mods' block entities their renderers draw (a cutting board's item, a stove's
+            // food), as entities marked "block" at the block's corner.
+            for (var b : blockEntities(level)) {
+                if (out.length() > listStart) out.append(',');
+                HorizonJson.write(routed(b.getAsJsonObject()), out);
+            }
+            if (out.length() == listStart) {
+                out.setLength(mark);
+                continue;
+            }
+            out.append(']');
+            firstDim = false;
         }
-        JsonObject out = new JsonObject();
-        out.add("dims", dims);
-        JsonObject trees = new JsonObject();
-        for (var t : NEW_TREES.entrySet()) trees.add(t.getKey(), t.getValue());
+        out.append("},\"models\":{");
+        boolean first = true;
+        for (var t : NEW_TREES.entrySet()) {
+            if (!first) out.append(',');
+            first = false;
+            HorizonJson.string(t.getKey(), out);
+            out.append(':');
+            HorizonJson.write(t.getValue(), out);
+        }
         NEW_TREES.clear();
-        out.add("models", trees);
-        return HorizonJson.write(out);
+        out.append("}}");
+        return out.toString();
+    }
+
+    /** One entity's routed entry: {x, y, z, id, keys, keep?, e: the entry}. */
+    private static void entry(Entity entity, StringBuilder out) {
+        StringBuilder head = new StringBuilder(96);
+        head.append("\"id\":").append(entity.getId()).append(",\"type\":");
+        HorizonJson.string(BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString(), head);
+        head.append(",\"x\":");
+        HorizonJson.number(entity.getX(), head);
+        head.append(",\"y\":");
+        HorizonJson.number(entity.getY(), head);
+        head.append(",\"z\":");
+        HorizonJson.number(entity.getZ(), head);
+        Look had = LOOKS.get(entity);
+        // It didn't tick (far and idle, HorizonEntities.active): it looks as it did. Standing
+        // still, it is drawn every other tick (its idle animation at 10 Hz, lerped).
+        boolean reuse = had != null && (HorizonEntities.resting(entity)
+                || ((entity.tickCount + entity.getId()) & 1) == 1 && had.still(entity));
+        Look look = reuse ? had : look(entity);
+        boolean keep = had != null && had.json().equals(look.json());
+        if (!reuse) LOOKS.put(entity, look);
+        String at = head.substring(head.indexOf(",\"x\":") + 1);
+        out.append('{').append(at).append(",\"id\":").append(entity.getId());
+        if (!look.keys().isEmpty()) out.append(",\"keys\":").append(look.keys());
+        if (keep) {
+            out.append(",\"keep\":true,\"e\":{").append(head).append(",\"keep\":true}}");
+            return;
+        }
+        out.append(",\"e\":{").append(head);
+        if (look.json().length() > 2) out.append(',').append(look.json(), 1, look.json().length());
+        else out.append('}');
+        out.append('}');
+    }
+
+    /** What its renderer draws now, and its name tag and shadow: the entry's look. */
+    private static Look look(Entity entity) {
+        JsonObject o = new JsonObject();
+        o.addProperty("w", entity.getBbWidth());
+        o.addProperty("h", entity.getBbHeight());
+        JsonArray items = new JsonArray();
+        long started = HorizonProfile.start();
+        JsonArray models = models(entity, items);
+        o.add("models", models);
+        if (HorizonProfile.ON) HorizonProfile.render(
+                BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString(), System.nanoTime() - started);
+        if (!items.isEmpty()) o.add("items", items);
+        // Its custom name, when its renderer couldn't say (Horizon shows it as its own
+        // mobs': visible, or looked at).
+        if (!extracted && entity.getCustomName() != null) {
+            o.add("name", com.google.gson.JsonParser.parseString(HorizonServer.json(entity.getCustomName())));
+            o.addProperty("name_visible", entity.isCustomNameVisible());
+        }
+        // The name tag its renderer gives (a custom name, or a mod's own: a pet's owner,
+        // health): shown always, or when looked at; above its box, or where the renderer
+        // attaches it.
+        if (lastTag != null) {
+            o.add("tag", com.google.gson.JsonParser.parseString(HorizonServer.json(lastTag)));
+            if (lastTagAlways) o.addProperty("tag_always", true);
+            if (lastTagY >= 0.0) o.addProperty("tag_y", lastTagY);
+        }
+        float shadow = lastShadow;
+        if (shadow > 0.0F) o.addProperty("shadow", shadow);
+        JsonArray keys = new JsonArray();
+        for (var m : models) {
+            if (m instanceof JsonObject mo && mo.has("key")) keys.add(mo.get("key"));
+        }
+        return new Look(HorizonJson.write(o), keys.isEmpty() ? "" : HorizonJson.write(keys),
+                entity.getX(), entity.getY(), entity.getZ(), entity.getYRot(), entity.getXRot(), entity.getYHeadRot());
     }
 
     /**

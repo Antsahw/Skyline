@@ -486,6 +486,16 @@ fn boot(env: &mut JNIEnv, jars: &[PathBuf]) -> jni::errors::Result<String> {
                 fn_ptr: native_chunk_revision as *mut c_void,
             },
             NativeMethod {
+                name: "surface".into(),
+                sig: "(Ljava/lang/String;II)I".into(),
+                fn_ptr: native_surface as *mut c_void,
+            },
+            NativeMethod {
+                name: "freshChunks".into(),
+                sig: "(Ljava/lang/String;)[I".into(),
+                fn_ptr: native_fresh_chunks as *mut c_void,
+            },
+            NativeMethod {
                 name: "stateName".into(),
                 sig: "(I)Ljava/lang/String;".into(),
                 fn_ptr: native_state_name as *mut c_void,
@@ -1197,6 +1207,43 @@ extern "system" fn native_section_ids<'local>(
 }
 
 /// `Natives.chunkRevision(String dimension, int cx, int cz)`: `world::chunk_revision`.
+extern "system" fn native_surface<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    dimension: JString<'local>,
+    x: sys::jint,
+    z: sys::jint,
+) -> sys::jint {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let Ok(dimension) = env.get_string(&dimension).map(String::from) else {
+            return i32::MIN;
+        };
+        world::surface(&dimension, x, z).unwrap_or(i32::MIN)
+    }))
+    .unwrap_or(i32::MIN)
+}
+
+extern "system" fn native_fresh_chunks<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    dimension: JString<'local>,
+) -> sys::jintArray {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let Ok(dimension) = env.get_string(&dimension).map(String::from) else {
+            return std::ptr::null_mut();
+        };
+        let fresh = world::take_fresh(&dimension);
+        let Ok(array) = env.new_int_array(fresh.len() as i32) else {
+            return std::ptr::null_mut();
+        };
+        if env.set_int_array_region(&array, 0, &fresh).is_err() {
+            return std::ptr::null_mut();
+        }
+        array.into_raw()
+    }))
+    .unwrap_or(std::ptr::null_mut())
+}
+
 extern "system" fn native_chunk_revision<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,

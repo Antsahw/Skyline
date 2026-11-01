@@ -43,6 +43,11 @@ public final class HorizonEntities {
 
     /** Per level: its mods' entities, by UUID, in the order they came (vanilla's tick order). */
     private static final Map<ServerLevel, Map<UUID, Entity>> LIVE = new IdentityHashMap<>();
+    /**
+     * Each level's entities as a list, made again after one comes or goes (getEntities runs
+     * this many times a tick: every mob's pushes, collisions, searches).
+     */
+    private static final Map<ServerLevel, List<Entity>> VIEWS = new IdentityHashMap<>();
     /** Per dimension: entities put away (their chunks unloaded), as saved. */
     private static final Map<String, List<CompoundTag>> SAVED = new HashMap<>();
     private static final Map<String, Integer> FAILURES = new ConcurrentHashMap<>();
@@ -72,6 +77,8 @@ public final class HorizonEntities {
             for (Entity e : live.values()) e.setRemoved(Entity.RemovalReason.UNLOADED_TO_CHUNK);
         }
         LIVE.clear();
+        VIEWS.clear();
+        GRIDS.clear();
         SAVED.clear();
         dir = now;
         // The new world's saved entities wait for their chunks (restore, each second).
@@ -99,6 +106,7 @@ public final class HorizonEntities {
         // a mirrored level's are the bridge's own, apart from Horizon's.
         if (entity.getId() < 0x7fff0000) entity.setId(HorizonServer.nextEntityId());
         live.put(entity.getUUID(), entity);
+        VIEWS.remove(level);
         entity.setLevelCallback(new Callback(level, entity));
         fire(entity, "ServerEntityEvents.ENTITY_LOAD", () ->
                 net.fabricmc.fabric.api.event.lifecycle.v1.ServerEntityEvents.ENTITY_LOAD.invoker().onLoad(entity, level));
@@ -108,7 +116,8 @@ public final class HorizonEntities {
     /** The level's mods' entities, for its entity getter (mods' searches, getEntity). */
     public static synchronized List<Entity> of(ServerLevel level) {
         Map<UUID, Entity> live = LIVE.get(level);
-        return live == null ? List.of() : new ArrayList<>(live.values());
+        if (live == null) return List.of();
+        return VIEWS.computeIfAbsent(level, l -> List.copyOf(live.values()));
     }
 
     /** Every mirrored level's mods' entities. */
@@ -116,6 +125,58 @@ public final class HorizonEntities {
         Map<ServerLevel, List<Entity>> out = new IdentityHashMap<>();
         for (var e : LIVE.entrySet()) out.put(e.getKey(), new ArrayList<>(e.getValue().values()));
         return out;
+    }
+
+    /**
+     * A level's entities by the chunk column they stand in, for box searches (near), and the
+     * widest half of their boxes.
+     */
+    private record Grid(long tick, List<Entity> of, it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap<List<Entity>> cells, double reach) {}
+
+    private static final Map<ServerLevel, Grid> GRIDS = new IdentityHashMap<>();
+    /** How far an entity may move in a tick and still be found from the column it was put in. */
+    private static final double GRID_MARGIN = 8.0;
+
+    /**
+     * The entities whose boxes may meet {@code box}: those put (once a tick) in the chunk
+     * columns the box covers, grown by how far an entity's box reaches from where it stands
+     * and how far it may have moved since. Vanilla searches its entity sections the same way;
+     * a scan of every entity for each of the many searches a tick (pushes, collisions, goals)
+     * was a fifth of the mobs' time.
+     */
+    static synchronized void near(ServerLevel level, net.minecraft.world.phys.AABB box, java.util.function.Consumer<Entity> out) {
+        List<Entity> of = of(level);
+        if (of.size() < 16) {
+            for (Entity e : of) out.accept(e);
+            return;
+        }
+        long tick = HorizonServer.tickCount();
+        Grid grid = GRIDS.get(level);
+        if (grid == null || grid.tick() != tick || grid.of() != of) {
+            var cells = new it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap<List<Entity>>();
+            double reach = 0.0;
+            for (Entity e : of) {
+                var b = e.getBoundingBox();
+                reach = Math.max(reach, Math.max(b.getXsize(), b.getZsize()) / 2.0);
+                cells.computeIfAbsent(net.minecraft.world.level.ChunkPos.pack(e.getBlockX() >> 4, e.getBlockZ() >> 4),
+                        k -> new ArrayList<>()).add(e);
+            }
+            grid = new Grid(tick, of, cells, reach + GRID_MARGIN);
+            GRIDS.put(level, grid);
+        }
+        double m = grid.reach();
+        int x0 = (int) Math.floor(box.minX - m) >> 4, x1 = (int) Math.floor(box.maxX + m) >> 4;
+        int z0 = (int) Math.floor(box.minZ - m) >> 4, z1 = (int) Math.floor(box.maxZ + m) >> 4;
+        if ((long) (x1 - x0 + 1) * (z1 - z0 + 1) > grid.cells().size()) {
+            for (List<Entity> cell : grid.cells().values()) for (Entity e : cell) out.accept(e);
+            return;
+        }
+        for (int cx = x0; cx <= x1; cx++) {
+            for (int cz = z0; cz <= z1; cz++) {
+                List<Entity> cell = grid.cells().get(net.minecraft.world.level.ChunkPos.pack(cx, cz));
+                if (cell != null) for (Entity e : cell) out.accept(e);
+            }
+        }
     }
 
     /** One of the levels' mods' entities by its id (Horizon's players hit it by id). */
@@ -139,7 +200,10 @@ public final class HorizonEntities {
             RESTING.remove(entity);
             synchronized (HorizonEntities.class) {
                 Map<UUID, Entity> live = LIVE.get(level);
-                if (live != null && live.get(entity.getUUID()) == entity) live.remove(entity.getUUID());
+                if (live != null && live.get(entity.getUUID()) == entity) {
+                    live.remove(entity.getUUID());
+                    VIEWS.remove(level);
+                }
             }
             fire(entity, "ServerEntityEvents.ENTITY_UNLOAD", () ->
                     net.fabricmc.fabric.api.event.lifecycle.v1.ServerEntityEvents.ENTITY_UNLOAD.invoker().onUnload(entity, level));
