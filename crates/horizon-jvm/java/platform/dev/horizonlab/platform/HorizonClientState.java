@@ -22,11 +22,46 @@ import java.util.concurrent.ConcurrentHashMap;
 final class HorizonClientState {
     private HorizonClientState() {}
 
-    /** A field of client state: static, or of the instance {@code owner} returns. */
-    private record Slot(Field field, Method owner) {
+    /**
+     * A field of client state: static, or of the instance {@code owner} returns (a method) or
+     * holds (a static field); {@code fresh} makes a new player's value (null: the field's
+     * empty value).
+     */
+    private record Slot(Field field, java.lang.reflect.Member owner, java.util.concurrent.Callable<Object> fresh) {
         Object target() throws ReflectiveOperationException {
-            return owner == null ? null : owner.invoke(null);
+            if (owner instanceof Method m) return m.invoke(null);
+            if (owner instanceof Field f) return f.get(null);
+            return null;
         }
+
+        Object first() throws Exception {
+            return fresh != null ? fresh.call() : empty(field.getType());
+        }
+    }
+
+    /**
+     * {@code Class(arg)}: a new instance by its constructor, with no argument or one enum
+     * constant ({@code pkg.Enum.CONSTANT}).
+     */
+    private static java.util.concurrent.Callable<Object> factory(String spec, ClassLoader loader) throws ReflectiveOperationException {
+        int open = spec.indexOf('(');
+        Class<?> type = Class.forName(spec.substring(0, open), false, loader);
+        String arg = spec.substring(open + 1, spec.length() - 1);
+        if (arg.isEmpty()) {
+            var make = type.getDeclaredConstructor();
+            make.setAccessible(true);
+            return make::newInstance;
+        }
+        int dot = arg.lastIndexOf('.');
+        @SuppressWarnings({"unchecked", "rawtypes"})
+        Object constant = Enum.valueOf((Class) Class.forName(arg.substring(0, dot), true, loader), arg.substring(dot + 1));
+        for (var make : type.getDeclaredConstructors()) {
+            if (make.getParameterCount() == 1 && make.getParameterTypes()[0].isInstance(constant)) {
+                make.setAccessible(true);
+                return () -> make.newInstance(constant);
+            }
+        }
+        throw new NoSuchMethodException(spec);
     }
 
     /**
@@ -43,6 +78,15 @@ final class HorizonClientState {
         "me.shedaniel.rei.impl.client.REIRuntimeImpl#getInstance()#lastDisplayScreen",
         "me.shedaniel.rei.impl.client.gui.ScreenOverlayImpl#entryListWidget",
         "me.shedaniel.rei.impl.client.gui.ScreenOverlayImpl#favoritesListWidget",
+        // JourneyMap: its minimap's and full-screen map's state and renderer (made non-final:
+        // mixin.mods.ModsPlugin), each player's own, centred on them. (Its MiniMap object is
+        // shared: a new one asks UIManager for the minimap while it is made, and recurses.)
+        "journeymap.client.ui.minimap.MiniMap#state=journeymap.client.model.map.MapState()",
+        "journeymap.client.ui.minimap.MiniMap#mapRenderer=journeymap.client.render.map.MapRenderer(journeymap.client.ui.UI.Minimap)",
+        "journeymap.client.ui.fullscreen.Fullscreen#state=journeymap.client.model.map.MapState()",
+        "journeymap.client.ui.fullscreen.Fullscreen#mapRenderer=journeymap.client.render.map.MapRenderer(journeymap.client.ui.UI.Fullscreen)",
+        // VoxelMap: its minimap (the map image it shifts as its player moves, its zoom).
+        "com.mamiyaotaru.voxelmap.VoxelConstants#getVoxelMapInstance()#map=com.mamiyaotaru.voxelmap.Map()",
     };
 
     private static List<Slot> slots;
@@ -55,18 +99,33 @@ final class HorizonClientState {
         if (slots != null) return slots;
         List<Slot> made = new ArrayList<>();
         ClassLoader loader = HorizonClientState.class.getClassLoader();
-        for (String spec : FIELDS) {
+        for (String full : FIELDS) {
+            String[] made2 = full.split("=", 2);
+            String spec = made2[0];
             String[] parts = spec.split("#");
             try {
                 Class<?> owner = Class.forName(parts[0], false, loader);
-                Method instance = null;
+                java.lang.reflect.Member instance = null;
+                Class<?> holder = owner;
                 if (parts.length == 3) {
-                    instance = owner.getMethod(parts[1].replace("()", ""));
+                    if (parts[1].endsWith("()")) {
+                        Method m = owner.getMethod(parts[1].replace("()", ""));
+                        instance = m;
+                        holder = m.getReturnType();
+                    } else {
+                        Field f = owner.getDeclaredField(parts[1]);
+                        f.setAccessible(true);
+                        instance = f;
+                        holder = f.getType();
+                    }
                 }
-                Field field = owner.getDeclaredField(parts[parts.length - 1]);
-                if (Modifier.isFinal(field.getModifiers())) continue;
+                Field field = holder.getDeclaredField(parts[parts.length - 1]);
+                if (Modifier.isFinal(field.getModifiers())) {
+                    Natives.log("Horizon's client: per-player state " + spec + " is final; kept for all players");
+                    continue;
+                }
                 field.setAccessible(true);
-                made.add(new Slot(field, instance));
+                made.add(new Slot(field, instance, made2.length == 2 ? factory(made2[1], loader) : null));
             } catch (ClassNotFoundException e) {
                 // The mod isn't here.
             } catch (ReflectiveOperationException | RuntimeException e) {
@@ -95,14 +154,23 @@ final class HorizonClientState {
                 SAVED.put(loaded, values);
             }
             Object[] values = SAVED.get(player);
+            boolean first = values == null;
             for (int i = 0; i < all.size(); i++) {
                 Slot slot = all.get(i);
-                Object value = values != null ? values[i] : empty(slot.field().getType());
+                Object value = values != null ? values[i] : null;
+                if (values == null) {
+                    // The first player keeps what the mod made (its own objects, started).
+                    Object current = loaded == null ? slot.field().get(slot.target()) : null;
+                    value = current != null ? current : slot.first();
+                }
                 slot.field().set(slot.target(), value);
             }
             loaded = player;
-        } catch (ReflectiveOperationException | RuntimeException e) {
-            Natives.log("Horizon's client: per-player state couldn't be swapped: " + e);
+            loadedNow(first);
+        } catch (Exception e) {
+            Throwable root = e;
+            while (root.getCause() != null && root.getCause() != root) root = root.getCause();
+            Natives.log("Horizon's client: per-player state couldn't be swapped: " + root);
         }
     }
 
@@ -112,12 +180,75 @@ final class HorizonClientState {
         if (player.equals(loaded)) {
             for (Slot slot : slots()) {
                 try {
-                    slot.field().set(slot.target(), empty(slot.field().getType()));
-                } catch (ReflectiveOperationException | RuntimeException e) {
+                    slot.field().set(slot.target(), slot.first());
+                } catch (Exception e) {
                     // Left as it is.
                 }
             }
             loaded = null;
+        }
+    }
+
+    /**
+     * What a mod needs after its state changed player: JourneyMap's cached player and labels
+     * (its coordinates) are read again; VoxelMap's map images are the texture manager's again
+     * (it draws them by name), and a new map knows the world and computes on the client's
+     * thread (its own thread reads Minecraft.player, which is the first player between ticks).
+     */
+    private static void loadedNow(boolean first) {
+        ClassLoader loader = HorizonClientState.class.getClassLoader();
+        try {
+            Class<?> cache = Class.forName("journeymap.client.data.DataCache", false, loader);
+            Object instance = cache.getField("INSTANCE").get(null);
+            Field player = cache.getDeclaredField("player");
+            player.setAccessible(true);
+            if (player.get(instance) instanceof com.google.common.cache.Cache<?, ?> loading) loading.invalidateAll();
+            // Its labels (coordinates...) are cached for a while: made again for this player.
+            Class.forName("journeymap.client.ui.theme.ThemeLabelSource", false, loader).getMethod("resetCaches").invoke(null);
+        } catch (ClassNotFoundException e) {
+            // No JourneyMap.
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            Natives.log("Horizon's client: JourneyMap's player couldn't be read again: " + e);
+        }
+        try {
+            Class<?> constants = Class.forName("com.mamiyaotaru.voxelmap.VoxelConstants", false, loader);
+            Object voxel = constants.getMethod("getVoxelMapInstance").invoke(null);
+            Object map = voxel.getClass().getMethod("getMap").invoke(voxel);
+            if (map == null) return;
+            Class<?> mapClass = map.getClass();
+            var textures = net.minecraft.client.Minecraft.getInstance().getTextureManager();
+            for (String[] pair : new String[][] {{"resourceMapImageFiltered", "mapImagesFiltered"}, {"resourceMapImageUnfiltered", "mapImagesUnfiltered"}}) {
+                Field ids = mapClass.getDeclaredField(pair[0]);
+                Field images = mapClass.getDeclaredField(pair[1]);
+                ids.setAccessible(true);
+                images.setAccessible(true);
+                Object[] idArray = (Object[]) ids.get(map);
+                Object[] imageArray = (Object[]) images.get(map);
+                for (int i = 0; i < idArray.length; i++) {
+                    if (idArray[i] != null && imageArray[i] != null) {
+                        textures.register((net.minecraft.resources.Identifier) idArray[i],
+                                (net.minecraft.client.renderer.texture.AbstractTexture) imageArray[i]);
+                    }
+                }
+            }
+            if (!SAVED.isEmpty()) {
+                // More than one player: no map computes on its own thread.
+                Field threading = mapClass.getDeclaredField("threading");
+                threading.setAccessible(true);
+                if (threading.getBoolean(map)) threading.setBoolean(map, false);
+            }
+            Field world = mapClass.getDeclaredField("world");
+            world.setAccessible(true);
+            Field voxelWorld = voxel.getClass().getDeclaredField("world");
+            voxelWorld.setAccessible(true);
+            Object level = voxelWorld.get(voxel);
+            if (world.get(map) == null && level != null) {
+                mapClass.getMethod("newWorld", net.minecraft.client.multiplayer.ClientLevel.class).invoke(map, level);
+            }
+        } catch (ClassNotFoundException e) {
+            // No VoxelMap.
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            Natives.log("Horizon's client: VoxelMap's map couldn't change player: " + e);
         }
     }
 

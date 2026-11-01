@@ -708,6 +708,31 @@ gets SPIR-V, vertex layouts and uniform lists.
 - Text components are resolved on the Java side (`getVisualOrderText`, styles kept): a LAN
   guest's or a dedicated server player's game has no mod's lang files ("jm.minimap.compass.n").
   Vanilla keys in mods' HUD text now come in the server's language.
+- Mods' injections into Minecraft's constructor at its options (`INVOKE Options.<init>`:
+  Yumi runs its mods' `yumi:client_init` there, Trinkets Updated's) run after the registries'
+  freeze (`HorizonHooks.START_OPTIONS`, from FabricBoot): Yumi's common init runs at the
+  freeze, and the client init registers receivers of payloads it made.
+- The mods' client reload listeners ordered after the models (`getFabricDependencies`) run in
+  the models' reload, after them, each failing alone (`failingAlone`); they used to be left out.
+- The client player's `levelCallback` is a no-op callback, not `NULL` (a copy of the server
+  player's): JourneyMap gives no mapping task to a player not in a level (its map stayed empty).
+- Each player's client is told of its chunks (`HorizonClient.clientChunks`): Fabric's
+  `ClientChunkEvents.CHUNK_LOAD` for Horizon's chunks within the login radius, nearest first,
+  24 a tick, and `CHUNK_UNLOAD` beyond it (or at a dimension change). Diorama maps only what
+  it is told of. A client level's chunk cache answers with Horizon's chunks
+  (`ClientChunkCacheMixin`), and `ClientLevel.hasChunk` from the chunk's revision without a
+  copy (`HorizonChunks.has`: VoxelMap asks hundreds a tick; with copies the server thread
+  stalled and LAN guests were dropped).
+- While the client's models load, players' clients don't tick (the client stays at its title
+  screen), as a vanilla client loads its resources before joining: Diorama reads the models
+  once, when its player joins.
+- Mods' injections at the head of `GameRenderer.render()` run each frame after `extract`'s
+  tail (`HorizonHooks.fireRender`).
+- The HUD sends a GPU texture as an image when a render pass drew into it or it was written
+  from memory (`writeToTexture`: Diorama's tiles), unless it is an atlas (`Texture.atlas`).
+- VoxelMap and JourneyMap together: VoxelMap's client init fails registering a payload type
+  JourneyMap registered (probably the same on real Fabric); VoxelMap then has no world-id
+  packets.
 - The keys mods bind are read again every 100 server ticks and resent when they change
   (JourneyMap registers its keys at its first client tick, after the first join).
 - **Mixin strips the injector annotations off merged handlers**: only `@MixinMerged` (mixin,
@@ -1190,11 +1215,18 @@ Map mods (2026-11-01, `bridge-gpu2`, headless, llvmpipe):
   side's `LoadedChunkOverlayPlugin` fails each tick (`ChunkMap` of the mirror).
 - VoxelMap 1.16.13 (`bridge-gpu3`): its minimap draws (map, frame, arrow, compass,
   coordinates), through the game renderer's feature dispatcher.
-- Per player (host and LAN guest, `bridge-gpu3`): Xaero's minimap is each player's own.
-  JourneyMap's map is centred on each player, but its coordinates label is the other
-  player's (one player cache: `DataCache`). VoxelMap shares one map image between players: it
-  shifts by each player's moves in turn and shows black gaps. Both are written for one client;
-  per-player copies of their state are left.
+- Diorama 0.6.0 (`bridge-gpu-3`): its square minimap draws the map tiles it bakes on the CPU
+  from the client's chunks (512 px textures written from memory, blitted to the GUI). Its
+  water's colours are to be compared with the real game. XaeroPlus and MiniHUD also draw with
+  the GPU; not tried yet.
+- Per player (host and LAN guest): Xaero's minimap is each player's own (`bridge-gpu3`);
+  JourneyMap's and VoxelMap's too since `bridge-gpu-2` (`HorizonClientState`): JourneyMap's
+  minimap and full-screen `MapState`/`MapRenderer` per player (static finals, made non-final as
+  the class loads by `mixin/mods/ModsPlugin`), its player cache and labels read again at each
+  switch; VoxelMap's `Map` per player (a new one for each, its images re-registered by name at
+  each switch, computed on the client's thread when there are several players). JourneyMap's
+  `MiniMap` object stays shared (a new one recurses through `UIManager`). Regress case
+  `maps-lan` (regress.py runs `lan=True` cases with lan_test.sh).
 
 Left: the client tick is ~35 ms with the minimap on llvmpipe (the frame's start ~25: Xaero's
 writer, the HUD ~10: the picture drawn and read back at 10 Hz).
@@ -1234,9 +1266,10 @@ shows them (`/recipes justhammers:iron_hammer`). Fixed since (bridge-pack3): Ope
 Claims (a mirrored connection isn't "connecting"), FrozenLib capes (no downloads), Better
 Combat / Spell Engine / Player Animation Lib on the client player, and the server tick that
 froze while the client's models reloaded (now prepared on background workers, applied by
-`tasks()`). Left: with Trinkets installed the models' reload never ends (its model discovery
-renews a future its client manager completes, which this reload doesn't run): Xaero's
-minimap gets no baked models.
+`tasks()`). With Trinkets installed the models' reload never ended (bridge-gpu-1 fixed it:
+Trinkets Updated's client init is a Yumi entrypoint run from Minecraft's constructor at its
+options, which never ran, so its client manager, whose preparation the models wait for, was
+never registered).
 
 A 137-jar pack (`big4t`, 2026-11-01, bridge-pack4: `big3` plus RFTools Base/Builder,
 Entangled, Hopper Gadgetry, Copper Hopper, Item Collectors, Simple Magnets, Paladins, Rogues,
@@ -1252,7 +1285,7 @@ was sea), Puzzles Lib's join (the client player has its connection), Combat Roll
 `RollManager` (mixin field initializers run on mirror objects). Left: Lithostitched's
 `wrapNoiseRouter` constructor wrap fails (it wants a registry the mirror's chunk map lacks;
 no worse than before, when it never ran); CCA's scoreboard client tick wants a scoreboard;
-the vanilla HUD's vehicle hearts (`this.variables` null); Xaero's HUD models (Trinkets, above).
+the vanilla HUD's vehicle hearts (`this.variables` null).
 Item Alchemy is out: its library bundles CompatDatapacks, which rewrites every recipe's
 `result.item` to `id` and breaks BCLib's recipes (BetterEnd's alloying and infusion: the
 registries don't load), a conflict on real Fabric too; Item Alchemy's own recipes need that

@@ -54,6 +54,11 @@ public final class HorizonClient {
         HorizonHooks.fireClient(minecraft, after ? HorizonHooks.START_AFTER : HorizonHooks.START_BEFORE);
     }
 
+    /** Minecraft's constructor at its options, after the registries' freeze (FabricBoot). */
+    public static void optionsStart() {
+        HorizonHooks.fireClient(minecraft, HorizonHooks.START_OPTIONS);
+    }
+
     public static void finish() throws ReflectiveOperationException {
         Minecraft mc = minecraft;
         // options.txt is brought up to date by the game's data fixer, as the server's saves are.
@@ -633,6 +638,9 @@ public final class HorizonClient {
             } finally {
                 set(net.minecraft.world.entity.Entity.class, local, "level", player.level());
             }
+            // In its level, as a client player is once added to it (JourneyMap maps only for a
+            // player whose levelCallback isn't NULL, which the server player's copy is).
+            set(net.minecraft.world.entity.Entity.class, local, "levelCallback", IN_LEVEL);
             PLAYERS.put(player.getUUID(), local);
         }
         SERVER_PLAYERS.put(local, player);
@@ -840,6 +848,69 @@ public final class HorizonClient {
         return searchConnection;
     }
 
+    /** Each player's client's chunks: the client level they are of, and their positions. */
+    private static final java.util.Map<java.util.UUID, Object[]> CLIENT_CHUNKS = new java.util.concurrent.ConcurrentHashMap<>();
+    /** At most this many chunks are made known to a player's client a tick (copies are made). */
+    private static final int CHUNKS_A_TICK = 24;
+
+    /**
+     * A player's client's chunks, as the server sends them: those of Horizon's within the
+     * login's radius around the player, nearest first, are loaded (ClientChunkEvents.CHUNK_LOAD,
+     * a few a tick), and those beyond it unloaded (CHUNK_UNLOAD), as a client's chunk cache does.
+     */
+    private static void clientChunks(net.minecraft.server.level.ServerPlayer player) {
+        if (!(minecraft.level instanceof net.minecraft.client.multiplayer.ClientLevel level)
+                || !(player.level() instanceof net.minecraft.server.level.ServerLevel server)) return;
+        Object[] state = CLIENT_CHUNKS.get(player.getUUID());
+        @SuppressWarnings("unchecked")
+        java.util.Map<Long, net.minecraft.world.level.chunk.LevelChunk> have = state == null ? null
+                : (java.util.Map<Long, net.minecraft.world.level.chunk.LevelChunk>) state[1];
+        if (state == null || state[0] != level) {
+            // Another dimension: the last one's chunks go.
+            if (state != null) unloadAll((net.minecraft.client.multiplayer.ClientLevel) state[0], have);
+            have = new java.util.HashMap<>();
+            CLIENT_CHUNKS.put(player.getUUID(), new Object[] {level, have});
+        }
+        int cx = player.chunkPosition().x(), cz = player.chunkPosition().z(), radius = LOGIN_RADIUS;
+        // Those out of reach go first.
+        var it = have.entrySet().iterator();
+        while (it.hasNext()) {
+            var entry = it.next();
+            int x = net.minecraft.world.level.ChunkPos.getX(entry.getKey()), z = net.minecraft.world.level.ChunkPos.getZ(entry.getKey());
+            if (Math.max(Math.abs(x - cx), Math.abs(z - cz)) > radius + 1) {
+                it.remove();
+                var chunk = entry.getValue();
+                HorizonServer.fireEach("ClientChunkEvents.CHUNK_UNLOAD",
+                        net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientChunkEvents.CHUNK_UNLOAD, l -> l.onChunkUnload(level, chunk));
+            }
+        }
+        int made = 0;
+        for (int ring = 0; ring <= radius && made < CHUNKS_A_TICK; ring++) {
+            for (int dx = -ring; dx <= ring && made < CHUNKS_A_TICK; dx++) {
+                for (int dz = -ring; dz <= ring && made < CHUNKS_A_TICK; dz++) {
+                    if (Math.max(Math.abs(dx), Math.abs(dz)) != ring) continue;
+                    long key = net.minecraft.world.level.ChunkPos.pack(cx + dx, cz + dz);
+                    if (have.containsKey(key)) continue;
+                    var chunk = HorizonChunks.chunk(server, cx + dx, cz + dz, level);
+                    if (chunk == null) continue;
+                    have.put(key, chunk);
+                    made++;
+                    HorizonServer.fireEach("ClientChunkEvents.CHUNK_LOAD",
+                            net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientChunkEvents.CHUNK_LOAD, l -> l.onChunkLoad(level, chunk));
+                }
+            }
+        }
+    }
+
+    private static void unloadAll(net.minecraft.client.multiplayer.ClientLevel level,
+                                  java.util.Map<Long, net.minecraft.world.level.chunk.LevelChunk> have) {
+        for (var chunk : have.values()) {
+            HorizonServer.fireEach("ClientChunkEvents.CHUNK_UNLOAD",
+                    net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientChunkEvents.CHUNK_UNLOAD, l -> l.onChunkUnload(level, chunk));
+        }
+        have.clear();
+    }
+
     /** A connection's player list (getPlayerInfo: JourneyMap's skins), empty. */
     private static void players(net.minecraft.client.multiplayer.ClientPacketListener connection) throws ReflectiveOperationException {
         Class<?> owner = net.minecraft.client.multiplayer.ClientPacketListener.class;
@@ -943,6 +1014,7 @@ public final class HorizonClient {
      */
     static void left(java.util.UUID id) {
         JOINED.remove(id);
+        CLIENT_CHUNKS.remove(id);
         HorizonClientState.forget(id);
         var overlay = OVERLAYS.remove(id);
         OVERLAY_SENT.remove(id);
@@ -1240,7 +1312,10 @@ public final class HorizonClient {
         // (Minecraft.player, the open screen), with its own keys (bindings). With no player, a
         // client at its title screen.
         var players = HorizonServer.players();
-        if (players.isEmpty()) {
+        // While the client's models load, it stays at its title screen, as a vanilla client
+        // loads its resources before it joins a world: mods that read the models when their
+        // player joins (Diorama's block colours, built once) get them.
+        if (players.isEmpty() || pendingModels != null) {
             rest(null);
             tickOnce();
             return;
@@ -1256,6 +1331,9 @@ public final class HorizonClient {
                     t = HorizonProfile.add("client: tick", t);
                     // The chunks mods asked for on their own threads (JourneyMap's mapping).
                     HorizonChunks.serveWanted(64);
+                    // Their client's chunks come and go (Fabric's ClientChunkEvents: Diorama maps
+                    // the chunks it is told of).
+                    clientChunks(player);
                     // A frame: the mods' work at its start and end (GameRenderer.extract), its HUD
                     // between.
                     HorizonHooks.fireFrame(minecraft.gameRenderer, true);
@@ -1263,6 +1341,8 @@ public final class HorizonClient {
                     sendHud(player);
                     t = HorizonProfile.add("client: HUD", t);
                     HorizonHooks.fireFrame(minecraft.gameRenderer, false);
+                    // Then the frame is drawn (GameRenderer.render): the mods' work at its head.
+                    HorizonHooks.fireRender(minecraft.gameRenderer);
                     HorizonGpu.endFrame();
                     HorizonProfile.add("client: frame end", t);
                 }));
@@ -1353,11 +1433,15 @@ public final class HorizonClient {
                 if (!id.equals(net.minecraft.client.renderer.Sheets.GUI_SHEET)) byTexture.put(id, entry);
             });
             // With the colour maps biome tints read (grass, foliage: GrassColor.pixels...).
-            java.util.List<net.minecraft.server.packs.resources.PreparableReloadListener> listeners = java.util.List.of(
+            java.util.List<net.minecraft.server.packs.resources.PreparableReloadListener> listeners = new java.util.ArrayList<>(java.util.List.of(
                     atlases, models,
                     new net.minecraft.client.resources.GrassColorReloadListener(),
                     new net.minecraft.client.resources.FoliageColorReloadListener(),
-                    new net.minecraft.client.resources.DryFoliageColorReloadListener());
+                    new net.minecraft.client.resources.DryFoliageColorReloadListener()));
+            // The mods' listeners that come after the models (Trinkets' client manager, whose
+            // preparation the models' reload waits for: without it the reload never ended),
+            // in the same reload as vanilla runs them; one that fails is left out alone.
+            for (var listener : AFTER_MODELS) listeners.add(failingAlone(listener));
             // Prepared on the game's background workers, applied on the client's thread (the
             // server's: Minecraft.execute, which tasks() runs each tick), where the atlases
             // upload to the GPU (never a pool thread: "Rendersystem called from wrong thread",
@@ -1374,6 +1458,39 @@ public final class HorizonClient {
             Natives.log("Horizon's client: the models couldn't be loaded: " + root);
             for (var f : root.getStackTrace()) Natives.log("    at " + f);
         }
+    }
+
+    /** The mods' client reload listeners that come after the models (reloadClientResources). */
+    private static final java.util.List<net.minecraft.server.packs.resources.PreparableReloadListener> AFTER_MODELS =
+            new java.util.ArrayList<>();
+
+    /** A mod's reload listener whose failure (after its preparation) is logged, not the reload's. */
+    private static net.minecraft.server.packs.resources.PreparableReloadListener failingAlone(
+            net.minecraft.server.packs.resources.PreparableReloadListener listener) {
+        return (net.minecraft.server.packs.resources.PreparableReloadListener) java.lang.reflect.Proxy.newProxyInstance(
+                HorizonClient.class.getClassLoader(),
+                new Class<?>[] {net.minecraft.server.packs.resources.PreparableReloadListener.class},
+                (proxy, method, args) -> {
+                    Object result;
+                    try {
+                        result = method.invoke(listener, args);
+                    } catch (java.lang.reflect.InvocationTargetException e) {
+                        if (!method.getName().equals("reload")) throw e.getCause();
+                        // Failed at once: the others mustn't wait for it at the barrier.
+                        Natives.log("Horizon's client: a mod's resource reload (" + listener.getClass().getName() + ") failed: " + e.getCause());
+                        return ((net.minecraft.server.packs.resources.PreparableReloadListener.PreparationBarrier) args[2])
+                                .wait(net.minecraft.util.Unit.INSTANCE).thenAccept(unit -> { });
+                    }
+                    if (result instanceof java.util.concurrent.CompletableFuture<?> future) {
+                        return future.exceptionally(t -> {
+                            Throwable root = t;
+                            while (root.getCause() != null && root.getCause() != root) root = root.getCause();
+                            Natives.log("Horizon's client: a mod's resource reload (" + listener.getClass().getName() + ") failed: " + root);
+                            return null;
+                        });
+                    }
+                    return result;
+                });
     }
 
     /** The models' reload under way: reload, model manager, atlas manager, start time, skins. */
@@ -1411,6 +1528,16 @@ public final class HorizonClient {
         }
     }
     private static boolean gpuParts;
+
+    /** A client player's place in its level: moves and removals are the server's business. */
+    private static final net.minecraft.world.level.entity.EntityInLevelCallback IN_LEVEL =
+            new net.minecraft.world.level.entity.EntityInLevelCallback() {
+                @Override
+                public void onMove() {}
+
+                @Override
+                public void onRemove(net.minecraft.world.entity.Entity.RemovalReason reason) {}
+            };
 
     /**
      * The game renderer's feature dispatcher (its render buffers, the real models and atlases,
@@ -1684,6 +1811,9 @@ public final class HorizonClient {
         int skipped = 0;
         for (var listener : new java.util.ArrayList<>(listeners)) {
             if (afterModels(listener)) {
+                // Run with the models' reload instead (models()), after them as Fabric orders
+                // it: Trinkets' model discovery waits for its manager's preparation.
+                AFTER_MODELS.add(listener);
                 skipped++;
                 continue;
             }
@@ -1698,7 +1828,7 @@ public final class HorizonClient {
             }
         }
         Natives.log("Horizon's client: " + ran + " of the mods' resource reload listeners ran over " + packs.size()
-                + " packs" + (skipped > 0 ? "; " + skipped + " that read baked models or textures left out" : ""));
+                + " packs" + (skipped > 0 ? "; " + skipped + " that read baked models or textures run with the models" : ""));
     }
 
     /**

@@ -142,6 +142,20 @@ public final class HorizonChunks {
         return copy;
     }
 
+    /**
+     * Whether a client of {@code level} has chunk cx cz: whether Horizon has it loaded (its
+     * revision), or on a thread that can't read Horizon's world, whether one is held. No copy
+     * is made (VoxelMap asks this of hundreds of chunks a tick).
+     */
+    public static boolean has(ServerLevel level, int cx, int cz, net.minecraft.world.level.Level view) {
+        long revision = Natives.chunkRevision(level.dimension().identifier().toString(), cx, cz);
+        if (revision != -1) return revision != -2;
+        synchronized (COPIES) {
+            var chunks = HELD.get(view);
+            return chunks != null && chunks.get(ChunkPos.pack(cx, cz)) instanceof Object[] held && held[0] != null;
+        }
+    }
+
     /** The held chunks by Horizon's level (what threads without a view read) and a client level of each. */
     private static final Map<ServerLevel, java.util.concurrent.ConcurrentHashMap<Long, LevelChunk>> HELD_BY_SERVER =
             new java.util.concurrent.ConcurrentHashMap<>();

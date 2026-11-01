@@ -273,3 +273,33 @@ tests pass; fmt and clippy `-D warnings` clean (horizon-client, horizon-jvm).
   mixin cases pass headless. Doesn't: use-on, orbs and precipitation are still only checked
   with real mods (Right Click Harvest, Clumps, Serene Seasons). Test: `regress.py --jars
   <jars> mixins1` (or the whole list).
+
+- **gpu 1, map mods with Trinkets** (`bridge-gpu-1`). Works: Xaero's minimap, JourneyMap and
+  VoxelMap with Trinkets Updated 4.2.1: the models load in ~9 s. Cause: Trinkets' client init is
+  a Yumi entrypoint run from `Minecraft.<init>` at its options, which never ran; now fired after
+  the registries' freeze. Also: client reload listeners after the models now run with them;
+  JourneyMap's map was empty on `java-bridge` (the client player's `levelCallback` was `NULL`:
+  no mapping task), fixed. Regress cases `maps`, `journeymap`, `voxelmap` (jars: Xaero's
+  Minimap, Trinkets, JourneyMap, VoxelMap). Test: those four in `~/hz-test/mods-java`, join,
+  wait ~1 minute: Xaero's map top left, JourneyMap's/VoxelMap's top right.
+- **gpu 2, JourneyMap and VoxelMap per player** (`bridge-gpu-2`, on top of `bridge-gpu-1`).
+  Works: host and LAN guest each see their own JourneyMap (map centred on them, own
+  coordinates and biome) and VoxelMap (own map image, no black gaps). How: `HorizonClientState`
+  slots can now make a fresh value per player (`field=Class(arg)`) and reach instances through
+  static fields; a new optional mixin config (`horizon-platform-mods.mixins.json`, plugin
+  `ModsPlugin`) makes JourneyMap's static final state non-final. Small change outside gpu:
+  `regress.py` runs `lan=True` cases with `lan_test.sh` (which now honours `NO_BUILD`). Doesn't:
+  a leaving player's VoxelMap map keeps its thread; JourneyMap's waypoints and settings are still
+  shared. Test: `MODS=<JourneyMap + VoxelMap> tools/java_bridge/lan_test.sh '$H command "tp Guest ~40 ~ ~"; sleep 100'`,
+  or `regress.py --jars … maps-lan`.
+- **gpu 3, other GPU mods** (`bridge-gpu-3`, on top of `bridge-gpu-2`). Scanned 12 popular 26.3
+  Fabric client mods; three draw with the GPU directly: Diorama, XaeroPlus, MiniHUD. Works:
+  Diorama's minimap (its baked map tiles, compass, coordinates). It needed (useful beyond it):
+  Fabric's `ClientChunkEvents` fired per player as Horizon's chunks come into view, the client
+  chunk cache answering with Horizon's chunks, `GameRenderer.render()` HEAD injections run,
+  GPU textures written from memory sent to the HUD, and players' client ticks held until the
+  models load. Fixed on the way: `hasChunk` made a full copy per call (VoxelMap stalled the
+  server thread with two players). Doesn't / not tried: Diorama's water colours unchecked
+  against the real game; XaeroPlus and MiniHUD (needs MaLiLib) not tried. Regress case
+  `diorama`. Test: Diorama alone in `~/hz-test/mods-java`, wait ~1 minute: the square map top
+  right.

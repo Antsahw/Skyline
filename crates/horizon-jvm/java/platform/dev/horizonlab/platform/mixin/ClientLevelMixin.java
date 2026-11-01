@@ -45,7 +45,7 @@ public abstract class ClientLevelMixin {
     @Inject(method = "hasChunk", at = @At("HEAD"), cancellable = true)
     private void horizon$hasChunk(int x, int z, CallbackInfoReturnable<Boolean> cir) {
         if (HorizonServer.isMirror(this) && horizon$server() instanceof net.minecraft.server.level.ServerLevel server) {
-            cir.setReturnValue(dev.horizonlab.platform.HorizonChunks.chunk(server, x, z, (ClientLevel) (Object) this) != null);
+            cir.setReturnValue(dev.horizonlab.platform.HorizonChunks.has(server, x, z, (ClientLevel) (Object) this));
         }
     }
 

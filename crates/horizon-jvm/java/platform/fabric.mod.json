@@ -6,7 +6,7 @@
   "description": "Horizon's side of the Java mod bridge: mirrors Horizon's server into vanilla objects and fires Fabric API's events.",
   "license": "MIT",
   "environment": "*",
-  "mixins": ["horizon-platform.mixins.json"],
+  "mixins": ["horizon-platform.mixins.json", "horizon-platform-mods.mixins.json"],
   "depends": {
     "fabricloader": ">=0.20",
     "minecraft": "*",

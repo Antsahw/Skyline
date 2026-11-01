@@ -61,6 +61,11 @@ MODS = {
     "fluidtank": ["largefluidtank*"],
     "scala": ["scalable-cats-force*"],
     "geckolib": ["geckolib*"],
+    "xaero": ["xaerominimap*", "xaeros-minimap*", "xaeros_minimap*"],
+    "trinkets": ["trinkets*"],
+    "journeymap": ["journeymap*"],
+    "voxelmap": ["voxelmap*"],
+    "diorama": ["diorama*"],
 }
 
 
@@ -378,6 +383,50 @@ CASES = {
         checks=[check_file("lost.txt", r"^lost 0 of (3[0-9]) set", "every gold block stays (30+ set)")],
         forbid=[r"generated again while loaded"],
     ),
+    "maps": dict(
+        about="Xaero's minimap with Trinkets: the models load (Yumi's client init, Trinkets' reloader) and the map draws",
+        mods=["xaero", "trinkets"], scene="none", env={"HORIZON_JAVA_DEBUG": "gpu"},
+        steps=['sleep 30'],
+        checks=[check_log(r"block and item models loaded", "the models' reload ends"),
+                check_log(r"gpu: a blit of horizon:dynamic/gpu", "the minimap's picture reaches the HUD")],
+        forbid=[r"models' reload didn't end", r"handler\$\w+\$xaerominimap\$\w+\): java"],
+        look="Xaero's minimap at the top left: land in its colours, N/E/S/W",
+    ),
+    "journeymap": dict(
+        about="JourneyMap (with Trinkets): it maps the chunks around (its task thread reads the client's chunks)",
+        mods=["journeymap", "trinkets"], scene="none",
+        steps=['sleep 90; find $S/journeymap/data -name "c.*.jmc" > $S/jm.txt'],
+        checks=[check_log(r"block and item models loaded", "the models' reload ends"),
+                check_file("jm.txt", r"\.jmc", "JourneyMap saved mapped chunks")],
+        look="JourneyMap's round minimap at the top right, filled in",
+    ),
+    "voxelmap": dict(
+        about="VoxelMap: its minimap draws through the feature dispatcher",
+        mods=["voxelmap"], scene="none", env={"HORIZON_JAVA_DEBUG": "gpu"},
+        steps=['sleep 40'],
+        checks=[check_log(r"gpu: a blit of horizon:dynamic/gpu", "VoxelMap's HUD target reaches the HUD")],
+        forbid=[r"voxelmap\$onTick\): java"],
+        look="VoxelMap's round minimap at the top right: land, arrow, coordinates",
+    ),
+    "diorama": dict(
+        about="Diorama: told of its chunks (ClientChunkEvents), it bakes map tiles and its minimap draws them",
+        mods=["diorama"], scene="none", env={"HORIZON_JAVA_DEBUG": "gpu"},
+        steps=['sleep 50'],
+        checks=[check_log(r"gpu: a blit of horizon:dynamic/gpu\d+ 512x512", "a baked 512 px tile reaches the HUD")],
+        forbid=[r"\[dev\.diorama\.\S+\]: java", r"\$diorama\$\w+\): java"],
+        look="Diorama's square minimap at the top right: the land around, N/E/S/W, the arrow",
+    ),
+    "maps-lan": dict(
+        about="JourneyMap and VoxelMap per player: a host and a LAN guest 40 blocks east, each map their own",
+        mods=["journeymap", "voxelmap"], scene="none", lan=True,
+        steps=['$H command "tp Guest ~40 ~ ~" >/dev/null; sleep 100; $G state > $S/guest.json'],
+        checks=[check_file("guest.json", r'"screen":"playing"', "the guest plays"),
+                check_log(r"Guest\S* joined the game", "the guest joined")],
+        forbid=[r"per-player state couldn't be swapped", r"couldn't change player", r"StackOverflowError",
+                r"couldn't be read again"],
+        look="lan-1-host.png and lan-1-guest.png: each minimap centred on its own player "
+             "(the guest's coordinates 40 more in x), JourneyMap's and VoxelMap's full",
+    ),
     "bigpack": dict(
         about="A whole pack (--pack): Java starts, the registries load, a player joins in time, the mods' worldgen runs",
         pack=True, scene="none", timeout=2700,
@@ -513,7 +562,9 @@ def run_game(case, name, jars, out, extra_env, pack=None, join_within=None):
             env.update(MODS=str(pack), CACHE=str(out.parent / "pack-cache"),
                        HORIZON_CTL_LAUNCH_TIMEOUT=str(case.get("timeout", 600)))
         started = time.time()
-        r = subprocess.run([str(TOOLS / "screen_test.sh"), *case["steps"]], env=env, capture_output=True,
+        # A LAN case (lan=True): a host and a guest that joins it (lan_test.sh; steps see $H, $G).
+        script = "lan_test.sh" if case.get("lan") else "screen_test.sh"
+        r = subprocess.run([str(TOOLS / script), *case["steps"]], env=env, capture_output=True,
                            text=True, timeout=case.get("timeout", 600) + 300)
         (out / "screen_test.txt").write_text(r.stdout + r.stderr)
         scratch = Path(Path("/tmp/hz-bridge-scratch").read_text().strip())

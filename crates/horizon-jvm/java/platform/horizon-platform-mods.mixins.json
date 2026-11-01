@@ -1,0 +1,13 @@
+{
+  "required": false,
+  "package": "dev.horizonlab.platform.mixin.mods",
+  "plugin": "dev.horizonlab.platform.mixin.mods.ModsPlugin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [
+    "JourneyMapMiniMapMixin",
+    "JourneyMapFullscreenMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 0
+  }
+}

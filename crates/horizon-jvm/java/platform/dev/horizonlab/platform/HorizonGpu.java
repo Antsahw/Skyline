@@ -134,7 +134,7 @@ public final class HorizonGpu implements GpuDeviceBackend {
         private boolean closed;
         /** A render pass drew into it (a picture, a map): not an atlas, which is written. */
         volatile boolean rendered;
-        /** Pixels were written into it from memory (a mod's image), or it is an atlas. */
+        /** Pixels were written into it from memory (a mod's image: Diorama's map tiles). */
         volatile boolean written;
 
         Texture(long id, int usage, String label, GpuFormat format, int width, int height, int layers, int mips) {
@@ -259,13 +259,11 @@ public final class HorizonGpu implements GpuDeviceBackend {
         long id = Gpu.texture(format.ordinal(), width, height, layers, mips);
         if (DEBUG) Natives.log("gpu: texture " + id + " " + label + " " + format + " " + width + "x" + height);
         var texture = new Texture(id, usage, label, format, width, height, layers, mips);
-        texture.atlas = ATLAS_CALLER.walk(frames -> frames.limit(8)
-                .anyMatch(f -> f.getDeclaringClass() == net.minecraft.client.renderer.texture.TextureAtlas.class));
         // An atlas (TextureAtlas.upload draws its sprites into it with passes): never a
         // picture of its own.
-        texture.written = StackWalker.getInstance().walk(frames -> frames.limit(24)
-                .anyMatch(f -> f.getClassName().startsWith("net.minecraft.client.renderer.texture.")
-                        && f.getClassName().contains("Atlas")));
+        texture.atlas = ATLAS_CALLER.walk(frames -> frames.limit(24)
+                .anyMatch(f -> f.getDeclaringClass() == net.minecraft.client.renderer.texture.TextureAtlas.class
+                        || f.getClassName().startsWith("net.minecraft.client.renderer.texture.") && f.getClassName().contains("Atlas")));
         return texture;
     }
 
@@ -887,12 +885,12 @@ public final class HorizonGpu implements GpuDeviceBackend {
     }
 
     /**
-     * Whether a view is of a texture a render pass drew into (a picture in picture, a map's
-     * target), the kind the HUD sends as an image; an atlas isn't (its sprites are written from
-     * memory, and screens' sprites are Horizon's), though passes draw into it too (mips).
+     * Whether a view is of a mod's own picture: a texture a render pass drew into (a picture
+     * in picture, a map's target) or one written from memory (Diorama's map tiles), the kind
+     * the HUD sends as an image; an atlas isn't (screens' sprites are Horizon's).
      */
     static boolean drawnInto(GpuTextureView view) {
-        return view.texture() instanceof Texture t && t.rendered && !t.written;
+        return view.texture() instanceof Texture t && !t.atlas && (t.rendered || t.written);
     }
 
     /**

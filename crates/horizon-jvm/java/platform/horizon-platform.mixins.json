@@ -69,6 +69,7 @@
     "RecipeBookComponentMixin",
     "TextInputManagerMixin",
     "MouseHandlerMixin",
+    "ClientChunkCacheMixin",
     "ClientPlayNetworkingMixin",
     "ClientCommonPacketListenerMixin",
     "ItemModelResolverMixin",
