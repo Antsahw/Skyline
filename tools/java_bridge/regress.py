@@ -56,6 +56,7 @@ MODS = {
     "codxlib": ["codxlib*"],
     "skyblock": ["skyblock-infinite*"],
     "simplyoneblock": ["simply_oneblock*", "simply-oneblock*"],
+    "geckolib": ["geckolib*"],
 }
 
 
@@ -143,6 +144,16 @@ CASES = {
         checks=[check_file("state.json", r'"player":\{[^}]*"health":(1?[0-9])\.', "the player lost health to the bites"),
                 check_log(r"Summoned new Biter", "the biter is summoned")],
         look="a biter at the player, the hearts down",
+    ),
+    "gecko": dict(
+        about="GeckoLib (geckomod fixture, built against the GeckoLib jar): a mob's GeckoLib model drawn, its looping animation moving it",
+        fixtures=["geckomod"], mods=["geckolib"], scene="entity", env={"ENTITY": "horizon_gecko:bobber"},
+        steps=['sleep 2; $C screenshot $S/a.png >/dev/null; sleep 0.7; $C screenshot $S/b.png >/dev/null; '
+               '$C entities 8 > $S/entities.json; python3 "$R/tools/java_bridge/changed.py" $S/a.png $S/b.png > $S/moved.txt'],
+        checks=[check_file("entities.json", r'"type":"horizon_gecko:bobber"', "horizon-ctl sees the bobbers"),
+                check_file("moved.txt", r"^changed", "the animation moves them between two shots")],
+        forbid=[r"bobber.*(failed|couldn't)"],
+        look="two bobbers ahead, their tops turned",
     ),
     "worldgen": dict(
         about="Biomes O' Plenty's biomes: /locate finds one",

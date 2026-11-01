@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "id": "horizon_gecko",
+  "version": "1.0.0",
+  "name": "Horizon Gecko",
+  "description": "A mob with a GeckoLib model and a looping animation: a check of the Java mod bridge's GeckoLib renderers (no download: GeckoLib comes from the jars folder).",
+  "environment": "*",
+  "entrypoints": {
+    "main": ["dev.horizonlab.geckomod.GeckoMod"],
+    "client": ["dev.horizonlab.geckomod.GeckoClient"]
+  },
+  "depends": {
+    "fabricloader": ">=0.20",
+    "minecraft": "26.3",
+    "fabric-api": "*",
+    "geckolib": ">=5.5"
+  }
+}

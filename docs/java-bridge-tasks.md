@@ -82,3 +82,11 @@ Never write as the user; mark what you post (CLAUDE.md). Never run mod jars the 
   to a biter); `lan_e2e.py --bin-dir target/fast --java-mods <critter jar folder> --check
   javahostile` (a guest 20 → 17). Not done: mod mobs vs Horizon's own mobs (they don't see each
   other), a mod's projectile is untested (same path).
+- **entities 3 (GeckoLib fixture animates)**, `bridge-entities-3`. Agent: Claude (iaxivers' chats).
+  Works: new fixture `geckomod` (`horizon_gecko:bobber`, a GeckoLib 5.5 entity with a looping
+  idle animation: its top turns and bobs) draws and animates. The fix: the bridge rendered at
+  partial tick 1.0, which GeckoLib reads as "game paused" (`AnimationController` stops); it now
+  renders at 0.999 (`HorizonEntityRender.PARTIAL_TICK`). New regress case `gecko` takes two
+  screenshots 0.7 s apart and checks they differ (`tools/java_bridge/changed.py`). Branch merges
+  `bridge-entities-2` (for `FIXTURE_CP`); touched tools only outside the area. Test:
+  `regress.py --jars <folder with geckolib-fabric-26.3-*.jar> gecko`.
