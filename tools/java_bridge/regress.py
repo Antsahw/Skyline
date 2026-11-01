@@ -306,6 +306,23 @@ CASES = {
                 check_log(r"Precipitation goes to the mods", "precipitation goes to the mods")],
         look="snow layers on the stone",
     ),
+    "mixins1": dict(
+        about="Round one's actions (mixinmod): a broken block also drops a diamond, dirt isn't picked up, wheat grows in dim light, cows can't be milked",
+        fixtures=["mixinmod"], scene="mixins1",
+        steps=['$C mouse left down >/dev/null; sleep 2; $C mouse left up >/dev/null; sleep 1; '
+               '$C command "tp @s ~2 ~ ~" >/dev/null; sleep 3; $C inventory > $S/inv.json; $C entities 4 minecraft:item > $S/ground.json',
+               '$C command "gamerule random_tick_speed 1000" >/dev/null; sleep 6; $C command "gamerule random_tick_speed 3" >/dev/null; '
+               '$C block $(cat $S/crop.pos) > $S/crop.json',
+               '$C command "item replace entity @s weapon.mainhand with minecraft:bucket" >/dev/null; '
+               '$C command "summon minecraft:cow ~2 ~ ~ {NoAI:1b}" >/dev/null; sleep 1; '
+               '$C look-at-entity $($C entities 6 minecraft:cow | python3 -c "import json,sys;print(json.load(sys.stdin)[\'entities\'][0][\'id\'])") >/dev/null; '
+               'sleep 0.5; $C mouse right click >/dev/null; sleep 1; $C inventory > $S/milk.json'],
+        checks=[check_file("inv.json", r'"minecraft:diamond":\s*1', "a diamond with the dirt (picked up)"),
+                check_file("ground.json", r"minecraft:dirt", "the dirt left on the ground"),
+                check_file("crop.json", r"wheat\[age=[1-7]\]", "the wheat grew in the dim light"),
+                check_file("milk.json", r'"minecraft:bucket":\s*1', "the cow wasn't milked (Player.interactOn's head)"),
+                check_log(r"Random ticks of \d+ vanilla blocks go to the mods", "crop ticks go to the mods")],
+    ),
     "mixins2": dict(
         about="Round two's actions (mixinmod): no snowball throws, an emerald with each craft",
         fixtures=["mixinmod"], scene="none",

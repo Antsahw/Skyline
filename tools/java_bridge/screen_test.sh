@@ -136,6 +136,15 @@ case "$SCENE" in
   # $S/floor.pos; seasons and tick speed are the case's.
   snow) "$R/tools/java_bridge/around.sh" \
     'q "weather rain"' 'echo "$((X-4)) $Y $((Z-4)) $((X+4)) $Y $((Z+4))" > "$S/floor.pos"' ;;
+  # The mixinmod fixture's first round: dirt two blocks east to break (looking at it), and a
+  # wheat seedling shut in stone to the west, lit 8 by a light block beside it (enough to
+  # stay, one short of growing); its position in $S/crop.pos.
+  mixins1) "$R/tools/java_bridge/around.sh" \
+    'q "gamemode survival"' 'q "setblock $((X+2)) $Y $Z minecraft:dirt"' \
+    'q "fill $((X-4)) $Y $((Z-2)) $((X-2)) $((Y+2)) $((Z+2)) minecraft:stone"' \
+    'q "setblock $((X-3)) $((Y+1)) $((Z+1)) minecraft:light[level=9]"' \
+    'q "setblock $((X-3)) $Y $Z minecraft:farmland[moisture=7]"' 'q "setblock $((X-3)) $((Y+1)) $Z minecraft:wheat[age=0]"' \
+    'echo "$((X-3)) $((Y+1)) $Z" > "$S/crop.pos"' '$C look-at-block $((X+2)) $Y $Z west >/dev/null' ;;
   none) ;;
 esac
 n=0; for step in "$@"; do eval "$step"; sleep 1; n=$((n+1)); $C screenshot "$S/s$n.png" >/dev/null; cp "$S/s$n.png" "$OUT/$SCENE-$n.png"; done

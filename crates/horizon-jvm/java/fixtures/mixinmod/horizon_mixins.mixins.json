@@ -14,7 +14,8 @@
     "SlotMixin",
     "DismountMixin",
     "FallMixin",
-    "EffectMixin"
+    "EffectMixin",
+    "MilkMixin"
   ],
   "injectors": {
     "defaultRequire": 1

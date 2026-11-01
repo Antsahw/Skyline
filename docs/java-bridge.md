@@ -907,8 +907,9 @@ terrain on.
 
 Vanilla-patching mods (tested headless 2026-11-01, server thread, survival; each is a
 `regress.py` case: `veinminer`, `harvest`, `carry`, `seasons`, `orbs`, `bettercombat`,
-`snow`, `sweep`; the `mixinmod` fixture's `attack`, `ride`, `dismount`, `fall`, `effects`,
-`slot`, `mixins2`):
+`snow`, `sweep`; the `mixinmod` fixture's `mixins1`, `attack`, `ride`, `dismount`, `fall`,
+`effects`, `slot`, `mixins2`; every routed action has one, and the fixture ones need no
+downloaded jars):
 - Better Combat: a click with an iron sword is its attack request; the cow takes 6. One swing
   at three zombies in a row hurts them all (`sweep`).
 - Serene Seasons' snow: mid winter, rain: the plains' floor gets snow layers.
@@ -916,7 +917,9 @@ Vanilla-patching mods (tested headless 2026-11-01, server thread, survival; each
   spared by its head), no minecarts (the boat still takes the player), no ninth hotbar slot,
   no snowball throws, an emerald with each craft, no getting off while holding a stick, no
   fall damage holding a feather (half the distance with a slime ball: 2 for 10 blocks, 7
-  with empty hands), players immune to poison.
+  with empty hands), players immune to poison, cows that can't be milked (`Player.interactOn`'s
+  head); `mixins1`: a broken block also drops a diamond, dirt isn't picked up, wheat lit 8
+  (one short of vanilla's 9) grows.
 - Veinminer: sneak + one dig breaks a 7-block iron vein, raw iron and experience drop, the
   pickaxe wears 7.
 - Right Click Harvest: a ripe wheat right-clicked is replanted (age 0) and drops wheat.
