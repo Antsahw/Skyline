@@ -53,6 +53,16 @@ pasting their final message here; patches come as attachments.
      the `dev.horizonlab.platform.` prefix filter.
    - `HorizonChunks`: entities' revision cache (`kept`) for server views + gpu's held client
      chunks (`held`); `Copy` has both `made` and `server`.
+   - **Batch 4 (on top of the upstream sync):** upstream's design wins where both built the
+     same thing: loot loading (shared tables, pack overlays, `native_loot_table_load`; pack-5's
+     lazy loot was dropped and requeued), the parallel table loading in `load_resources` (pack-5's
+     memory marks kept), `player_fall_damage` (mixins' routed falls go inside it). Branches made
+     before the sync that touched `server_mods.rs` merge into `java_server.rs` by git's rename
+     detection; check where a hunk landed when HEAD's side of a conflict is empty (it can split
+     a doc comment from its item). `mem_log` lives in horizon-client-render.
+   - Merge messages: write them with `git commit -F`, not `git merge -m … --no-edit` after a
+     conflict (that leaves the `# Conflicts` lines). Never `filter-branch` this branch: it
+     re-hashes upstream's signed commits.
 4. Build Java (`java.sh`), then the game; `cargo fmt`; clippy (`-A
    clippy::manual_range_contains`: pre-existing in horizon-world).
 5. `regress.py`. Don't edit `screen_test.sh` while a run is going (bash reads it as it runs).
@@ -63,6 +73,20 @@ pasting their final message here; patches come as attachments.
 7. Give the user one short message per chat (or "continue with your queue"), and update
    java-bridge-tasks.md's queue.
 
+## A fresh boss container (what batch 4 needed)
+
+- JDK 25 from Adoptium into `~/jdk25` (`JAVA_HOME`, `HORIZON_JAVA_HOME`); `libasound2-dev
+  libudev-dev`, `mesa-vulkan-drivers xvfb` for headless runs.
+- Fabric's libraries: the build's own download fails on the proxy's certificate: fetch the
+  `fabric-libs.tsv`/`fabric-api.tsv` files with curl into `.local/bridge/lib` (and
+  `HORIZON_BRIDGE_LIBS`).
+- Vanilla: a launcher-style folder from Mojang's servers (version JSON pinned in
+  `research-lock.json`, client and server jars, libraries, assets), then `horizon-prepare
+  --prepare --minecraft-dir <it> --server-jar <it>/server-26.3.jar` (~1 min). Never commit it.
+- Test jars from Modrinth's API (`/v2/project/<slug>/version?game_versions=["26.3"]&loaders=
+  ["fabric"]`). Slugs that differ from the names: theoneblock, gwg (Grid World),
+  buildcraftrefabricated, trinkets-updated, voxelmap-updated, diorama-map.
+
 ## Test jars
 
 Not in the repo. `regress.py --jars <folder>` picks jars by name (`MODS` in regress.py). A boss
@@ -72,28 +96,26 @@ Some sandboxes refuse to run downloaded mod code: then say so; the user can run 
 
 ## Upstream
 
-`java-bridge` was based on upstream 3782473 (2026-10-28); by 2026-11-01 upstream was ~12,800
-commits ahead (it removed WebAssembly code mods, deleting `game/server_mods.rs`, and moved
-rendering into `crates/horizon-client-render`). A one-off chat makes `bridge-upstream-sync`.
-After it lands: sync every day or two; keep hooks in shared Horizon files to one-line calls into
-our own files.
+Synced with upstream main 6f54a627d (2026-11-01, `bridge-upstream-sync`, merged in batch 4).
+Upstream removed WebAssembly code mods (our `server_mods.rs` is `game/java_server.rs` now) and
+moved rendering into `crates/horizon-client-render`. Sync every day or two (a one-off chat, or
+the boss when it's small); keep hooks in shared Horizon files to one-line calls into our files.
 
-## Status (2026-11-01, cab3843)
+## Status (2026-11-01, merge-batch4)
 
-Works headless: 137-jar pack starts (~255 s on 2 cores); blocks, machines, screens, REI (list,
-search, R/U, over machines), recipe book, mod mobs (AI, models, sounds, particles, spawning,
-saving, LAN guests), worldgen in all three dimensions (BOP, BetterNether, BetterEnd, Tectonic),
-skyblock data packs and mod world types, Jade, AppleSkin, Xaero's Minimap and World Map,
-JourneyMap, VoxelMap, Veinminer, Carry On, Right Click Harvest, Serene Seasons, Clumps, Better
-Combat, Prism launch, mod settings in Options → Mods, per-player client state on LAN.
+`java-bridge` has upstream main (6f54a627d) and every chat's round 4. Works headless: everything
+of before, plus (round 4) hostile mod mobs, riding mod mobs, GeckoLib animation, map mods with
+Trinkets and per player, Diorama, 17 tech mods (BuildCraft, EE, RFTools Power...), mod settings
+per LAN player, in-game mod failure messages, dedicated servers' mod screens/REI/Jade, Better
+Combat sweeps, mods judging fall damage and effects, faster startup (110 jars: 193 → 120 s) and
+content builds (173 → 107 s), much less memory while loading.
 
-Not yet: anything on real hardware; 157 jars (memory: 577k block states); startup time;
-dedicated servers; mod config per player; GeckoLib on a real mod; running from a normal install
-(needs a dev checkout with `.local/` today); Windows.
+Not yet: anything on real hardware; 157 jars in 8 GB (memory); dedicated servers' other client
+mods; running from a normal install; Windows.
 
 ## Next big steps
 
-1. The upstream sync, then daily syncs.
+1. Daily upstream syncs.
 2. The user's PC results → fix what's really slow or broken.
 3. Beta readiness: run from a normal install (bridge jars and a Java runtime shipped/fetched),
    Windows, clear in-game mod error messages, a known-working pack list. Then a closed beta

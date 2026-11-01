@@ -30,40 +30,52 @@ Never write as the user; mark what you post (CLAUDE.md). Never run mod jars the 
 
 ## Queue (in order)
 
+Round 5 (after merge-batch4, 2026-11-01): `java-bridge` now has upstream main (6f54a627d).
+Start from it; the old `server_mods.rs` is `game/java_server.rs`, and our hooks in Horizon's
+own files stay one-line calls into our files. Upstream's code wins where both built the same.
+
 ### entities
-1. Measure the per-type mob cost in the 137-jar pack; cut the top three.
-2. Hostile mod mobs attacking players (single player and a LAN guest); add a regress case.
-3. GeckoLib: a fixture mod with an animated GeckoLib model (no download needed) drawing with
-   its animation; real GeckoLib mods are checked on the user's PC.
-4. Dismounting (`stopRiding`) and riding mod mobs.
+1. Riding: other players see the rider sitting (Horizon's tracker learns the mod's vehicle),
+   horse-style charged jumps, and `--in-frame`.
+2. Mod mobs and Horizon's own mobs seeing each other (targets, fleeing, attacks both ways).
+3. A bigger mob pack (the 137-jar pack's mobs plus 10 more mob mods): measure, cut the top three.
 
 ### worldgen
-1. Startup time: why the 137-jar pack takes ~255 s to spawn; cut it (profile the start).
-2. Grid World's far terrain (its holes).
-3. Content preparation time for a new mod set (4–7 min): find the slow part.
-4. Lost blocks: keep the repro running in the regress set (a case), fix if it shows.
+1. Startup: the ~10 s of Fabric biome changes calling TerraBlender; the 65 s of class loading in
+   the content build (cache what can be cached between runs).
+2. Keep the new `lost` case running; fix if it ever shows.
+3. Mods' worldgen in far terrain (LOD) for the big pack: what's missing or slow.
 
 ### pack
-1. Memory: block states (577k with 157 jars) — find where Horizon's memory grows with them
-   (Rust side) and make it lean enough for the full pack in 8 GB.
-2. The remaining errors: Lithostitched setup, Cardinal Components' scoreboard client tick,
-   vehicle hearts on the HUD.
-3. Grow toward SkyFactory: more 26.3 Fabric tech and automation mods; fix what breaks.
+1. Memory, the big rewrites: block models (+665 MB at 577k states), block facts (+512 MB), the
+   ~1 KB per state in the registry. Goal: the 157-jar pack in 8 GB.
+2. Lazy loot tables again, on top of upstream's design (its shared tables, pack overlays and
+   the `native_loot_table_load` hook: parse on first use, the hook run then). pack-5's version
+   was dropped in the merge (about 270 MB at 577k states).
+3. Skyblock: the island must exist before the first player is let in, with margin.
 
 ### client
-1. Mod config files per player on LAN (a guest changing Jade's settings changes the host's).
-2. A clear in-game message when a mod fails (which mod, why), instead of only the log.
-3. Dedicated server: mod screens, HUD mods and REI for its players; add a lan_test-style check.
+1. Run from a normal install: the bridge jars and Fabric's libraries shipped or fetched, a Java
+   25 runtime fetched, no `.local/` needed. Then: the launcher can start it.
+2. Dedicated server: the rest of the client mods for its players (maps, HUD mods).
+3. REI's settings per player (copying them stopped REI drawing).
 
 ### mixins
-1. Getting off vehicles (`stopRiding`), and Better Combat's sweep (several mobs a swing).
-2. The next "Rust does" lines from `mixin-table.tsv` in the big pack, most-patched first.
-3. A regress case per routed action not covered yet.
+1. Move our hooks onto upstream's native-mod hook points where one fits (the list in
+   java-bridge.md "Hooks in Horizon's shared files": random tick, hurt, block break/place,
+   clicks, commands, deaths). One at a time, a regress case each.
+2. Effects from beacons, conduits, raids and the Warden ask the mods too.
+3. Falls: `--in-frame`, maces and wind charges routed; the routed fall's block contact (upstream's
+   `mod_block_fall`).
 
 ### gpu
-1. Xaero, JourneyMap and VoxelMap with Trinkets installed (models never load: find why).
-2. JourneyMap and VoxelMap per player (their state is one per game).
-3. Other 26.3 Fabric mods that draw with the GPU: find and get them working.
+1. XaeroPlus and MiniHUD (with MaLiLib).
+2. JourneyMap's waypoints and settings per player; VoxelMap's thread of a player who left.
+3. Diorama's water colours (compare with real Fabric on the user's PC).
+
+### one-off
+- Windows: build and run the bridge on Windows (paths, the JVM's DLL, the launcher).
+- NeoForge for 26.3: research only (the loader, its events, what the mirror needs).
 
 ## Reports
 
