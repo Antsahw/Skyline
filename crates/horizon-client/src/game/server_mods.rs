@@ -1426,10 +1426,31 @@ mod run {
                 }
             }
             let keys = state.keys.clone().unwrap_or_default();
+            // The Java mods with a settings screen, for the players' Mods pages (read once:
+            // the mods' entrypoints don't change while the game runs).
+            static CONFIG_MODS: std::sync::OnceLock<Vec<(String, String)>> =
+                std::sync::OnceLock::new();
+            let config_mods = CONFIG_MODS.get_or_init(|| {
+                horizon_jvm::events::config_mods().unwrap_or_else(|e| {
+                    log::warn!("Java mods: their settings screens can't be listed: {e}");
+                    Vec::new()
+                })
+            });
             for conn in placed {
                 if state.greeted.insert(conn) {
                     // The inventory overlay is there (REI's item list): its first, empty, frame.
                     Self::send_java_overlay_frame(host, conn, "[]");
+                    if !config_mods.is_empty() {
+                        host.hub.send_to(
+                            conn,
+                            &C::CustomPayload(
+                                horizon_protocol::packets::configuration::CustomPayload {
+                                    channel: super::super::java_screen::CONFIG_MODS.into(),
+                                    data: serde_json::to_vec(config_mods).unwrap_or_default(),
+                                },
+                            ),
+                        );
+                    }
                 }
                 if !state.told.insert(conn) || keys.is_empty() {
                     continue;
@@ -2615,7 +2636,10 @@ mod run {
                 let window = input.get("window").and_then(Value::as_i64).unwrap_or(-1) as i32;
                 // A key of a Java mod's key binding, pressed or released while playing, and the
                 // HUD's size: the connection's player's, whatever window is open.
-                let bind = input.get("kind").and_then(Value::as_str) == Some("bind");
+                let bind = matches!(
+                    input.get("kind").and_then(Value::as_str),
+                    Some("bind" | "modconfig")
+                );
                 let uuid = if bind
                     || window == super::super::java_screen::HUD_WINDOW
                     || window == super::super::java_screen::OVERLAY_WINDOW

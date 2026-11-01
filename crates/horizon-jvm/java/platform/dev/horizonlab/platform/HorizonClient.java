@@ -217,7 +217,7 @@ public final class HorizonClient {
     /**
      * {@code /modconfig <mod>}: the mod's settings screen, as Mod Menu's list opens it (its
      * "modmenu" entrypoint's ConfigScreenFactory, with no parent screen), for the player who
-     * runs it. Horizon's own menus have no list of Java mods yet; this is the way in.
+     * runs it. Horizon's Mods page lists the same screens (configMods, the "modconfig" input).
      */
     private static void registerCommands() {
         net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback.EVENT.register((dispatcher, context, environment) ->
@@ -244,6 +244,8 @@ public final class HorizonClient {
     /** The mods with a settings screen, by id: what makes it from a parent screen. */
     static java.util.Map<String, java.util.function.UnaryOperator<net.minecraft.client.gui.screens.Screen>> configScreens() {
         java.util.Map<String, java.util.function.UnaryOperator<net.minecraft.client.gui.screens.Screen>> out = new java.util.TreeMap<>();
+        // Mod Menu's API when Mod Menu isn't installed: mods' "modmenu" entrypoints load then.
+        HorizonModMenuApi.ensure();
         java.lang.reflect.Method create;
         try {
             create = Class.forName("com.terraformersmc.modmenu.api.ConfigScreenFactory", true, HorizonClient.class.getClassLoader())
@@ -265,6 +267,33 @@ public final class HorizonClient {
             }
         }
         return out;
+    }
+
+    /**
+     * The mods with a settings screen, as {@code [[id, name], ...]} (by name): what players'
+     * Mods pages list (events::config_mods). The screens are made when asked for, not here.
+     */
+    public static String configMods() {
+        Thread.currentThread().setContextClassLoader(HorizonClient.class.getClassLoader());
+        var list = new com.google.gson.JsonArray();
+        var loader = net.fabricmc.loader.api.FabricLoader.getInstance();
+        java.util.List<String[]> mods = new java.util.ArrayList<>();
+        try {
+            for (String id : configScreens().keySet()) {
+                String name = loader.getModContainer(id).map(c -> c.getMetadata().getName()).orElse(id);
+                mods.add(new String[] {id, name});
+            }
+        } catch (Throwable t) {
+            Natives.log("Horizon's client: the mods' settings screens can't be listed: " + t);
+        }
+        mods.sort(java.util.Comparator.comparing(m -> m[1].toLowerCase(java.util.Locale.ROOT)));
+        for (String[] m : mods) {
+            var pair = new com.google.gson.JsonArray();
+            pair.add(m[0]);
+            pair.add(m[1]);
+            list.add(pair);
+        }
+        return list.toString();
     }
 
     private static net.minecraft.client.gui.screens.Screen make(java.lang.reflect.Method create, Object factory,
@@ -779,6 +808,10 @@ public final class HorizonClient {
                     server != null ? server.registryAccess() : level.registryAccess());
             set(net.minecraft.client.multiplayer.ClientPacketListener.class, connection, "enabledFeatures",
                     level.enabledFeatures());
+            // Its network connection, with no channel (mods ask it: getConnection(), isMemoryConnection):
+            // what is sent on it goes nowhere (ClientCommonPacketListenerMixin).
+            set(net.minecraft.client.multiplayer.ClientCommonPacketListenerImpl.class, connection, "connection",
+                    Natives.allocate(net.minecraft.network.Connection.class));
             // Its Minecraft (ClientCommonPacketListenerImpl.minecraft): mods' injections into its
             // handlers read the client through it (Architectury's join event: minecraft.player).
             set(net.minecraft.client.multiplayer.ClientCommonPacketListenerImpl.class, connection, "minecraft", minecraft);
@@ -868,6 +901,8 @@ public final class HorizonClient {
         var local = localPlayer(player);
         shareAttachments(player, local);
         set(Minecraft.class, minecraft, "player", local);
+        // Mods' client state is theirs (HorizonClientState: REI's search box, overlay...).
+        HorizonClientState.load(player.getUUID());
         // The services (profiles by id: Chunk Loaders' owner names): the mirrored server's.
         if (minecraft.services() == null && player.level().getServer() != null) {
             set(Minecraft.class, minecraft, "services", clientServices(player.level().getServer()));
@@ -887,11 +922,33 @@ public final class HorizonClient {
         try {
             run.run();
         } finally {
+            // Back to the outer run's player's state (as() within another player's as()).
+            if (before != null) HorizonClientState.load(before.getUUID());
             set(Minecraft.class, minecraft, "player", before);
             set(net.minecraft.client.gui.Gui.class, minecraft.gui, "screen", screenBefore);
             minecraft.level = levelBefore;
             set(net.minecraft.world.entity.Entity.class, local, "level", localLevel);
         }
+    }
+
+    /**
+     * A player left the server: their client's state goes (their screens, overlay, mods' kept
+     * state), so a player joining later with their name starts afresh.
+     */
+    static void left(java.util.UUID id) {
+        JOINED.remove(id);
+        HorizonClientState.forget(id);
+        var overlay = OVERLAYS.remove(id);
+        OVERLAY_SENT.remove(id);
+        OVERLAY_MOUSE.remove(id);
+        if (overlay != null) {
+            try {
+                overlay.removed();
+            } catch (Throwable t) {
+                // Gone anyway.
+            }
+        }
+        if (SCREENS.containsKey(id)) closeScreen(id);
     }
 
     interface ThrowingRunnable {
@@ -1486,6 +1543,13 @@ public final class HorizonClient {
         } catch (Throwable t) {
             Natives.log("Horizon's client: no spawn for the client's join: " + t);
         }
+        // Fabric's own (its networking's injection, skipped in fireConnection): the connection's INIT and
+        // JOIN (Puzzles Lib's client join, and mods listening there).
+        var sender = HorizonLoop.clientSender();
+        HorizonServer.fireEach("ClientPlayConnectionEvents.INIT",
+                net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents.INIT, l -> l.onPlayInit(connection, minecraft));
+        HorizonServer.fireEach("ClientPlayConnectionEvents.JOIN",
+                net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents.JOIN, l -> l.onPlayReady(connection, sender, minecraft));
     }
 
     /** The chunk radius of the login packet: Horizon's view distance. */
@@ -1523,7 +1587,7 @@ public final class HorizonClient {
             Class<?>[] params = m.getParameterTypes();
             // (Fabric's own needs the connection's networking add-on, which the headless
             // client has none of.)
-            if (merged == null || merged.mixin().startsWith("dev.horizonlab.") || merged.mixin().startsWith("net.fabricmc.")
+            if (merged == null || merged.mixin().startsWith("dev.horizonlab.platform.") || merged.mixin().startsWith("net.fabricmc.")
                     || params.length != 2 || params[0] != packet
                     || !org.spongepowered.asm.mixin.injection.callback.CallbackInfo.class.isAssignableFrom(params[1])) {
                 continue;
@@ -2391,6 +2455,22 @@ public final class HorizonClient {
         String kind = in.get("kind").getAsString();
         if (kind.equals("bind")) {
             bind(id, in.get("key").getAsInt(), in.get("down").getAsBoolean());
+            return;
+        }
+        // A mod's settings screen, from the player's Mods page (as /modconfig opens it).
+        if (kind.equals("modconfig")) {
+            var player = HorizonServer.player(id);
+            var factory = configScreens().get(in.get("mod").getAsString());
+            if (DEBUG_INPUT) Natives.log("settings screen of " + in.get("mod").getAsString() + " for " + player + ": " + (factory != null));
+            if (player == null || factory == null) return;
+            try {
+                as(player, () -> setScreen(factory.apply(null)));
+            } catch (Throwable t) {
+                Throwable root = t;
+                while (root.getCause() != null && root.getCause() != root) root = root.getCause();
+                Natives.log("Horizon's client: " + in.get("mod").getAsString() + "'s settings screen failed: " + root);
+                for (StackTraceElement frame : root.getStackTrace()) Natives.log("    at " + frame);
+            }
             return;
         }
         // The window's HUD size (window -2: no screen), which the HUD lays out in.
