@@ -2,7 +2,7 @@
 //! levels (`HorizonEntities`), and their own renderers, run in the headless client, say each
 //! tick what to draw (`HorizonEntityRender`): models as part trees, with their parts' poses,
 //! matrices, textures, tints and overlays. The server sends each player those near it on
-//! [`CHANNEL`] (game/server_mods.rs); this game draws them with its entity pass, and aims at
+//! [`CHANNEL`] (game/java_server.rs); this game draws them with its entity pass, and aims at
 //! them: an attack or a use of one goes to the server as vanilla's packets do, which hands
 //! it to the mods.
 use super::Game;
