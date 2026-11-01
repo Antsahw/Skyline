@@ -280,6 +280,13 @@ CASES = {
         checks=[check_file("snow.json", r'"minecraft:snowball":\s*4', "the snowballs stayed (not thrown)"),
                 check_file("craft.json", r'"minecraft:emerald":\s*1', "an emerald with the planks")],
     ),
+    "lost": dict(
+        about="Lost blocks: 36 gold blocks set right after spawn, chunks still generating, all stay",
+        mods=["fd"], scene="none",
+        steps=['$R/tools/java_bridge/lost_blocks.sh "$C" $S/lost.txt 25'],
+        checks=[check_file("lost.txt", r"^lost 0 of (3[0-9]) set", "every gold block stays (30+ set)")],
+        forbid=[r"generated again while loaded"],
+    ),
     "bigpack": dict(
         about="A whole pack (--pack): Java starts, the registries load, a player joins in time, the mods' worldgen runs",
         pack=True, scene="none", timeout=2700,

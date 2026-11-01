@@ -68,3 +68,8 @@ Never write as the user; mark what you post (CLAUDE.md). Never run mod jars the 
 ## Reports
 
 (Newest last. One short entry per task: area, task, branch, works / doesn't / how to test.)
+
+- **worldgen 4, lost blocks** (bridge-worldgen-4): the repro is a regress case, `lost`
+  (`lost_blocks.sh`: 36 gold blocks set right after spawn with FD, read back 25 s later; fails
+  on any lost one or a "generated again while loaded" line). It didn't show: 0 lost in 4 runs
+  (35/34/36/35 set) on the current java-bridge, so no fix. Test: `regress.py --jars … lost`.
