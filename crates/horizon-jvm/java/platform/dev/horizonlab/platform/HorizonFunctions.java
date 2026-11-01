@@ -69,17 +69,47 @@ public final class HorizonFunctions {
         return was;
     }
 
-    /** Whether the load functions have run (or won't: no data, a failure). */
+    /**
+     * The game time by which what the load functions scheduled for the first moments has run
+     * (Skyblock Infinite places its island 2 s after load, for players to have joined): the
+     * latest of the events queued when they finished that fall within {@link #SETTLE_TICKS};
+     * -1 until they finished. A player joins after it.
+     */
+    private static volatile long settleAt = -1;
+    private static volatile long gameTime;
+    /** How long after load scheduled events still hold the first player (10 s). */
+    private static final long SETTLE_TICKS = 200;
+
+    /** Whether the load functions have run (or won't: no data, a failure), and what they scheduled for the first seconds. */
     static boolean ready() {
         if (failed || HorizonData.loaded == null) return true;
         if (manager == null) return false;
         try {
             java.lang.reflect.Field pending = ServerFunctionManager.class.getDeclaredField("postReload");
             pending.setAccessible(true);
-            return !(boolean) pending.get(manager);
+            if ((boolean) pending.get(manager)) return false;
         } catch (ReflectiveOperationException e) {
             return true;
         }
+        return settleAt >= 0 && gameTime >= settleAt;
+    }
+
+    /** {@link #settleAt}, once the load functions have finished. */
+    private static void settle(long now) {
+        long latest = now;
+        try {
+            java.lang.reflect.Field field = TimerQueue.class.getDeclaredField("queue");
+            field.setAccessible(true);
+            for (Object event : (java.util.Collection<?>) field.get(scheduled)) {
+                long at = ((TimerQueue.Event<?>) event).triggerTime();
+                if (at <= now + SETTLE_TICKS) latest = Math.max(latest, at);
+            }
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            // Nothing to wait for.
+        }
+        settleAt = latest;
+        if (latest > now) Natives.log("Java mods: a new player joins after what the load functions scheduled ("
+                + (latest - now) + " ticks)");
     }
 
     /** One server tick of functions, once a world is open (its saved data holds the schedule). */
@@ -96,6 +126,12 @@ public final class HorizonFunctions {
                 again.set(manager, true);
             }
             scheduled.tick(server, gameTime);
+            HorizonFunctions.gameTime = gameTime;
+            if (settleAt < 0) {
+                java.lang.reflect.Field done = ServerFunctionManager.class.getDeclaredField("postReload");
+                done.setAccessible(true);
+                if (!(boolean) done.get(manager)) settle(gameTime);
+            }
         } catch (Throwable t) {
             failed = true;
             Natives.log("Java mods: the mods' functions stopped: " + t);

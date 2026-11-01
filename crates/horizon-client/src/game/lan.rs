@@ -1738,11 +1738,16 @@ impl Game<'_> {
         // With Java mods, also until the spawn's chunks are there: their tick functions may
         // build on them first (the spawn a load function moved can be anywhere).
         #[cfg(feature = "java-mods")]
-        if super::java_mods::java_loading()
-            || (super::java_mods::has_java_mods() && !self.spawn_chunks_lit())
-        {
-            self.held_joins.push((conn, 0, 0));
-            return true;
+        if super::java_mods::has_java_mods() {
+            let loading = super::java_mods::java_loading();
+            let lit = self.spawn_chunks_lit();
+            if loading || !lit {
+                self.held_joins.push((conn, 0, 0));
+                return true;
+            }
+            log::info!(
+                "Java mods: a player joins now (the mods' load functions ran, the spawn's chunks are there)"
+            );
         }
         false
     }
