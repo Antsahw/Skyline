@@ -50,6 +50,7 @@ impl WorldRequest {
         // is decoded (`save::roll_loaded_loot`), and the spawn chunks are read while the world
         // opens. Every world opens here: in-frame, on the server thread, on a dedicated server.
         horizon_client::structure_blocks::loot_data(&options.resources);
+        horizon_client::mem_log::mark("loot data");
         let Self {
             save_root,
             folder,
@@ -120,6 +121,7 @@ impl WorldRequest {
         let dim = Dim::from_id(&level.dimension);
         let (mut streaming, save, locator) =
             make_streaming(res, pack, options, settings, &save_root, dim, level.seed)?;
+        horizon_client::mem_log::mark("streaming (generator)");
         streaming.radius = settings.render_distance;
         let mut world = World::new(res.facts().air, level.seed);
         world.fast_lava = dim == Dim::Nether;

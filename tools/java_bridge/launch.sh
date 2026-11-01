@@ -44,7 +44,7 @@ export HORIZON_HOME=$S/home HORIZON_LAUNCHER_HOME=$S/lh XDG_DATA_HOME=$S/data XD
 world=(--world "${WORLD:-W}" --seed "${SEED:-1234}" --creative --wait)
 [ "${WORLD:-W}" = none ] && world=()
 "$R/target/fast/horizon-ctl" --socket "$S/ctl.sock" launch "${world[@]}" --offscreen \
-  --game "$R/target/fast/horizon-client" --resources "$R/.local/horizon-client/26.3" "$@" > "$S/ctl.out" 2>&1
+  --game "${GAME:-$R/target/fast/horizon-client}" --resources "$R/.local/horizon-client/26.3" "$@" > "$S/ctl.out" 2>&1
 # --wait waits for a world; at the title screen, for the screen (the mods' content first).
 [ "${WORLD:-W}" = none ] && "$R/target/fast/horizon-ctl" --socket "$S/ctl.sock" wait-for screen title --timeout 900 >> "$S/ctl.out" 2>&1
 echo "$S"

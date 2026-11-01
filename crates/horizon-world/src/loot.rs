@@ -124,9 +124,9 @@ impl Enchantment {
 
 /// Loot tables, items, enchantments and the tags they reference.
 pub struct LootData {
-    tables: HashMap<String, Value>,
-    modifiers: HashMap<String, Value>,
-    predicates: HashMap<String, Value>,
+    tables: JsonFiles,
+    modifiers: JsonFiles,
+    predicates: JsonFiles,
     items: HashMap<String, ItemFacts>,
     /// Enchantments in registry (identifier) order.
     enchantments: Vec<Enchantment>,
@@ -273,7 +273,43 @@ fn int_value(v: &Value) -> Option<i64> {
 /// `data/<ns>/<kind>/` of every namespace, as `ns:path`: vanilla's, and in
 /// a content mods' root theirs (docs/modpacks.md), whose chests name their
 /// own loot tables.
-fn load_kind(data: &Path, kind: &str, out: &mut HashMap<String, Value>) -> io::Result<()> {
+/// Data-pack JSON files by id (`namespace:path`), each read and parsed on first use: a modded
+/// pack has tens of thousands of loot tables (Rechiseled: one per block), and as JSON trees they
+/// took about 500 MB, though a session reads few of them. A file that doesn't parse reads as
+/// missing.
+#[derive(Default)]
+struct JsonFiles(HashMap<String, (std::path::PathBuf, std::sync::OnceLock<Option<Value>>)>);
+
+impl JsonFiles {
+    fn contains_key(&self, id: &str) -> bool {
+        self.0.contains_key(id)
+    }
+    fn get(&self, id: &str) -> Option<&Value> {
+        let (path, value) = self.0.get(id)?;
+        value
+            .get_or_init(|| serde_json::from_slice(&fs::read(path).ok()?).ok())
+            .as_ref()
+    }
+}
+
+fn load_kind(data: &Path, kind: &str, out: &mut JsonFiles) -> io::Result<()> {
+    let Ok(entries) = fs::read_dir(data) else {
+        return Ok(());
+    };
+    let mut namespaces: Vec<String> = entries
+        .flatten()
+        .filter(|e| e.path().is_dir())
+        .filter_map(|e| e.file_name().to_str().map(str::to_owned))
+        .collect();
+    namespaces.sort();
+    for ns in namespaces {
+        list_dir(&data.join(&ns).join(kind), &ns, "", out);
+    }
+    Ok(())
+}
+
+/// Every namespace's `kind` files under `data`, read now (tags, recipes: all of them are used).
+fn read_kind(data: &Path, kind: &str, out: &mut HashMap<String, Value>) -> io::Result<()> {
     let Ok(entries) = fs::read_dir(data) else {
         return Ok(());
     };
@@ -287,6 +323,25 @@ fn load_kind(data: &Path, kind: &str, out: &mut HashMap<String, Value>) -> io::R
         load_dir(&data.join(&ns).join(kind), &ns, "", out)?;
     }
     Ok(())
+}
+
+/// The JSON files under `dir` into `out` by id, unread ([`JsonFiles`]).
+fn list_dir(dir: &Path, namespace: &str, prefix: &str, out: &mut JsonFiles) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        if path.is_dir() {
+            list_dir(&path, namespace, &format!("{prefix}{stem}/"), out);
+        } else if path.extension().is_some_and(|e| e == "json") {
+            let id = format!("{namespace}:{prefix}{stem}");
+            out.0.insert(id, (path, std::sync::OnceLock::new()));
+        }
+    }
 }
 
 fn load_dir(
@@ -326,11 +381,11 @@ impl LootData {
     pub fn load(root: &Path) -> io::Result<Self> {
         let all = root.join("data");
         let data = all.join("minecraft");
-        let mut tables = HashMap::new();
+        let mut tables = JsonFiles::default();
         load_kind(&all, "loot_table", &mut tables)?;
-        let mut modifiers = HashMap::new();
+        let mut modifiers = JsonFiles::default();
         load_kind(&all, "item_modifier", &mut modifiers)?;
-        let mut predicates = HashMap::new();
+        let mut predicates = JsonFiles::default();
         load_kind(&all, "predicate", &mut predicates)?;
         let raw: BTreeMap<String, Value> =
             serde_json::from_slice(&fs::read(root.join("items.json"))?)?;
@@ -391,14 +446,14 @@ impl LootData {
             "damage_type",
         ] {
             let mut raw = HashMap::new();
-            load_kind(&all, &format!("tags/{registry}"), &mut raw)?;
+            read_kind(&all, &format!("tags/{registry}"), &mut raw)?;
             for (name, value) in raw {
                 let values = value["values"].as_array().cloned().unwrap_or_default();
                 tags.insert((registry.to_owned(), name), values);
             }
         }
         let mut recipes = HashMap::new();
-        load_kind(&all, "recipe", &mut recipes)?;
+        read_kind(&all, "recipe", &mut recipes)?;
         let mut ids: Vec<&String> = recipes.keys().collect();
         ids.sort();
         let smelting = ids

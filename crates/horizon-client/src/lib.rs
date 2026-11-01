@@ -98,6 +98,7 @@ pub mod light;
 pub mod locator_bar;
 pub mod lod;
 pub mod logging;
+pub mod mem_log;
 pub mod menu;
 pub mod menu_blur;
 pub mod merchant;

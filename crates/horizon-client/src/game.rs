@@ -9204,9 +9204,13 @@ impl Game<'_> {
     /// integrated-server selection. Server startup must use this entry point.
     fn load_world(&mut self, request: world_loading::WorldRequest) -> Result<()> {
         self.join_world_rest()?;
+        mem_mark("world rest joined");
         self.perf.world_opening();
         let prepared = request.prepare(&self.res, &self.pack, &self.options, &self.settings)?;
-        self.finish_open_world(prepared)
+        mem_mark("world prepared");
+        let opened = self.finish_open_world(prepared);
+        mem_mark("world opened");
+        opened
     }
 
     fn finish_open_world(&mut self, prepared: world_loading::PreparedWorld) -> Result<()> {
@@ -14769,6 +14773,7 @@ fn load_resources(
         }
     }
     log::info!("load assets: {:.2}s", started.elapsed().as_secs_f32());
+    mem_mark("assets");
     progress.set(1);
     let behaviour_json: serde_json::Value = serde_json::from_reader(std::io::BufReader::new(
         std::fs::File::open(root.join("block-behaviours.json"))?,
@@ -14801,12 +14806,15 @@ fn load_resources(
     let biomes = Arc::new(biomes.map_err(|e| -> Box<dyn std::error::Error> { e.into() })?);
     let environment = environment.map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
     log::info!("load facts: {:.2}s", started.elapsed().as_secs_f32());
+    mem_mark("facts");
     progress.set(2);
     log::info!("load biomes+env: {:.2}s", started.elapsed().as_secs_f32());
+    mem_mark("biomes+env");
     progress.set(3);
     let light = Arc::new(LightTables::load(&root, assets.registry, &facts)?);
     let pack = PackResources::load(&root, assets.clone(), render, &facts, biomes.clone(), light)?;
     log::info!("load pack tables: {:.2}s", started.elapsed().as_secs_f32());
+    mem_mark("pack tables");
     progress.set(4);
     if !menu {
         horizon_client::ui::load_metadata(&root);
@@ -14822,6 +14830,7 @@ fn load_resources(
         "load collision+motion: {:.2}s",
         started.elapsed().as_secs_f32()
     );
+    mem_mark("collision+motion");
     progress.set(5);
     let resources = Resources {
         core: WorldCore {
@@ -14847,6 +14856,7 @@ fn load_resources(
     let prepared_at = Instant::now();
     let game_cpu = menu.then(|| GameCpuResources::load(&root)).transpose()?;
     let renderer_cpu = menu.then(|| prepare_renderer_textures(&pack));
+    mem_mark("renderer textures (CPU)");
     if menu {
         log::info!(
             "Horizon: handoff CPU resources prepared on worker in {} ms",
@@ -14876,6 +14886,7 @@ fn load_resources(
                     .set(rest)
                     .map_err(|_| "world resources already loaded".to_owned())?;
                 progress.set(9);
+                mem_mark("world rest");
                 horizon_client::telemetry::mark_rest_ready();
                 log::info!(
                     "Horizon: rest-ready after {} ms",
@@ -14934,6 +14945,7 @@ fn load_world_rest(
 
     let items = Items::load(root, assets.registry, facts)?;
     log::info!("load items: {:.2}s", started.elapsed().as_secs_f32());
+    mem_mark("items");
     progress.set(7);
     let recipes = Recipes::load(root, &items)?;
     let transformers = horizon_client::block_transform::Transformers::load(root, assets.registry)?;
@@ -14945,33 +14957,44 @@ fn load_world_rest(
         biomes.list.len(),
         threads
     );
+    // The tables' parse is done: its garbage (gigabytes for a modded pack) back to the system.
+    horizon_threads::trim_heap();
+    mem_mark("resources");
     progress.set(8);
+    mem_mark("recipes, transformers");
     let stations = horizon_client::stations::StationData::load(root, &items);
     let animate =
         horizon_client::animate_tick::AnimateTables::load(root, registry_owner.registry, biomes)?;
     let fog = horizon_client::fog::FogTables::load(root, biomes);
+    mem_mark("stations, animate, fog");
+    let providers = Providers::load(root);
+    mem_mark("providers");
+    let block_entity_render = horizon_client::block_entity_render::BlockEntityRenderer::load(
+        root,
+        registry_owner.registry,
+    )?;
+    mem_mark("block entity render");
+    let behaviours = Behaviours::load_with_gameplay(
+        registry_owner.registry,
+        root,
+        behaviour_json,
+        gameplay_projection,
+    )?;
+    mem_mark("level behaviours");
     Ok(WorldRest {
         stations,
         items,
         recipes,
         transformers,
-        providers: Providers::load(root),
-        block_entity_render: horizon_client::block_entity_render::BlockEntityRenderer::load(
-            root,
-            registry_owner.registry,
-        )?,
+        providers,
+        block_entity_render,
         animate,
         fog,
         music: horizon_client::music::MusicTables::load(root),
         ambient: horizon_client::ambience::AmbientTables::load(root),
         nether_environment: Environment::load_dimension(root, "the_nether", false)?,
         end_environment: Environment::load_dimension(root, "the_end", false)?,
-        behaviours: Behaviours::load_with_gameplay(
-            registry_owner.registry,
-            root,
-            behaviour_json,
-            gameplay_projection,
-        )?,
+        behaviours,
         mob_types: MobTypes::load(root)?
             .types
             .into_iter()
@@ -15041,6 +15064,7 @@ fn build_renderer(
         previous,
         api,
     ))?;
+    mem_mark("renderer");
     renderer.hud.sprite_animations = atlas
         .sprite_animations
         .iter()
@@ -16071,4 +16095,9 @@ mod tests {
             }
         }
     }
+}
+
+/// [`horizon_client::mem_log::mark`].
+pub(crate) fn mem_mark(stage: &str) {
+    horizon_client::mem_log::mark(stage);
 }

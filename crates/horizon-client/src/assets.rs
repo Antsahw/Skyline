@@ -110,6 +110,7 @@ impl Assets {
         }
         let (registry, flags) =
             BlockRegistry::from_facts_json_with_flags(File::open(root.join("facts.json"))?)?;
+        crate::mem_log::mark("block registry");
         let bundle: Value =
             serde_json::from_reader(BufReader::new(File::open(root.join("block-tags.json"))?))?;
         let mut definitions = TagDefinitions::default();
@@ -200,8 +201,11 @@ impl RenderAssets {
         for name in MATERIALS {
             sprites.insert(root, &format!("minecraft:block/{name}"))?;
         }
+        crate::mem_log::mark("sprites (blocks)");
         let parsed = crate::model_library::ParsedModels::load(root);
+        crate::mem_log::mark("parsed models");
         let models = crate::models::prepare_with_models(root, registry, &mut sprites, &parsed)?;
+        crate::mem_log::mark("state models");
         let model_library = parsed.into_item_library();
         // Fluids are drawn by the fluid renderer, not block models; breaking
         // progress uses the destroy-stage overlays.
@@ -220,6 +224,7 @@ impl RenderAssets {
         sprites.finish();
         // `finish` grows the buffer by doubling: keep only the bytes in use.
         sprites.pixels.shrink_to_fit();
+        crate::mem_log::mark("block textures");
         Ok(Self {
             sprite_size: sprites.size,
             sprite_minimum_size: sprites.minimum_size,
