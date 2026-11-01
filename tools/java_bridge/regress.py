@@ -7,9 +7,13 @@ checked by what the game reports (horizon-ctl), its log and its screenshots.
     python3 tools/java_bridge/regress.py --java-only ...                # after a Java-only change
     python3 tools/java_bridge/regress.py --list
 
+    python3 tools/java_bridge/regress.py --pack ~/hz-test/mods-java bigpack  # a whole pack
+
 --jars is one folder of Modrinth mod jars; each case takes the ones it needs by name and is
 skipped when one is missing (the repo's fixture mods are built here). Screenshots and logs go
-to --out (default /tmp/hz-regress/<case>/). Exit status 1 when a case fails.
+to --out (default /tmp/hz-regress/<case>/). Exit status 1 when a case fails. --pack is a
+whole pack's mods folder (a config/ beside it is the mods' configs), for `bigpack`; its content,
+made once per set of jars (minutes), is kept in --out/pack-cache.
 """
 import argparse
 import fnmatch
@@ -146,6 +150,18 @@ CASES = {
                 check_file("state.json", r'"block_pos":\[-?[01],6[45],-?[01]\]', "the player stands on the block")],
         forbid=[r"fell out of the world", r"functions stopped"],
     ),
+    "bigpack": dict(
+        about="A whole pack (--pack): Java starts, the registries load, a player joins in time, the mods' worldgen runs",
+        pack=True, scene="none", timeout=2700,
+        steps=['sleep 20; $C state > $S/state.json'],
+        checks=[check_log(r"Fabric started in", "Java and Fabric start"),
+                check_log(r"System chat: \S+ joined the game", "a player joins"),
+                check_file("state.json", r'"block_pos":\[', "the player is in the world")],
+        forbid=[r"Java mods: not started", r"Registry loading errors", r"their content was not made",
+                r"Java mods' worldgen: chunk -?\d+ -?\d+ failed", r"control socket did not open",
+                r"fell out of the world"],
+        look="the pack's world, its HUD (minimap) drawn",
+    ),
     "prism": dict(
         about="Prism Launcher's wrapper: an instance's mods linked, Fabric API left out (no game)",
         mods=["fd"], optional=["fabric-api"], prism=True,
@@ -214,16 +230,20 @@ def run_prism(case, jars, out):
         shutil.rmtree(inst, ignore_errors=True)
 
 
-def run_game(case, name, jars, out, extra_env):
+def run_game(case, name, jars, out, extra_env, pack=None, join_within=None):
     mods = Path(tempfile.mkdtemp(prefix="hz-regress-mods."))
     try:
         for jar in jars:
             shutil.copy(jar, mods)
         env = dict(os.environ, MODS=str(mods), SCENE=case["scene"], OUT=str(out), NO_BUILD="1", **extra_env,
                    **case.get("env", {}))
+        if pack is not None:
+            # The pack's own folder (launch.sh takes its config/ too); its content kept between runs.
+            env.update(MODS=str(pack), CACHE=str(out.parent / "pack-cache"),
+                       HORIZON_CTL_LAUNCH_TIMEOUT=str(case.get("timeout", 600)))
         started = time.time()
         r = subprocess.run([str(TOOLS / "screen_test.sh"), *case["steps"]], env=env, capture_output=True,
-                           text=True, timeout=600)
+                           text=True, timeout=case.get("timeout", 600) + 300)
         (out / "screen_test.txt").write_text(r.stdout + r.stderr)
         scratch = Path(Path("/tmp/hz-bridge-scratch").read_text().strip())
         log_path = scratch / "home" / "logs" / "latest.log"
@@ -247,6 +267,11 @@ def run_game(case, name, jars, out, extra_env):
                 except (OSError, ValueError, KeyError, IndexError, TypeError):
                     ok = False
             results.append((ok, what))
+        if join_within is not None:
+            joined = join_seconds(log)
+            results.append((joined is not None and joined <= join_within,
+                            f"a player joins within {join_within} s of the start"
+                            + (f" ({joined} s)" if joined is not None else " (never)")))
         for pattern in case.get("forbid", []):
             hits = re.findall(rf".*{pattern}.*", log)
             results.append((not hits, f"no '{pattern}' in the log" + (f" ({hits[0].strip()[:120]})" if hits else "")))
@@ -258,10 +283,25 @@ def run_game(case, name, jars, out, extra_env):
         shutil.rmtree(mods, ignore_errors=True)
 
 
+def join_seconds(log):
+    """Seconds from the log's first line to the first player's join (None if none joined)."""
+    stamps = re.findall(r"^\[(\d\d):(\d\d):(\d\d)\]", log, re.M)
+    joined = re.search(r"^\[(\d\d):(\d\d):(\d\d)\].*System chat: \S+ joined the game", log, re.M)
+    if not stamps or not joined:
+        return None
+    first = int(stamps[0][0]) * 3600 + int(stamps[0][1]) * 60 + int(stamps[0][2])
+    at = int(joined.group(1)) * 3600 + int(joined.group(2)) * 60 + int(joined.group(3))
+    return (at - first) % 86400
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("cases", nargs="*", help="cases to run (default: all)")
     ap.add_argument("--jars", default=os.environ.get("HZ_JARS"), help="a folder of Modrinth mod jars")
+    ap.add_argument("--pack", default=os.environ.get("HZ_PACK"), help="a whole pack's mods folder (bigpack)")
+    ap.add_argument("--join-within", type=int, default=int(os.environ.get("HZ_JOIN_WITHIN", "900")),
+                    help="bigpack: seconds from the start to the player's join (default 900; the first run "
+                         "of a set of jars also makes its content)")
     ap.add_argument("--out", default="/tmp/hz-regress")
     ap.add_argument("--java-only", action="store_true", help="rebuild only the Java side (java.sh)")
     ap.add_argument("--list", action="store_true")
@@ -285,6 +325,10 @@ def main():
         out = out_root / name
         shutil.rmtree(out, ignore_errors=True)
         out.mkdir()
+        if case.get("pack") and not (a.pack and list(Path(a.pack).glob("*.jar"))):
+            print(f"SKIP {name}: no --pack folder of jars")
+            summary.append((name, None))
+            continue
         jars, missing = find_jars(a.jars, case.get("mods", []))
         if jars is None:
             print(f"SKIP {name}: no {missing} jar in {a.jars or '(no --jars)'}")
@@ -299,7 +343,9 @@ def main():
             if case.get("prism"):
                 results, errors = run_prism(case, jars, out)
             else:
-                results, errors = run_game(case, name, jars, out, extra_env)
+                results, errors = run_game(case, name, jars, out, extra_env,
+                                           pack=Path(a.pack).resolve() if case.get("pack") else None,
+                                           join_within=a.join_within if case.get("pack") else None)
         except Exception as e:  # a case that cannot run fails, the others still run
             results, errors = [(False, f"the case could not run: {e}")], []
         for ok, what in results:

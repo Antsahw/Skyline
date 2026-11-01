@@ -41,6 +41,18 @@ enum J {
     Str(String),
     Arr(Vec<J>),
     Obj(Vec<(String, J)>),
+    /// A finished value kept as its JSON text: a new state's row, once made, is never read
+    /// again, and the tree form of hundreds of thousands of rows took gigabytes.
+    Raw(Raw),
+}
+
+/// JSON text, written as it is ([`J::Raw`]).
+#[derive(Clone, Debug)]
+struct Raw(Box<serde_json::value::RawValue>);
+impl PartialEq for Raw {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.get() == other.0.get()
+    }
 }
 impl<'de> Deserialize<'de> for J {
     fn deserialize<D: de::Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
@@ -119,10 +131,18 @@ impl Serialize for J {
                 }
                 map.end()
             }
+            J::Raw(r) => r.0.serialize(s),
         }
     }
 }
 impl J {
+    /// This value as its JSON text ([`J::Raw`]).
+    fn into_raw(self) -> J {
+        match serde_json::value::to_raw_value(&self) {
+            Ok(raw) => J::Raw(Raw(raw)),
+            Err(_) => self,
+        }
+    }
     fn get(&self, key: &str) -> Option<&J> {
         match self {
             J::Obj(o) => o.iter().find(|(k, _)| k == key).map(|(_, v)| v),
@@ -637,7 +657,7 @@ impl<'a> Plan<'a> {
                         row.set("random_ticks", J::Bool(r));
                     }
                 }
-                list.push(row);
+                list.push(row.into_raw());
             }
         }
         Ok(())
@@ -1149,6 +1169,12 @@ impl Overlay<'_> {
         Ok(())
     }
     fn write(&self, rel: &str, bytes: &[u8]) -> Result<()> {
+        use std::io::Write;
+        self.create(rel)?.write_all(bytes)?;
+        Ok(())
+    }
+    /// A new file at `rel` in place of the link to the base's.
+    fn create(&self, rel: &str) -> Result<fs::File> {
         let rel = Path::new(rel);
         if let Some(parent) = rel.parent() {
             self.dir(parent)?;
@@ -1157,8 +1183,7 @@ impl Overlay<'_> {
         if fs::symlink_metadata(&path).is_ok() {
             fs::remove_file(&path)?;
         }
-        fs::write(path, bytes)?;
-        Ok(())
+        Ok(fs::File::create(path)?)
     }
 }
 #[cfg(unix)]
@@ -1355,7 +1380,12 @@ fn tables(base: &Path, plan: &Plan, overlay: &Overlay<'_>) -> Result<()> {
             let mut doc = read_json(&path)?;
             plan.json(name, &mut doc)
                 .map_err(|e| format!("{name}: {e}"))?;
-            serde_json::to_vec(&doc)?
+            // Straight to the file: a big pack's tables run to hundreds of MB.
+            let mut out = std::io::BufWriter::new(overlay.create(name)?);
+            serde_json::to_writer(&mut out, &doc)?;
+            use std::io::Write;
+            out.flush()?;
+            return Ok(());
         } else {
             let (mut named, _) = nbt::read_named(&fs::read(&path)?, Limits::tables())
                 .map_err(|e| format!("{name}: {e}"))?;

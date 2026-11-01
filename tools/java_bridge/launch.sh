@@ -16,11 +16,16 @@ export JAVA_HOME HORIZON_JAVA_HOME=$JAVA_HOME PATH=$JAVA_HOME/bin:$PATH
 old=$(cat /tmp/hz-bridge-scratch 2>/dev/null)
 if [ -n "$old" ] && [ -d "$old" ]; then
   "$R/target/fast/horizon-ctl" --socket "$old/ctl.sock" quit >/dev/null 2>&1 || true
-  rm -rf "$old"
+  # The game may still be writing its world as it quits.
+  rm -rf "$old" 2>/dev/null || { sleep 3; rm -rf "$old" 2>/dev/null || true; }
 fi
 S=$(mktemp -d /tmp/hz-bridge.XXXX)
 mkdir -p "$S/mods-java" "$S/home" "$S/lh" "$S/data" "$S/conf"
-cp "$MODS"/*.jar "$S/mods-java/"
+cp -p "$MODS"/*.jar "$S/mods-java/"
+# The pack's mod configs: a config/ folder beside MODS (as in a launcher instance).
+[ -d "$MODS/../config" ] && cp -r "$MODS/../config" "$S/config"
+# CACHE=dir keeps the mods' content (made once per set of jars: minutes for a big pack) across runs.
+[ -n "$CACHE" ] && mkdir -p "$CACHE" && ln -s "$CACHE" "$S/.horizon-cache"
 [ -n "$OPTS" ] && cp "$OPTS" "$S/options.txt"
 [ -n "$GRAPHICS" ] && cp "$GRAPHICS" "$S/horizon-graphics.txt"
 echo "$S" > /tmp/hz-bridge-scratch

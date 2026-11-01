@@ -18,7 +18,8 @@ fi
 [ -n "$JAVA_HOME" ] || { echo "no Java 25 in /usr/lib/jvm: set JAVA_HOME" >&2; exit 1; }
 export JAVA_HOME HORIZON_JAVA_HOME=$JAVA_HOME PATH=$JAVA_HOME/bin:$PATH
 old=$(cat /tmp/hz-bridge-scratch 2>/dev/null)
-[ -n "$old" ] && "$R/target/fast/horizon-ctl" --socket "$old/ctl.sock" quit >/dev/null 2>&1 && rm -rf "$old"
+[ -n "$old" ] && "$R/target/fast/horizon-ctl" --socket "$old/ctl.sock" quit >/dev/null 2>&1 \
+  && { rm -rf "$old" 2>/dev/null || { sleep 3; rm -rf "$old" 2>/dev/null; }; }
 # JAVA_ONLY=1: a Java-only change; just the jars are rebuilt (seconds) and run from disk.
 # NO_BUILD=1: the caller built already (regress.py: once for every scene).
 if [ -n "$NO_BUILD" ]; then
