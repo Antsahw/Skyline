@@ -39,6 +39,13 @@ MODS = {
     "terrablender": ["terrablender*"],
     "glitchcore": ["glitchcore*"],
     "fabric-api": ["fabric-api*"],
+    "veinminer": ["veinminer-fabric*"],
+    "rch": ["rightclickharvest*"],
+    "jamlib": ["jamlib*"],
+    "carryon": ["carryon*"],
+    "seasons": ["sereneseasons*"],
+    "clumps": ["clumps*"],
+    "kotlin": ["fabric-language-kotlin*"],
 }
 
 
@@ -126,6 +133,61 @@ CASES = {
         checks=[check_file("messages.json", r"redwood_forest[^\"]*is at|nearest[^\"]*redwood", "a redwood forest is found")],
         forbid=[r"features failed"],
     ),
+    "veinminer": dict(
+        about="Veinminer: sneak and dig once, the whole 7-ore iron vein breaks and drops",
+        mods=["veinminer", "kotlin"], scene="vein",
+        steps=['$C key shift down >/dev/null; sleep 0.3; $C mouse left down >/dev/null; sleep 1; '
+               '$C mouse left up >/dev/null; sleep 3; $C key shift up >/dev/null; '
+               '$C blocks $(cat $S/vein.pos) > $S/vein.json; $C state > $S/state.json; '
+               '$C entities 8 minecraft:item > $S/drops.json'],
+        checks=[check_file("vein.json", r'"counts":\{\}', "every ore of the vein is gone"),
+                check_json("state.json", ["held", "damage"], 7, "the pickaxe wore once per ore"),
+                check_file("drops.json", r"minecraft:raw_iron", "raw iron dropped")],
+        look="the vein gone, raw iron on the ground",
+    ),
+    "harvest": dict(
+        about="Right Click Harvest: a ripe wheat right-clicked is replanted and drops",
+        mods=["rch", "jamlib"], scene="harvest",
+        steps=['$C mouse right click >/dev/null; sleep 2; $C block $(cat $S/crop.pos) > $S/crop.json; '
+               '$C entities 6 minecraft:item > $S/drops.json'],
+        checks=[check_json("crop.json", ["state"], "minecraft:wheat[age=0]", "the wheat is replanted"),
+                check_file("drops.json", r"minecraft:wheat\b", "wheat dropped")],
+    ),
+    "carry": dict(
+        about="Carry On: sneak-right-click picks a cow up, a right-click on the ground puts it down",
+        mods=["carryon"], scene="carry",
+        # The carry key is Carry On's own key binding (shift): its client sends it once the
+        # game knows the mods' keys, a few seconds after joining.
+        steps=['sleep 5; $C key shift down >/dev/null; sleep 1.5; $C mouse right click >/dev/null; sleep 1; '
+               '$C key shift up >/dev/null; sleep 1; $C entities 8 minecraft:cow > $S/carried.json',
+               '$C turn 180 0 >/dev/null; $C look 90 50 >/dev/null; sleep 0.5; $C mouse right click >/dev/null; '
+               'sleep 2; $C entities 8 minecraft:cow > $S/placed.json'],
+        checks=[check_file("carried.json", r'"entities":\[\]', "the cow is carried (gone from the world)"),
+                check_file("placed.json", r"minecraft:cow", "the cow is put down again")],
+        look="the cow put down in front",
+    ),
+    "seasons": dict(
+        about="Serene Seasons: wheat grows in summer, not in winter (its random-tick patch)",
+        mods=["seasons", "glitchcore"], scene="seasons",
+        # Out of season, crops don't grow at all (the default lets one tick in six through).
+        config={"sereneseasons/fertility.toml": "[general]\n\tseasonal_crops = true\n\tout_of_season_crop_behavior = 1\n"},
+        steps=['$C command "season set mid_summer" >/dev/null; $C command "gamerule random_tick_speed 1000" >/dev/null; '
+               'sleep 6; $C command "gamerule random_tick_speed 0" >/dev/null; $C block $(cat $S/crop.pos) > $S/summer.json',
+               '$C command "setblock $(cat $S/crop.pos) minecraft:wheat[age=0]" >/dev/null; '
+               '$C command "season set early_winter" >/dev/null; $C command "gamerule random_tick_speed 1000" >/dev/null; '
+               'sleep 6; $C command "gamerule random_tick_speed 3" >/dev/null; $C block $(cat $S/crop.pos) > $S/winter.json'],
+        checks=[check_file("summer.json", r'wheat\[age=[1-7]\]', "the wheat grew in summer"),
+                check_json("winter.json", ["state"], "minecraft:wheat[age=0]", "the wheat didn't grow in winter"),
+                check_log(r"Random ticks of \d+ vanilla blocks go to the mods", "crop ticks go to the mods")],
+    ),
+    "orbs": dict(
+        about="Clumps: experience orbs' pickup goes through its playerTouch",
+        mods=["clumps"], scene="none",
+        steps=['$C command "gamemode survival" >/dev/null; for i in 1 2 3 4 5 6; do '
+               '$C command "summon experience_orb ~ ~0.5 ~ {Value:7}" >/dev/null; done; sleep 2; $C state > $S/state.json'],
+        checks=[check_json("state.json", ["player", "xp", "total"], 42, "all six orbs' points (42)"),
+                check_log(r"experience_orbs go to the mods", "orb pickup goes to the mods")],
+    ),
     "prism": dict(
         about="Prism Launcher's wrapper: an instance's mods linked, Fabric API left out (no game)",
         mods=["fd"], optional=["fabric-api"], prism=True,
@@ -199,8 +261,16 @@ def run_game(case, name, jars, out, extra_env):
     try:
         for jar in jars:
             shutil.copy(jar, mods)
+        config = {}
+        if case.get("config"):
+            # Mods' config files written before the game starts (launch.sh's CONFIG).
+            folder = mods / "config"
+            for rel, text in case["config"].items():
+                (folder / rel).parent.mkdir(parents=True, exist_ok=True)
+                (folder / rel).write_text(text)
+            config = {"CONFIG": str(folder)}
         env = dict(os.environ, MODS=str(mods), SCENE=case["scene"], OUT=str(out), NO_BUILD="1", **extra_env,
-                   **case.get("env", {}))
+                   **case.get("env", {}), **config)
         started = time.time()
         r = subprocess.run([str(TOOLS / "screen_test.sh"), *case["steps"]], env=env, capture_output=True,
                            text=True, timeout=600)

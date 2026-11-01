@@ -526,6 +526,11 @@ fn boot(env: &mut JNIEnv, jars: &[PathBuf]) -> jni::errors::Result<String> {
                 fn_ptr: native_level_event as *mut c_void,
             },
             NativeMethod {
+                name: "spawnEntity".into(),
+                sig: "(Ljava/lang/String;Ljava/lang/String;)V".into(),
+                fn_ptr: native_spawn_entity as *mut c_void,
+            },
+            NativeMethod {
                 name: "setSlot".into(),
                 sig: "(Ljava/lang/String;ILjava/lang/String;)V".into(),
                 fn_ptr: native_set_slot as *mut c_void,
@@ -1368,6 +1373,24 @@ extern "system" fn native_level_event(
             position: [x, y, z],
             data,
             state,
+        });
+    }));
+}
+
+/// `Natives.spawnEntity(String dimension, String snbt)`: a vanilla entity a mod added.
+extern "system" fn native_spawn_entity(
+    mut env: JNIEnv,
+    _class: JClass,
+    dimension: JString,
+    snbt: JString,
+) {
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let (Ok(dimension), Ok(snbt)) = (env.get_string(&dimension), env.get_string(&snbt)) else {
+            return;
+        };
+        events::push(events::Action::SpawnEntity {
+            dimension: dimension.into(),
+            snbt: snbt.into(),
         });
     }));
 }

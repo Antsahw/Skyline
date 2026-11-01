@@ -7271,6 +7271,7 @@ impl Game<'_> {
             self.player_menu_sound(sound);
         }
         let crafted = std::mem::take(&mut menu.crafted);
+        let crafted_takes = std::mem::take(&mut menu.crafted_takes);
         let brewed = std::mem::take(&mut menu.brewed);
         let equipped = std::mem::take(&mut menu.equipped);
         for (i, stack) in after.into_iter().enumerate() {
@@ -7287,6 +7288,7 @@ impl Game<'_> {
                 self.player_drop(stack);
             }
             self.award_crafted(&crafted);
+            self.java_crafted(&crafted_takes);
             for stack in &brewed {
                 self.trigger_brewed_potion(stack);
             }

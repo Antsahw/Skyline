@@ -240,7 +240,10 @@ public final class HorizonMixinTable {
             "net/minecraft/server/level/ServerPlayer.hurtServer", "net/minecraft/world/entity/player/Player.hurtServer",
             "net/minecraft/world/entity/LivingEntity.hurtServer",
             "net/minecraft/client/Minecraft.runTick", "net/minecraft/client/Minecraft.tick",
-            GAME_MODE + ".useItem", GAME_MODE + ".destroyBlock");
+            GAME_MODE + ".useItem", GAME_MODE + ".destroyBlock",
+            // A player's hit on and use of Horizon's entities (HorizonVanillaActions.entity).
+            "net/minecraft/world/entity/player/Player.attack", "net/minecraft/world/entity/player/Player.interactOn",
+            "net/minecraft/world/item/ItemStack.use");
 
     public static Where where(String owner, String method) {
         String key = owner + "." + method;
@@ -255,6 +258,13 @@ public final class HorizonMixinTable {
         if (owner.equals(ITEM_ENTITY) && PICKUP.contains(method)) return new Where("routed", "item pickup");
         if (owner.equals(ORB) && XP.contains(method)) return new Where("routed", "experience orbs");
         if (FIRED.contains(key)) return new Where("fired", "Horizon fires it");
+        if (owner.equals("net/minecraft/world/inventory/ResultSlot")) {
+            return new Where("java", "crafting results (vanilla's onTake on copies of the grid and result)");
+        }
+        if (owner.startsWith("net/minecraft/world/item/") && (method.equals("use") || method.equals("releaseUsing")
+                || method.equals("finishUsingItem"))) {
+            return method.equals("use") ? new Where("routed", "using an item in the air") : new Where("rust", "items in use (Horizon's)");
+        }
         boolean block = owner.startsWith("net/minecraft/world/level/block/") && !owner.contains("/entity/");
         boolean item = owner.startsWith("net/minecraft/world/item/");
         if (block && RANDOM_TICK.contains(method)) return new Where("routed", "random ticks");
@@ -306,7 +316,8 @@ public final class HorizonMixinTable {
         return switch (w.side()) {
             case "java" -> "applies (Java)";
             case "fired" -> p.eventLike() ? "fired by Horizon" : "not applied (Horizon runs this part)";
-            case "routed" -> p.eventLike() && FIRED.contains(p.owner() + "." + p.method())
+            case "routed" -> p.eventLike() && (FIRED.contains(p.owner() + "." + p.method())
+                    || p.method().equals("use") && p.at().equals("HEAD"))
                     ? "fired by Horizon" : "routed to Java";
             default -> "not applied (Horizon's Rust)";
         };

@@ -133,6 +133,12 @@ public final class Natives {
     public static native void levelEvent(String dimension, int type, int x, int y, int z, int data, String state);
 
     /**
+     * A vanilla entity a mod's code added to a mirrored level (Carry On putting a carried mob
+     * down), as vanilla saves it (SNBT with its id): Horizon loads it as its own.
+     */
+    public static native void spawnEntity(String dimension, String snbt);
+
+    /**
      * A mod changed a player's inventory slot (vanilla's Inventory order): the stack as SNBT
      * (ItemStack.CODEC), or null for empty.
      */

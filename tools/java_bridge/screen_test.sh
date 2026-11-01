@@ -81,6 +81,33 @@ case "$SCENE" in
     'q "gamemode survival"' 'q "give @s chunkloaders:single_chunk_loader"' \
     '$C look-at-block $((X+2)) $((Y-1)) $Z >/dev/null' '$C mouse right click >/dev/null' \
     '$C look-at-block $((X+2)) $Y $Z >/dev/null' '$C mouse right click >/dev/null' 'sleep 3' ;;
+  # Veinminer: a 7-ore iron vein three blocks east (a 3x2 wall and one on top), survival, a
+  # diamond pickaxe, looking at the vein's middle; the region is written to $S/vein.pos.
+  vein) "$R/tools/java_bridge/around.sh" \
+    'q "fill $((X+3)) $Y $((Z-1)) $((X+3)) $((Y+1)) $((Z+1)) minecraft:iron_ore"' \
+    'q "setblock $((X+3)) $((Y+2)) $Z minecraft:iron_ore"' \
+    'q "gamemode survival"' 'q "give @s minecraft:diamond_pickaxe"' 'q "tp @s ~ ~ ~ -90 0"' \
+    'echo "$((X+3)) $Y $((Z-1)) $((X+3)) $((Y+2)) $((Z+1))" > "$S/vein.pos"' \
+    '$C look-at-block $((X+3)) $((Y+1)) $Z west >/dev/null' ;;
+  # Right Click Harvest: a row of ripe wheat on wet farmland two blocks east, survival,
+  # looking at the middle one.
+  harvest) "$R/tools/java_bridge/around.sh" \
+    'q "fill $((X+2)) $((Y-1)) $((Z-1)) $((X+2)) $((Y-1)) $((Z+1)) minecraft:farmland[moisture=7]"' \
+    'q "fill $((X+2)) $Y $((Z-1)) $((X+2)) $Y $((Z+1)) minecraft:wheat[age=7]"' \
+    'q "gamemode survival"' 'q "tp @s ~ ~ ~ -90 30"' \
+    'echo "$((X+2)) $Y $Z" > "$S/crop.pos"' '$C look-at-block $((X+2)) $Y $Z west >/dev/null' ;;
+  # Carry On: a cow standing still two blocks east, survival, empty hands, looking at it.
+  carry) "$R/tools/java_bridge/around.sh" \
+    'q "summon minecraft:cow ~2 ~ ~ {NoAI:1b,CustomName:\"Bessie\"}"' 'q "gamemode survival"' \
+    'q "tp @s ~ ~ ~ -90 20"' 'sleep 1' \
+    '$C look-at-entity $($C entities 6 minecraft:cow | python3 -c "import json,sys;print(json.load(sys.stdin)[\"entities\"][0][\"id\"])") >/dev/null' ;;
+  # Serene Seasons: a wheat seedling on wet farmland under the sky (glass over it would be
+  # a greenhouse: fertile in every season); its position in $S/crop.pos.
+  seasons) "$R/tools/java_bridge/around.sh" \
+    'q "setblock $((X+3)) $((Y-1)) $Z minecraft:farmland[moisture=7]"' \
+    'q "setblock $((X+3)) $((Y-1)) $((Z+1)) minecraft:water"' \
+    'q "setblock $((X+3)) $Y $Z minecraft:wheat[age=0]"' \
+    'echo "$((X+3)) $Y $Z" > "$S/crop.pos"' ;;
   none) ;;
 esac
 n=0; for step in "$@"; do eval "$step"; sleep 1; n=$((n+1)); $C screenshot "$S/s$n.png" >/dev/null; cp "$S/s$n.png" "$OUT/$SCENE-$n.png"; done

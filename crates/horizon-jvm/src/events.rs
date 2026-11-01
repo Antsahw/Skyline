@@ -192,6 +192,9 @@ pub enum Action {
         item: String,
         count: i32,
     },
+    /// A vanilla entity a mod's code added to a mirrored level (Carry On putting a carried
+    /// mob down): vanilla's save of it (SNBT, with its `id`), for the game to load as its own.
+    SpawnEntity { dimension: String, snbt: String },
     /// `ServerLevel.levelEvent`: a level event there (`LevelEvent`, 2001 a block's break
     /// particles and sound), as Horizon's level events go.
     LevelEvent {
@@ -583,6 +586,114 @@ pub fn attack_block(
         .z()
     })?;
     Ok(taken.unwrap_or(false))
+}
+
+/// What mods made of a player's attack on, or use of, one of the game's own entities
+/// ([`vanilla_entity`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct EntityResult {
+    /// A mod took it: the game does nothing more.
+    pub taken: bool,
+    /// The arm swings.
+    pub swing: bool,
+    /// The mods removed the entity (picked it up: Carry On): the game removes its own.
+    pub removed: bool,
+}
+
+/// Player `uuid` attacks (`using` false) or uses the game's entity saved as `snbt` (vanilla's
+/// entity NBT with its `id`), with `hand` (0 main, 1 off) at `hit`, holding hotbar slot
+/// `selected`: Fabric's `AttackEntityCallback`/`UseEntityCallback` and the mods' injections at
+/// the head of `Player.attack`/`interactOn`, on a copy of the entity. Run it inside
+/// [`crate::world::with_blocks`].
+#[allow(clippy::too_many_arguments)]
+pub fn vanilla_entity(
+    uuid: &str,
+    dimension: &str,
+    snbt: &str,
+    using: bool,
+    hand: i32,
+    hit: [f64; 3],
+    selected: i32,
+) -> Result<EntityResult, String> {
+    let bits = with_server(|env, _| {
+        let class = vanilla_class(env)?;
+        let uuid = env.new_string(uuid)?;
+        let dimension = env.new_string(dimension)?;
+        let snbt = env.new_string(snbt)?;
+        env.call_static_method(
+            &class,
+            "entity",
+            "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ZIDDDI)I",
+            &[
+                JValue::Object(&uuid),
+                JValue::Object(&dimension),
+                JValue::Object(&snbt),
+                JValue::Bool(u8::from(using)),
+                JValue::Int(hand),
+                JValue::Double(hit[0]),
+                JValue::Double(hit[1]),
+                JValue::Double(hit[2]),
+                JValue::Int(selected),
+            ],
+        )?
+        .i()
+    })?
+    .unwrap_or(0);
+    Ok(EntityResult {
+        taken: bits & 1 != 0,
+        swing: bits & 2 != 0,
+        removed: bits & 4 != 0,
+    })
+}
+
+/// Player `uuid` took `count` of the crafting result `result` (SNBT) of recipe `recipe` from a
+/// grid `width` wide (`grid`: each cell's SNBT, `""` for empty, as before the take): vanilla's
+/// `ResultSlot.onTake` on copies, for the mods' crafted hooks (Architectury, Balm, Modonomicon).
+/// What they give comes back as slots. Run it inside [`crate::world::with_blocks`].
+pub fn crafted(
+    uuid: &str,
+    recipe: &str,
+    result: &str,
+    count: i32,
+    width: i32,
+    grid: &[String],
+) -> Result<(), String> {
+    with_server(|env, _| {
+        let class = vanilla_class(env)?;
+        let uuid = env.new_string(uuid)?;
+        let recipe = env.new_string(recipe)?;
+        let result = env.new_string(result)?;
+        let cells = env.new_object_array(
+            grid.len() as sys::jsize,
+            "java/lang/String",
+            JObject::null(),
+        )?;
+        for (i, cell) in grid.iter().enumerate() {
+            let s = env.new_string(cell)?;
+            env.set_object_array_element(&cells, i as sys::jsize, &s)?;
+        }
+        env.call_static_method(
+            &class,
+            "crafted",
+            "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;II[Ljava/lang/String;)V",
+            &[
+                JValue::Object(&uuid),
+                JValue::Object(&recipe),
+                JValue::Object(&result),
+                JValue::Int(count),
+                JValue::Int(width),
+                JValue::Object(&cells),
+            ],
+        )?;
+        Ok(())
+    })?;
+    Ok(())
+}
+
+/// `dev.horizonlab.platform.HorizonVanillaActions`, from Fabric's class loader.
+fn vanilla_class<'a>(env: &mut JNIEnv<'a>) -> jni::errors::Result<JClass<'a>> {
+    let bridge = crate::get().ok_or(jni::errors::Error::NullPtr("the JVM is not running"))?;
+    bridge.find_class(env, "dev/horizonlab/platform/HorizonVanillaActions")
 }
 
 /// What mods make of a player's break of a block ([`break_block`]).

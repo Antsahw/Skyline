@@ -2008,6 +2008,24 @@ impl Hub {
         }
     }
 
+    /// Sends guest `i`'s inventory-menu `slots` (`Guest::menu_slot` ids) as they are now,
+    /// for a change made outside a click's answer (Java mods' crafted hooks during a click).
+    pub fn send_inventory_slots(&mut self, i: usize, slots: &[usize]) {
+        for &slot in slots {
+            let now = self.guests[i].menu_slot(slot);
+            let net = self.stack(&now);
+            let g = &mut self.guests[i];
+            g.menu_state = (g.menu_state + 1) & 0x7FFF;
+            g.send(&C::ContainerSetSlot(play::ContainerSetSlot {
+                container: 0,
+                state: g.menu_state,
+                slot: slot as i16,
+                item: net,
+            }));
+            g.menu_sent[slot] = now;
+        }
+    }
+
     /// `PlayerAdvancements.flushDirty` and the recipes the player unlocked
     /// since (`ServerRecipeBook.addRecipes`), once the player's first tick
     /// has sent their advancements.

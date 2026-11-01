@@ -63,6 +63,7 @@ public final class HorizonHooks {
     public static synchronized void scan() {
         if (scanned) return;
         scanned = true;
+        HorizonProfile.stallWatch();
         int injections = 0;
         for (ModContainer mod : FabricLoader.getInstance().getAllMods()) {
             String id = mod.getMetadata().getId();
