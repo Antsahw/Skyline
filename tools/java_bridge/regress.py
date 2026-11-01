@@ -139,6 +139,14 @@ CASES = {
         forbid=[r"settings screen failed", r"Mod Menu's API couldn't be made"],
         look="Jade's settings screen",
     ),
+    "failmsg": dict(
+        about="A mod's failure told in chat: which mod, where, what (the failmod fixture throws in its ticks)",
+        fixtures=["failmod"], mods=["fd"], scene="none",
+        steps=['sleep 25; $C messages > $S/messages.json'],
+        checks=[check_file("messages.json", r"\[Java mods\] Horizon Fail failed in ServerTickEvents.END_SERVER_TICK: IllegalStateException", "the server tick's failure is told"),
+                check_file("messages.json", r"\[Java mods\] Horizon Fail failed in ClientTickEvents.END_CLIENT_TICK: NullPointerException", "the client tick's failure is told")],
+        look="the two red lines in chat",
+    ),
     "keys": dict(
         about="A mod's key binding (the keysmod fixture, G) reaches the mod",
         fixtures=["keysmod"], scene="none",

@@ -320,6 +320,7 @@ public final class HorizonClient {
             Throwable root = t;
             while (root.getCause() != null && root.getCause() != root) root = root.getCause();
             Natives.log("Horizon's client: " + mod + "'s settings screen failed: " + root);
+            HorizonFailures.report("its settings screen", root);
             for (StackTraceElement frame : root.getStackTrace()) Natives.log("    at " + frame);
             source.sendFailure(net.minecraft.network.chat.Component.literal(mod + "'s settings screen failed: " + root));
             return 0;
@@ -1145,6 +1146,7 @@ public final class HorizonClient {
             Throwable root = t;
             while (root.getCause() != null && root.getCause() != root) root = root.getCause();
             Natives.log("Horizon's client: the client side of using a block failed: " + root);
+            HorizonFailures.report("using a block", root);
             for (StackTraceElement frame : root.getStackTrace()) Natives.log("    at " + frame);
         }
     }
@@ -1265,6 +1267,7 @@ public final class HorizonClient {
                 while (root.getCause() != null && root.getCause() != root) root = root.getCause();
                 if (HUD_FAILURES.merge("tick", 1, Integer::sum) <= 3) {
                     Natives.log("Horizon's client: a player's client tick failed: " + root);
+                    HorizonFailures.report("the client's tick", root);
                     for (StackTraceElement frame : root.getStackTrace()) Natives.log("    at " + frame);
                 }
             }
@@ -1522,6 +1525,8 @@ public final class HorizonClient {
      */
     private static void joined(net.minecraft.server.level.ServerPlayer player) {
         if (minecraft.level == null || !JOINED.add(player.getUUID())) return;
+        // Mods that failed before a player was there: told now (HorizonFailures).
+        HorizonFailures.flush();
         // The client's server is the mirror, in this process (as single player's is, and as
         // its connections are memory ones): mods name their per-world data by it (Xaero's
         // minimap: "waypoints" of the world folder).
@@ -1603,6 +1608,7 @@ public final class HorizonClient {
             } catch (Throwable t) {
                 Throwable cause = t.getCause() != null ? t.getCause() : t;
                 Natives.log("Horizon's client: " + merged.mixin() + " failed at the client's " + method + ": " + cause);
+                HorizonFailures.report("the client's join", cause);
             }
         }
     }
@@ -2080,6 +2086,7 @@ public final class HorizonClient {
             int count = HUD_FAILURES.merge(part, 1, Integer::sum);
             if (count == 1 && HUD_LOGGED.add(part)) {
                 Natives.log("Horizon's client: the HUD's " + part + " failed: " + root);
+                HorizonFailures.report("the HUD", root);
                 StackTraceElement[] frames = root.getStackTrace();
                 for (int f = 0; f < Math.min(frames.length, 10); f++) Natives.log("    at " + frames[f]);
             } else if (count == 3) {
@@ -2158,6 +2165,7 @@ public final class HorizonClient {
             Throwable root = t;
             while (root.getCause() != null && root.getCause() != root) root = root.getCause();
             Natives.log("Horizon's client: a screen failed to draw: " + root);
+            HorizonFailures.report("drawing a screen", root);
             for (StackTraceElement frame : root.getStackTrace()) Natives.log("    at " + frame);
         }
         var ops = graphics.ops();
@@ -2267,6 +2275,7 @@ public final class HorizonClient {
         } catch (Throwable t) {
             if (TICK_FAILED.add(String.valueOf(t))) {
                 Natives.log("Horizon's client: the inventory overlay failed to draw: " + t);
+                HorizonFailures.report("drawing over the inventory", t);
                 if (DEBUG_INPUT) for (StackTraceElement frame : t.getStackTrace()) Natives.log("    at " + frame);
             }
         }
@@ -2378,6 +2387,7 @@ public final class HorizonClient {
             Throwable root = t;
             while (root.getCause() != null && root.getCause() != root) root = root.getCause();
             Natives.log("Horizon's client: the inventory overlay's " + kind + " failed: " + root);
+            HorizonFailures.report("the inventory overlay", root);
             for (StackTraceElement frame : root.getStackTrace()) Natives.log("    at " + frame);
         }
     }
@@ -2410,6 +2420,7 @@ public final class HorizonClient {
             // Once a screen: a failing tick fails each tick.
             if (TICK_FAILED.add(screen)) {
                 Natives.log("Horizon's client: a screen's tick failed: " + root);
+                HorizonFailures.report("a screen's tick", root);
                 for (StackTraceElement frame : root.getStackTrace()) Natives.log("    at " + frame);
             }
         }
@@ -2436,6 +2447,7 @@ public final class HorizonClient {
             Throwable root = t;
             while (root.getCause() != null && root.getCause() != root) root = root.getCause();
             Natives.log("Horizon's client: a client task failed: " + root);
+            HorizonFailures.report("a client task", root);
         }
     }
 
@@ -2475,6 +2487,7 @@ public final class HorizonClient {
                 Throwable root = t;
                 while (root.getCause() != null && root.getCause() != root) root = root.getCause();
                 Natives.log("Horizon's client: " + in.get("mod").getAsString() + "'s settings screen failed: " + root);
+                HorizonFailures.report("its settings screen", root);
                 for (StackTraceElement frame : root.getStackTrace()) Natives.log("    at " + frame);
             }
             return;
@@ -2550,6 +2563,7 @@ public final class HorizonClient {
             Throwable root = t;
             while (root.getCause() != null && root.getCause() != root) root = root.getCause();
             Natives.log("Horizon's client: a screen's " + kind + " failed: " + root);
+            HorizonFailures.report("a screen", root);
             for (StackTraceElement frame : root.getStackTrace()) Natives.log("    at " + frame);
         } finally {
             acting = null;

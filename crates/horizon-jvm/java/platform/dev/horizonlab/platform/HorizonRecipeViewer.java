@@ -63,6 +63,7 @@ public final class HorizonRecipeViewer {
             Throwable root = t;
             while (root.getCause() != null && root.getCause() != root) root = root.getCause();
             Natives.log("Horizon's recipe viewer failed: " + root);
+            HorizonFailures.report("the recipe viewer", root);
             StackTraceElement[] frames = root.getStackTrace();
             for (int f = 0; f < Math.min(frames.length, 20); f++) Natives.log("    at " + frames[f]);
             source.sendFailure(Component.literal("The recipe viewer failed: " + root));

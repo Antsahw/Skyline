@@ -152,6 +152,15 @@ saying something works.
   the originals: particle kept; content FORMAT 11), or Horizon drew the model still.
 - The client connection has its `minecraft` (Architectury's join event read
   `this.minecraft.player`: NPE at the client's join).
+- **A mod's failure is told in chat** (`HorizonFailures.report`): "[Java mods] <mod> failed in
+  <where>: <exception>: <message> (the game goes on; the log has more)", to every player, once
+  per mod and place, eight in a session at most (then one "more failed" line); failures before
+  anyone joined are told at the first join. The mod is the first stack frame in a mod's jar
+  (past the game, Fabric, Horizon), or the mixin of a failing handler (`MixinMerged`). Called
+  where the bridge catches mods' failures: events (`HorizonServer.fire`), hooks
+  (`HorizonHooks`: HUD, client frame and methods, injections), and the client's screens,
+  overlay, HUD, ticks, tasks, joins, settings screens and the recipe viewer. Fixture:
+  `fixture_mod.sh failmod` (its ticks throw now and then); regress `failmsg`.
 - `HORIZON_JAVA_DEBUG=loop` logs messages between the halves; `=screens` also logs each sent
   screen frame (first 4000 chars) and the inventory overlay's input; `=hud` logs the block
   looked at and its state.
