@@ -68,3 +68,12 @@ Never write as the user; mark what you post (CLAUDE.md). Never run mod jars the 
 ## Reports
 
 (Newest last. One short entry per task: area, task, branch, works / doesn't / how to test.)
+
+- **mixins 1** (`bridge-mixins-1`), by Claude for iaxivers: getting off vehicles and Better
+  Combat's sweep. Works: sneaking in a boat runs the heads of `stopRiding`/`removeVehicle`
+  (mixinmod keeps a player holding a stick seated, lets go with empty hands); one Better
+  Combat swing hurts all three zombies in a row (the mirror's box queries didn't list the
+  copies of Horizon's mobs). Doesn't: passive mobs aren't swept (Better Combat's own rule);
+  each tick of a held sneak asks Java once. Outside the area: `HorizonServer.entities`'
+  `candidates` (3 lines). Test: `regress.py --jars <jars> sweep dismount` (Better Combat,
+  Cloth Config, playerAnimator; the mixinmod fixture).
