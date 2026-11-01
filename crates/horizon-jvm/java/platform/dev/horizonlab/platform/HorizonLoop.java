@@ -75,9 +75,19 @@ public final class HorizonLoop {
      */
     private static final java.util.Queue<Runnable> OUTBOX = new java.util.concurrent.ConcurrentLinkedQueue<>();
 
-    /** Delivers what the server sent (HorizonServer.syncInventories' end). */
+    /**
+     * Delivers what the server sent (HorizonServer.syncInventories' end): what was queued when
+     * it starts. What a delivery makes the server send waits for the next tick, as over a
+     * network: the headless client's level reads the server's block entities, so a client
+     * handler's change can send the same message again (Large Fluid Tank's content message set
+     * the server's tank, which sent its contents again: the server thread never left this).
+     */
     public static void flush() {
-        for (Runnable delivery; (delivery = OUTBOX.poll()) != null; ) delivery.run();
+        for (int left = OUTBOX.size(); left > 0; left--) {
+            Runnable delivery = OUTBOX.poll();
+            if (delivery == null) break;
+            delivery.run();
+        }
     }
 
     /** Server to client: whether a mod's client code receives it (it is then delivered at flush). */

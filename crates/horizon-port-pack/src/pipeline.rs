@@ -182,12 +182,16 @@ pub fn carry(
         }
         // The oracle's facts for the mods it ran; a mod it did not load (a
         // library missing) keeps the guesses from its blockstates.
-        let prefix = format!("{}:", info.mod_id);
+        // (Under the mod's id or another namespace it owns: BuildCraft's modules.)
+        let prefixes: Vec<String> = std::iter::once(info.mod_id.clone())
+            .chain(carry::namespaces_claimed(jar, &info.mod_id, &in_pack).unwrap_or_default())
+            .map(|ns| format!("{ns}:"))
+            .collect();
         let seen = |f: &&oracle::Facts| {
             f.blocks
                 .keys()
                 .chain(f.items.keys())
-                .any(|k| k.starts_with(&prefix))
+                .any(|k| prefixes.iter().any(|p| k.starts_with(p.as_str())))
         };
         match carry::carry(
             jar,

@@ -76,6 +76,8 @@ public final class HorizonHooks {
                     for (String key : new String[] {"mixins", "server"}) {
                         if (!json.has(key) || !json.get(key).isJsonArray()) continue;
                         for (JsonElement name : json.getAsJsonArray(key)) {
+                            // (A trailing comma reads as a null entry: Simple Pocket Machines'.)
+                            if (name.isJsonNull()) continue;
                             String file = pkg + "/" + name.getAsString().replace('.', '/') + ".class";
                             Optional<Path> bytes = mod.findPath(file);
                             if (bytes.isPresent()) {
@@ -178,6 +180,8 @@ public final class HorizonHooks {
                     for (String key : new String[] {"mixins", "client"}) {
                         if (!json.has(key) || !json.get(key).isJsonArray()) continue;
                         for (JsonElement name : json.getAsJsonArray(key)) {
+                            // (A trailing comma reads as a null entry: Simple Pocket Machines'.)
+                            if (name.isJsonNull()) continue;
                             String file = pkg + "/" + name.getAsString().replace('.', '/') + ".class";
                             Optional<Path> bytes = mod.findPath(file);
                             if (bytes.isPresent()) {
