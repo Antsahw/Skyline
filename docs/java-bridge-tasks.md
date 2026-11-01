@@ -182,3 +182,8 @@ tests pass; fmt and clippy `-D warnings` clean (horizon-client, horizon-jvm).
   Now over vanilla's distinct shapes, memoized: 110-jar pack 173 s → 107 s, output identical.
   Left: the Java oracle's class loading (~65 s). Test: delete `.horizon-cache/java-content`,
   start with the pack, `grep "content mod(s) made" latest.log`.
+
+- **worldgen 4, lost blocks** (bridge-worldgen-4): the repro is a regress case, `lost`
+  (`lost_blocks.sh`: 36 gold blocks set right after spawn with FD, read back 25 s later; fails
+  on any lost one or a "generated again while loaded" line). It didn't show: 0 lost in 4 runs
+  (35/34/36/35 set) on the current java-bridge, so no fix. Test: `regress.py --jars … lost`.

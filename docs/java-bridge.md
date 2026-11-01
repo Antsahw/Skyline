@@ -880,7 +880,9 @@ far proto of a loaded column instead of saved over its save. Repro (`setblock` o
 blocks right after spawn with FD, 25 s later each read back): 4 lost in one of 17 runs
 before (none in the 15 of those that logged a column landing on a loaded one), none in 4
 runs since; the race wasn't caught in the act, so these are guards on the paths a proto
-could take over a loaded column, not a proven cause.
+could take over a loaded column, not a proven cause. It is now the regress case `lost`
+(`tools/java_bridge/lost_blocks.sh`: the repro, one summary line; FD): 0 lost in 4 more runs
+(2026-11-01, bridge-worldgen-4). A failure there names each lost block and its chunk.
 
 Worldgen speed (2026-11-01, bridge-worldgen-speed, 2 cores, BOP): where Java worldgen's
 CPU goes (JFR, `-XX:StartFlightRecording` in `JAVA_TOOL_OPTIONS`, `duration=` since the game
@@ -1290,6 +1292,7 @@ horizon-ctl reports and the log, and prints `pass`/`FAIL`; screenshots and logs 
 `/tmp/hz-regress/<case>/` (a `look` line names what to see on one). A new scene that works gets
 a case in `CASES`. A case's `config` writes mods' config files before the game starts
 (`launch.sh`'s `CONFIG`: a folder copied over the game's `config/`). `skyblock` and `oneblock` take Skyblock Infinite's and Simply OneBlock's jars.
+`lost` is the lost-block repro (gold blocks set right after spawn, read back 25 s later).
 `bigpack` plays a whole pack: `--pack <mods folder>` (a `config/` beside it is the mods'
 configs), and checks that Java starts, the registries load, no Java worldgen chunk fails and a
 player joins within `--join-within` seconds (default 900; the first run of a set of jars also
