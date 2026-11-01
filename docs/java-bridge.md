@@ -237,10 +237,38 @@ it does nothing unless Horizon fires it or hands the action to the mirror.
   - An `ExperienceOrb` a mod's code spawns becomes Horizon's orb (`dropItem` of
     `#experience_orb`, the value as the count).
 - `HORIZON_JAVA_DEBUG=ticks` logs each random tick the mods run and what it made.
+- Second round (`HorizonVanillaActions`, from the table of a 91-jar pack: the most patched
+  vanilla actions left were `Player.attack`, item use, crafting results, crop growth):
+  - Horizon's own mobs, hit or used by a player (`vanilla_entity`, from `java_entity_attack`
+    and `java_entity_interact` for ids below the bridge's): a copy made from the mob's NBT
+    (`mob_tree_nbt`) gets Fabric's `AttackEntityCallback`/`UseEntityCallback` and the mods'
+    heads of `Player.attack`/`interactOn`. Bits back: taken, swing, removed (the mods
+    removed the copy: Horizon removes its mob, no drops). A vanilla mob a mod's code adds
+    (`addFreshEntity`) becomes Horizon's (`Natives.spawnEntity` → `Action::SpawnEntity` →
+    `load_mob`): Carry On picks a cow up and puts it down. Middle patches of `Player.attack`
+    (Better Combat) stay Rust's: the entity is Horizon's.
+  - An item used in the air (`GameModeMixin.useItem`): a vanilla item whose class's use (or
+    `releaseUsing`, `finishUsingItem`) a mod patches inside goes to vanilla's use on the
+    mirror (`useRouted`); the heads of `ItemStack.use` and of `use` on the item's classes are
+    fired (`fireUse`), a cancel being the result.
+  - A crafting result taken (`menu::CraftedTake`, from `Menu.on_take`; guests in
+    `guest_menu_op`, in-frame beside `award_crafted`): vanilla's `ResultSlot.onTake` on a copy
+    of the grid (one of each ingredient, so remainders stay in the copy) and the result
+    (Architectury's, Balm's, Modonomicon's crafted hooks). What the mods give is sent to the
+    guest at once (`LanHub::send_inventory_slots`: the click's answer would take it as known).
+  - Crop and sapling growth: covered by the first round (random ticks, bone meal through
+    `useRouted`: BCLib and Puzzles Lib patch `BoneMealItem`, Balm `CropBlock`/`StemBlock`).
+- The mirrored player's `tickCount` follows Horizon's ticks: Carry On refuses a second action
+  on the tick of the last one, and the mirror's players aren't ticked.
+- `HORIZON_JAVA_DEBUG=entities` logs each attack on/use of Horizon's entities, a vanilla mob a
+  mod adds (with its stack) and each crafting result's hooks; `=stall` writes every Java
+  thread's stack to `horizon-java/stacks.txt` each 30 s (the JVM runs with `-Xrs`: no jstack).
 - Fixture `java/fixtures/mixinmod` (`fixture_mod.sh mixinmod <jar>`, which now copies
   `*.mixins.json`): an `@Inject` at INVOKE inside `destroyBlock` (every break drops a
   diamond), an `@Redirect` inside `CropBlock.randomTick` (crops grow in the dark), a HEAD
-  cancel of `ItemEntity.playerTouch` (dirt can't be picked up).
+  cancel of `ItemEntity.playerTouch` (dirt can't be picked up), an INVOKE inside
+  `ResultSlot.checkTakeAchievements` (an emerald with every craft), a HEAD cancel of
+  `SnowballItem.use` (no throwing), a HEAD cancel of `Player.attack` on pigs.
 
 ## Mods that draw with the GPU
 
@@ -438,6 +466,15 @@ gets SPIR-V, vertex layouts and uniform lists.
   dimension type holder, its dimension key) and a level's `LevelStem` from the registries.
   Lithium caches a level's height there: without it every level was 0 tall and every chunk's
   structure step failed (`Size must be positive, was: 1x0x1`). `<init>*` targets count.
+- The headless client's block and item models reload (`HorizonClient.models`) never finished
+  with a 91-jar pack, holding the first server tick (the world stayed at "Loading terrain"):
+  it now gives up after 90 s and logs it (mods reading models get none). The cause, one
+  reload stage waiting for good, is still open.
+- `launch.sh` stopped (`set -e`) when `/tmp/hz-bridge-scratch` didn't exist.
+- In a pack where a mod patches `ServerPlayerGameMode.useItemOn` past its head (Energized
+  Power, Core Lib at INVOKE, Mythic Upgrades at RETURN), every use of a vanilla block runs
+  vanilla's code on the mirror (`Using minecraft:air on minecraft:stone goes to the mods`):
+  chests (Horizon's menu by type) and doors still work there.
 - Mirrored players aren't ticked, so their pose doesn't follow the sneak key: `isCrouching()`
   (Veinminer's "sneak to mine a vein") reads the pose, now set to CROUCHING with the key.
 - Veinminer (Miraculixx) has no mixin into breaking: it uses Fabric's `AttackBlockCallback` and
@@ -592,19 +629,20 @@ router's climate (TerraBlender doesn't change it), then the spiral reads generat
 `GRAPHICS=file` (a `horizon-graphics.txt`, e.g. `lodDistance:256`) for `launch.sh` turns far
 terrain on.
 
-Vanilla-patching mods (tested headless 2026-10-31, server thread, survival):
+Vanilla-patching mods (tested headless 2026-11-01, server thread, survival; each is a
+`regress.py` case: `veinminer`, `harvest`, `carry`, `seasons`, `orbs`):
 - Veinminer: sneak + one dig breaks a 7-block iron vein, raw iron and experience drop, the
   pickaxe wears 7.
-- Serene Seasons: crop growth goes through it (wheat and cane don't grow in early spring, do
-  in mid summer: `/season set mid_summer`). Its biome/weather patches (`Biome.shouldSnow`,
-  `Level.isRainingAt`, `tickPrecipitation`) stay Rust's: logged, not applied.
+- Right Click Harvest: a ripe wheat right-clicked is replanted (age 0) and drops wheat.
+- Carry On: sneak + right-click with empty hands picks a cow up (gone from Horizon's world,
+  its name kept), a right-click puts it down. The carried mob isn't drawn in Horizon's hands
+  (client rendering); its `Inventory` slot lock and `Entity` riding patches are Rust's.
+- Serene Seasons: wheat grows in mid summer, not in early winter (`seasons` writes
+  `out_of_season_crop_behavior = 1`; the default lets one tick in six through). Glass over a
+  crop makes it a greenhouse (fertile every season). Its biome/weather patches stay Rust's.
 - Clumps: orbs' pickup goes through its `playerTouch` (6 orbs of 7: 42 points).
-- Right Click Harvest: a mature wheat right-clicked goes back to age 0 (jamlib's useItemOn head).
-- Carry On: loads; its UseBlock/AttackBlock/BEFORE events fire; the carried block isn't drawn
-  in Horizon's hand (client rendering), and its `Inventory` slot lock and `Entity` riding
-  patches are Rust's (logged).
-- The `mixinmod` fixture: routed break (diamond with every block, loot and orbs), routed crop
-  ticks (wheat to age 7 in a sealed cave), routed pickup (dirt refused, cobblestone taken).
+- The `mixinmod` fixture: routed break, crop ticks, pickup (first round); pigs spared, cows
+  hit; snowballs not thrown; an emerald with a crafted stack of planks.
 
 Works (tested): content (blocks with their own states, items, food, crops, light), mod block
 logic and block entities, Fabric and vanilla menus in Horizon's window, mods' own screens with
@@ -818,7 +856,8 @@ with Architectury and Cloth Config, Biomes O' Plenty with TerraBlender and Glitc
 API); a case missing one is skipped, the fixture mods are built. Each case checks what
 horizon-ctl reports and the log, and prints `pass`/`FAIL`; screenshots and logs are in
 `/tmp/hz-regress/<case>/` (a `look` line names what to see on one). A new scene that works gets
-a case in `CASES`.
+a case in `CASES`. A case's `config` writes mods' config files before the game starts
+(`launch.sh`'s `CONFIG`: a folder copied over the game's `config/`).
 
 ### Play a Prism instance
 

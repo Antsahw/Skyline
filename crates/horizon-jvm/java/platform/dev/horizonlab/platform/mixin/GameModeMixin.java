@@ -48,6 +48,12 @@ public abstract class GameModeMixin {
     private void horizon$useItem(ServerPlayer player, Level level, ItemStack stack, InteractionHand hand,
                                  CallbackInfoReturnable<InteractionResult> cir) {
         if (!HorizonServer.isMirror(player)) return;
-        if (!HorizonServer.moddedItem(stack)) cir.setReturnValue(InteractionResult.PASS);
+        if (HorizonServer.moddedItem(stack)) return;
+        // A vanilla item whose use a mod patches inside (a bucket under claims): vanilla's use
+        // with the patches. Else the mods' injections at the head of ItemStack.use and the
+        // item's use (Horizon doesn't run them), then Horizon uses it.
+        if (dev.horizonlab.platform.HorizonVanillaActions.useRouted(stack)) return;
+        var fired = dev.horizonlab.platform.HorizonVanillaActions.fireUse((net.minecraft.server.level.ServerLevel) level, player, stack, hand);
+        cir.setReturnValue(fired != null ? fired : InteractionResult.PASS);
     }
 }

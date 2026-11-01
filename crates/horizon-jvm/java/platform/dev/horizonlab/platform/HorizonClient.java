@@ -1066,8 +1066,16 @@ public final class HorizonClient {
             var skins = (net.minecraft.client.renderer.PlayerSkinRenderCache) Natives.allocate(net.minecraft.client.renderer.PlayerSkinRenderCache.class);
             var models = new net.minecraft.client.resources.model.ModelManager(colors, atlases, skins);
             java.util.concurrent.Executor here = Runnable::run;
-            net.minecraft.server.packs.resources.SimpleReloadInstance.of(minecraft.getResourceManager(), java.util.List.of(atlases, models),
-                    here, here, java.util.concurrent.CompletableFuture.completedFuture(net.minecraft.util.Unit.INSTANCE)).done().join();
+            // A reload that never finishes (seen with a 91-jar pack: one stage waits for good)
+            // must not hold the server's tick: after 90 s the models are left out.
+            try {
+                net.minecraft.server.packs.resources.SimpleReloadInstance.of(minecraft.getResourceManager(), java.util.List.of(atlases, models),
+                        here, here, java.util.concurrent.CompletableFuture.completedFuture(net.minecraft.util.Unit.INSTANCE))
+                        .done().get(90, java.util.concurrent.TimeUnit.SECONDS);
+            } catch (java.util.concurrent.TimeoutException e) {
+                Natives.log("Horizon's client: the block and item models' reload didn't finish in 90 s; mods reading models get none");
+                return;
+            }
             set(Minecraft.class, minecraft, "modelManager", models);
             // The real atlases beside the headless GUI one.
             Class<?> owner = net.minecraft.client.resources.model.sprite.AtlasManager.class;

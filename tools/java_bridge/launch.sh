@@ -13,7 +13,7 @@ fi
 [ -n "$JAVA_HOME" ] || { echo "no Java 25 in /usr/lib/jvm: set JAVA_HOME" >&2; exit 1; }
 export JAVA_HOME HORIZON_JAVA_HOME=$JAVA_HOME PATH=$JAVA_HOME/bin:$PATH
 # The previous run's scratch folder goes (each holds a world and the mods' content: ~1 GB).
-old=$(cat /tmp/hz-bridge-scratch 2>/dev/null)
+old=$(cat /tmp/hz-bridge-scratch 2>/dev/null || true)
 if [ -n "$old" ] && [ -d "$old" ]; then
   "$R/target/fast/horizon-ctl" --socket "$old/ctl.sock" quit >/dev/null 2>&1 || true
   rm -rf "$old"
@@ -23,6 +23,8 @@ mkdir -p "$S/mods-java" "$S/home" "$S/lh" "$S/data" "$S/conf"
 cp "$MODS"/*.jar "$S/mods-java/"
 [ -n "$OPTS" ] && cp "$OPTS" "$S/options.txt"
 [ -n "$GRAPHICS" ] && cp "$GRAPHICS" "$S/horizon-graphics.txt"
+# CONFIG: a folder copied over the game folder's config/ (mods' settings before they start).
+[ -n "$CONFIG" ] && mkdir -p "$S/config" && cp -r "$CONFIG"/. "$S/config/"
 echo "$S" > /tmp/hz-bridge-scratch
 # A display for the offscreen renderer when there is none.
 if [ -z "$DISPLAY" ]; then

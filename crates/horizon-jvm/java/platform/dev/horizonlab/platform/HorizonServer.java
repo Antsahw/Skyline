@@ -950,6 +950,11 @@ public final class HorizonServer {
     }
 
     /** Runs a mod event, logging (not throwing) what a mod throws, ten times per event at most. */
+    /** True the first time {@code what} fails (a failure logged once). */
+    static boolean failedOnce(String what) {
+        return FAILURES.merge(what, 1, Integer::sum) == 1;
+    }
+
     static void fire(String event, Runnable run) {
         try {
             run.run();
@@ -1088,6 +1093,9 @@ public final class HorizonServer {
                 }
                 // The permission level (low 8 bits) and the sneak key (bit 8).
                 PERMISSIONS.put(uuid, permissions[i] & 0xff);
+                // tickCount moves with Horizon's ticks (the mirror isn't ticked): Carry On
+                // refuses a second action on the tick of the last one, which was every tick.
+                player.tickCount = (int) tick;
                 boolean sneaking = ((permissions[i] >> 8) & 1) != 0;
                 player.setShiftKeyDown(sneaking);
                 // isCrouching is the pose (the mirror isn't ticked: updatePlayerPose doesn't
@@ -1705,7 +1713,7 @@ public final class HorizonServer {
     private static final Map<Long, Long> WRITTEN_AT = new java.util.HashMap<>();
     private static volatile long currentTick;
 
-    private static String dimensionOf(Level level) {
+    static String dimensionOf(Level level) {
         return level.dimension().identifier().toString();
     }
 
@@ -1916,6 +1924,8 @@ public final class HorizonServer {
                     "#experience_orb", orb.getValue());
             return true;
         }
+        // A vanilla mob (Carry On putting a carried cow down): Horizon's own, from its NBT.
+        if (HorizonVanillaActions.spawnVanilla((ServerLevel) level, entity)) return true;
         dropped(entity);
         return false;
     }

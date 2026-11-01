@@ -142,4 +142,36 @@ public final class HorizonProfile {
         }
         ticks = 0;
     }
+
+    /**
+     * HORIZON_JAVA_DEBUG=stall: every 30 s, every Java thread's stack goes to
+     * horizon-java/stacks.txt in the game folder (the JVM runs with -Xrs: no jstack, no
+     * SIGQUIT dump), to see where a hung start or tick is.
+     */
+    public static void stallWatch() {
+        if (!String.valueOf(System.getenv("HORIZON_JAVA_DEBUG")).contains("stall") || watching) return;
+        watching = true;
+        Thread t = new Thread(() -> {
+            while (true) {
+                try {
+                    Thread.sleep(30_000);
+                    StringBuilder out = new StringBuilder();
+                    for (var e : Thread.getAllStackTraces().entrySet()) {
+                        out.append('"').append(e.getKey().getName()).append("\" ").append(e.getKey().getState()).append('\n');
+                        for (StackTraceElement f : e.getValue()) out.append("    at ").append(f).append('\n');
+                        out.append('\n');
+                    }
+                    var file = net.fabricmc.loader.api.FabricLoader.getInstance().getGameDir().resolve("horizon-java/stacks.txt");
+                    java.nio.file.Files.createDirectories(file.getParent());
+                    java.nio.file.Files.writeString(file, out);
+                } catch (Throwable ignored) {
+                    return;
+                }
+            }
+        }, "Horizon stall watch");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    private static volatile boolean watching;
 }

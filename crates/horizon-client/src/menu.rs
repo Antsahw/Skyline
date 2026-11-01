@@ -262,6 +262,18 @@ const RESULT: usize = 3;
 const CONTAINER_MAX: u32 = 99;
 const OFFHAND: usize = 40;
 
+/// A crafting result taken from a grid ([`Menu::crafted_takes`]).
+#[derive(Clone, Debug)]
+pub struct CraftedTake {
+    /// The recipe's id.
+    pub recipe: String,
+    pub taken: ItemStack,
+    /// The grid's width (2 or 3).
+    pub width: usize,
+    /// The grid's cells before the take.
+    pub grid: Vec<Option<ItemStack>>,
+}
+
 pub struct Menu {
     kind: Kind,
     slots: Vec<Slot>,
@@ -288,6 +300,10 @@ pub struct Menu {
     pub player_sounds: Vec<&'static str>,
     /// Recipes whose result was taken (`awardUsedRecipes`), for the caller.
     pub crafted: Vec<String>,
+    /// Crafting results taken from a crafting grid (`ResultSlot.onTake`), with the recipe, the
+    /// taken stack, the grid's width and its cells before the take: for the caller's Java mods
+    /// (their crafted hooks).
+    pub crafted_takes: Vec<CraftedTake>,
     /// Potions taken from a brewing stand's bottle slots
     /// (`PotionSlot.onTake`), for the caller.
     pub brewed: Vec<ItemStack>,
@@ -686,6 +702,7 @@ impl Menu {
             sounds: Vec::new(),
             player_sounds: Vec::new(),
             crafted: Vec::new(),
+            crafted_takes: Vec::new(),
             brewed: Vec::new(),
             equipped: Vec::new(),
             merchant: None,
@@ -1596,6 +1613,12 @@ impl Menu {
         let grid = self.containers[GRID].clone();
         if let Some((id, _)) = env.recipes.find(&grid, n) {
             self.crafted.push(format!("minecraft:{id}"));
+            self.crafted_takes.push(CraftedTake {
+                recipe: format!("minecraft:{id}"),
+                taken: taken.clone(),
+                width: n,
+                grid: grid.clone(),
+            });
         }
         let remaining = env
             .recipes

@@ -206,6 +206,7 @@ impl Game<'_> {
     pub(super) fn java_attack_block(&mut self, _pos: [i32; 3], _face: i32) -> bool {
         false
     }
+    pub(super) fn java_crafted(&mut self, _takes: &[horizon_client::menu::CraftedTake]) {}
     pub(super) fn java_orb_touch(
         &mut self,
         _orb: &horizon_client::entities::ExperienceOrb,
@@ -1293,6 +1294,7 @@ mod run {
                     action,
                     horizon_jvm::events::Action::SetBlock { .. }
                         | horizon_jvm::events::Action::DropItem { .. }
+                        | horizon_jvm::events::Action::SpawnEntity { .. }
                 );
                 match action {
                     horizon_jvm::events::Action::Tell { uuid, text } => {
@@ -1565,9 +1567,11 @@ mod run {
                         }
                     }
                     drop @ (horizon_jvm::events::Action::DropItem { .. }
-                    | horizon_jvm::events::Action::LevelEvent { .. }) => {
+                    | horizon_jvm::events::Action::LevelEvent { .. }
+                    | horizon_jvm::events::Action::SpawnEntity { .. }) => {
                         let (horizon_jvm::events::Action::DropItem { dimension, .. }
-                        | horizon_jvm::events::Action::LevelEvent { dimension, .. }) = &drop
+                        | horizon_jvm::events::Action::LevelEvent { dimension, .. }
+                        | horizon_jvm::events::Action::SpawnEntity { dimension, .. }) = &drop
                         else {
                             continue;
                         };
@@ -2271,8 +2275,11 @@ mod run {
         ) -> bool {
             #[cfg(feature = "java-mods")]
             {
-                if id < crate::game::java_entities::FIRST_ID || !java_mods_on() {
+                if !java_mods_on() {
                     return false;
+                }
+                if id < crate::game::java_entities::FIRST_ID {
+                    return self.java_vanilla_entity(host, conn, id, None);
                 }
                 let Some(g) = host.hub.guest(conn) else {
                     return false;
@@ -2299,6 +2306,72 @@ mod run {
             }
         }
 
+        /// A connection's player attacks (`interact` None) or uses one of Horizon's own mobs:
+        /// Fabric's `AttackEntityCallback`/`UseEntityCallback` and the mods' heads of
+        /// `Player.attack`/`interactOn`, on a copy made from the mob's NBT (Carry On's pickup,
+        /// claims stopping a hit). True when a mod took it; a mob the mods removed (picked
+        /// up) goes without drops.
+        #[cfg(feature = "java-mods")]
+        fn java_vanilla_entity(
+            &mut self,
+            host: &mut LanHost,
+            conn: u32,
+            id: i32,
+            interact: Option<&play::Interact>,
+        ) -> bool {
+            let Ok(id) = u32::try_from(id) else {
+                return false;
+            };
+            let Some(i) = self
+                .mobs
+                .iter()
+                .position(|m| m.id == id && m.alive() && !m.removed)
+            else {
+                return false;
+            };
+            let Some(g) = host.hub.guest(conn) else {
+                return false;
+            };
+            if g.spectator() {
+                return false;
+            }
+            let (uuid, selected) = (uuid_string(g.uuid), g.selected as i32);
+            let snbt = horizon_client::snbt::to_snbt(&self.mob_tree_nbt(i));
+            let dim = self.dim.id();
+            let (using, hand, hit) = match interact {
+                Some(p) => (true, i32::from(p.hand == 1), p.location),
+                None => (false, 0, [0.0; 3]),
+            };
+            let hit = if using {
+                let m = &self.mobs[i];
+                [
+                    m.position.x + hit[0],
+                    m.position.y + hit[1],
+                    m.position.z + hit[2],
+                ]
+            } else {
+                hit
+            };
+            let result = self.with_java_world(|| {
+                horizon_jvm::events::vanilla_entity(&uuid, dim, &snbt, using, hand, hit, selected)
+            });
+            self.apply_java_actions(Some(host));
+            match result {
+                Ok(r) => {
+                    if r.removed
+                        && let Some(m) = self.mobs.iter_mut().find(|m| m.id == id)
+                    {
+                        m.removed = true;
+                    }
+                    r.taken
+                }
+                Err(e) => {
+                    log::warn!("Java mods: a mob's attack or use failed: {e}");
+                    false
+                }
+            }
+        }
+
         /// A connection's player used a Java mod's entity (`Interact`): the mods' server runs
         /// `Player.interactOn`. False for Horizon's entities.
         pub(in crate::game) fn java_entity_interact(
@@ -2309,8 +2382,11 @@ mod run {
         ) -> bool {
             #[cfg(feature = "java-mods")]
             {
-                if p.id < crate::game::java_entities::FIRST_ID || !java_mods_on() {
+                if !java_mods_on() {
                     return false;
+                }
+                if p.id < crate::game::java_entities::FIRST_ID {
+                    return self.java_vanilla_entity(host, conn, p.id, Some(p));
                 }
                 let Some(g) = host.hub.guest(conn) else {
                     return false;
@@ -2489,6 +2565,53 @@ mod run {
             {
                 let _ = (pos, face);
                 false
+            }
+        }
+
+        /// The player acting now took these crafting results: vanilla's `ResultSlot.onTake`
+        /// on copies, for the Java mods' crafted hooks; what they give comes back as slots.
+        pub(in crate::game) fn java_crafted(
+            &mut self,
+            takes: &[horizon_client::menu::CraftedTake],
+        ) {
+            #[cfg(feature = "java-mods")]
+            {
+                if takes.is_empty() || !java_mods_on() || !self.hears_players() {
+                    return;
+                }
+                let uuid = self
+                    .lan_acting_uuid
+                    .map(uuid_string)
+                    .unwrap_or_else(|| self.player_uuid_string());
+                let snbt = |stack: &horizon_client::items::ItemStack| {
+                    horizon_client::snbt::to_snbt(&horizon_items::item_nbt::item_to_nbt(stack))
+                };
+                for take in takes {
+                    let grid: Vec<String> = take
+                        .grid
+                        .iter()
+                        .map(|c| c.as_ref().map(snbt).unwrap_or_default())
+                        .collect();
+                    let result = snbt(&take.taken);
+                    let ran = self.with_java_world(|| {
+                        horizon_jvm::events::crafted(
+                            &uuid,
+                            &take.recipe,
+                            &result,
+                            take.taken.count as i32,
+                            take.width as i32,
+                            &grid,
+                        )
+                    });
+                    if let Err(e) = ran {
+                        log::warn!("Java mods: a crafting result's hooks failed: {e}");
+                    }
+                }
+                self.apply_java_actor_slots(&uuid);
+            }
+            #[cfg(not(feature = "java-mods"))]
+            {
+                let _ = takes;
             }
         }
 
@@ -2718,6 +2841,18 @@ mod run {
                 now.into_iter().map(|(_, a)| a).collect()
             };
             for drop in now {
+                // A vanilla mob a mod added (Carry On putting a carried cow down): Horizon's own.
+                if let horizon_jvm::events::Action::SpawnEntity { snbt, .. } = &drop {
+                    match horizon_world::nbt::parse_snbt(snbt) {
+                        Ok((tag, _)) => {
+                            if self.load_mob(tag, None).is_none() {
+                                log::debug!("Java mods: a mod added an entity Horizon can't load");
+                            }
+                        }
+                        Err(e) => log::warn!("Java mods: a mod's entity: {e}"),
+                    }
+                    continue;
+                }
                 if let horizon_jvm::events::Action::LevelEvent {
                     id,
                     position,

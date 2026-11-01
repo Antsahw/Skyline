@@ -2,6 +2,15 @@
   "required": true,
   "package": "dev.horizonlab.mixinmod",
   "compatibilityLevel": "JAVA_21",
-  "mixins": ["BreakMixin", "CropMixin", "PickupMixin"],
-  "injectors": {"defaultRequire": 1}
+  "mixins": [
+    "BreakMixin",
+    "CropMixin",
+    "PickupMixin",
+    "CraftMixin",
+    "SnowballMixin",
+    "AttackMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
 }
