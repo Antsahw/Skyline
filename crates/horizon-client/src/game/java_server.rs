@@ -2914,7 +2914,7 @@ mod run {
                 let uuid = self
                     .lan_acting_uuid
                     .map(uuid_string)
-                    .unwrap_or_else(|| self.player_uuid_string());
+                    .unwrap_or_else(|| uuid_string(self.player_uuid()));
                 let dim = self.dim.id();
                 let r = self.with_java_world(|| {
                     horizon_jvm::events::dismount(&uuid, dim, &ty, at, &snbt, after)
@@ -2943,7 +2943,7 @@ mod run {
                 let uuid = self
                     .lan_acting_uuid
                     .map(uuid_string)
-                    .unwrap_or_else(|| self.player_uuid_string());
+                    .unwrap_or_else(|| uuid_string(self.player_uuid()));
                 let id = format!("minecraft:{}", effect.id);
                 let (duration, amplifier) = (effect.duration, effect.amplifier);
                 let (ambient, visible) = (effect.ambient, effect.visible);
@@ -2990,7 +2990,7 @@ mod run {
                 let uuid = self
                     .lan_acting_uuid
                     .map(uuid_string)
-                    .unwrap_or_else(|| self.player_uuid_string());
+                    .unwrap_or_else(|| uuid_string(self.player_uuid()));
                 let dim = self.dim.id();
                 let r = self.with_java_world(|| {
                     horizon_jvm::events::fall(

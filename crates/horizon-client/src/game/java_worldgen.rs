@@ -575,7 +575,7 @@ impl GridMask {
                 ..surface
             })
         });
-        column.spans = spans;
+        column.spans = spans.into();
     }
 }
 
