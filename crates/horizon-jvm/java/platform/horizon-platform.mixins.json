@@ -37,7 +37,8 @@
     "FunctionsMixin",
     "TimerCallbackMixin",
     "RespawnDataMixin",
-    "MirrorUpdatesMixin"
+    "MirrorUpdatesMixin",
+    "CombatCaptureMixin"
   ],
   "injectors": {
     "defaultRequire": 1

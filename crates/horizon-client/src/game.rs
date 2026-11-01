@@ -829,7 +829,13 @@ impl LevelAccess for GameLevel<'_> {
         self.world.world_surface(x, z, |s| self.facts.is_air(s))
     }
     fn precipitation(&self, pos: BlockPos) -> Option<horizon_world::level::Precipitation> {
-        self.behaviours.precipitation_info(self, pos)
+        let info = self.behaviours.precipitation_info(self, pos)?;
+        // Java mods that patch the biomes' weather (Serene Seasons) answer it at the end of
+        // the level's tick (server_mods.rs: java_random_ticks).
+        if server_mods::java_precipitation(info.top) {
+            return None;
+        }
+        Some(info)
     }
     fn is_raining_at(&self, pos: BlockPos) -> bool {
         self.behaviours.is_raining_at(self, pos)
@@ -8948,6 +8954,85 @@ impl Game<'_> {
         } else {
             self.audio
                 .play("minecraft:entity.player.attack.nodamage", from, 1.0, 1.0);
+        }
+    }
+    /// A mob a routed attack hit (Java mods' `Player.attack`, `game/server_mods.rs`): hurt
+    /// by the player with what its copy's `hurtServer` got, pushed as its `knockback` was
+    /// (the strength and direction the mods left), and the hit's sounds and particles. The
+    /// weapon's wear and the exhaustion were the mirror's (they come back as slots and food).
+    pub(super) fn routed_hit(
+        &mut self,
+        index: usize,
+        amount: f32,
+        knockback: f64,
+        knock_x: f64,
+        knock_z: f64,
+        primary: bool,
+    ) {
+        let from = self
+            .player
+            .as_ref()
+            .map(|p| [p.position.x, p.position.y, p.position.z]);
+        self.combat.last_hurt_mob = Some((self.mobs[index].id, self.world.game_time));
+        let old_health = self.mobs[index].health;
+        let source = match from {
+            Some(f) => self.attack_source(f),
+            None => horizon_client::mobs::Damage::of(horizon_client::mobs::DamageKind::Generic),
+        };
+        let landed = amount > 0.0 && self.hurt_by_player(index, amount, source);
+        if !landed {
+            if primary {
+                self.audio
+                    .play("minecraft:entity.player.attack.nodamage", from, 1.0, 1.0);
+            }
+            return;
+        }
+        let victim = self.mob_entity(&self.mobs[index]);
+        self.player_hit(
+            &victim,
+            creatures::damage_type(source.kind, true),
+            None,
+            amount,
+        );
+        if knockback > 0.0 {
+            self.mobs[index].knockback(knockback, knock_x, knock_z);
+        }
+        let mob = &self.mobs[index];
+        let actual = old_health - mob.health;
+        let (feet, height) = (
+            [mob.position.x, mob.position.y, mob.position.z],
+            mob.kind.height,
+        );
+        self.stats
+            .custom("damage_dealt", (actual * 10.0).round() as i32);
+        if actual > 2.0 {
+            let indicator = horizon_client::particles::ParticleOptions::simple(
+                horizon_client::particles::ParticleType::DamageIndicator,
+            );
+            let at = [feet[0], feet[1] + height * 0.5, feet[2]];
+            self.particles.send_particles(
+                &indicator,
+                at,
+                [0.1, 0.0, 0.1],
+                0.2,
+                (actual * 0.5) as u32,
+            );
+            self.lan_send_particles(&indicator, at, [0.1, 0.0, 0.1], 0.2, (actual * 0.5) as u32);
+        }
+        self.last_hurt_by_player
+            .insert(self.mobs[index].id, self.lan_acting);
+        if primary {
+            self.audio
+                .play("minecraft:entity.player.attack.strong", from, 1.0, 1.0);
+        }
+        for event in std::mem::take(&mut self.mobs[index].outbox) {
+            match event {
+                horizon_client::mobs::MobEvent::Sound(s, at, volume, pitch) => {
+                    self.audio
+                        .play(&format!("minecraft:{s}"), Some(at), volume, pitch);
+                }
+                other => self.mobs[index].outbox.push(other),
+            }
         }
     }
     /// ServerExplosion: rays from a 16^3 grid lose (resistance + 0.3) * 0.3 per step.

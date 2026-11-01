@@ -1163,6 +1163,19 @@ impl Game<'_> {
                 _ => {}
             },
             S::SetCarriedItem(p) => {
+                // Java mods' heads of Inventory.setSelectedSlot (Carry On while carrying): a
+                // cancel keeps the old slot, which the game is told.
+                let slot = i32::from(p.slot);
+                if (0..9).contains(&p.slot)
+                    && self
+                        .as_guest(host, conn, |g| g.java_select_slot(slot))
+                        .unwrap_or(false)
+                {
+                    let kept = host.hub.guests[gi].selected as i32;
+                    host.hub
+                        .send_to(conn, &C::SetHeldSlot(play::SetHeldSlot { slot: kept }));
+                    return;
+                }
                 if (0..9).contains(&p.slot) {
                     host.hub.guests[gi].selected = p.slot as usize;
                     if let Some(play) = host.play.get_mut(&conn) {
@@ -1276,6 +1289,17 @@ impl Game<'_> {
                         g.swings_started != swings
                     });
                     self.lan_swing_back(host, conn, swung);
+                    // Java mods' heads of Entity.startRiding: a cancel takes the guest off.
+                    if let Some(vehicle) = host.hub.guests[gi].vehicle
+                        && before != Some(vehicle)
+                        && self
+                            .as_guest(host, conn, |g| g.java_ride(vehicle))
+                            .unwrap_or(false)
+                    {
+                        self.as_guest(host, conn, |g| g.stop_riding());
+                        host.hub.guests[gi].vehicle = before;
+                        return;
+                    }
                     self.guest_boarded(host, conn, before);
                 }
             }
@@ -1838,6 +1862,18 @@ impl Game<'_> {
         }
         let (old_yaw, old_pitch) = (host.hub.guests[gi].yaw, host.hub.guests[gi].pitch);
         if self.look_at_entity(host, gi, id, None).is_none() {
+            return;
+        }
+        // Java mods that patch the attack itself (Better Combat): their Player.attack on
+        // copies decides each mob's damage and knockback.
+        if let Ok(mob) = u32::try_from(id)
+            && self
+                .as_guest(host, conn, |g| g.java_attack_mob(mob))
+                .unwrap_or(false)
+        {
+            host.mob_players.insert(mob, conn);
+            host.hub.guests[gi].yaw = old_yaw;
+            host.hub.guests[gi].pitch = old_pitch;
             return;
         }
         // A mace's smash sets the attacker's velocity and sends it at once, before the

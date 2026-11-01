@@ -108,6 +108,24 @@ case "$SCENE" in
     'q "setblock $((X+3)) $((Y-1)) $((Z+1)) minecraft:water"' \
     'q "setblock $((X+3)) $Y $Z minecraft:wheat[age=0]"' \
     'echo "$((X+3)) $Y $Z" > "$S/crop.pos"' ;;
+  # A fight: a cow and a pig standing still ahead (two blocks east, a block apart), survival,
+  # an iron sword in hand, looking at the cow; their ids in $S/cow.id and $S/pig.id.
+  fight) "$R/tools/java_bridge/around.sh" \
+    'q "gamemode survival"' 'q "give @s minecraft:iron_sword"' \
+    'q "summon minecraft:cow ~2.5 ~ ~-0.6 {NoAI:1b}"' 'q "summon minecraft:pig ~2.5 ~ ~1.4 {NoAI:1b}"' \
+    'q "tp @s ~ ~ ~ -90 15"' 'sleep 1' \
+    '$C entities 6 minecraft:cow | python3 -c "import json,sys;print(json.load(sys.stdin)[\"entities\"][0][\"id\"])" > "$S/cow.id"' \
+    '$C entities 6 minecraft:pig | python3 -c "import json,sys;print(json.load(sys.stdin)[\"entities\"][0][\"id\"])" > "$S/pig.id"' \
+    '$C look-at-entity $(cat "$S/cow.id") >/dev/null' ;;
+  # Vehicles: a minecart two blocks north, a boat two blocks south; where they are in
+  # $S/cart.pos and $S/boat.pos (points to look at).
+  ride) "$R/tools/java_bridge/around.sh" \
+    'q "summon minecraft:minecart $(p $X+0.5) $Y $(p $Z-1.5)"' 'q "summon minecraft:oak_boat $(p $X+0.5) $Y $(p $Z+2.5)"' \
+    'echo "$(p $X+0.5) $(p $Y+0.3) $(p $Z-1.5)" > "$S/cart.pos"' 'echo "$(p $X+0.5) $(p $Y+0.25) $(p $Z+2.5)" > "$S/boat.pos"' ;;
+  # Precipitation: rain, a 9x9 stone floor under the sky (around.sh's), its middle column in
+  # $S/floor.pos; seasons and tick speed are the case's.
+  snow) "$R/tools/java_bridge/around.sh" \
+    'q "weather rain"' 'echo "$((X-4)) $Y $((Z-4)) $((X+4)) $Y $((Z+4))" > "$S/floor.pos"' ;;
   none) ;;
 esac
 n=0; for step in "$@"; do eval "$step"; sleep 1; n=$((n+1)); $C screenshot "$S/s$n.png" >/dev/null; cp "$S/s$n.png" "$OUT/$SCENE-$n.png"; done

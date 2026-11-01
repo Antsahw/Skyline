@@ -120,6 +120,37 @@ pub(super) fn java_routed(action: &str) -> bool {
         .is_some_and(|r| r.iter().any(|a| a == action))
 }
 
+/// Precipitation ticks' columns (their tops) kept for Java mods that patch the biomes'
+/// weather, answered at the end of the level's block tick (Game::java_random_ticks).
+#[cfg(feature = "java-mods")]
+static JAVA_PRECIPITATION: std::sync::Mutex<Vec<horizon_core::position::BlockPos>> =
+    std::sync::Mutex::new(Vec::new());
+
+/// The precipitation tick at the column topped by `top` is kept for the Java mods (true), when
+/// they patch the biomes' weather (`events::routed_actions`' "precipitation").
+pub(super) fn java_precipitation(top: horizon_core::position::BlockPos) -> bool {
+    #[cfg(feature = "java-mods")]
+    {
+        if !JAVA_ROUTED
+            .get()
+            .is_some_and(|r| r.iter().any(|a| a == "precipitation"))
+        {
+            return false;
+        }
+        let mut kept = JAVA_PRECIPITATION.lock().unwrap_or_else(|e| e.into_inner());
+        if kept.len() >= 4096 {
+            return false;
+        }
+        kept.push(top);
+        true
+    }
+    #[cfg(not(feature = "java-mods"))]
+    {
+        let _ = top;
+        false
+    }
+}
+
 /// True when the tick is the mods' instead of Horizon's (a routed vanilla block's).
 #[cfg(feature = "java-mods")]
 pub(super) fn java_random_tick(
@@ -207,6 +238,15 @@ impl Game<'_> {
         false
     }
     pub(super) fn java_crafted(&mut self, _takes: &[horizon_client::menu::CraftedTake]) {}
+    pub(super) fn java_attack_mob(&mut self, _id: u32) -> bool {
+        false
+    }
+    pub(super) fn java_select_slot(&mut self, _slot: i32) -> bool {
+        false
+    }
+    pub(super) fn java_ride(&mut self, _vehicle: u32) -> bool {
+        false
+    }
     pub(super) fn java_orb_touch(
         &mut self,
         _orb: &horizon_client::entities::ExperienceOrb,
@@ -2206,6 +2246,9 @@ mod run {
                         log::warn!("Java mods: block entities failed: {e}");
                     }
                 }
+                // The routed actions are asked once Fabric runs (precipitation's flag too).
+                let _ = super::java_routed("precipitation");
+                self.java_precipitation_ticks();
                 let ticks = std::mem::take(
                     &mut *super::JAVA_RANDOM_TICKS
                         .lock()
@@ -2612,6 +2655,204 @@ mod run {
             #[cfg(not(feature = "java-mods"))]
             {
                 let _ = takes;
+            }
+        }
+
+        /// The player acting now attacks the mob `id`, when Java mods patch the attack itself
+        /// (Better Combat, Farmer's Delight's knives): vanilla's `Player.attack` (Better
+        /// Combat's attack request) on copies of it and the mobs within 8 blocks; each mob hit
+        /// is hurt and pushed here with what its copy got. True when it was done that way.
+        pub(in crate::game) fn java_attack_mob(&mut self, id: u32) -> bool {
+            #[cfg(feature = "java-mods")]
+            {
+                if !java_mods_on() || !super::java_routed("player_attack") {
+                    return false;
+                }
+                let Some(target) = self
+                    .mobs
+                    .iter()
+                    .position(|m| m.id == id && m.alive() && !m.removed)
+                else {
+                    return false;
+                };
+                let Some(p) = self.player.as_ref() else {
+                    return false;
+                };
+                let (feet, yaw, pitch) =
+                    ([p.position.x, p.position.y, p.position.z], p.yaw, p.pitch);
+                // The target first, then the mobs a sweep or Better Combat's swing can reach.
+                let mut chosen = vec![target];
+                for (i, m) in self.mobs.iter().enumerate() {
+                    if i != target
+                        && m.alive()
+                        && !m.removed
+                        && chosen.len() < 24
+                        && m.distance_to(feet) < 8.0
+                    {
+                        chosen.push(i);
+                    }
+                }
+                let ids: Vec<u32> = chosen.iter().map(|&i| self.mobs[i].id).collect();
+                let nbts: Vec<String> = chosen
+                    .iter()
+                    .map(|&i| horizon_client::snbt::to_snbt(&self.mob_tree_nbt(i)))
+                    .collect();
+                let uuid = self
+                    .lan_acting_uuid
+                    .map(uuid_string)
+                    .unwrap_or_else(|| self.player_uuid_string());
+                let (dim, selected, ticks) = (
+                    self.dim.id(),
+                    self.selected as i32,
+                    self.attack_ticks as i32,
+                );
+                let result = self.with_java_world(|| {
+                    horizon_jvm::events::player_attack(
+                        &uuid, dim, &nbts, &ids, ticks, yaw, pitch, selected,
+                    )
+                });
+                self.apply_java_actor_slots(&uuid);
+                let hits = match result {
+                    Ok(Some(hits)) => hits,
+                    Ok(None) => return false,
+                    Err(e) => {
+                        log::warn!("Java mods: an attack failed: {e}");
+                        return false;
+                    }
+                };
+                self.attack_ticks = 0;
+                for hit in hits {
+                    if let Some(i) = self.mobs.iter().position(|m| m.id == hit.id && m.alive()) {
+                        self.routed_hit(
+                            i,
+                            hit.damage,
+                            hit.knockback,
+                            hit.knock_x,
+                            hit.knock_z,
+                            i == target,
+                        );
+                    }
+                }
+                self.swing_arm();
+                true
+            }
+            #[cfg(not(feature = "java-mods"))]
+            {
+                let _ = id;
+                false
+            }
+        }
+
+        /// The precipitation ticks kept for the Java mods this tick: the biome's answers on the
+        /// mirror (`Biome.shouldFreeze`, `shouldSnow`, `getPrecipitationAt` with Serene
+        /// Seasons' patches), then Horizon's `tickPrecipitation` with them.
+        #[cfg(feature = "java-mods")]
+        fn java_precipitation_ticks(&mut self) {
+            let tops = std::mem::take(
+                &mut *super::JAVA_PRECIPITATION
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner()),
+            );
+            if tops.is_empty() {
+                return;
+            }
+            let flat: Vec<i32> = tops.iter().flat_map(|p| [p.x, p.y, p.z]).collect();
+            let dim = self.dim.id();
+            let answers =
+                match self.with_java_world(|| horizon_jvm::events::precipitation(dim, &flat)) {
+                    Ok(a) => a,
+                    Err(e) => {
+                        log::warn!("Java mods: precipitation failed: {e}");
+                        return;
+                    }
+                };
+            use horizon_world::level::{Precipitation, PrecipitationKind};
+            for (top, a) in tops.into_iter().zip(answers.chunks_exact(3)) {
+                let info = Precipitation {
+                    top,
+                    freezes_below: a[0] != 0,
+                    snows_at_top: a[1] != 0,
+                    kind: match a[2] {
+                        1 => PrecipitationKind::Rain,
+                        2 => PrecipitationKind::Snow,
+                        _ => PrecipitationKind::None,
+                    },
+                };
+                self.with_level(|b, level, ticks| b.precipitation_tick_with(level, ticks, info));
+            }
+        }
+
+        /// The player acting now picks hotbar slot `slot`: the Java mods' heads of
+        /// `Inventory.setSelectedSlot` (Carry On keeps the slot while carrying). True when one
+        /// cancelled.
+        pub(in crate::game) fn java_select_slot(&mut self, slot: i32) -> bool {
+            #[cfg(feature = "java-mods")]
+            {
+                if !java_mods_on() || !self.hears_players() {
+                    return false;
+                }
+                let uuid = self
+                    .lan_acting_uuid
+                    .map(uuid_string)
+                    .unwrap_or_else(|| self.player_uuid_string());
+                let r = self.with_java_world(|| horizon_jvm::events::select_slot(&uuid, slot));
+                self.apply_java_actor_slots(&uuid);
+                r.unwrap_or(false)
+            }
+            #[cfg(not(feature = "java-mods"))]
+            {
+                let _ = slot;
+                false
+            }
+        }
+
+        /// The player acting now got onto vehicle `vehicle`: the Java mods' heads of
+        /// `Entity.startRiding`, with a copy of it. True when one cancelled.
+        pub(in crate::game) fn java_ride(&mut self, vehicle: u32) -> bool {
+            #[cfg(feature = "java-mods")]
+            {
+                if !java_mods_on() || !self.hears_players() {
+                    return false;
+                }
+                let (ty, at, snbt) = if let Some(i) = self.mobs.iter().position(|m| m.id == vehicle)
+                {
+                    let m = &self.mobs[i];
+                    let at = [m.position.x, m.position.y, m.position.z];
+                    let ty = format!("minecraft:{}", m.kind.id.trim_start_matches("minecraft:"));
+                    (ty, at, horizon_client::snbt::to_snbt(&self.mob_tree_nbt(i)))
+                } else if let Some(b) = self.boats.iter().find(|b| b.id == vehicle) {
+                    let raft = &*b.wood == "bamboo";
+                    let ty = match (raft, b.chest) {
+                        (true, false) => "minecraft:bamboo_raft".to_string(),
+                        (true, true) => "minecraft:bamboo_chest_raft".to_string(),
+                        (false, false) => format!("minecraft:{}_boat", b.wood),
+                        (false, true) => format!("minecraft:{}_chest_boat", b.wood),
+                    };
+                    (
+                        ty,
+                        [b.position.x, b.position.y, b.position.z],
+                        String::new(),
+                    )
+                } else if let Some(c) = self.carts.iter().find(|c| c.id == vehicle) {
+                    let at = [c.position.x, c.position.y, c.position.z];
+                    ("minecraft:minecart".to_string(), at, String::new())
+                } else {
+                    return false;
+                };
+                let uuid = self
+                    .lan_acting_uuid
+                    .map(uuid_string)
+                    .unwrap_or_else(|| self.player_uuid_string());
+                let dim = self.dim.id();
+                let r =
+                    self.with_java_world(|| horizon_jvm::events::ride(&uuid, dim, &ty, at, &snbt));
+                self.apply_java_actor_slots(&uuid);
+                r.unwrap_or(false)
+            }
+            #[cfg(not(feature = "java-mods"))]
+            {
+                let _ = vehicle;
+                false
             }
         }
 

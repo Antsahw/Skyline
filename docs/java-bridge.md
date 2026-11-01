@@ -258,6 +258,34 @@ it does nothing unless Horizon fires it or hands the action to the mirror.
     guest at once (`LanHub::send_inventory_slots`: the click's answer would take it as known).
   - Crop and sapling growth: covered by the first round (random ticks, bone meal through
     `useRouted`: BCLib and Puzzles Lib patch `BoneMealItem`, Balm `CropBlock`/`StemBlock`).
+- Third round:
+  - A player's attack (`HorizonCombat`, Rust `java_attack_mob` from `guest_attack`), when
+    Better Combat is loaded or a mod patches `Player.attack`'s inside (Farmer's Delight,
+    Spell Engine): copies of the target and the mobs within 8 blocks (NBT, Horizon's ids)
+    stand in the mirror's level for the call (`HorizonServer.entities` lists them);
+    vanilla's `Player.attack` runs with the patches; `CombatCaptureMixin` catches what
+    reaches each copy's `hurtServer` and `knockback` (vanilla's bodies don't run on a copy),
+    and Horizon hurts and pushes its own mobs with it (`Game::routed_hit`). The weapon's wear
+    and exhaustion are the mirror's. Better Combat: a click becomes its attack request (combo
+    counted here, reset after 40 ticks; targets from its own `TargetFinder` among the copies;
+    `ServerNetwork.handleAttackRequest`). It hands each hit to the connection's
+    `handleAttack`, which on a mirrored connection now attacks directly (`GameListenerMixin`:
+    the mirror has no packet processor). Better Combat's client half (animations, its own
+    swing timing, the HUD) doesn't run: a click is one attack.
+  - A hotbar pick (`SetCarriedItem`): the heads of `Inventory.setSelectedSlot` (Carry On while
+    carrying); a cancel keeps the old slot and sends it (`SetHeldSlot`).
+  - Getting onto a vehicle (after the guest's interact boarded one): the heads of
+    `Entity.startRiding` with a copy of it (a mob from its NBT, a boat or cart by type); a
+    cancel takes the guest off (`stop_riding`). Getting off isn't hooked yet.
+  - Precipitation (`ServerLevel.tickPrecipitation`), when a mod patches the biomes' weather
+    (`Biome.shouldSnow`, `shouldFreeze`, `getPrecipitationAt`...: Serene Seasons): the game
+    keeps each column's top (`GameLevel::precipitation` → `java_precipitation`) and, at the
+    end of the level's block tick, asks the mirror's biome (`HorizonVanillaActions
+    .precipitation`), then runs its own tick with those answers
+    (`Behaviours::precipitation_tick_with`). Snow lies in the plains in a Serene Seasons
+    winter; the sky still rains in Horizon's window (the client's biome weather is Horizon's).
+  - Performance mods (Lithium, FerriteCore, ModernFix...: `HorizonMixinTable.PERFORMANCE`)
+    never make an action the mirror's: Lithium overwrites `Biome.getTemperature`.
 - The mirrored player's `tickCount` follows Horizon's ticks: Carry On refuses a second action
   on the tick of the last one, and the mirror's players aren't ticked.
 - `HORIZON_JAVA_DEBUG=entities` logs each attack on/use of Horizon's entities, a vanilla mob a
@@ -630,7 +658,13 @@ router's climate (TerraBlender doesn't change it), then the spiral reads generat
 terrain on.
 
 Vanilla-patching mods (tested headless 2026-11-01, server thread, survival; each is a
-`regress.py` case: `veinminer`, `harvest`, `carry`, `seasons`, `orbs`):
+`regress.py` case: `veinminer`, `harvest`, `carry`, `seasons`, `orbs`, `bettercombat`,
+`snow`; the `mixinmod` fixture's `attack`, `ride`, `slot`, `mixins2`):
+- Better Combat: a click with an iron sword is its attack request; the cow takes 6.
+- Serene Seasons' snow: mid winter, rain: the plains' floor gets snow layers.
+- The fixture: ten times the damage inside `Player.attack` (a cow dies to one sword hit, a pig
+  spared by its head), no minecarts (the boat still takes the player), no ninth hotbar slot,
+  no snowball throws, an emerald with each craft.
 - Veinminer: sneak + one dig breaks a 7-block iron vein, raw iron and experience drop, the
   pickaxe wears 7.
 - Right Click Harvest: a ripe wheat right-clicked is replanted (age 0) and drops wheat.
