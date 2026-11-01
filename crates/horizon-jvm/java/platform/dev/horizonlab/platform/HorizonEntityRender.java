@@ -83,6 +83,30 @@ public final class HorizonEntityRender {
         HorizonClient.set(net.minecraft.client.renderer.entity.EntityRenderDispatcher.class, dispatcher, "itemModelResolver", items);
         context = new EntityRendererProvider.Context(dispatcher, null, items, null, null, models, null,
                 mc.getAtlasManager(), mc.font, null, null);
+        // Its renderers by type (renderer(): vanilla's and the mods'), for renderers that draw
+        // another entity through it (Carry On's carried mob), and the players' (AvatarRenderer,
+        // with the layers mods add to it). The client's own dispatcher is this one.
+        HorizonClient.set(net.minecraft.client.renderer.entity.EntityRenderDispatcher.class, dispatcher, "renderers",
+                new java.util.AbstractMap<EntityType<?>, EntityRenderer<?, ?>>() {
+                    @Override
+                    public EntityRenderer<?, ?> get(Object type) {
+                        return type instanceof EntityType<?> t ? renderer(t) : null;
+                    }
+
+                    @Override
+                    public java.util.Set<Map.Entry<EntityType<?>, EntityRenderer<?, ?>>> entrySet() {
+                        return java.util.Set.of();
+                    }
+                });
+        try {
+            HorizonClient.set(net.minecraft.client.renderer.entity.EntityRenderDispatcher.class, dispatcher, "playerRenderers",
+                    net.minecraft.client.renderer.entity.EntityRenderers.createAvatarRenderers(context));
+        } catch (Throwable t) {
+            Natives.log("Java mods: players' renderers couldn't be made: " + t);
+        }
+        if (mc.getEntityRenderDispatcher() == null) {
+            HorizonClient.set(net.minecraft.client.Minecraft.class, mc, "entityRenderDispatcher", dispatcher);
+        }
         cubesField = ModelPart.class.getDeclaredField("cubes");
         cubesField.setAccessible(true);
         childrenField = ModelPart.class.getDeclaredField("children");
@@ -305,6 +329,13 @@ public final class HorizonEntityRender {
                     entry(entity, out);
                 }
             }
+            // What mods draw on its players (their layers, as entries marked "block": no box).
+            for (var p : level.players()) {
+                String drawn = player(p);
+                if (drawn == null) continue;
+                if (out.length() > listStart) out.append(',');
+                out.append(drawn);
+            }
             // Mods' block entities their renderers draw (a cutting board's item, a stove's
             // food), as entities marked "block" at the block's corner.
             for (var b : blockEntities(level)) {
@@ -318,6 +349,15 @@ public final class HorizonEntityRender {
             out.append(']');
             firstDim = false;
         }
+        out.append("},\"hands\":{");
+        boolean firstHand = true;
+        for (var h : HANDS.entrySet()) {
+            if (!firstHand) out.append(',');
+            firstHand = false;
+            HorizonJson.string(h.getKey(), out);
+            out.append(':').append(h.getValue());
+        }
+        HANDS.clear();
         out.append("},\"models\":{");
         boolean first = true;
         for (var t : NEW_TREES.entrySet()) {
@@ -404,6 +444,268 @@ public final class HorizonEntityRender {
      * What the entity's renderer submits (EntityRenderDispatcher.submit without the camera's
      * translation: matrices are relative to the entity's position), at the tick's end.
      */
+    // ---- Players: what mods draw on them (Carry On's carried block or mob) -------------
+
+    /**
+     * Recording only what mods' layers submit (a player: Horizon draws the body, its armour
+     * and held items itself), and, in first person, what vanilla's own arm and held item
+     * aren't (handStack: the hand's item; vanillaHand: vanilla's own drawing was seen).
+     */
+    private static boolean onlyMods, inModLayer, firstPerson, vanillaHand;
+    private static net.minecraft.world.item.ItemStack handStack;
+
+    private static boolean kept(Object model) {
+        if (firstPerson && model instanceof net.minecraft.client.model.player.PlayerModel) {
+            vanillaHand = true;
+            return false;
+        }
+        return !onlyMods || inModLayer;
+    }
+
+    /** A mod's layer of a player renderer, marked while it submits (onlyMods keeps those). */
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private static final class ModLayer extends net.minecraft.client.renderer.entity.layers.RenderLayer {
+        final net.minecraft.client.renderer.entity.layers.RenderLayer inner;
+
+        ModLayer(net.minecraft.client.renderer.entity.RenderLayerParent parent, net.minecraft.client.renderer.entity.layers.RenderLayer inner) {
+            super(parent);
+            this.inner = inner;
+        }
+
+        @Override
+        public void submit(PoseStack pose, SubmitNodeCollector collector, int light, EntityRenderState state, float yRot, float xRot) {
+            boolean was = inModLayer;
+            inModLayer = true;
+            try {
+                inner.submit(pose, collector, light, state, yRot, xRot);
+            } finally {
+                inModLayer = was;
+            }
+        }
+    }
+
+    /** Player renderers whose mods' layers are wrapped, and whether they have any. */
+    private static final Map<Object, Boolean> MARKED = new IdentityHashMap<>();
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private static boolean modLayers(net.minecraft.client.renderer.entity.LivingEntityRenderer renderer) throws ReflectiveOperationException {
+        Boolean had = MARKED.get(renderer);
+        if (had != null) return had;
+        var layers = (List) HorizonClient.field(net.minecraft.client.renderer.entity.LivingEntityRenderer.class, renderer, "layers");
+        boolean any = false;
+        for (int i = 0; i < layers.size(); i++) {
+            Object layer = layers.get(i);
+            if (layer instanceof ModLayer) {
+                any = true;
+            } else if (!layer.getClass().getName().startsWith("net.minecraft.")) {
+                layers.set(i, new ModLayer(renderer, (net.minecraft.client.renderer.entity.layers.RenderLayer) layer));
+                any = true;
+            }
+        }
+        MARKED.put(renderer, any);
+        return any;
+    }
+
+    /** Each mirrored player's client avatar: what player renderers draw. */
+    private static final Map<java.util.UUID, net.minecraft.client.player.RemotePlayer> AVATARS = new java.util.HashMap<>();
+
+    /**
+     * The player as a client sees another (a RemotePlayer in its client level), where the
+     * server player is, posed as it is, its synced data, items and mods' attachments its own.
+     */
+    private static net.minecraft.client.player.RemotePlayer avatar(net.minecraft.server.level.ServerPlayer p) throws ReflectiveOperationException {
+        var clientLevel = HorizonClient.clientLevel(p.level());
+        var a = AVATARS.get(p.getUUID());
+        if (a == null || a.level() != clientLevel) {
+            a = new net.minecraft.client.player.RemotePlayer(clientLevel, p.getGameProfile());
+            // Its tab-list entry (its skin), which a client's connection would have.
+            HorizonClient.set(net.minecraft.client.player.AbstractClientPlayer.class, a, "playerInfo",
+                    new net.minecraft.client.multiplayer.PlayerInfo(p.getGameProfile(), false));
+            AVATARS.put(p.getUUID(), a);
+        }
+        a.setId(p.getId());
+        a.setPos(p.getX(), p.getY(), p.getZ());
+        a.xo = a.xOld = p.getX();
+        a.yo = a.yOld = p.getY();
+        a.zo = a.zOld = p.getZ();
+        a.setYRot(p.getYRot());
+        a.setXRot(p.getXRot());
+        a.yRotO = p.getYRot();
+        a.xRotO = p.getXRot();
+        a.yBodyRot = a.yBodyRotO = p.yBodyRot;
+        a.yHeadRot = a.yHeadRotO = p.yHeadRot;
+        a.tickCount = p.tickCount;
+        HorizonClient.set(net.minecraft.world.entity.LivingEntity.class, a, "swingState",
+                HorizonClient.field(net.minecraft.world.entity.LivingEntity.class, p, "swingState"));
+        a.setPose(p.getPose());
+        a.setShiftKeyDown(p.isShiftKeyDown());
+        for (String f : new String[] {"position", "speed", "speedOld"}) {
+            HorizonClient.set(net.minecraft.world.entity.WalkAnimationState.class, a.walkAnimation, f,
+                    HorizonClient.field(net.minecraft.world.entity.WalkAnimationState.class, p.walkAnimation, f));
+        }
+        HorizonClient.set(net.minecraft.world.entity.Entity.class, a, "entityData", p.getEntityData());
+        HorizonClient.set(net.minecraft.world.entity.LivingEntity.class, a, "equipment",
+                HorizonClient.field(net.minecraft.world.entity.LivingEntity.class, p, "equipment"));
+        HorizonClient.set(net.minecraft.world.entity.player.Player.class, a, "inventory", p.getInventory());
+        HorizonClient.shareAttachments(p, a);
+        // What mods keep on the player (Fabric's attachments: Carry On's carry data; mixins'
+        // own fields): the server player's.
+        for (Class<?> c : new Class<?>[] {net.minecraft.world.entity.Entity.class,
+                net.minecraft.world.entity.LivingEntity.class, net.minecraft.world.entity.player.Player.class}) {
+            for (java.lang.reflect.Field f : c.getDeclaredFields()) {
+                if (java.lang.reflect.Modifier.isStatic(f.getModifiers()) || f.getType().isPrimitive()) continue;
+                String type = f.getType().getName();
+                boolean added = f.getName().contains("$") || f.getName().startsWith("fabric_");
+                boolean modType = !(type.startsWith("net.minecraft.") || type.startsWith("com.mojang.") || type.startsWith("java.")
+                        || type.startsWith("javax.") || type.startsWith("org.joml.") || type.startsWith("it.unimi.") || f.getType().isArray());
+                if (!added && !modType) continue;
+                try {
+                    f.setAccessible(true);
+                    f.set(a, f.get(p));
+                } catch (ReflectiveOperationException | RuntimeException e) {
+                    // A field it can't reach stays its own.
+                }
+            }
+        }
+        return a;
+    }
+
+    /** First person: vanilla's renderer of the hands, whose arm submits mods hook (Carry On). */
+    private static net.minecraft.client.renderer.FirstPersonHandsAndItemsRenderer hands;
+    private static java.lang.reflect.Method submitArm;
+    /** Players that had something drawn by mods last tick (an empty entry clears it). */
+    private static final java.util.Set<java.util.UUID> DREW = new java.util.HashSet<>();
+    /** Each player's mods' first-person drawing this snapshot, by UUID (JSON). */
+    private static final Map<String, String> HANDS = new java.util.LinkedHashMap<>();
+
+    /**
+     * What mods draw on a mirrored player (their layers of its renderer), as an entry like a
+     * mod entity's: at the player, no box ("block"), its "owner" the player (its own game
+     * draws it in third person only). Its first person (HANDS) too. Null when nothing.
+     */
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private static String player(net.minecraft.server.level.ServerPlayer p) {
+        try {
+            var a = avatar(p);
+            var dispatcher = context().getEntityRenderDispatcher();
+            if (!(dispatcher.getRenderer(a) instanceof net.minecraft.client.renderer.entity.LivingEntityRenderer renderer)) return null;
+            if (!modLayers(renderer)) return null;
+            JsonArray out = new JsonArray();
+            JsonArray held = new JsonArray();
+            EntityRenderState[] made = new EntityRenderState[1];
+            items = held;
+            onlyMods = true;
+            try {
+                HorizonClient.as(p, () -> made[0] = renderer.createRenderState(a, 1.0F));
+                PoseStack pose = new PoseStack();
+                var offset = renderer.getRenderOffset(made[0]);
+                pose.translate(offset.x, offset.y, offset.z);
+                CameraRenderState camera = new CameraRenderState();
+                camera.orientation = new org.joml.Quaternionf();
+                camera.pos = net.minecraft.world.phys.Vec3.ZERO;
+                renderer.submit(made[0], pose, collector(out), camera);
+            } finally {
+                onlyMods = false;
+                items = null;
+            }
+            firstPerson(p, a, made[0]);
+            if (out.isEmpty() && held.isEmpty()) return null;
+            StringBuilder e = new StringBuilder(256);
+            int id = 0x7ff00000 | (p.getId() & 0xfffff);
+            e.append("{\"x\":");
+            HorizonJson.number(p.getX(), e);
+            e.append(",\"y\":");
+            HorizonJson.number(p.getY(), e);
+            e.append(",\"z\":");
+            HorizonJson.number(p.getZ(), e);
+            e.append(",\"owner\":");
+            HorizonJson.string(p.getStringUUID(), e);
+            JsonArray keys = new JsonArray();
+            for (var m : out) if (m instanceof JsonObject mo && mo.has("key")) keys.add(mo.get("key"));
+            if (!keys.isEmpty()) e.append(",\"keys\":").append(HorizonJson.write(keys));
+            JsonObject o = new JsonObject();
+            o.addProperty("id", id);
+            o.addProperty("type", "minecraft:player");
+            o.addProperty("x", p.getX());
+            o.addProperty("y", p.getY());
+            o.addProperty("z", p.getZ());
+            o.addProperty("w", p.getBbWidth());
+            o.addProperty("h", p.getBbHeight());
+            o.addProperty("block", true);
+            o.add("models", out);
+            if (!held.isEmpty()) o.add("items", held);
+            e.append(",\"e\":");
+            HorizonJson.write(o, e);
+            e.append('}');
+            return e.toString();
+        } catch (Throwable t) {
+            if (FAILED.add("player")) Natives.log("Java mods: a player's mod layers couldn't be drawn: " + t);
+            return null;
+        }
+    }
+
+    private static final java.util.Set<String> FAILED = java.util.Collections.synchronizedSet(new java.util.HashSet<>());
+
+    /**
+     * The player's first person as vanilla's FirstPersonHandsAndItemsRenderer draws each arm
+     * (submitArmWithItem, which mods hook: Carry On draws what is carried instead): kept when
+     * something besides vanilla's own arm and held item is drawn, with whether vanilla's were
+     * (else Horizon's game hides its own for that hand). In view space.
+     */
+    private static void firstPerson(net.minecraft.server.level.ServerPlayer p, net.minecraft.client.player.RemotePlayer a,
+                                    EntityRenderState state) throws Throwable {
+        if (!(state instanceof net.minecraft.client.renderer.entity.state.AvatarRenderState avatar)) return;
+        if (hands == null) {
+            hands = new net.minecraft.client.renderer.FirstPersonHandsAndItemsRenderer(net.minecraft.client.Minecraft.getInstance());
+            submitArm = net.minecraft.client.renderer.FirstPersonHandsAndItemsRenderer.class.getDeclaredMethod("submitArmWithItem",
+                    net.minecraft.client.renderer.state.level.PlayerRenderState.class,
+                    net.minecraft.client.renderer.state.level.FirstPersonHandsAndItemsRenderState.class, float.class, float.class,
+                    net.minecraft.world.InteractionHand.class, float.class, net.minecraft.world.item.ItemStack.class, float.class,
+                    PoseStack.class, SubmitNodeCollector.class, int.class);
+            submitArm.setAccessible(true);
+        }
+        var level = new net.minecraft.client.renderer.state.level.PlayerRenderState();
+        level.hasPlayer = true;
+        level.avatarRenderState = avatar;
+        var fp = level.firstPersonHandsAndItems;
+        fp.attackHand = net.minecraft.world.InteractionHand.MAIN_HAND;
+        fp.mainHandItem = p.getMainHandItem();
+        fp.offHandItem = p.getOffhandItem();
+        fp.mainHandHeight = fp.oldMainHandHeight = fp.offHandHeight = fp.oldOffHandHeight = 1.0F;
+        fp.mainHandSwapScale = fp.offHandSwapScale = 1.0F;
+        JsonArray out = new JsonArray();
+        JsonArray held = new JsonArray();
+        boolean[] hide = new boolean[2];
+        int n = 0;
+        for (var hand : net.minecraft.world.InteractionHand.values()) {
+            var stack = p.getItemInHand(hand);
+            int before = out.size() + held.size();
+            items = held;
+            firstPerson = true;
+            handStack = stack;
+            vanillaHand = false;
+            try {
+                HorizonClient.as(p, () -> submitArm.invoke(hands, level, fp, 1.0F, a.getXRot(), hand, 0.0F, stack, 0.0F,
+                        new PoseStack(), collector(out), 0xF000F0));
+            } finally {
+                firstPerson = false;
+                handStack = null;
+                items = null;
+            }
+            boolean drew = out.size() + held.size() > before;
+            hide[n++] = drew && !vanillaHand;
+        }
+        if (out.isEmpty() && held.isEmpty()) return;
+        JsonObject o = new JsonObject();
+        o.add("models", out);
+        if (!held.isEmpty()) o.add("items", held);
+        JsonArray h = new JsonArray();
+        h.add(hide[0]);
+        h.add(hide[1]);
+        o.add("hide", h);
+        HANDS.put(p.getStringUUID(), HorizonJson.write(o));
+    }
+
     // ---- Items (ItemModelResolverMixin, ItemStackRenderStateMixin) ----------------------
 
     /** Items render states hold for Horizon: the stack and how it is shown. */
@@ -454,6 +756,11 @@ public final class HorizonEntityRender {
         Kept kept = KEPT.get(state);
         if (kept == null) return false;
         if (items == null) return true;
+        if (onlyMods && !inModLayer) return true;
+        if (handStack != null && net.minecraft.world.item.ItemStack.matches(kept.stack(), handStack)) {
+            vanillaHand = true;
+            return true;
+        }
         String snbt = snbt(kept.stack());
         if (snbt == null) return true;
         JsonObject o = new JsonObject();
@@ -593,11 +900,14 @@ public final class HorizonEntityRender {
                         return proxy;
                     }
                     case "submitModel" -> {
+                        if (!kept(args[0])) return null;
                         if (args.length == 9) model(out, (Model) args[0], args[1], (PoseStack) args[2], (RenderType) args[3],
                                 (Integer) args[4], (Integer) args[5], (Integer) args[6], args[7]);
                     }
-                    case "submitCustomGeometry" -> mesh(out, (PoseStack) args[0], (RenderType) args[1],
-                            (SubmitNodeCollector.CustomGeometryRenderer) args[2]);
+                    case "submitCustomGeometry" -> {
+                        if (!kept(null)) return null;
+                        mesh(out, (PoseStack) args[0], (RenderType) args[1], (SubmitNodeCollector.CustomGeometryRenderer) args[2]);
+                    }
                     case "hashCode" -> {
                         return System.identityHashCode(proxy);
                     }

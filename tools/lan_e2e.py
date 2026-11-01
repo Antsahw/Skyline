@@ -310,7 +310,9 @@ CHECKS = ['tab', 'self', 'armour', 'nametags', 'walls', 'chest', 'crafting', 'sp
           'worn', 'blast', 'barter', 'deflect', 'fireball', 'light', 'time', 'swings', 'cracks', 'plates', 'effects',
           'portals', 'distance', 'growth', 'doors', 'flight', 'ladder', 'boats', 'minecarts', 'frames', 'hands',
           'lightning', 'riding', 'occupied_horse', 'mounts', 'worldspawn', 'beds', 'shield', 'deathmining', 'contacts', 'absorption',
-          'breath', 'lava', 'levels', 'drops', 'underwater', 'fireworks']
+          'breath', 'lava', 'levels', 'drops', 'underwater', 'fireworks', 'javamobs']
+# --java-mods: a folder of Fabric mod jars both games run (the javamobs check: the crittermod fixture).
+JAVA_MODS = None
 
 
 class Game:
@@ -322,8 +324,16 @@ class Game:
         (self.work / '.local/horizon-client').mkdir(parents=True)
         os.symlink(resources, self.work / '.local/horizon-client' / lab.VERSION)
         self.socket = self.work / 'c.sock'
+        # Java mods (--java-mods): the game reads them from mods-java beside its options.
+        if JAVA_MODS:
+            (self.work / 'mods-java').mkdir()
+            for jar in Path(JAVA_MODS).glob('*.jar'):
+                shutil.copy(jar, self.work / 'mods-java' / jar.name)
         env = game_env(os.environ.get('VSCREEN', 'lan-e2e'), home=self.work / 'home')
         env = game_environment(env, self.work)
+        if JAVA_MODS:
+            # The bridge's libraries (Fabric Loader, Fabric API) from this checkout's .local/bridge.
+            env['HORIZON_ROOT'] = str(ROOT)
         self.d = Cli(ctl, self.socket, self.work, env)
         self.d.name = name
 
@@ -1221,7 +1231,7 @@ def check_leave(host, guest, out):
                 break
         counts.append(leave_game_total(host))
         guest.raw('connect', f'127.0.0.1:{port}', GUEST_NAME)
-        guest.raw('wait-for', 'loaded', '--timeout', 300)
+        guest.raw('wait-for', 'loaded', '--timeout', 900 if JAVA_MODS else 300)
         guest.wait(20)
     assert counts == [before + 1, before + 2], f'leave_game was {before}, then {counts} after two leaves'
     return {'leave_game': counts}
@@ -5007,7 +5017,7 @@ def run(ctl, out, resources, checks):
         # Guests' commands need the world's Allow Commands as well as the LAN's (#372): a creative
         # world has them; everyone plays in survival.
         host.raw('open', 'Lan', 5, 'creative')
-        host('wait_ready', seconds=400)
+        host('wait_ready', seconds=900 if JAVA_MODS else 400)
         host('command', command='defaultgamemode survival')
         host('command', command='gamemode survival')
         host('command', command='time set day')
@@ -5067,9 +5077,12 @@ def main():
                       help='host on its server thread (default; retained for existing callers)')
     mode.add_argument('--in-frame', dest='server_thread', action='store_false',
                       help='host the world in the window, for comparison')
+    parser.add_argument('--java-mods', help='a folder of Fabric mod jars both games run (a build with java-mods; '
+                        'the javamobs check needs the crittermod fixture: tools/java_bridge/fixture_mod.sh)')
     args = parser.parse_args()
-    global SERVER_THREAD
+    global SERVER_THREAD, JAVA_MODS
     SERVER_THREAD = args.server_thread
+    JAVA_MODS = args.java_mods
     if args.bin_dir:
         bins = Path(args.bin_dir).resolve()
     else:
@@ -7972,6 +7985,54 @@ def check_dig_sounds(host, guest, out):
 
 CHECKS += ['dig_sounds']
 CHECK_FNS['dig_sounds'] = check_dig_sounds
+
+
+def java_entities(game, kind):
+    """The Java mods' entities of `kind` the game shows (horizon-ctl `entities`)."""
+    return [e for e in game.raw('entities', 16).get('entities', [])
+            if e.get('kind') == 'java' and e.get('type') == kind]
+
+
+def check_javamobs(host, guest, out):
+    """A Java mod's mob on a LAN server (--java-mods with the crittermod fixture): the host summons
+    critters; the guest's game draws them (the server's snapshot to each player) and the guest kills
+    one with a sword (its attack packet, an id from the bridge's range, goes to the mods' server),
+    which goes on both sides; one the host kills goes on the guest's side too."""
+    if not JAVA_MODS:
+        return 'skipped: no --java-mods'
+    kind = 'horizon_critters:critter'
+    for g in (host, guest):
+        g('command', command='gamemode survival')
+        g('command', command='clear @s')
+        g('command', command='give @s minecraft:diamond_sword')
+    face_each_other(host, guest)
+    hx, hy, hz = pos_of(host)
+    host('command', command=f'summon {kind} {hx + 1.5:.2f} {hy:.2f} {hz + 1.0:.2f} {{NoAI:1b}}')
+    host('command', command=f'summon {kind} {hx + 1.5:.2f} {hy:.2f} {hz - 1.5:.2f} {{NoAI:1b}}')
+    seen = {}
+    seen['guest sees'] = len(guest.until(lambda: java_entities(guest, kind), lambda l: len(l) == 2, ticks=100))
+    seen['host sees'] = len(java_entities(host, kind))
+    guest.shot(out, 'javamobs-seen')
+    # The guest's sword on the first: two full-charged hits (a critter has 8 health).
+    target = min(java_entities(guest, kind), key=lambda e: abs(e['pos'][2] - (hz + 1.0)))
+    tx, ty, tz = target['pos']
+    for _ in range(2):
+        guest.raw('look-at', f'{tx:.2f}', f'{ty + 0.45:.2f}', f'{tz:.2f}')
+        guest.wait(25)
+        guest.raw('mouse', 'left', 'click')
+        guest.wait(5)
+    seen['after guest kills'] = {g.name: len(g.until(lambda g=g: java_entities(g, kind), lambda l: len(l) <= 1, ticks=60))
+                                 for g in (guest, host)}
+    guest.shot(out, 'javamobs-killed')
+    host('command', command=f'kill @e[type={kind}]')
+    seen['after host kills'] = len(guest.until(lambda: java_entities(guest, kind), lambda l: not l, ticks=60))
+    assert seen['guest sees'] == 2 and seen['host sees'] == 2, seen
+    assert seen['after guest kills'] == {'guest': 1, 'host': 1}, seen
+    assert seen['after host kills'] == 0, seen
+    return seen
+
+
+CHECK_FNS['javamobs'] = check_javamobs
 
 
 if __name__ == '__main__':

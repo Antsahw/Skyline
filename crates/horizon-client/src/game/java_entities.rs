@@ -106,6 +106,8 @@ pub(super) struct JavaEntities {
     trees: HashMap<String, Arc<Part>>,
     now: Vec<Shown>,
     before: HashMap<i32, Shown>,
+    own: Vec<Shown>,
+    pub(super) hands: Option<Hands>,
 }
 
 /// The atlas key of an entity texture: `ns:textures/entity/x.png` is `ns:entity/x`
@@ -142,8 +144,34 @@ fn item(v: &Value) -> Option<Item> {
 struct RawPayload {
     #[serde(default)]
     entities: Vec<RawShown>,
+    /// What mods draw on this game's own player (their layers: Carry On's carried block),
+    /// drawn in third person.
+    #[serde(default)]
+    own: Vec<RawShown>,
+    /// What mods draw in this player's first person, in view space.
+    #[serde(default)]
+    hands: Option<RawHands>,
     #[serde(default)]
     models: HashMap<String, Value>,
+}
+
+#[derive(serde::Deserialize)]
+struct RawHands {
+    #[serde(default)]
+    models: Vec<RawModel>,
+    #[serde(default)]
+    items: Vec<Value>,
+    /// Per hand (main, off): mods drew instead of vanilla's arm and item.
+    #[serde(default)]
+    hide: [bool; 2],
+}
+
+/// What mods draw in first person (`HorizonEntityRender.firstPerson`): view space.
+#[derive(Clone, Default)]
+pub(super) struct Hands {
+    models: Vec<Drawn>,
+    items: Vec<Item>,
+    pub(super) hide: [bool; 2],
 }
 
 #[derive(serde::Deserialize)]
@@ -319,6 +347,12 @@ impl JavaEntities {
                 Some(kept)
             })
             .collect();
+        self.own = payload.own.into_iter().map(RawShown::shown).collect();
+        self.hands = payload.hands.map(|h| Hands {
+            models: h.models.into_iter().filter_map(RawModel::drawn).collect(),
+            items: h.items.iter().filter_map(item).collect(),
+            hide: h.hide,
+        });
         self.before = std::mem::replace(&mut self.now, now)
             .into_iter()
             .map(|s| (s.id, s))
@@ -359,10 +393,9 @@ impl Game<'_> {
         out: &mut Vec<Vertex>,
     ) {
         let java = &self.java_entities;
-        if java.now.is_empty() {
+        if java.now.is_empty() && java.own.is_empty() {
             return;
         }
-        let atlas = &self.gui.atlas;
         let t = alpha as f32;
         for s in &java.now {
             let at = java.position(s, alpha);
@@ -391,86 +424,150 @@ impl Game<'_> {
             );
             let packed = (u32::from(light >> 4) * 16) | ((u32::from(light & 15) * 16) << 8);
             let before = java.before.get(&s.id);
-            for (i, m) in s.models.iter().enumerate() {
-                let Some(tree) = java.trees.get(&m.key) else {
-                    continue;
-                };
-                let Some(r) = atlas.sprites.get(&m.sprite) else {
-                    continue;
-                };
-                // The same model the tick before: its matrix and poses, to move from.
-                let last = before
-                    .and_then(|b| b.models.get(i))
-                    .filter(|b| b.key == m.key);
-                let matrix: [f32; 16] = match last {
-                    Some(b) => std::array::from_fn(|k| lerp(b.matrix[k], m.matrix[k], t)),
-                    None => m.matrix,
-                };
-                let mut poses = Poses::new(tree);
-                for (path, pose) in &m.poses {
-                    let from = last.and_then(|b| b.poses.get(path));
-                    *poses.get(path) = match from {
-                        Some(f) => std::array::from_fn(|k| lerp(f[k], pose[k], t)),
-                        None => *pose,
-                    };
-                }
-                // A part posed last tick and back to its initial pose now.
-                if let Some(b) = last {
-                    for (path, f) in &b.poses {
-                        if !m.poses.contains_key(path) && poses.has(path) {
-                            let initial = *poses.get(path);
-                            *poses.get(path) = std::array::from_fn(|k| lerp(f[k], initial[k], t));
-                        }
-                    }
-                }
-                for path in &m.hidden {
-                    poses.visible(path, false);
-                }
-                for path in &m.skip {
-                    poses.skip_draw(path);
-                }
-                let base = glam::Mat4::from_translation(d.as_vec3())
-                    * glam::Mat4::from_cols_array(&matrix);
-                render::draw(
-                    tree,
-                    base,
-                    &poses,
-                    [r.u0, r.v0, r.u1, r.v1],
-                    abgr(m.tint),
-                    packed,
-                    overlay_code(m.overlay),
-                    out,
+            let base = glam::Mat4::from_translation(d.as_vec3());
+            self.draw_look(
+                s.id, &s.models, &s.meshes, &s.items, before, base, packed, t, out,
+            );
+        }
+        // What mods draw on this game's own player, seen from outside (third person): at the
+        // player as drawn.
+        if !self.camera_type.first_person()
+            && let Some(m) = self.player_model.as_ref()
+        {
+            let at = glam::DVec3::new(m.position.x, m.position.y, m.position.z);
+            let light = self.world.light(
+                at.x.floor() as i32,
+                (at.y + 1.62).floor() as i32,
+                at.z.floor() as i32,
+            );
+            let packed = (u32::from(light >> 4) * 16) | ((u32::from(light & 15) * 16) << 8);
+            for s in &java.own {
+                let base = glam::Mat4::from_translation((at - camera).as_vec3());
+                self.draw_look(
+                    s.id, &s.models, &s.meshes, &s.items, None, base, packed, t, out,
                 );
             }
-            // Custom geometry (GeckoLib's): its quads as written, moved with the entity
-            // between ticks.
-            for m in &s.meshes {
-                let Some(r) = atlas.sprites.get(&m.sprite) else {
-                    continue;
+        }
+    }
+
+    /// What mods draw in first person (Carry On's carried block or mob in the hands): view
+    /// space through `to_world` (the hands' own transform, game.rs `hand_geometry`).
+    pub(super) fn java_hand_geometry(
+        &self,
+        to_world: glam::Mat4,
+        packed: u32,
+        out: &mut Vec<Vertex>,
+    ) {
+        if let Some(h) = &self.java_entities.hands {
+            self.draw_look(
+                -1,
+                &h.models,
+                &[],
+                &h.items,
+                None,
+                to_world,
+                packed,
+                1.0,
+                out,
+            );
+        }
+    }
+
+    /// One entity's look (its models posed between the last two ticks, its custom geometry and
+    /// items), with `base` before each matrix.
+    #[allow(clippy::too_many_arguments)]
+    fn draw_look(
+        &self,
+        id: i32,
+        models: &[Drawn],
+        meshes: &[Mesh],
+        items: &[Item],
+        before: Option<&Shown>,
+        base: glam::Mat4,
+        packed: u32,
+        t: f32,
+        out: &mut Vec<Vertex>,
+    ) {
+        let java = &self.java_entities;
+        let atlas = &self.gui.atlas;
+        for (i, m) in models.iter().enumerate() {
+            let Some(tree) = java.trees.get(&m.key) else {
+                continue;
+            };
+            let Some(r) = atlas.sprites.get(&m.sprite) else {
+                continue;
+            };
+            // The same model the tick before: its matrix and poses, to move from.
+            let last = before
+                .and_then(|b| b.models.get(i))
+                .filter(|b| b.key == m.key);
+            let matrix: [f32; 16] = match last {
+                Some(b) => std::array::from_fn(|k| lerp(b.matrix[k], m.matrix[k], t)),
+                None => m.matrix,
+            };
+            let mut poses = Poses::new(tree);
+            for (path, pose) in &m.poses {
+                let from = last.and_then(|b| b.poses.get(path));
+                *poses.get(path) = match from {
+                    Some(f) => std::array::from_fn(|k| lerp(f[k], pose[k], t)),
+                    None => *pose,
                 };
-                let overlay = overlay_code(m.overlay);
-                for (v, &argb) in m.vertices.iter().zip(&m.colors) {
-                    let n = [v[5], v[6], v[7]].map(|c| (c.clamp(-1.0, 1.0) * 127.0) as i8);
-                    out.push(Vertex {
-                        pos: (d.as_vec3() + glam::Vec3::new(v[0], v[1], v[2])).to_array(),
-                        uv: [r.u0 + (r.u1 - r.u0) * v[3], r.v0 + (r.v1 - r.v0) * v[4]],
-                        layer: overlay,
-                        color: abgr(argb),
-                        light: if m.glow { FULL_BRIGHT } else { packed },
-                        normal: [n[0], n[1], n[2], -127],
-                        glint_uv: [0.0, 0.0],
-                    });
+            }
+            // A part posed last tick and back to its initial pose now.
+            if let Some(b) = last {
+                for (path, f) in &b.poses {
+                    if !m.poses.contains_key(path) && poses.has(path) {
+                        let initial = *poses.get(path);
+                        *poses.get(path) = std::array::from_fn(|k| lerp(f[k], initial[k], t));
+                    }
                 }
             }
-            // ItemInHandLayer and the like: the items, as Horizon's item renderer draws them
-            // (ItemModelResolver.updateForLiving's seed: the entity id plus the context).
-            for item in &s.items {
-                let seed = s.id.wrapping_add(item.context as i32);
-                let state = self.resolve_item(&item.stack, item.context, None, seed);
-                let pose = glam::Mat4::from_translation(d.as_vec3())
-                    * glam::Mat4::from_cols_array(&item.matrix);
-                self.submit_item_world(&state, pose, packed, out);
+            for path in &m.hidden {
+                poses.visible(path, false);
             }
+            for path in &m.skip {
+                poses.skip_draw(path);
+            }
+            render::draw(
+                tree,
+                base * glam::Mat4::from_cols_array(&matrix),
+                &poses,
+                [r.u0, r.v0, r.u1, r.v1],
+                abgr(m.tint),
+                packed,
+                overlay_code(m.overlay),
+                out,
+            );
+        }
+        // Custom geometry (GeckoLib's): its quads as written, moved with the entity
+        // between ticks.
+        for m in meshes {
+            let Some(r) = atlas.sprites.get(&m.sprite) else {
+                continue;
+            };
+            let overlay = overlay_code(m.overlay);
+            for (v, &argb) in m.vertices.iter().zip(&m.colors) {
+                let n = [v[5], v[6], v[7]].map(|c| (c.clamp(-1.0, 1.0) * 127.0) as i8);
+                out.push(Vertex {
+                    pos: base
+                        .transform_point3(glam::Vec3::new(v[0], v[1], v[2]))
+                        .to_array(),
+                    uv: [r.u0 + (r.u1 - r.u0) * v[3], r.v0 + (r.v1 - r.v0) * v[4]],
+                    layer: overlay,
+                    color: abgr(argb),
+                    light: if m.glow { FULL_BRIGHT } else { packed },
+                    normal: [n[0], n[1], n[2], -127],
+                    glint_uv: [0.0, 0.0],
+                });
+            }
+        }
+        // ItemInHandLayer and the like: the items, as Horizon's item renderer draws them
+        // (ItemModelResolver.updateForLiving's seed: the entity id plus the context).
+        for item in items {
+            let seed = id.wrapping_add(item.context as i32);
+            let state = self.resolve_item(&item.stack, item.context, None, seed);
+            let pose = base * glam::Mat4::from_cols_array(&item.matrix);
+            self.submit_item_world(&state, pose, packed, out);
         }
     }
 

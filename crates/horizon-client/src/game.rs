@@ -10651,8 +10651,16 @@ impl Game<'_> {
             .is_some_and(|p| p.auto_spin_attack_ticks > 0);
         let items = self.visible_hand_items();
         let off_hand_empty = items[1].is_none();
+        // What mods draw in first person (Carry On's carried block or mob), and the hands
+        // they draw instead of vanilla's arm and item (game/java_entities.rs).
+        self.java_hand_geometry(to_world, packed, &mut out);
+        let modded = self
+            .java_entities
+            .hands
+            .as_ref()
+            .map_or([false; 2], |h| h.hide);
         for (i, (hand, item)) in Hand::BOTH.into_iter().zip(items).enumerate() {
-            if !shown[i] {
+            if !shown[i] || modded[i] {
                 continue;
             }
             let (attack, inverse_height) = (attacks[i], inverse_heights[i]);

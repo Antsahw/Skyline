@@ -730,8 +730,41 @@ Known gaps of mod entities: vanilla mobs don't see them nor they vanilla mobs (a
 won't hunt Horizon's sheep); worn armour, fire, leashes and sprite-atlas models
 (`UvMapping`) aren't drawn; custom geometry is sent whole each tick (fine for a few
 GeckoLib mobs, heavy for many); a mod's particle types are drawn as a generic particle
-(its sprites, not its provider's motion); Horizon's `/gamerule spawn_mobs` doesn't reach the
-mods' spawner; in-frame single player is untested.
+(its sprites, not its provider's motion); in-frame single player is untested.
+
+Game rules and difficulty (2026-11-01): Horizon's rules and difficulty go to the mirror's
+server when they change (`events::game_rules` from `tick_java_mods`, `HorizonServer.gameRules`:
+`GameRules.set` without the server, so nothing echoes back; `Java mods: game rule … is …` in
+the log). The mods' spawner keeps `spawn_mobs` (creatures of generated chunks still come, as
+vanilla's), and monsters only off peaceful with `spawn_monsters`; despawning in peaceful,
+mobs' griefing and the rest read the same rules. Tested: no critter spawns near the player
+with `spawn_mobs` off, ten in 45 s once on.
+
+Mods' player layers (2026-11-01; Carry On's carried mob): each mirrored player has a client
+avatar (`HorizonEntityRender.avatar`: a real `RemotePlayer` in its client level, synced each
+snapshot: position, rotations, walk and swing, synced data, equipment, inventory, mixins'
+fields and Fabric's attachments). The players' renderers (`EntityRenderers.createAvatarRenderers`,
+on the context's dispatcher, which is now also `Minecraft`'s with its renderers by type) have
+their mods' layers wrapped (`ModLayer`); the snapshot records only what those submit, as an
+entry at the player with no box (`"block"`) and an `"owner"`: Rust sends a player its own in
+`"own"` (drawn in third person at the player as drawn), the others with the entities. First
+person: vanilla's `FirstPersonHandsAndItemsRenderer.submitArmWithItem` per hand, which mods
+hook (Carry On draws what is carried and cancels), recorded without vanilla's own arm and
+held item; `"hands"` goes to that player (view space, drawn in `hand_geometry` through its
+`to_world`), with the hands to hide. Left: the arms' pose mods set (`HumanoidModel.setupAnim`
+mixins: Carry On holds its arms out) isn't Horizon's player model's; a carried block isn't
+tested (Carry On draws it as an item).
+26.3 traps found: Fabric's `UseEntityCallback` and `AttackEntityCallback` fire in the packet
+listener, not in `Player.interactOn`/`attack` (the bridge fires them now); mirrored players
+weren't ticked, so their `tickCount` stood still (Carry On refuses on "the same tick": it is
+advanced each server tick now); Fabric's attachments are a field mixed into `Entity`
+(`dataAttachments`), which client copies of a player share now (`HorizonClient.shareAttachments`).
+
+LAN (2026-11-01): `python3 tools/lan_e2e.py --bin-dir target/fast --java-mods <jars> --check
+javamobs` (a build with java-mods; the crittermod fixture jar in `<jars>`; on Linux without
+vscreen `DISPLAY` and `HORIZON_E2E_HEADLESS=1`): the host summons two critters, the guest's
+game shows both, the guest kills one with a sword (gone on both sides), the host kills the
+other (gone on the guest's side). Passes.
 
 Natural spawning of mods' mobs (`HorizonSpawner`, 2026-11-01): heights as
 `NaturalSpawner.getRandomPosWithin` picks them, up to Horizon's WORLD_SURFACE heightmap

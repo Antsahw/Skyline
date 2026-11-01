@@ -709,10 +709,33 @@ public final class HorizonClient {
                 services.profileRepository(), services.nameToIdCache(), players);
     }
 
+    private static java.lang.reflect.Field attachments;
+    private static boolean noAttachments;
+
+    /**
+     * Fabric's data attachments (a map Fabric API mixes into Entity: Carry On's carry data,
+     * which the server sets), the server player's on a client copy of it, as a client would
+     * have them synced. Again each time: the server makes its map when it first attaches.
+     */
+    static void shareAttachments(net.minecraft.world.entity.Entity from, net.minecraft.world.entity.Entity to) {
+        if (noAttachments) return;
+        try {
+            if (attachments == null) {
+                attachments = net.minecraft.world.entity.Entity.class.getDeclaredField("dataAttachments");
+                attachments.setAccessible(true);
+            }
+            Object map = attachments.get(from);
+            if (map != null) attachments.set(to, map);
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            noAttachments = true;
+        }
+    }
+
     static void as(net.minecraft.server.level.ServerPlayer player, ThrowingRunnable run) throws Throwable {
         var before = minecraft.player;
         var screenBefore = minecraft.gui.screen();
         var local = localPlayer(player);
+        shareAttachments(player, local);
         set(Minecraft.class, minecraft, "player", local);
         // The services (profiles by id: Chunk Loaders' owner names): the mirrored server's.
         if (minecraft.services() == null && player.level().getServer() != null) {
