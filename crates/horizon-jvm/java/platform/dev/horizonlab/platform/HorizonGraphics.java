@@ -794,9 +794,10 @@ public final class HorizonGraphics extends GuiGraphicsExtractor {
     @Override
     public void text(Font font, Component text, int x, int y, int color, boolean shadow) {
         if (text == null) return;
-        JsonObject o = op("text");
-        o.addProperty("json", HorizonServer.json(text));
-        text(o, x, y, color, shadow);
+        // Resolved here, its runs styled (the mods' translations: a LAN guest's or a dedicated
+        // server player's game has none of a mod's lang files, and would show
+        // "jm.minimap.compass.n").
+        text(font, text.getVisualOrderText(), x, y, color, shadow);
     }
 
     @Override

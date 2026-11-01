@@ -1199,6 +1199,7 @@ public final class HorizonClient {
             });
             set(owner, headless, "spriteLookup", field(owner, atlases, "spriteLookup"));
             fonts(atlases, skins);
+            featureRenderer(models, atlases);
             Natives.log("Horizon's client: block and item models loaded in " + (System.nanoTime() - started) / 1_000_000 + " ms");
         } catch (Throwable t) {
             Throwable root = t;
@@ -1208,6 +1209,26 @@ public final class HorizonClient {
         }
     }
     private static boolean gpuParts;
+
+    /**
+     * The game renderer's feature dispatcher (its render buffers, the real models and atlases,
+     * the client's font), which mods drawing their own passes submit through: VoxelMap's
+     * SubmitPass (prepareFrame, renderAllFeatures) draws its whole HUD with it.
+     */
+    private static void featureRenderer(net.minecraft.client.resources.model.ModelManager models,
+                                        net.minecraft.client.resources.model.sprite.AtlasManager atlases) {
+        try {
+            var gameRenderer = minecraft.gameRenderer;
+            Class<?> owner = net.minecraft.client.renderer.GameRenderer.class;
+            var buffers = new net.minecraft.client.renderer.RenderBuffers(1);
+            set(owner, gameRenderer, "renderBuffers", buffers);
+            set(owner, gameRenderer, "featureRenderDispatcher", new net.minecraft.client.renderer.feature.FeatureRenderDispatcher(
+                    buffers, models, atlases, minecraft.font, gameRenderer.gameRenderState()));
+        } catch (Throwable t) {
+            Natives.log("Horizon's client: no feature render dispatcher: " + t);
+            for (var f : t.getStackTrace()) Natives.log("    at " + f);
+        }
+    }
 
     /**
      * The game renderer's GUI renderer, as far as mods drawing with the GPU read it: its GUI
