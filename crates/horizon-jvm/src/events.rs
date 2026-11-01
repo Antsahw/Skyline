@@ -1835,6 +1835,28 @@ pub fn worldgen_lod_tops(
     Ok(states.flatten())
 }
 
+/// What a mod's generator on the noise cuts out of the land, for far terrain
+/// (`HorizonWorldgen.lodMask`): Grid World's grid, `["grid", x, y, z, replacement state]`.
+/// None for none.
+pub fn worldgen_lod_mask(dimension: &str) -> Result<Option<Vec<String>>, String> {
+    let parts = with_server(|env, class| {
+        let dimension = env.new_string(dimension)?;
+        let parts = env
+            .call_static_method(
+                class,
+                "worldgenLodMask",
+                "(Ljava/lang/String;)[Ljava/lang/String;",
+                &[JValue::Object(&dimension)],
+            )?
+            .l()?;
+        if parts.is_null() {
+            return Ok(None);
+        }
+        string_array(env, parts).map(Some)
+    })?;
+    Ok(parts.flatten())
+}
+
 /// The blocks a dimension's surface rules can give and its default block
 /// (`HorizonWorldgen.lodMaterials`): a far column's land, under its features. None if the
 /// mods don't generate it with a noise generator.

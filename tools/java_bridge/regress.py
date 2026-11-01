@@ -54,6 +54,7 @@ MODS = {
     "kotlin": ["fabric-language-kotlin*"],
     "oneblock": ["oneblock*"],
     "codxlib": ["codxlib*"],
+    "gridgen": ["gridgen*"],
     "skyblock": ["skyblock-infinite*"],
     "simplyoneblock": ["simply_oneblock*", "simply-oneblock*"],
     "buildcraft": ["bcrefabricated*", "buildcraft*"],
@@ -306,6 +307,17 @@ CASES = {
                 check_file("tank.json", r"Changed the block", "a Large Fluid Tank is placed"),
                 check_file("after.json", r"game time is", "the server still answers after the tanks sync")],
         forbid=[r"Unknown block type"],
+    ),
+    "gridlod": dict(
+        about="Grid World's far terrain: the grid's layers far away, not whole land",
+        mods=["gridgen"], scene="none", env={"WORLD": "none", "GRAPHICS": str(TOOLS / "lod-graphics.txt")},
+        steps=['"$R/tools/java_bridge/new_world.sh" "Grid World"',
+               '$C command "gamemode spectator" >/dev/null; $C command "tp @s ~ 140 ~" >/dev/null; sleep 90; '
+               '$C status > $S/status.json; $C look 30 25 >/dev/null; sleep 3'],
+        checks=[check_file("status.json", r'"resident_quads":[1-9]', "far terrain is drawn"),
+                check_log(r"the world's preset is gridgen:grid_world", "the world is Grid World's")],
+        forbid=[r"far terrain's \S+ failed", r"worldgen: proto failed"],
+        look="near: the grid; far: thin layers every 5 blocks, not solid land",
     ),
     "prism": dict(
         about="Prism Launcher's wrapper: an instance's mods linked, Fabric API left out (no game)",
