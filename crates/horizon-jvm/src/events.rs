@@ -1036,6 +1036,22 @@ pub fn game_time(time: i64, seed: i64) -> Result<(), String> {
     Ok(())
 }
 
+/// Horizon's game rules (`minecraft:spawn_mobs=false;...`) into the mirror's, which mods
+/// read (their spawner, their mobs' griefing). Sent when they change.
+pub fn game_rules(rules: &str) -> Result<(), String> {
+    with_server(|env, class| {
+        let rules = env.new_string(rules)?;
+        env.call_static_method(
+            class,
+            "gameRules",
+            "(Ljava/lang/String;)V",
+            &[JValue::Object(&rules)],
+        )?;
+        Ok(())
+    })?;
+    Ok(())
+}
+
 /// Java mods' blocks placed or removed at `positions` of `dimension`: their block entities made
 /// (or, gone, put away), so they tick from their placement as vanilla's do.
 pub fn block_entities(dimension: &str, positions: &[[i32; 3]]) -> Result<(), String> {

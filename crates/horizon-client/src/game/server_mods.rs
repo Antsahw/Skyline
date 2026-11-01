@@ -1097,9 +1097,39 @@ mod run {
                 self.streaming.set_ticketed(wanted);
             }
             let (game_time, seed) = (self.world.game_time, self.level.seed);
+            // Horizon's game rules and difficulty, when they changed: the mods' spawner, their
+            // mobs' griefing and despawning in peaceful read the mirror's (HorizonServer.gameRules).
+            let rules = {
+                use horizon_client::gamerules::{RULES, Value};
+                static LAST: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+                let now: String = RULES
+                    .iter()
+                    .filter_map(|r| {
+                        Some(match self.ui.rules.get(r.name)? {
+                            Value::Bool(b) => format!("minecraft:{}={b}", r.name),
+                            Value::Int(i) => format!("minecraft:{}={i}", r.name),
+                        })
+                    })
+                    .chain(std::iter::once(format!(
+                        "difficulty={}",
+                        self.ui.difficulty
+                    )))
+                    .collect::<Vec<_>>()
+                    .join(";");
+                let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+                (*last != now).then(|| {
+                    *last = now.clone();
+                    now
+                })
+            };
             // The entities' snapshot in the same view as the tick: what the tick read of the
             // world (whole sections, HorizonServer.section) serves it too.
             let (ticked, entities) = self.with_java_world(|| {
+                if let Some(rules) = &rules
+                    && let Err(e) = horizon_jvm::events::game_rules(rules)
+                {
+                    log::warn!("Java mods: game rules not passed: {e}");
+                }
                 let ticked = horizon_jvm::events::game_time(game_time, seed).and_then(|()| {
                     horizon_jvm::events::server_tick(ticks, dedicated, &root, &players, &events)
                 });
@@ -1151,6 +1181,10 @@ mod run {
                 /// It looks as when last sent whole: `e` has its position only.
                 #[serde(default)]
                 keep: bool,
+                /// What mods draw on a player (their layers): the player, by UUID (its own
+                /// game draws it in third person only).
+                #[serde(default, borrow)]
+                owner: Option<&'a str>,
                 #[serde(borrow)]
                 e: &'a RawValue,
             }
@@ -1160,6 +1194,9 @@ mod run {
                 dims: HashMap<&'a str, Vec<Entry<'a>>>,
                 #[serde(default)]
                 models: HashMap<String, Box<RawValue>>,
+                /// What mods draw in each player's first person, by UUID.
+                #[serde(default, borrow)]
+                hands: HashMap<&'a str, &'a RawValue>,
             }
             static SENT: std::sync::Mutex<Option<Sent>> = std::sync::Mutex::new(None);
             let _timed =
@@ -1205,54 +1242,69 @@ mod run {
                     })
                     .collect()
             };
-            let payload = |sent: &mut Sent, who: u32, entries: &[&Entry]| -> Vec<u8> {
-                let had = sent.has.remove(&who).unwrap_or_default();
-                let mut has = HashSet::with_capacity(entries.len());
-                let mut out = String::with_capacity(
-                    entries.iter().map(|e| e.e.get().len() + 1).sum::<usize>() + 64,
-                );
-                out.push_str("{\"entities\":[");
-                let mut first = true;
-                for e in entries {
-                    // A "keep" its game can't keep (it hasn't had the look): the last whole one.
-                    let entry = match e.id {
-                        Some(id) if e.keep && !had.contains(&id) => match sent.looks.get(&id) {
-                            Some(whole) => whole.as_str(),
-                            None => continue,
-                        },
-                        _ => e.e.get(),
-                    };
-                    if let Some(id) = e.id {
-                        has.insert(id);
+            let hands = &snapshot.hands;
+            let payload =
+                |sent: &mut Sent, who: u32, uuid: Option<&str>, entries: &[&Entry]| -> Vec<u8> {
+                    let had = sent.has.remove(&who).unwrap_or_default();
+                    let mut has = HashSet::with_capacity(entries.len());
+                    let mut out = String::with_capacity(
+                        entries.iter().map(|e| e.e.get().len() + 1).sum::<usize>() + 64,
+                    );
+                    out.push_str("{\"entities\":[");
+                    let mut first = true;
+                    let mut own = Vec::new();
+                    for e in entries {
+                        if e.owner.is_some() && e.owner == uuid {
+                            own.push(e.e.get());
+                            continue;
+                        }
+                        // A "keep" its game can't keep (it hasn't had the look): the last whole one.
+                        let entry = match e.id {
+                            Some(id) if e.keep && !had.contains(&id) => match sent.looks.get(&id) {
+                                Some(whole) => whole.as_str(),
+                                None => continue,
+                            },
+                            _ => e.e.get(),
+                        };
+                        if let Some(id) = e.id {
+                            has.insert(id);
+                        }
+                        if !first {
+                            out.push(',');
+                        }
+                        first = false;
+                        out.push_str(entry);
                     }
-                    if !first {
-                        out.push(',');
+                    sent.has.insert(who, has);
+                    out.push_str("],\"own\":[");
+                    out.push_str(&own.join(","));
+                    if let Some(h) = uuid.and_then(|u| hands.get(u)) {
+                        out.push_str("],\"hands\":");
+                        out.push_str(h.get());
+                        out.push_str(",\"models\":{");
+                    } else {
+                        out.push_str("],\"models\":{");
                     }
-                    first = false;
-                    out.push_str(entry);
-                }
-                sent.has.insert(who, has);
-                let have = sent.to.entry(who).or_default();
-                out.push_str("],\"models\":{");
-                let mut first = true;
-                for e in entries {
-                    for key in &e.keys {
-                        if have.insert((*key).to_owned())
-                            && let Some(tree) = sent.trees.get(*key)
-                        {
-                            if !first {
-                                out.push(',');
+                    let have = sent.to.entry(who).or_default();
+                    let mut first = true;
+                    for e in entries {
+                        for key in &e.keys {
+                            if have.insert((*key).to_owned())
+                                && let Some(tree) = sent.trees.get(*key)
+                            {
+                                if !first {
+                                    out.push(',');
+                                }
+                                first = false;
+                                out.push_str(&serde_json::to_string(key).unwrap_or_default());
+                                out.push(':');
+                                out.push_str(tree.get());
                             }
-                            first = false;
-                            out.push_str(&serde_json::to_string(key).unwrap_or_default());
-                            out.push(':');
-                            out.push_str(tree.get());
                         }
                     }
-                }
-                out.push_str("}}");
-                out.into_bytes()
-            };
+                    out.push_str("}}");
+                    out.into_bytes()
+                };
             let Some(host) = self.lan.as_mut() else {
                 // In-frame: the window's own player.
                 if self.serving.is_none() && self.remote.is_none() {
@@ -1261,7 +1313,7 @@ mod run {
                         .as_ref()
                         .map_or([0.0; 3], |p| [p.position.x, p.position.y, p.position.z]);
                     let entities = near(self.dim.id(), at);
-                    let data = payload(sent, u32::MAX, &entities);
+                    let data = payload(sent, u32::MAX, None, &entities);
                     self.remote_java_entities(&data);
                 }
                 return;
@@ -1281,7 +1333,8 @@ mod run {
                 } else {
                     sent.showing.insert(g.conn);
                 }
-                let data = payload(sent, g.conn, &entities);
+                let uuid = uuid_string(g.uuid);
+                let data = payload(sent, g.conn, Some(&uuid), &entities);
                 super::super::java_profile::bytes("entities: payload to players", data.len());
                 host.hub.send_to(
                     g.conn,

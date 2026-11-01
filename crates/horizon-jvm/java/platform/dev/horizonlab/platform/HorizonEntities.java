@@ -426,7 +426,15 @@ public final class HorizonEntities {
             // Uncharged, then.
         }
         equipment(player);
-        fire(target, "Player.attack", () -> player.attack(target));
+        // ServerGamePacketListenerImpl's attack, as Fabric hooks it: AttackEntityCallback first
+        // (a mod may take the hit), then Player.attack.
+        boolean[] taken = {false};
+        fire(target, "AttackEntityCallback", () -> {
+            var r = net.fabricmc.fabric.api.event.player.AttackEntityCallback.EVENT.invoker().interact(player, player.level(),
+                    net.minecraft.world.InteractionHand.MAIN_HAND, target, null);
+            taken[0] = r != net.minecraft.world.InteractionResult.PASS;
+        });
+        if (!taken[0]) fire(target, "Player.attack", () -> player.attack(target));
         return true;
     }
 
@@ -444,7 +452,14 @@ public final class HorizonEntities {
         var interaction = hand == 1 ? net.minecraft.world.InteractionHand.OFF_HAND : net.minecraft.world.InteractionHand.MAIN_HAND;
         net.minecraft.world.InteractionResult[] result = {net.minecraft.world.InteractionResult.PASS};
         var at = new net.minecraft.world.phys.Vec3(x - target.getX(), y - target.getY(), z - target.getZ());
-        fire(target, "Player.interactOn", () -> result[0] = player.interactOn(target, interaction, at));
+        // ServerGamePacketListenerImpl's interaction, as Fabric hooks it: UseEntityCallback first
+        // (Carry On picks a mob up there), then Player.interactOn.
+        fire(target, "UseEntityCallback", () -> result[0] = net.fabricmc.fabric.api.event.player.UseEntityCallback.EVENT.invoker()
+                .interact(player, player.level(), interaction, target,
+                        new net.minecraft.world.phys.EntityHitResult(target, new net.minecraft.world.phys.Vec3(x, y, z))));
+        if (result[0] == net.minecraft.world.InteractionResult.PASS) {
+            fire(target, "Player.interactOn", () -> result[0] = player.interactOn(target, interaction, at));
+        }
         HorizonServer.afterCall();
         if (!result[0].consumesAction()) return 0;
         return result[0] instanceof net.minecraft.world.InteractionResult.Success success && success.shouldSwing() ? 2 : 1;

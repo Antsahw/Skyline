@@ -596,6 +596,46 @@ public final class HorizonServer {
         HorizonServer.seed = seed;
     }
 
+    /**
+     * Horizon's game rules into the mirror's (the server's, which every mirrored level reads)
+     * and its difficulty: "id=value;...;difficulty=n" as Horizon has them. Set without the server (no
+     * onGameRuleChanged: that would send them back to Horizon).
+     */
+    public static void gameRules(String rules) {
+        if (server == null || rules == null) return;
+        var gameRules = server.getGameRules();
+        for (String pair : rules.split(";")) {
+            int eq = pair.indexOf('=');
+            if (eq <= 0) continue;
+            try {
+                if (pair.startsWith("difficulty=")) {
+                    var difficulty = net.minecraft.world.Difficulty.byId(Integer.parseInt(pair.substring(eq + 1)));
+                    if (server.getWorldData().getDifficulty() != difficulty) server.getWorldData().setDifficulty(difficulty);
+                    continue;
+                }
+                var rule = net.minecraft.core.registries.BuiltInRegistries.GAME_RULE
+                        .getValue(Identifier.parse(pair.substring(0, eq)));
+                if (rule != null) setRule(gameRules, rule, pair.substring(eq + 1));
+            } catch (Throwable t) {
+                Natives.log("Java mods: game rule " + pair + " not set: " + t);
+            }
+        }
+        RULES_SEEN = true;
+    }
+
+    /** Whether Horizon's rules were passed once (the first pass sets them all, quietly). */
+    private static boolean RULES_SEEN;
+
+    private static <T> void setRule(net.minecraft.world.level.gamerules.GameRules rules,
+                                    net.minecraft.world.level.gamerules.GameRule<T> rule, String value) {
+        rule.deserialize(value).result().ifPresent(v -> {
+            if (v.equals(rules.get(rule))) return;
+            boolean first = !RULES_SEEN;
+            rules.set(rule, v, null);
+            if (!first) Natives.log("Java mods: game rule " + rule.id() + " is " + value);
+        });
+    }
+
     /** Horizon's world seed (ServerLevel.getSeed on a mirrored level), from its first tick. */
     private static volatile long seed;
 
@@ -1114,6 +1154,9 @@ public final class HorizonServer {
         // MinecraftServer.tickServer's head (Fabric's START_SERVER_TICK is its own injection there).
         Object[] haveTime = {(java.util.function.BooleanSupplier) () -> true};
         hook(server, MinecraftServer.class, "tickServer", TICK_SERVER, "HEAD", haveTime);
+        // Players' age in ticks (Entity.tick's tickCount++, which mirrored players don't run):
+        // mods time their actions by it (Carry On won't pick up on the tick it last acted).
+        for (ServerPlayer p : BY_UUID.values()) p.tickCount++;
         fireEach("ServerTickEvents.START_SERVER_TICK", ServerTickEvents.START_SERVER_TICK, l -> l.onStartTick(server));
         for (ServerLevel level : new ArrayList<>(LEVELS.values())) {
             fireEach("ServerTickEvents.START_LEVEL_TICK", ServerTickEvents.START_LEVEL_TICK, l -> l.onStartTick(level));

@@ -50,19 +50,28 @@ public final class HorizonSpawner {
         }
         for (ServerLevel level : HorizonServer.levels()) {
             biomes(level);
+            // Generation's creatures come with the chunk whatever spawn_mobs says (vanilla's do).
             generated(level);
-            if (level.players().isEmpty()) continue;
             boolean mobs;
             try {
                 mobs = level.getGameRules().get(net.minecraft.world.level.gamerules.GameRules.SPAWN_MOBS);
             } catch (Throwable t) {
                 mobs = true;
             }
-            if (!mobs) continue;
+            if (level.players().isEmpty() || !mobs) continue;
             for (ServerPlayer player : List.copyOf(level.players())) {
                 if (player.isSpectator()) continue;
+                // NaturalSpawner's spawnEnemies: monsters only off peaceful, with spawn_monsters.
+                boolean enemies;
+                try {
+                    enemies = level.getDifficulty() != net.minecraft.world.Difficulty.PEACEFUL
+                            && level.getGameRules().get(net.minecraft.world.level.gamerules.GameRules.SPAWN_MONSTERS);
+                } catch (Throwable t) {
+                    enemies = true;
+                }
                 for (MobCategory category : MobCategory.values()) {
                     if (category == MobCategory.MISC) continue;
+                    if (category == MobCategory.MONSTER && !enemies) continue;
                     if (category.isPersistent() && ticks % 400 != 0) continue;
                     try {
                         for (int i = category.isPersistent() ? 48 : 6; i > 0; i--) {
