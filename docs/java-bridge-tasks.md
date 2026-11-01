@@ -68,3 +68,23 @@ Never write as the user; mark what you post (CLAUDE.md). Never run mod jars the 
 ## Reports
 
 (Newest last. One short entry per task: area, task, branch, works / doesn't / how to test.)
+
+- **pack 1, memory** (`bridge-pack-5`, 74191149b; Claude for iaxivers). Works: where the
+  memory goes is measured per load stage (`HORIZON_MEM_LOG=1`; table in java-bridge.md,
+  "Where the memory goes"); `level::Behaviours`' parse of `gameplay-facts.json` no longer
+  peaks at 3.4 GB (208k states: 453 MB; GeneratorData's load 3.95 → 0.73 GB); loot tables are
+  read on use (577k pack: −270 MB); the heap is trimmed after the big loads. Doesn't: the
+  577k-state pack still doesn't fit this 8 GB sandbox: the world opens at 5.2 GB (1 GB of it
+  llvmpipe's textures) and the JVM's start passes the limit. Biggest left: baked models
+  (+665 MB), block facts (+512 MB, the behaviour JSON kept until the world rest), `BlockState`
+  (~1 KB a state). Test: `HORIZON_MEM_LOG=1` with any pack, read `memory after` in the log;
+  `cargo run --profile fast -p horizon-world --example state_memory_probe -- <content root>`.
+- **pack 2, errors** (`bridge-pack-5`, 6f5856370). Works: Lithostitched's noise router
+  modifiers apply (its setup error is gone), Cardinal Components' scoreboard client tick,
+  Enderscape's vehicle hearts; Puzzles Lib's and Architectury's handleLogin on a player's own
+  connection (a small change in `HorizonClient.connection(player)`, client area); Skyblock
+  Infinite's first player no longer falls (joins wait for the load functions' first
+  schedules; regress `skyblock` failed on java-bridge cab3843). Doesn't: Xaero's world map's
+  frame hook (models, the Trinkets issue), Wunderlib's and Shulker Box Tooltip's receivers at
+  ClientPlayConnectionEvents.INIT, Compressed Blocks' settings screen. Test: `regress.py
+  --pack <137-jar pack> bigpack` and `--jars … skyblock oneblock pot hud rei` (all pass).
