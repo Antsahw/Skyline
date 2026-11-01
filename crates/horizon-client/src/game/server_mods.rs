@@ -1295,43 +1295,57 @@ mod run {
 
         /// Sends what the Java mods asked since the last call: system messages to a player or
         /// everyone. `host` is the hub when it is out of `self.lan`.
-        /// Each player's game is told once which keys Java mods bind (game/java_screen.rs's
-        /// KEYS), so it sends them while playing.
+        /// Each player's game is told which keys Java mods bind (game/java_screen.rs's KEYS),
+        /// so it sends them while playing; again when they change (mods that register theirs
+        /// once the client runs: JourneyMap's map key), read every 100 calls.
         #[cfg(feature = "java-mods")]
         fn send_java_keys(host: &mut LanHost) {
-            static KEYS: std::sync::OnceLock<Vec<i32>> = std::sync::OnceLock::new();
-            static TOLD: std::sync::Mutex<Option<std::collections::HashSet<u32>>> =
-                std::sync::Mutex::new(None);
-            let mut told = TOLD.lock().unwrap_or_else(|e| e.into_inner());
-            let told = told.get_or_insert_with(Default::default);
-            let new: Vec<u32> = host
+            #[derive(Default)]
+            struct Told {
+                keys: Option<Vec<i32>>,
+                calls: u32,
+                /// The players' games told the keys as they are, and those greeted at all.
+                told: std::collections::HashSet<u32>,
+                greeted: std::collections::HashSet<u32>,
+            }
+            static TOLD: std::sync::Mutex<Option<Told>> = std::sync::Mutex::new(None);
+            let mut state = TOLD.lock().unwrap_or_else(|e| e.into_inner());
+            let state = state.get_or_insert_with(Default::default);
+            let placed: Vec<u32> = host
                 .hub
                 .guests
                 .iter()
-                .filter(|g| g.placed && !told.contains(&g.conn))
+                .filter(|g| g.placed)
                 .map(|g| g.conn)
                 .collect();
-            if new.is_empty() {
+            if placed.is_empty() {
                 return;
             }
-            let keys = KEYS.get_or_init(|| {
-                horizon_jvm::events::bound_keys().unwrap_or_else(|e| {
+            state.calls = state.calls.wrapping_add(1);
+            if state.keys.is_none() || state.calls % 100 == 0 {
+                let keys = horizon_jvm::events::bound_keys().unwrap_or_else(|e| {
                     log::warn!("Java mods: their key bindings can't be read: {e}");
                     Vec::new()
-                })
-            });
-            for conn in new {
-                told.insert(conn);
-                // The inventory overlay is there (REI's item list): its first, empty, frame.
-                Self::send_java_overlay_frame(host, conn, "[]");
-                if keys.is_empty() {
+                });
+                if state.keys.as_ref() != Some(&keys) {
+                    state.keys = Some(keys);
+                    state.told.clear();
+                }
+            }
+            let keys = state.keys.clone().unwrap_or_default();
+            for conn in placed {
+                if state.greeted.insert(conn) {
+                    // The inventory overlay is there (REI's item list): its first, empty, frame.
+                    Self::send_java_overlay_frame(host, conn, "[]");
+                }
+                if !state.told.insert(conn) || keys.is_empty() {
                     continue;
                 }
                 host.hub.send_to(
                     conn,
                     &C::CustomPayload(horizon_protocol::packets::configuration::CustomPayload {
                         channel: super::super::java_screen::KEYS.into(),
-                        data: serde_json::to_vec(keys).unwrap_or_default(),
+                        data: serde_json::to_vec(&keys).unwrap_or_default(),
                     }),
                 );
             }

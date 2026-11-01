@@ -14,6 +14,10 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 /** The headless client's texture manager: named views (HorizonTextures), nothing uploaded. */
 @Mixin(TextureManager.class)
 public abstract class TextureManagerMixin {
+    /** Vanilla's map of registered textures, which mods read (JourneyMap's getTex accessor). */
+    @org.spongepowered.asm.mixin.Shadow @org.spongepowered.asm.mixin.Final
+    private java.util.Map<Identifier, AbstractTexture> byPath;
+
     @Inject(method = "getTexture", at = @At("HEAD"), cancellable = true)
     private void horizon$texture(Identifier id, CallbackInfoReturnable<AbstractTexture> cir) {
         if (HorizonClient.headless()) cir.setReturnValue(HorizonTextures.get(id));
@@ -25,6 +29,7 @@ public abstract class TextureManagerMixin {
         if (!HorizonClient.headless()) return;
         ci.cancel();
         HorizonTextures.register(id, texture);
+        if (byPath != null) byPath.put(id, texture);
     }
 
     @Inject(method = "release", at = @At("HEAD"), cancellable = true)
@@ -32,5 +37,6 @@ public abstract class TextureManagerMixin {
         if (!HorizonClient.headless()) return;
         ci.cancel();
         HorizonTextures.release(id);
+        if (byPath != null) byPath.remove(id);
     }
 }

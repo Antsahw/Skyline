@@ -118,7 +118,7 @@ public abstract class LevelMixin {
         if (!HorizonServer.isMirror(this) || (Object) this instanceof net.minecraft.server.level.ServerLevel) return;
         var server = HorizonServer.serverSide((Level) (Object) this);
         if (server instanceof net.minecraft.server.level.ServerLevel level) {
-            net.minecraft.world.level.chunk.ChunkAccess chunk = dev.horizonlab.platform.HorizonChunks.chunk(level, x, z);
+            net.minecraft.world.level.chunk.ChunkAccess chunk = dev.horizonlab.platform.HorizonChunks.chunk(level, x, z, (Level) (Object) this);
             // Where Horizon has none loaded, an empty chunk (a client's view beyond its chunks).
             if (chunk == null && load) {
                 Level self = (Level) (Object) this;

@@ -28,12 +28,15 @@ public abstract class CameraMixin {
     private void horizon$position(CallbackInfoReturnable<Vec3> cir) {
         Entity player = horizon$player();
         if (player != null) cir.setReturnValue(player.getEyePosition());
+        // With no player (the title screen): at the origin, never null (JourneyMap's MapRenderer).
+        else if (HorizonClient.headless()) cir.setReturnValue(Vec3.ZERO);
     }
 
     @Inject(method = "blockPosition", at = @At("HEAD"), cancellable = true)
     private void horizon$blockPosition(CallbackInfoReturnable<BlockPos> cir) {
         Entity player = horizon$player();
         if (player != null) cir.setReturnValue(BlockPos.containing(player.getEyePosition()));
+        else if (HorizonClient.headless()) cir.setReturnValue(BlockPos.ZERO);
     }
 
     @Inject(method = "entity", at = @At("HEAD"), cancellable = true)

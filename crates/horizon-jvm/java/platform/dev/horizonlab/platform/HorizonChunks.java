@@ -28,19 +28,29 @@ import net.minecraft.world.level.levelgen.Heightmap;
 public final class HorizonChunks {
     private HorizonChunks() {}
 
-    private static final Map<ServerLevel, Map<Long, LevelChunk>> COPIES = new IdentityHashMap<>();
+    private static final Map<net.minecraft.world.level.Level, Map<Long, LevelChunk>> COPIES = new IdentityHashMap<>();
     private static long epoch = Long.MIN_VALUE;
 
     /** Horizon's chunk cx cz of a mirrored level as a LevelChunk; null where none is loaded. */
     public static LevelChunk chunk(ServerLevel level, int cx, int cz) {
+        return chunk(level, cx, cz, level);
+    }
+
+    /**
+     * The same, as a chunk of {@code view} (a headless client's level of {@code level}): its
+     * getLevel() is the client's, as a client's chunks are (JourneyMap maps only chunks of the
+     * player's level). Its blocks are Horizon's.
+     */
+    public static LevelChunk chunk(ServerLevel level, int cx, int cz, net.minecraft.world.level.Level view) {
         if (level.palettedContainerFactory() == null) return null;
         synchronized (COPIES) {
+            if (view != level) return held(level, view, cx, cz);
             long now = Natives.viewEpoch();
             if (now != epoch) {
                 COPIES.clear();
                 epoch = now;
             }
-            Map<Long, LevelChunk> copies = COPIES.computeIfAbsent(level, l -> new HashMap<>());
+            Map<Long, LevelChunk> copies = COPIES.computeIfAbsent(view, l -> new HashMap<>());
             long key = ChunkPos.pack(cx, cz);
             LevelChunk copy = copies.get(key);
             if (copy == null && !copies.containsKey(key)) {
@@ -84,19 +94,73 @@ public final class HorizonChunks {
             }
             return had.copy();
         }
-        LevelChunk copy = copy(level, cx, cz);
+        LevelChunk copy = copy(level, level, cx, cz);
         if (copy instanceof Copy c && revision >= 0) kept.put(key, new Kept(revision, c));
         return copy;
+    }
+
+    /**
+     * A client's chunks are kept, as a client keeps the chunks it was sent: mods hold them by
+     * weak references between frames (JourneyMap's ChunkMD) and read them on their own threads,
+     * where Horizon's world can't be read (no view: Natives.chunkRevision -1). One is made, and
+     * filled, on a thread that can read it, and made again when Horizon's chunk changes (its
+     * revision). One asked for where none was made is wanted: the client's tick makes it
+     * (serveWanted).
+     */
+    private static final Map<net.minecraft.world.level.Level, Map<Long, Object[]>> HELD = new java.util.WeakHashMap<>();
+    private static final Map<net.minecraft.world.level.Level, java.util.Set<Long>> WANTED = new java.util.WeakHashMap<>();
+
+    private static LevelChunk held(ServerLevel level, net.minecraft.world.level.Level view, int cx, int cz) {
+        Map<Long, Object[]> chunks = HELD.computeIfAbsent(view, l -> new HashMap<>());
+        if (chunks.size() > 8192) chunks.clear();
+        long key = ChunkPos.pack(cx, cz);
+        Object[] held = chunks.get(key);
+        long revision = Natives.chunkRevision(level.dimension().identifier().toString(), cx, cz);
+        if (revision == -1) {
+            if (held != null) return (LevelChunk) held[0];
+            WANTED.computeIfAbsent(view, l -> new java.util.LinkedHashSet<>()).add(key);
+            return null;
+        }
+        if (held != null && revision >= 0 && (long) held[1] == revision) return (LevelChunk) held[0];
+        if (revision == -2) {
+            chunks.remove(key);
+            return null;
+        }
+        LevelChunk copy = copy(level, view, cx, cz);
+        if (copy instanceof Copy c) c.ensure();
+        if (copy != null) chunks.put(key, new Object[] {copy, revision});
+        return copy;
+    }
+
+    /** Makes up to {@code most} of the chunks of client levels mods asked for off the game's threads. */
+    public static void serveWanted(int most) {
+        java.util.List<Object[]> todo = new java.util.ArrayList<>();
+        synchronized (COPIES) {
+            for (var entry : WANTED.entrySet()) {
+                var it = entry.getValue().iterator();
+                while (it.hasNext() && todo.size() < most) {
+                    todo.add(new Object[] {entry.getKey(), it.next()});
+                    it.remove();
+                }
+            }
+        }
+        for (Object[] want : todo) {
+            var view = (net.minecraft.world.level.Level) want[0];
+            long key = (long) want[1];
+            if (HorizonServer.serverSide(view) instanceof ServerLevel server) {
+                chunk(server, ChunkPos.getX(key), ChunkPos.getZ(key), view);
+            }
+        }
     }
 
     /** A block a call set on a mirrored level: the copy of its chunk (if made) follows. */
     static void set(ServerLevel level, BlockPos pos, BlockState state) {
         synchronized (COPIES) {
+            long key = ChunkPos.pack(pos.getX() >> 4, pos.getZ() >> 4);
             if (Natives.viewEpoch() != epoch) return;
-            Map<Long, LevelChunk> copies = COPIES.get(level);
-            if (copies == null) return;
-            LevelChunk copy = copies.get(ChunkPos.pack(pos.getX() >> 4, pos.getZ() >> 4));
-            if (copy instanceof Copy c) c.follow(pos, state);
+            for (var copies : COPIES.values()) {
+                if (copies.get(key) instanceof Copy c && c.server == level) c.follow(pos, state);
+            }
         }
     }
 
@@ -106,13 +170,13 @@ public final class HorizonChunks {
      * sections at a time). Mobs ask for their chunk every tick (their fluids, their paths, their
      * shadows) and only read a few blocks of it; a full copy is 98k blocks.
      */
-    private static LevelChunk copy(ServerLevel level, int cx, int cz) {
+    private static LevelChunk copy(ServerLevel level, net.minecraft.world.level.Level view, int cx, int cz) {
         if (!HorizonServer.loaded(level, cx << 4, level.getMinY(), cz << 4)) return null;
-        return new Copy(level, new ChunkPos(cx, cz));
+        return new Copy(level, view, new ChunkPos(cx, cz));
     }
 
     private static void fill(Copy chunk) {
-        ServerLevel level = (ServerLevel) chunk.getLevel();
+        ServerLevel level = chunk.server;
         int cx = chunk.getPos().x(), cz = chunk.getPos().z();
         String dimension = level.dimension().identifier().toString();
         int minY = level.getMinY();
@@ -174,9 +238,12 @@ public final class HorizonChunks {
          * constructor made, not a fill (which a copy for one block read doesn't need).
          */
         private final boolean made;
+        /** The level whose chunk this is (Horizon's); getLevel() may be a client's view of it. */
+        final ServerLevel server;
 
-        Copy(ServerLevel level, ChunkPos pos) {
-            super(level, pos);
+        Copy(ServerLevel level, net.minecraft.world.level.Level view, ChunkPos pos) {
+            super(view, pos);
+            this.server = level;
             made = true;
         }
 
@@ -202,19 +269,19 @@ public final class HorizonChunks {
         @Override
         public BlockState getBlockState(BlockPos pos) {
             if (filled) return super.getBlockState(pos);
-            return HorizonServer.blockState(getLevel(), pos);
+            return HorizonServer.blockState(server, pos);
         }
 
         @Override
         public net.minecraft.world.level.material.FluidState getFluidState(BlockPos pos) {
             if (filled) return super.getFluidState(pos);
-            return HorizonServer.blockState(getLevel(), pos).getFluidState();
+            return HorizonServer.blockState(server, pos).getFluidState();
         }
 
         @Override
         public net.minecraft.world.level.material.FluidState getFluidState(int x, int y, int z) {
             if (filled) return super.getFluidState(x, y, z);
-            return HorizonServer.blockState(getLevel(), new BlockPos(x, y, z)).getFluidState();
+            return HorizonServer.blockState(server, new BlockPos(x, y, z)).getFluidState();
         }
 
         @Override
@@ -269,7 +336,7 @@ public final class HorizonChunks {
         @Override
         public BlockState setBlockState(BlockPos pos, BlockState state, int flags) {
             BlockState old = getBlockState(pos);
-            getLevel().setBlock(pos, state, flags);
+            server.setBlock(pos, state, flags);
             return old == state ? null : old;
         }
     }

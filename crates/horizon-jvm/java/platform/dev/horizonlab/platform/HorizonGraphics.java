@@ -28,6 +28,15 @@ public final class HorizonGraphics extends GuiGraphicsExtractor {
     private HorizonGraphics(int width, int height, Capture state) {
         super(HorizonClient.minecraft(), state, width, height);
         state.owner = this;
+        // The game's GUI render state is this frame's too: mods add to it directly
+        // (Xaero's World Map: gameRenderer.gameRenderState().guiRenderState, its map's blit).
+        try {
+            var game = HorizonClient.minecraft().gameRenderer;
+            var renderState = game == null ? null : game.gameRenderState();
+            if (renderState != null) HorizonClient.set(net.minecraft.client.renderer.state.GameRenderState.class, renderState, "guiRenderState", state);
+        } catch (Throwable t) {
+            // No game render state: nothing reads it.
+        }
     }
 
     /**
@@ -260,13 +269,13 @@ public final class HorizonGraphics extends GuiGraphicsExtractor {
     private static long debugImages;
 
     /** HORIZON_JAVA_DEBUG=gpu: a GPU texture blitted is saved as /tmp/horizon-gpu-N.png now and then. */
-    private static void debugImage(String name, HorizonGpu.View view, byte[] rgba) {
+    private static void debugImage(String name, int w, int h, byte[] rgba) {
         if (rgba == null) {
             Natives.log("gpu: " + name + " has no pixels");
             return;
         }
         if (debugImages++ % 100 != 0) return;
-        int w = view.getWidth(0), h = view.getHeight(0), opaque = 0;
+        int opaque = 0;
         var image = new java.awt.image.BufferedImage(w, h, java.awt.image.BufferedImage.TYPE_INT_ARGB);
         for (int y = 0; y < h; y++) {
             for (int x = 0; x < w; x++) {
@@ -349,8 +358,21 @@ public final class HorizonGraphics extends GuiGraphicsExtractor {
         if (DEBUG_GPU) Natives.log("gpu: a blit of " + name + " " + view.getWidth(0) + "x" + view.getHeight(0) + " at " + x0 + "," + y0 + " " + x1 + "," + y1
                 + " uv " + u0 + "," + v0 + " " + u1 + "," + v1 + (modsOnly && !drawnByModNow() ? " (not a mod's)" : ""));
         if (read && imagesSent != null && (!modsOnly || drawnByModNow())) {
-            byte[] rgba = HorizonGpu.pixels(view);
-            if (DEBUG_GPU) debugImage(name, view, rgba);
+            // A big target (a full-screen map: the window's size) is read at most PIP_INTERVAL
+            // apart for each receiver, and sent shrunk to the window's largest image (512 px).
+            int w = view.getWidth(0), h = view.getHeight(0);
+            int shrink = Math.max(1, (Math.max(w, h) + MAX_IMAGE - 1) / MAX_IMAGE);
+            Object key = java.util.List.of(name, System.identityHashCode(imagesSent));
+            long now = System.nanoTime();
+            Long last = shrink > 1 ? BIG_LAST.get(key) : null;
+            byte[] rgba = last != null && now - last < PIP_INTERVAL ? null : HorizonGpu.pixels(view);
+            if (rgba != null && shrink > 1) {
+                BIG_LAST.put(key, now);
+                rgba = shrink(rgba, w, h, shrink);
+                w /= shrink;
+                h /= shrink;
+            }
+            if (DEBUG_GPU) debugImage(name, w, h, rgba);
             if (rgba != null) {
                 int version = java.util.Arrays.hashCode(rgba);
                 if (!Integer.valueOf(version).equals(imagesSent.get(name))) {
@@ -358,8 +380,8 @@ public final class HorizonGraphics extends GuiGraphicsExtractor {
                     var image = new JsonObject();
                     image.addProperty("op", "image");
                     image.addProperty("name", name);
-                    image.addProperty("width", view.getWidth(0));
-                    image.addProperty("height", view.getHeight(0));
+                    image.addProperty("width", w);
+                    image.addProperty("height", h);
                     image.addProperty("rgba", java.util.Base64.getEncoder().encodeToString(rgba));
                     ops.add(image);
                 }
@@ -382,6 +404,38 @@ public final class HorizonGraphics extends GuiGraphicsExtractor {
         } finally {
             pose().popMatrix();
         }
+    }
+
+    /** The largest image the window takes (its big image slots), in pixels on a side. */
+    private static final int MAX_IMAGE = 512;
+    private static final java.util.Map<Object, Long> BIG_LAST = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** RGBA rows {@code w} x {@code h}, each {@code k} x {@code k} block averaged into one pixel. */
+    static byte[] shrink(byte[] rgba, int w, int h, int k) {
+        int nw = w / k, nh = h / k;
+        byte[] out = new byte[nw * nh * 4];
+        int n = k * k;
+        for (int y = 0; y < nh; y++) {
+            for (int x = 0; x < nw; x++) {
+                int r = 0, g = 0, b = 0, a = 0;
+                for (int dy = 0; dy < k; dy++) {
+                    int row = ((y * k + dy) * w + x * k) * 4;
+                    for (int dx = 0; dx < k; dx++) {
+                        int p = row + dx * 4;
+                        r += rgba[p] & 255;
+                        g += rgba[p + 1] & 255;
+                        b += rgba[p + 2] & 255;
+                        a += rgba[p + 3] & 255;
+                    }
+                }
+                int o = (y * nw + x) * 4;
+                out[o] = (byte) (r / n);
+                out[o + 1] = (byte) (g / n);
+                out[o + 2] = (byte) (b / n);
+                out[o + 3] = (byte) (a / n);
+            }
+        }
+        return out;
     }
 
     /** A captured piece of a sprite (already posed): a blit of its texture's part, tinted. */

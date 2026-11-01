@@ -132,6 +132,10 @@ public final class HorizonGpu implements GpuDeviceBackend {
         /** A texture atlas's (atlas). */
         boolean atlas;
         private boolean closed;
+        /** A render pass drew into it (a picture, a map): not an atlas, which is written. */
+        volatile boolean rendered;
+        /** Pixels were written into it from memory (a mod's image), or it is an atlas. */
+        volatile boolean written;
 
         Texture(long id, int usage, String label, GpuFormat format, int width, int height, int layers, int mips) {
             super(usage, label, format, width, height, layers, mips);
@@ -257,6 +261,11 @@ public final class HorizonGpu implements GpuDeviceBackend {
         var texture = new Texture(id, usage, label, format, width, height, layers, mips);
         texture.atlas = ATLAS_CALLER.walk(frames -> frames.limit(8)
                 .anyMatch(f -> f.getDeclaringClass() == net.minecraft.client.renderer.texture.TextureAtlas.class));
+        // An atlas (TextureAtlas.upload draws its sprites into it with passes): never a
+        // picture of its own.
+        texture.written = StackWalker.getInstance().walk(frames -> frames.limit(24)
+                .anyMatch(f -> f.getClassName().startsWith("net.minecraft.client.renderer.texture.")
+                        && f.getClassName().contains("Atlas")));
         return texture;
     }
 
@@ -598,6 +607,7 @@ public final class HorizonGpu implements GpuDeviceBackend {
                 var a = colors.get(i);
                 if (a == null) continue;
                 views[i] = view(a.textureView());
+                if (a.textureView().texture() instanceof Texture t) t.rendered = true;
                 if (a.clearValue().isPresent()) {
                     Vector4fc c = a.clearValue().get();
                     clears[i * 4] = c.x();
@@ -659,6 +669,7 @@ public final class HorizonGpu implements GpuDeviceBackend {
 
         @Override
         public void writeToTexture(GpuTexture texture, ByteBuffer data, int mip, int layer, int x, int y, int width, int height) {
+            if (texture instanceof Texture t) t.written = true;
             ByteBuffer direct = data;
             boolean copied = false;
             int expand = texture.getFormat().componentCount() == 3 && texture.getFormat().componentType().byteSize() == 1 ? 1 : 0;
@@ -678,6 +689,7 @@ public final class HorizonGpu implements GpuDeviceBackend {
         @Override
         public void copyBufferToTexture(GpuBufferSlice source, int sx, int sy, int sw, int sh, GpuTexture texture,
                                         int dx, int dy, int width, int height, int mip, int layer) {
+            if (texture instanceof Texture t) t.written = true;
             int block = texture.getFormat().blockSize();
             long start = source.offset() + ((long) sy * sw + sx) * block;
             long length = ((long) (height - 1) * sw + width) * block;
@@ -875,12 +887,12 @@ public final class HorizonGpu implements GpuDeviceBackend {
     }
 
     /**
-     * Whether a view is of a texture drawn into (a render target: a picture in picture), the
-     * kind the HUD sends as an image; an atlas isn't (screens' sprites are Horizon's).
+     * Whether a view is of a texture a render pass drew into (a picture in picture, a map's
+     * target), the kind the HUD sends as an image; an atlas isn't (its sprites are written from
+     * memory, and screens' sprites are Horizon's), though passes draw into it too (mips).
      */
     static boolean drawnInto(GpuTextureView view) {
-        var t = view.texture();
-        return t != null && (t.usage() & GpuTexture.USAGE_RENDER_ATTACHMENT) != 0 && t.getWidth(0) <= 1024 && t.getHeight(0) <= 1024;
+        return view.texture() instanceof Texture t && t.rendered && !t.written;
     }
 
     /**
