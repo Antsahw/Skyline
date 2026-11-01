@@ -712,6 +712,17 @@ gets SPIR-V, vertex layouts and uniform lists.
   (`HorizonClient.connection(player)`): each needs the shared one's client, network
   connection and a scoreboard (Cardinal Components' client tick, Puzzles Lib's and
   Architectury's handleLogin).
+- A Java mod can register its blocks under namespaces other than its id (BuildCraft's
+  modules: `buildcraftenergy`, `buildcraftbuilders`...): the content mod declares them under
+  each namespace it owns (`data/<ns>/horizon/block/`, the namespace in the manifest's
+  `namespaces`), and the port pipeline gives a jar the oracle's facts when its ids are under
+  any of them (it looked at the mod id only: every BuildCraft block was unknown).
+- The headless client's level reads the server's block entities, so a client handler can
+  change the server's state and make it send the same message again (Large Fluid Tank's
+  content message): `HorizonLoop.flush` delivers only what was queued when it started (it
+  drained until empty: the server thread never left it).
+- Mixin configs with a trailing comma in a list read as a null entry (lenient Gson):
+  skip it, or the whole config is lost to the census (Simple Pocket Machines').
 - The load functions can schedule what a first player needs (Skyblock Infinite places its
   island 2 s after load, `schedule function … 2s`): the first player also waits until the
   events queued when they finished, due within 10 s, have run (`HorizonFunctions.settle`).

@@ -88,3 +88,18 @@ Never write as the user; mark what you post (CLAUDE.md). Never run mod jars the 
   frame hook (models, the Trinkets issue), Wunderlib's and Shulker Box Tooltip's receivers at
   ClientPlayConnectionEvents.INIT, Compressed Blocks' settings screen. Test: `regress.py
   --pack <137-jar pack> bigpack` and `--jars … skyblock oneblock pot hud rei` (all pass).
+- **pack 3, SkyFactory direction** (`bridge-pack-5`, ed553348c). Works (17 tech and
+  automation mods, alone: 48k states): BuildCraft (its module blocks: content mods declare
+  under every namespace they own), Equivalent Exchange 26's transmutation table, GrowableOres,
+  RFTools Power, Tesseract, Wireless Chargers, Large Fluid Tank (a client-to-server sync loop
+  hung the server thread: fixed in `HorizonLoop.flush`), Logistics, Additional Enchanted Miner,
+  Experience Bottler, Discerning Furnace, Conveyors & Automation, Simple Pocket Machines (its
+  mixin config's trailing comma), Idle Generators, Copper Rails, Red Bits, TC Wireless
+  Redstone. Left out: Croparium (its 26.3 build is a broken beta), Agritech (BOP recipes for
+  items this BOP lacks, no conditions: fails on Fabric too), PolyFactory (99k states: past
+  this sandbox with the rest). Doesn't: the 156-jar pack with them (245k states) runs out of
+  memory here once Java starts; BuildCraft's FineRichesTracker server tick NPE; BuildCraft's
+  model reload listener ("Invalid atlas id: minecraft:blocks"); several mods' settings screens
+  on the Mods page (`getProvidedConfigScreenFactories`: client area). Test: `regress.py --jars
+  … tech` (BuildCraft, Large Fluid Tank, Scalable Cat's Force jars), or the tech mods in
+  `~/hz-test/mods-java`: `/setblock ~2 ~ ~ buildcraftbuilders:quarry`.
