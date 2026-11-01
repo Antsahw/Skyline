@@ -715,12 +715,17 @@ impl Streaming {
         let mut queue = self.shared.queue.lock().unwrap();
         rank_again(&mut queue, |x, z| self.distance(x, z));
     }
-    fn receive_decorated(&mut self, x: i32, z: i32, region: [Proto; 9]) {
+    fn receive_decorated(&mut self, x: i32, z: i32, region: [Proto; 9], world: &World) {
         self.generation_scan.exhausted = false;
         self.decorating -= 1;
         self.decorated.insert((x, z));
         for (i, proto) in region.into_iter().enumerate() {
             let key = (x + (i % 3) as i32 - 1, z + (i / 3) as i32 - 1);
+            // A column that is in the world meanwhile keeps the world's blocks: its proto
+            // would later be finished or saved over them.
+            if world.chunks.contains_key(&key) {
+                continue;
+            }
             self.protos.insert(key, Some(proto));
             self.written.insert(key);
         }
@@ -753,6 +758,17 @@ impl Streaming {
         self.generating.remove(&key);
         self.finishing.remove(&key);
         self.decorated.insert(key);
+        // A column already in the world is the world's: the player or the game may have
+        // changed it since (a block placed), and a finished proto landing on it would undo
+        // that. It stays; this one goes.
+        if world.chunks.contains_key(&key) {
+            log::warn!(
+                "Horizon: column {} {} generated again while loaded; the loaded one stays",
+                key.0,
+                key.1
+            );
+            return;
+        }
         // A column that finished after the player moved away is dropped
         // whole: its block entities and saved entities too, or they would
         // stay in the world (and the entities spawn again, duplicated, when
@@ -977,7 +993,7 @@ impl Streaming {
                         }
                     }
                 }
-                Done::Decorated(x, z, region) => self.receive_decorated(x, z, *region),
+                Done::Decorated(x, z, region) => self.receive_decorated(x, z, *region, world),
                 Done::Generated(chunk) => self.receive_generated(chunk, world),
                 Done::Saved(protos) => self.receive_saved(protos),
                 Done::Lit(x, z, sections, seq) => {
@@ -1090,6 +1106,12 @@ impl Streaming {
             // `ChunkGenerator::save_protos`), and dropped once back.
             let mut written = Vec::new();
             for key in far {
+                // Never a proto over a column the world has (its save is the column's).
+                if world.chunks.contains_key(&key) {
+                    self.written.remove(&key);
+                    self.protos.remove(&key);
+                    continue;
+                }
                 if self.written.remove(&key) {
                     written.push(key);
                 } else {
@@ -1507,7 +1529,7 @@ impl Streaming {
         while self.decorating > 0 || !self.finishing.is_empty() || self.saving > 0 {
             let left = deadline.saturating_duration_since(std::time::Instant::now());
             match self.results.recv_timeout(left) {
-                Ok(Done::Decorated(x, z, region)) => self.receive_decorated(x, z, *region),
+                Ok(Done::Decorated(x, z, region)) => self.receive_decorated(x, z, *region, world),
                 Ok(Done::Generated(chunk)) => self.receive_generated(chunk, world),
                 Ok(Done::Saved(protos)) => self.receive_saved(protos),
                 Ok(other) => self.deferred.push(other),
@@ -1535,7 +1557,7 @@ impl Streaming {
         let started = std::time::Instant::now();
         while let Ok(done) = self.results.try_recv() {
             match done {
-                Done::Decorated(x, z, region) => self.receive_decorated(x, z, *region),
+                Done::Decorated(x, z, region) => self.receive_decorated(x, z, *region, world),
                 Done::Generated(chunk) => self.receive_generated(chunk, world),
                 Done::Saved(protos) => self.receive_saved(protos),
                 other => self.deferred.push(other),

@@ -25,8 +25,8 @@ pub(super) struct JavaTerrain {
     world: std::path::PathBuf,
     /// Whether the mods generate this dimension, asked once (the first chunk waits for Java).
     modded: Arc<OnceLock<bool>>,
-    /// Whether that generator is a mod's own (One Block's, Grid World's): Horizon's noise
-    /// says nothing of its land, so far terrain stays empty.
+    /// Whether that generator is a mod's own and not on the noise (One Block's): Horizon's
+    /// noise says nothing of its land, so far terrain is the generator's base columns.
     custom: Arc<OnceLock<bool>>,
     /// Whether Horizon's noise fills the Java protos (asked once the mods generate it).
     horizon_noise: OnceLock<bool>,
@@ -122,7 +122,10 @@ impl JavaTerrain {
                 let origin = horizon_jvm::events::worldgen_origin(&self.dimension)
                     .ok()
                     .flatten();
-                self.custom.get_or_init(|| origin.is_some_and(|o| o.custom));
+                // A generator of the mod's own, not on the noise (One Block's void): far
+                // terrain from its columns; on the noise (Grid World's), Horizon's land.
+                self.custom
+                    .get_or_init(|| origin.is_some_and(|o| o.custom && !o.noise));
                 // /locate biome and maps of places not generated yet ask the mods too, and
                 // the spawn comes from their generator's origin.
                 self.inner.set_biome_oracle(Arc::new(JavaBiomes {
@@ -205,6 +208,8 @@ impl ChunkGenerator for JavaTerrain {
             inner: self.inner.clone().lod_sampler(),
             modded: self.modded.clone(),
             custom: self.custom.clone(),
+            registry: self.registry,
+            materials: Arc::new(OnceLock::new()),
             oracle: JavaBiomes {
                 dimension: self.dimension.clone(),
                 biomes: self.biomes.clone(),
@@ -493,12 +498,17 @@ impl horizon_client::vanillagen::BiomeOracle for JavaBiomes {
     }
 }
 
-/// Far terrain of a dimension the mods may generate: Horizon's columns, with each column's
-/// biome (its colours) the mods' at its surface once they generate it.
+/// Far terrain of a dimension the mods may generate: Horizon's columns (its noise is the
+/// mods' land) with each column's biome (its colours) and top block the mods' once they
+/// generate it; a mod's own generator's base columns when it isn't on the noise.
 struct JavaLod {
     inner: Box<dyn LodSampler>,
     modded: Arc<OnceLock<bool>>,
     custom: Arc<OnceLock<bool>>,
+    registry: &'static BlockRegistry,
+    /// What the land is made of ([`JavaLod::materials`]), shared by the samplers.
+    materials:
+        Arc<OnceLock<Option<std::collections::HashSet<horizon_world::registry::BlockStateId>>>>,
     oracle: JavaBiomes,
 }
 
@@ -507,10 +517,170 @@ impl JavaLod {
         self.modded.get() == Some(&true)
     }
 
-    /// A mod's own generator makes the dimension (a void with one block, a grid): Horizon's
-    /// columns would show land that isn't there.
+    /// A mod's own generator not on the noise makes the dimension (a void with one block):
+    /// Horizon's columns would show land that isn't there.
     fn custom(&self) -> bool {
         self.custom.get() == Some(&true)
+    }
+
+    /// The mod's generator's columns (ChunkGenerator.getBaseColumn) at `at`, with the mods'
+    /// biomes: runs of blocks, the top one the surface.
+    fn own_columns(&self, at: &[(i32, i32)]) -> Vec<horizon_client::lod::Column> {
+        let runs = {
+            let _timed = super::java_profile::Timed::named("worldgen far columns");
+            horizon_jvm::events::worldgen_lod_columns(&self.oracle.dimension, at)
+        };
+        let runs = runs.ok().flatten().unwrap_or_default();
+        let mut columns: Vec<horizon_client::lod::Column> = at
+            .iter()
+            .enumerate()
+            .map(|(i, _)| {
+                let mut column = horizon_client::lod::Column::default();
+                for (from, to, state) in runs.get(i).into_iter().flatten() {
+                    let Some(state) = parse_state(self.registry, state) else {
+                        continue;
+                    };
+                    column.spans.push(horizon_client::lod::Span {
+                        min: *from as i16,
+                        max: *to as i16,
+                        state,
+                        biome: 0,
+                        // Open sky, no block light.
+                        light: 0xf0,
+                    });
+                }
+                if let Some(top) = column.spans.last() {
+                    column.surface = Some(horizon_client::lod::Surface {
+                        height: i32::from(top.max),
+                        state: top.state,
+                        water: None,
+                        biome: 0,
+                    });
+                }
+                column
+            })
+            .collect();
+        let tops: Vec<[i32; 3]> = columns
+            .iter()
+            .zip(at)
+            .map(|(c, &(x, z))| [x, c.surface.map_or(64, |s| s.height - 1), z])
+            .collect();
+        if let Some(ids) = self.oracle.ids(&tops) {
+            for (column, id) in columns.iter_mut().zip(ids) {
+                if let Some(surface) = column.surface.as_mut() {
+                    surface.biome = id;
+                }
+                for span in &mut column.spans {
+                    span.biome = id;
+                }
+            }
+        }
+        columns
+    }
+
+    /// The blocks the land is made of (the surface rules' and the default block), asked once.
+    fn materials(
+        &self,
+    ) -> Option<&std::collections::HashSet<horizon_world::registry::BlockStateId>> {
+        self.materials
+            .get_or_init(|| {
+                let names = horizon_jvm::events::worldgen_lod_materials(&self.oracle.dimension)
+                    .ok()
+                    .flatten()?;
+                Some(
+                    names
+                        .iter()
+                        .filter_map(|n| parse_state(self.registry, n))
+                        .collect(),
+                )
+            })
+            .as_ref()
+    }
+
+    /// Each column's land top block as the mods' surface rules make it
+    /// (`HorizonWorldgen.lodTops`): Horizon's rules are vanilla's, the mods' biomes have their
+    /// own (BOP's). The land top is the highest run of a block the rules give (or stone):
+    /// trees, plants and water above it stay.
+    fn tops(&self, columns: &mut [&mut horizon_client::lod::Column], at: &[(i32, i32)]) {
+        let Some(materials) = self.materials() else {
+            return;
+        };
+        let mut asked = Vec::new();
+        let mut water = Vec::new();
+        let mut which = Vec::new();
+        for (i, (column, &(x, z))) in columns.iter().zip(at).enumerate() {
+            let Some(k) = column
+                .spans
+                .iter()
+                .rposition(|s| materials.contains(&s.state))
+            else {
+                continue;
+            };
+            // Vanilla's biomes have vanilla's rules: Horizon's own columns are those.
+            let biome = self.oracle.biomes.get(column.spans[k].biome);
+            if biome.name.starts_with("minecraft:") {
+                continue;
+            }
+            let top = i32::from(column.spans[k].max) - 1;
+            // Water right over the land: the height it reaches.
+            let mut over = i32::MIN;
+            if let Some(next) = column.spans.get(k + 1)
+                && next.min == column.spans[k].max
+                && let Some(surface) = column.surface
+                && let Some((height, _)) = surface.water
+                && height > top
+            {
+                over = height;
+            }
+            asked.push([x, top, z]);
+            water.push(over);
+            which.push((i, k));
+        }
+        if asked.is_empty() {
+            return;
+        }
+        let states = {
+            let _timed = super::java_profile::Timed::named("worldgen far tops");
+            horizon_jvm::events::worldgen_lod_tops(&self.oracle.dimension, &asked, &water)
+        };
+        let Some(states) = states.ok().flatten() else {
+            return;
+        };
+        for (((i, k), top), state) in which.into_iter().zip(asked).zip(states) {
+            let Some(state) = state.and_then(|s| parse_state(self.registry, &s)) else {
+                continue;
+            };
+            // Land stays land (a rule's water or air is for a column's shape, not its top).
+            if !materials.contains(&state) {
+                continue;
+            }
+            let column = &mut *columns[i];
+            let span = column.spans[k];
+            if span.state == state {
+                continue;
+            }
+            if let Some(surface) = column.surface.as_mut()
+                && surface.height == i32::from(span.max)
+            {
+                surface.state = state;
+            }
+            // The run's top block alone takes the new state.
+            let y = top[1] as i16;
+            if span.max - span.min == 1 {
+                column.spans[k].state = state;
+            } else {
+                column.spans[k].max = y;
+                column.spans.insert(
+                    k + 1,
+                    horizon_client::lod::Span {
+                        min: y,
+                        max: y + 1,
+                        state,
+                        ..span
+                    },
+                );
+            }
+        }
     }
 
     /// Sets each column's biome to the mods' at `(x, surface, z)`.
@@ -520,17 +690,17 @@ impl JavaLod {
             .zip(at)
             .map(|(c, &(x, z))| [x, c.surface.map_or(64, |s| s.height - 1), z])
             .collect();
-        let Some(ids) = self.oracle.ids(&blocks) else {
-            return;
-        };
-        for (column, id) in columns.iter_mut().zip(ids) {
-            if let Some(surface) = column.surface.as_mut() {
-                surface.biome = id;
-            }
-            for span in &mut column.spans {
-                span.biome = id;
+        if let Some(ids) = self.oracle.ids(&blocks) {
+            for (column, id) in columns.iter_mut().zip(ids) {
+                if let Some(surface) = column.surface.as_mut() {
+                    surface.biome = id;
+                }
+                for span in &mut column.spans {
+                    span.biome = id;
+                }
             }
         }
+        self.tops(columns, at);
     }
 
     fn remap_one(
@@ -552,6 +722,8 @@ impl LodSampler for JavaLod {
             inner: self.inner.fork()?,
             modded: self.modded.clone(),
             custom: self.custom.clone(),
+            registry: self.registry,
+            materials: self.materials.clone(),
             oracle: JavaBiomes {
                 dimension: self.oracle.dimension.clone(),
                 biomes: self.oracle.biomes.clone(),
@@ -567,10 +739,12 @@ impl LodSampler for JavaLod {
     fn drain_details(&mut self) -> Vec<horizon_client::streaming::LodDetail> {
         let mut details = self.inner.drain_details();
         if self.custom() {
-            for (_, columns) in &mut details {
-                *columns = Arc::new(std::array::from_fn(|_| {
-                    horizon_client::lod::Column::default()
-                }));
+            for ((cx, cz), columns) in &mut details {
+                let at: Vec<(i32, i32)> = (0..256)
+                    .map(|i| (*cx * 16 + (i & 15), *cz * 16 + (i >> 4)))
+                    .collect();
+                let mut own = self.own_columns(&at).into_iter();
+                *columns = Arc::new(std::array::from_fn(|_| own.next().unwrap_or_default()));
             }
             return details;
         }
@@ -594,7 +768,7 @@ impl LodSampler for JavaLod {
 
     fn column(&mut self, x: i32, z: i32) -> horizon_client::lod::Column {
         if self.custom() {
-            return horizon_client::lod::Column::default();
+            return self.own_columns(&[(x, z)]).pop().unwrap_or_default();
         }
         let column = self.inner.column(x, z);
         self.remap_one(column, x, z)
@@ -602,7 +776,10 @@ impl LodSampler for JavaLod {
 
     fn reduced_column(&mut self, x: i32, z: i32, width: i32) -> horizon_client::lod::Column {
         if self.custom() {
-            return horizon_client::lod::Column::default();
+            return self
+                .own_columns(&[(x + width / 2, z + width / 2)])
+                .pop()
+                .unwrap_or_default();
         }
         let column = self.inner.reduced_column(x, z, width);
         self.remap_one(column, x + width / 2, z + width / 2)
@@ -615,24 +792,44 @@ impl LodSampler for JavaLod {
         stride: i32,
         side: usize,
     ) -> Vec<horizon_client::lod::Column> {
+        let at: Vec<(i32, i32)> = (0..side * side)
+            .map(|i| {
+                (
+                    x + (i % side) as i32 * stride + stride / 2,
+                    z + (i / side) as i32 * stride + stride / 2,
+                )
+            })
+            .collect();
         if self.custom() {
-            return vec![horizon_client::lod::Column::default(); side * side];
+            return self.own_columns(&at);
         }
         let mut columns = self.inner.grid(x, z, stride, side);
         if self.modded() {
-            let at: Vec<(i32, i32)> = (0..columns.len())
-                .map(|i| {
-                    (
-                        x + (i % side) as i32 * stride + stride / 2,
-                        z + (i / side) as i32 * stride + stride / 2,
-                    )
-                })
-                .collect();
             let mut refs: Vec<&mut horizon_client::lod::Column> = columns.iter_mut().collect();
             self.remap(&mut refs, &at);
         }
         columns
     }
+}
+
+/// A state as Java writes it (`minecraft:oak_log[axis=y]`, BlockStateParser.serialize).
+fn parse_state(
+    registry: &BlockRegistry,
+    text: &str,
+) -> Option<horizon_world::registry::BlockStateId> {
+    let (name, properties) = match text.split_once('[') {
+        Some((name, rest)) => (name, rest.strip_suffix(']')?),
+        None => (text, ""),
+    };
+    let mut descriptor = horizon_world::chunk::BlockState {
+        name: name.to_owned(),
+        properties: Default::default(),
+    };
+    for pair in properties.split(',').filter(|p| !p.is_empty()) {
+        let (k, v) = pair.split_once('=')?;
+        descriptor.properties.insert(k.to_owned(), v.to_owned());
+    }
+    registry.resolve(&descriptor).ok()
 }
 
 /// `minecraft:oak_log[axis=y]`: a state as Java reads it.

@@ -488,7 +488,8 @@ public final class HorizonWorldgen {
             ChunkPos origin = d.generator.getOrigin(d.level.getChunkSource().randomState());
             int height = d.generator.getSpawnHeight(d.level);
             boolean own = d.generator.getClass() != net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator.class;
-            return new int[] {origin.x(), origin.z(), height, own ? 1 : 0};
+            boolean noise = d.generator instanceof net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator;
+            return new int[] {origin.x(), origin.z(), height, own ? 1 : 0, noise ? 1 : 0};
         } catch (Throwable t) {
             failed("origin", t);
             return null;
@@ -658,6 +659,101 @@ public final class HorizonWorldgen {
     }
 
     // ---- Biomes where nothing is generated yet ------------------------------------------
+
+    // ---- Far terrain -------------------------------------------------------------------------
+
+    /**
+     * The top blocks the mods' surface rules give far columns (Horizon's far terrain, whose
+     * land is Horizon's noise, the same as the mods' generator's when it is vanilla's):
+     * the material rule at each x y z triple (the land's top block, water up to
+     * {@code waterHeights} over it: HorizonSurface.tops), with the mods' noise biomes. A state per triple
+     * (BlockStateParser's form) or null where the rules leave the block; null if the mods
+     * don't generate the dimension with a noise generator.
+     */
+    public static String[] lodTops(String dimension, int[] xyz, int[] waterHeights) {
+        Thread.currentThread().setContextClassLoader(HorizonWorldgen.class.getClassLoader());
+        Dimension d = DIMENSIONS.get(dimension);
+        if (d == null || !(d.generator instanceof net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator noise)) return null;
+        try {
+            var randomState = d.level.getChunkSource().randomState();
+            var rule = noise.generatorSettings().value().materialRule().value();
+            var generation = new net.minecraft.world.level.levelgen.WorldGenerationContext(d.generator, d.level);
+            var samplers = randomState.samplersWithContext(
+                    net.minecraft.world.level.levelgen.densityfunction.SamplerContext.builder().enableCaches().build());
+            var resolver = d.level.uncachedBiomeResolver();
+            java.util.function.Function<BlockPos, Holder<Biome>> biomes =
+                    pos -> resolver.getNoiseBiome(pos.getX() >> 2, pos.getY() >> 2, pos.getZ() >> 2);
+            BlockState[] tops = HorizonSurface.tops(randomState.surfaceSystem(), rule, randomState, generation, biomes,
+                    samplers, xyz, waterHeights);
+            if (tops == null) return null;
+            String[] out = new String[tops.length];
+            for (int i = 0; i < tops.length; i++) {
+                out[i] = tops[i] == null ? null : net.minecraft.commands.arguments.blocks.BlockStateParser.serialize(tops[i]);
+            }
+            return out;
+        } catch (Throwable t) {
+            failed("far terrain's tops", t);
+            return null;
+        }
+    }
+
+    /**
+     * The blocks the dimension's surface rules can give, and its default block (stone): what
+     * a far column's land top is made of (above it are the features: trees, plants). Null if
+     * the mods don't generate it with a noise generator.
+     */
+    public static String[] lodMaterials(String dimension) {
+        Thread.currentThread().setContextClassLoader(HorizonWorldgen.class.getClassLoader());
+        Dimension d = DIMENSIONS.get(dimension);
+        if (d == null || !(d.generator instanceof net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator noise)) return null;
+        var settings = noise.generatorSettings().value();
+        Set<BlockState> states = HorizonSurface.materials(settings.materialRule().value());
+        states.add(settings.defaultBlock());
+        // Land only: a rule's water, lava or air isn't a column's top.
+        states.removeIf(state -> state.isAir() || !state.getFluidState().isEmpty());
+        return states.stream().map(net.minecraft.commands.arguments.blocks.BlockStateParser::serialize).toArray(String[]::new);
+    }
+
+    /**
+     * Far columns of a dimension a mod's own generator makes (not a noise generator: One
+     * Block's void): ChunkGenerator.getBaseColumn at each x z pair, as runs from the bottom,
+     * "fromY toY state" (toY exclusive) separated by ';', "" for an empty column. Null if the
+     * mods don't generate the dimension.
+     */
+    public static String[] lodColumns(String dimension, int[] xz) {
+        Thread.currentThread().setContextClassLoader(HorizonWorldgen.class.getClassLoader());
+        Dimension d = DIMENSIONS.get(dimension);
+        if (d == null) return null;
+        try {
+            var randomState = d.level.getChunkSource().randomState();
+            String[] out = new String[xz.length / 2];
+            for (int i = 0; i < out.length; i++) {
+                var column = d.generator.getBaseColumn(xz[2 * i], xz[2 * i + 1], d.level, randomState);
+                StringBuilder runs = new StringBuilder();
+                BlockState run = null;
+                int from = 0;
+                int minY = d.level.getMinY(), maxY = d.level.getMinY() + d.level.getHeight();
+                for (int y = minY; y <= maxY; y++) {
+                    BlockState state = y < maxY ? column.getBlock(y) : null;
+                    if (state != null && state.isAir()) state = null;
+                    if (state != run) {
+                        if (run != null) {
+                            if (runs.length() > 0) runs.append(';');
+                            runs.append(from).append(' ').append(y).append(' ')
+                                    .append(net.minecraft.commands.arguments.blocks.BlockStateParser.serialize(run));
+                        }
+                        run = state;
+                        from = y;
+                    }
+                }
+                out[i] = runs.toString();
+            }
+            return out;
+        } catch (Throwable t) {
+            failed("far terrain's columns", t);
+            return null;
+        }
+    }
 
     /**
      * The mods' biomes at quart positions (x y z triples) of a dimension they generate:
