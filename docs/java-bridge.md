@@ -1361,6 +1361,20 @@ for good): it is now bounded at 30 s. Not mobs, but in the mirror tick: the head
 client's tick, 7–24 ms (the mods' frame-start hooks up to 19 ms in the first minutes, ~5 ms of
 HUD).
 
+### Content preparation time (2026-11-01, bridge-worldgen-3)
+
+A new set of jars builds its content (`horizon_jvm::content::build` → port-pack's inventory,
+oracle, carry, then `mod_content::build`). With the 110-jar pack (2 cores) that was 173 s, and
+~140 s of it was one Rust function on the main thread: `oracle::own_states`, which gave each
+mod block state a vanilla shape by `bounds_distance` against **every** vanilla state (~28k) —
+mods' ~40k states × 28k. Vanilla has only a few hundred distinct bounds pairs, so the search
+now runs over those (`ShapeIndex::distinct`, least name kept per pair, the same tie-break) and
+memoizes per bounds pair (`ShapeIndex::nearest`). 173 s → 107 s; the content mods it writes
+are byte-identical (`diff -r` of two caches: only scratch paths, map order, and the Java
+oracle's sampled drop counts differ, run to run). What's left, in order: the Java oracle
+(class loading, ~65 s), `mod_content::tables` (~15 s), the facts JSON read (~10 s).
+Sample it with gdb (`gdb -p $(pgrep -x horizon-client) -batch -ex bt`, every 2 s).
+
 ## Working on it
 
 - **The task queue is [java-bridge-tasks.md](java-bridge-tasks.md)**: take your area's next task, follow its loop, add a report there.

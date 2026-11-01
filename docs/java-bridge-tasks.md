@@ -68,3 +68,9 @@ Never write as the user; mark what you post (CLAUDE.md). Never run mod jars the 
 ## Reports
 
 (Newest last. One short entry per task: area, task, branch, works / doesn't / how to test.)
+
+- **worldgen 3, content preparation time** (bridge-worldgen-3): the slow part was port-pack's
+  nearest-shape search (`oracle::own_states`: every mod state against every vanilla state).
+  Now over vanilla's distinct shapes, memoized: 110-jar pack 173 s → 107 s, output identical.
+  Left: the Java oracle's class loading (~65 s). Test: delete `.horizon-cache/java-content`,
+  start with the pack, `grep "content mod(s) made" latest.log`.
