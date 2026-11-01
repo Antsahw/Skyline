@@ -188,9 +188,21 @@ public final class HorizonRecipeViewer {
         } finally {
             single.set(mc, singleBefore);
         }
-        // What the server's display sync packet (DisplaySyncPacket, SET) does on a client that
-        // joins: the server's displays (crafting, smelting, the mods' machines) into the
-        // client's registry, as synced ones.
+        int count = syncDisplays(loader);
+        Natives.log("Horizon's recipe viewer: " + count + " of the server's displays synced to REI's client");
+        reloaded = true;
+        Natives.log("Horizon's recipe viewer: REI's plugins reloaded in " + (System.nanoTime() - started) / 1_000_000 + " ms");
+    }
+
+    /** The client registry's size after the last sync: fewer means REI reloaded since. */
+    private static int syncedSize = -1;
+
+    /**
+     * What the server's display sync packet (DisplaySyncPacket, SET) does on a client that
+     * joins: the server's displays (crafting, smelting, the mods' machines) into the client's
+     * registry, as synced ones. The count added.
+     */
+    private static int syncDisplays(ClassLoader loader) throws ReflectiveOperationException {
         Class<?> serverRegistry = Class.forName("me.shedaniel.rei.api.common.registry.display.ServerDisplayRegistry", true, loader);
         Object server = serverRegistry.getMethod("getInstance").invoke(null);
         @SuppressWarnings("unchecked")
@@ -208,8 +220,66 @@ public final class HorizonRecipeViewer {
                 if ((boolean) add.invoke(client, d, synced)) count++;
             }
         }
-        Natives.log("Horizon's recipe viewer: " + count + " of the server's displays synced to REI's client");
-        reloaded = true;
-        Natives.log("Horizon's recipe viewer: REI's plugins reloaded in " + (System.nanoTime() - started) / 1_000_000 + " ms");
+        syncedSize = (int) Class.forName("me.shedaniel.rei.api.common.registry.display.DisplayRegistryCommon", true, loader)
+                .getMethod("size").invoke(client);
+        return count;
+    }
+
+    /**
+     * REI reloads its plugins on its own too (on its thread, as a player's client joins:
+     * Architectury's join event), which empties the client's displays of the server's: after
+     * such a reload, they are synced again. True when they were (the item lists then search
+     * again). Each tick; cheap when nothing changed.
+     */
+    public static boolean keepSynced() {
+        if (!reloaded) return false;
+        try {
+            ClassLoader loader = HorizonRecipeViewer.class.getClassLoader();
+            if (running == null) {
+                running = Class.forName("me.shedaniel.rei.impl.common.plugins.ReloadManagerImpl", true, loader).getMethod("countRunningReloadTasks");
+                size = Class.forName("me.shedaniel.rei.api.common.registry.display.DisplayRegistryCommon", true, loader).getMethod("size");
+                registry = Class.forName("me.shedaniel.rei.api.client.registry.display.DisplayRegistry", true, loader).getMethod("getInstance");
+            }
+            if ((int) running.invoke(null) > 0) return false;
+            if ((int) size.invoke(registry.invoke(null)) >= syncedSize) return false;
+            int count = syncDisplays(loader);
+            Natives.log("Horizon's recipe viewer: REI reloaded on its own; " + count + " of the server's displays synced again");
+            return true;
+        } catch (Throwable t) {
+            if (HorizonServer.failedOnce("recipe viewer keepSynced")) Natives.log("Horizon's recipe viewer: REI's displays can't be kept: " + t);
+            return false;
+        }
+    }
+
+    private static Method running, size, registry;
+
+    /**
+     * After REI's own reload, on the player's screen (in as()): its reload drops the overlay
+     * renderer it applied to the screen (ScreenRegistryImpl's last renderer provider, applied as
+     * a screen is laid out: INIT_POST), so nothing of REI draws until the next screen; applied
+     * again here, the overlay laid out again, and the list searched.
+     */
+    public static void afterOwnReload() {
+        try {
+            ClassLoader loader = HorizonRecipeViewer.class.getClassLoader();
+            var screen = net.minecraft.client.Minecraft.getInstance().gui.screen();
+            if (screen != null) {
+                Class<?> impl = Class.forName("me.shedaniel.rei.impl.client.registry.screen.ScreenRegistryImpl", true, loader);
+                Object registry = Class.forName("me.shedaniel.rei.api.client.registry.screen.ScreenRegistry", true, loader)
+                        .getMethod("getInstance").invoke(null);
+                impl.getMethod("getLastRendererProvider", net.minecraft.client.gui.screens.Screen.class).invoke(registry, screen);
+                Natives.log("Horizon's recipe viewer: REI's overlay back on " + screen.getClass().getSimpleName());
+            }
+            Class<?> runtime = Class.forName("me.shedaniel.rei.api.client.REIRuntime", true, loader);
+            Object made = runtime.getMethod("getOverlay").invoke(runtime.getMethod("getInstance").invoke(null));
+            if (made instanceof java.util.Optional<?> optional && optional.isPresent()) {
+                optional.get().getClass().getMethod("queueReloadOverlay").invoke(optional.get());
+            }
+        } catch (ClassNotFoundException e) {
+            return;
+        } catch (Throwable t) {
+            if (HorizonServer.failedOnce("recipe viewer afterOwnReload")) Natives.log("Horizon's recipe viewer: REI's overlay could not come back: " + t);
+        }
+        refreshSearch();
     }
 }

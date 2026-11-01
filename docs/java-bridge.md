@@ -196,8 +196,8 @@ saying something works.
   "none") with ASM and puts them on the class path first, so those entrypoints load (tested:
   Jade, AppleSkin, Farmer's Delight, Cloth Config, REI via Architectury).
 - Settings per player (`HorizonClientConfig`): the objects holding mods' settings (every
-  cloth-config AutoConfig holder, Jade's JsonConfig values, AppleSkin's `ModConfig.INSTANCE`,
-  REI's config object) are swapped with the rest of a player's client state; a player new to
+  cloth-config AutoConfig holder, Jade's JsonConfig values, AppleSkin's `ModConfig.INSTANCE`) are
+  swapped with the rest of a player's client state; a player new to
   the client gets a deep copy (the mod's own objects copied; the game's, the JDK's and
   libraries' shared). On disk, the first player the client serves (the host) owns `config/`:
   after another player's screen input, files changed under `config/` move to
@@ -205,7 +205,23 @@ saying something works.
   AppleSkin's tooltip off and saves; the host's screen and file still say on, the guest's say
   off. Not yet: a guest's saved files aren't loaded at their next join (their session's
   settings start from the host's); mods holding settings elsewhere (Farmer's Delight's
-  ConfigValues) are still shared. Add a mod's holder in `holders()`.
+  ConfigValues) are still shared. Add a mod's holder in `holders()`. REI's config object stays
+  shared: it holds REI's entry stacks, and a copy of it stopped REI's overlay drawing.
+- `HorizonClientState` gives a player new to the client a fresh empty collection for a
+  collection field (null before): REI's own reload cleared `lastDisplayScreen` and threw on
+  null.
+- Dedicated servers: `tools/java_bridge/server_test.sh` starts `horizon-client --dedicated
+  --nogui` with MODS in its `mods-java/` (console through a FIFO: `sv "op Player"`) and a game
+  that joins it; steps with `$G`, screenshots of the player's game. Its players get mod screens
+  (Tech Reborn's machines), HUD mods (Jade with TR's energy) and REI over their inventory and
+  over mod screens: the dedicated server runs the same headless client as a LAN host.
+- **REI reloads on its own** at a client's join (Architectury's join event, now that joins
+  run; on REI's thread): that empties the client's display registry of the server's displays,
+  and REI's reload removes the overlay renderer it applied to the open screen (the renderer
+  provider applied at INIT_POST), so its list vanished from a mod screen a few seconds after it
+  opened. `HorizonRecipeViewer.keepSynced` (each server tick) syncs the displays again when
+  the registry shrank, and `afterOwnReload` applies the renderer again per open screen (and
+  queues the overlay's reload and the list's search). Regress `reiscreen`.
 
 ## Mods' overlay on Horizon's inventory (REI)
 

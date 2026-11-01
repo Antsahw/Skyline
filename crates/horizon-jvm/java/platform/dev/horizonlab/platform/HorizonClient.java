@@ -2226,6 +2226,21 @@ public final class HorizonClient {
     /** Each open mod screen's frame, to its player when it changed (the server's tick end). */
     public static void sendFrames() {
         tasks();
+        // REI reloaded on its own (a client's join): the server's displays back, its overlay
+        // renderer on each open screen again, lists searched.
+        if (HorizonRecipeViewer.keepSynced()) {
+            java.util.Set<java.util.UUID> ids = new java.util.HashSet<>(SCREENS.keySet());
+            ids.addAll(OVERLAYS.keySet());
+            for (var id : ids) {
+                var player = HorizonServer.player(id);
+                if (player == null) continue;
+                try {
+                    as(player, HorizonRecipeViewer::afterOwnReload);
+                } catch (Throwable t) {
+                    // The next screen opened has it.
+                }
+            }
+        }
         for (var id : new java.util.ArrayList<>(SCREENS.keySet())) {
             tickScreen(id);
             send(id);

@@ -125,7 +125,19 @@ final class HorizonClientState {
     }
 
     private static Object empty(Class<?> type) {
-        if (!type.isPrimitive()) return null;
+        if (!type.isPrimitive()) {
+            // A collection a mod makes once and never again (REI's lastDisplayScreen, cleared at
+            // each reload): a new empty one of its class.
+            if ((java.util.Collection.class.isAssignableFrom(type) || java.util.Map.class.isAssignableFrom(type))
+                    && !type.isInterface() && !Modifier.isAbstract(type.getModifiers())) {
+                try {
+                    return type.getDeclaredConstructor().newInstance();
+                } catch (ReflectiveOperationException e) {
+                    return null;
+                }
+            }
+            return null;
+        }
         if (type == boolean.class) return false;
         if (type == char.class) return (char) 0;
         if (type == long.class) return 0L;

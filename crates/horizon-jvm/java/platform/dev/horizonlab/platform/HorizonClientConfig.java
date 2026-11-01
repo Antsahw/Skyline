@@ -25,7 +25,7 @@ import java.util.stream.Stream;
  *
  * <ul>
  *   <li>In memory: the objects holding mods' settings (cloth-config's AutoConfig holders, and
- *       mods with a holder of their own: Jade, AppleSkin, REI) are swapped per player as the
+ *       mods with a holder of their own: Jade, AppleSkin) are swapped per player as the
  *       client changes player (HorizonClientState.load calls {@link #swap}). A player new to the
  *       client starts with a copy of the settings of the player before them (the host's first).
  *   <li>On disk: the first player the client serves owns config/ (the host, in a LAN world).
@@ -66,20 +66,8 @@ final class HorizonClientConfig {
         }
         // AppleSkin: ModConfig.INSTANCE.
         staticField(out, loader, "squeek.appleskin.ModConfig", "INSTANCE");
-        // REI: its config manager's object (and its craftable-only switch).
-        try {
-            Class<?> api = Class.forName("me.shedaniel.rei.api.client.config.ConfigManager", true, loader);
-            Object instance = api.getMethod("getInstance").invoke(null);
-            for (String name : new String[] {"object", "craftableOnly"}) {
-                Field f = instance.getClass().getDeclaredField(name);
-                f.setAccessible(true);
-                out.add(new Holder("rei:" + name, instance, f));
-            }
-        } catch (ClassNotFoundException e) {
-            // No REI.
-        } catch (ReflectiveOperationException | RuntimeException e) {
-            fail("REI", e);
-        }
+        // (REI's config object isn't copied: it holds REI's entry stacks, and a copy of them
+        // stopped its overlay drawing over mod screens. Its settings stay shared.)
         // Jade: each JsonConfig's cached value (configGetter.value).
         try {
             Class<?> jade = Class.forName("snownee.jade.Jade", true, loader);
@@ -135,6 +123,8 @@ final class HorizonClientConfig {
                 Map<String, Object> mine = SAVED.computeIfAbsent(from, k -> new HashMap<>());
                 for (Holder h : all) mine.put(h.key(), h.field().get(h.target()));
             }
+            // The first player keeps the settings as they are (nobody's were put away before).
+            if (from == null && !SAVED.containsKey(to)) return;
             Map<String, Object> theirs = SAVED.get(to);
             for (Holder h : all) {
                 Object current = h.field().get(h.target());

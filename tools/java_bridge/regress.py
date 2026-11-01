@@ -121,6 +121,15 @@ CASES = {
                 check_log(r"recipes of 1 farmersdelight:beef_stew: opened", "beef stew's recipe shows")],
         forbid=[r"recipe viewer failed"],
     ),
+    "reiscreen": dict(
+        about="REI's item list over a mod's screen (Farmer's Delight's pot) stays after REI's own reload (a client's join)",
+        mods=["rei", "architectury", "cloth", "fd"], scene="pot",
+        steps=['sleep 12'],
+        checks=[check_log(r"REI reloaded on its own", "REI reloaded on its own (else nothing to check)"),
+                check_log(r"REI's overlay back on CookingPotScreen", "REI's overlay applied again to the pot's screen")],
+        forbid=[r"recipe viewer failed", r"overlay could not come back"],
+        look="REI's item list and search box beside the pot's screen",
+    ),
     "join": dict(
         about="Client join hooks (the joinmod fixture): handleLogin's injections and Fabric's JOIN run, with a connection",
         fixtures=["joinmod"], mods=["fd"], scene="none",
