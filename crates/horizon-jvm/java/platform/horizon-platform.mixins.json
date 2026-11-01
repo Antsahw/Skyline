@@ -40,7 +40,8 @@
     "TimerCallbackMixin",
     "RespawnDataMixin",
     "MirrorUpdatesMixin",
-    "MirrorConnectionMixin"
+    "MirrorConnectionMixin",
+    "CombatCaptureMixin"
   ],
   "injectors": {
     "defaultRequire": 1

@@ -76,7 +76,8 @@ public final class HorizonVanillaActions {
                 if (out[0] != 0) return;
                 out[0] = bits(l.interact(player, level, interaction, target, null));
             });
-            if (out[0] == 0 && HorizonHooks.hooked("net/minecraft/world/entity/player/Player", "attack")) {
+            // A routed attack (HorizonCombat) runs Player.attack itself, its head included.
+            if (out[0] == 0 && !HorizonCombat.routed() && HorizonHooks.hooked("net/minecraft/world/entity/player/Player", "attack")) {
                 var r = HorizonHooks.fire(player, Player.class, "attack", ATTACK, "HEAD", new Object[] {target}, null, true);
                 if (r.cancelled()) out[0] = 1;
             }
@@ -218,5 +219,105 @@ public final class HorizonVanillaActions {
             if (DEBUG) Natives.log("crafting: the mirror's inventory after: " + player.getInventory().getNonEquipmentItems());
         });
         HorizonServer.afterCall();
+    }
+
+    // ---- The hotbar, riding --------------------------------------------------------------
+
+    /**
+     * A player picks hotbar slot {@code slot} (ServerGamePacketListenerImpl.handleSetCarriedItem:
+     * Inventory.setSelectedSlot): the mods' injections at its head (Carry On keeps the slot
+     * while carrying). True when one cancelled: Horizon keeps the old slot and tells the game.
+     */
+    public static boolean selectSlot(String uuid, int slot) {
+        Thread.currentThread().setContextClassLoader(HorizonVanillaActions.class.getClassLoader());
+        ServerPlayer player = HorizonServer.player(UUID.fromString(uuid));
+        String owner = "net/minecraft/world/entity/player/Inventory";
+        if (player == null || !HorizonHooks.hooked(owner, "setSelectedSlot")) return false;
+        var r = HorizonHooks.fire(player.getInventory(), net.minecraft.world.entity.player.Inventory.class, "setSelectedSlot", "(I)V",
+                "HEAD", new Object[] {slot}, null, true);
+        HorizonServer.afterCall();
+        return r.cancelled();
+    }
+
+    private static final String START_RIDING = "(Lnet/minecraft/world/entity/Entity;ZZ)Z";
+
+    /**
+     * A player got onto one of Horizon's vehicles ({@code type} at x y z, a mob's NBT when it
+     * is one): the mods' injections at the head of Entity.startRiding on the mirrored player,
+     * with a copy of the vehicle. True when one cancelled (Horizon takes the player off).
+     */
+    public static boolean ride(String uuid, String dimension, String type, double x, double y, double z, String snbt) {
+        Thread.currentThread().setContextClassLoader(HorizonVanillaActions.class.getClassLoader());
+        ServerPlayer player = HorizonServer.player(UUID.fromString(uuid));
+        if (player == null || !HorizonHooks.hooked("net/minecraft/world/entity/Entity", "startRiding")) return false;
+        ServerLevel level = HorizonServer.level(dimension);
+        Entity vehicle = null;
+        try {
+            if (snbt != null && !snbt.isEmpty()) {
+                var tag = net.minecraft.nbt.TagParser.parseCompoundFully(snbt);
+                vehicle = EntityType.loadEntityRecursive(TagValueInput.create(ProblemReporter.DISCARDING, level.registryAccess(), tag),
+                        level, EntitySpawnReason.LOAD, e -> e);
+            } else {
+                var entityType = net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE.getValue(net.minecraft.resources.Identifier.parse(type));
+                if (entityType != null) vehicle = entityType.create(level, EntitySpawnReason.LOAD);
+                if (vehicle != null) vehicle.setPos(x, y, z);
+            }
+        } catch (Throwable t) {
+            if (HorizonServer.failedOnce("vehicle " + type)) Natives.log("Java mods: a vehicle (" + type + ") couldn't be copied: " + t);
+        }
+        if (vehicle == null) return false;
+        var r = HorizonHooks.fire(player, Entity.class, "startRiding", START_RIDING, "HEAD", new Object[] {vehicle, false, true},
+                Boolean.TRUE, true);
+        HorizonServer.afterCall();
+        if (DEBUG) Natives.log("entities: " + player.getName().getString() + " rides " + vehicle + ": " + (r.cancelled() ? "stopped" : "ok"));
+        return r.cancelled() && !Boolean.TRUE.equals(r.returnValue());
+    }
+
+    // ---- Precipitation: biome weather and snow --------------------------------------------
+
+    private static final Set<String> WEATHER = Set.of("shouldSnow", "shouldFreeze", "getPrecipitationAt", "coldEnoughToSnow",
+            "warmEnoughToRain", "getTemperature", "getHeightAdjustedTemperature");
+    private static Boolean weatherRouted;
+
+    /**
+     * Whether Horizon's precipitation ticks (ServerLevel.tickPrecipitation: ice, snow layers,
+     * cauldrons) ask the mirror: a mod patches the biome's weather answers or the tick itself
+     * (Serene Seasons' seasonal snow). Performance mods (Lithium) don't count.
+     */
+    public static boolean weatherRouted() {
+        if (weatherRouted == null) {
+            weatherRouted = HorizonMixinTable.patchedInside(net.minecraft.world.level.biome.Biome.class, WEATHER, Set.of())
+                    || HorizonMixinTable.patchedInside(ServerLevel.class, Set.of("tickPrecipitation"), Set.of());
+            if (weatherRouted) Natives.log("Precipitation goes to the mods (" + HorizonMixinTable.mods("net/minecraft/world/level/biome/Biome", "shouldSnow")
+                    + HorizonMixinTable.mods("net/minecraft/server/level/ServerLevel", "tickPrecipitation") + ")");
+        }
+        return weatherRouted;
+    }
+
+    /**
+     * Precipitation ticks of {@code dimension}: each column's top (motion-blocking: x, y, z
+     * per column, as Horizon found it) answered as tickPrecipitation asks the biome there:
+     * shouldFreeze below the top, shouldSnow at it, getPrecipitationAt below it (0 none, 1
+     * rain, 2 snow). Per column {freezes, snows, kind}.
+     */
+    public static int[] precipitation(String dimension, int[] tops) {
+        Thread.currentThread().setContextClassLoader(HorizonVanillaActions.class.getClassLoader());
+        ServerLevel level = HorizonServer.level(dimension);
+        int[] out = new int[tops.length];
+        int sea = level.getSeaLevel();
+        for (int i = 0; i + 2 < tops.length; i += 3) {
+            var top = new net.minecraft.core.BlockPos(tops[i], tops[i + 1], tops[i + 2]);
+            var below = top.below();
+            int at = i;
+            HorizonServer.fire("ServerLevel.tickPrecipitation", () -> {
+                var biome = level.getBiome(top).value();
+                out[at] = biome.shouldFreeze(level, below) ? 1 : 0;
+                out[at + 1] = biome.shouldSnow(level, top) ? 1 : 0;
+                var kind = biome.getPrecipitationAt(below, sea);
+                out[at + 2] = kind == net.minecraft.world.level.biome.Biome.Precipitation.RAIN ? 1
+                        : kind == net.minecraft.world.level.biome.Biome.Precipitation.SNOW ? 2 : 0;
+            });
+        }
+        return out;
     }
 }

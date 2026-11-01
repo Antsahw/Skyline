@@ -696,6 +696,190 @@ fn vanilla_class<'a>(env: &mut JNIEnv<'a>) -> jni::errors::Result<JClass<'a>> {
     bridge.find_class(env, "dev/horizonlab/platform/HorizonVanillaActions")
 }
 
+/// One mob a routed attack hit ([`player_attack`]): what its copy's `hurtServer` got and the
+/// knockback it was given (vanilla's `knockback(strength, x, z)`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct AttackHit {
+    /// The game's entity id.
+    pub id: u32,
+    pub damage: f32,
+    /// The damage type (`minecraft:player_attack`).
+    pub damage_type: String,
+    pub knockback: f64,
+    pub knock_x: f64,
+    pub knock_z: f64,
+}
+
+/// Player `uuid` attacks the game's mob `ids[0]`; `nbts` are it and the mobs around (vanilla's
+/// entity NBT), `ticks` the player's ticks since its last swing, `yaw`/`pitch` its view:
+/// vanilla's `Player.attack` with the mods' patches (Better Combat's attack request when it
+/// is loaded) on copies of them. Each mob hit, for the game to hurt; None: the game attacks
+/// itself. Run it inside [`crate::world::with_blocks`].
+#[allow(clippy::too_many_arguments)]
+pub fn player_attack(
+    uuid: &str,
+    dimension: &str,
+    nbts: &[String],
+    ids: &[u32],
+    ticks: i32,
+    yaw: f32,
+    pitch: f32,
+    selected: i32,
+) -> Result<Option<Vec<AttackHit>>, String> {
+    let out = with_server(|env, _| {
+        let bridge = crate::get().ok_or(jni::errors::Error::NullPtr("the JVM is not running"))?;
+        let class = bridge.find_class(env, "dev/horizonlab/platform/HorizonCombat")?;
+        let uuid = env.new_string(uuid)?;
+        let dimension = env.new_string(dimension)?;
+        let array = env.new_object_array(
+            nbts.len() as sys::jsize,
+            "java/lang/String",
+            JObject::null(),
+        )?;
+        for (i, n) in nbts.iter().enumerate() {
+            let s = env.new_string(n)?;
+            env.set_object_array_element(&array, i as sys::jsize, &s)?;
+        }
+        let id_array = env.new_int_array(ids.len() as sys::jsize)?;
+        let flat: Vec<i32> = ids.iter().map(|&i| i as i32).collect();
+        env.set_int_array_region(&id_array, 0, &flat)?;
+        let types = env.new_object_array(
+            nbts.len() as sys::jsize,
+            "java/lang/String",
+            JObject::null(),
+        )?;
+        let result = env
+            .call_static_method(
+                &class,
+                "attack",
+                "(Ljava/lang/String;Ljava/lang/String;[Ljava/lang/String;[IIFFI[Ljava/lang/String;)[D",
+                &[
+                    JValue::Object(&uuid),
+                    JValue::Object(&dimension),
+                    JValue::Object(&array),
+                    JValue::Object(&id_array),
+                    JValue::Int(ticks),
+                    JValue::Float(yaw),
+                    JValue::Float(pitch),
+                    JValue::Int(selected),
+                    JValue::Object(&types),
+                ],
+            )?
+            .l()?;
+        if result.is_null() {
+            return Ok(None);
+        }
+        let result = jni::objects::JDoubleArray::from(result);
+        let len = env.get_array_length(&result)? as usize;
+        let mut v = vec![0.0f64; len];
+        env.get_double_array_region(&result, 0, &mut v)?;
+        let mut hits = Vec::new();
+        for (k, h) in v.chunks_exact(5).enumerate() {
+            let t = env.get_object_array_element(&types, k as sys::jsize)?;
+            let damage_type = if t.is_null() {
+                String::new()
+            } else {
+                env.get_string(&JString::from(t))?.into()
+            };
+            hits.push(AttackHit {
+                id: h[0] as u32,
+                damage: h[1] as f32,
+                damage_type,
+                knockback: h[2],
+                knock_x: h[3],
+                knock_z: h[4],
+            });
+        }
+        Ok(Some(hits))
+    })?;
+    Ok(out.flatten())
+}
+
+/// `dev.horizonlab.platform.HorizonVanillaActions`'s static `method` (a JNI signature).
+fn call_vanilla<'a>(
+    env: &mut JNIEnv<'a>,
+    method: &str,
+    sig: &str,
+    args: &[JValue],
+) -> jni::errors::Result<jni::objects::JValueOwned<'a>> {
+    let class = vanilla_class(env)?;
+    env.call_static_method(&class, method, sig, args)
+}
+
+/// Player `uuid` picks hotbar slot `slot`: the mods' heads of `Inventory.setSelectedSlot`.
+/// True when one cancelled (the game keeps the old slot).
+pub fn select_slot(uuid: &str, slot: i32) -> Result<bool, String> {
+    let r = with_server(|env, _| {
+        let uuid = env.new_string(uuid)?;
+        call_vanilla(
+            env,
+            "selectSlot",
+            "(Ljava/lang/String;I)Z",
+            &[JValue::Object(&uuid), JValue::Int(slot)],
+        )?
+        .z()
+    })?;
+    Ok(r.unwrap_or(false))
+}
+
+/// Player `uuid` got onto the game's vehicle of type `ty` (`minecraft:oak_boat`) at
+/// `position`, `snbt` its NBT when it is a mob (else empty): the mods' heads of
+/// `Entity.startRiding`. True when one cancelled (the game takes the player off).
+pub fn ride(
+    uuid: &str,
+    dimension: &str,
+    ty: &str,
+    position: [f64; 3],
+    snbt: &str,
+) -> Result<bool, String> {
+    let r = with_server(|env, _| {
+        let uuid = env.new_string(uuid)?;
+        let dimension = env.new_string(dimension)?;
+        let ty = env.new_string(ty)?;
+        let snbt = env.new_string(snbt)?;
+        call_vanilla(
+            env,
+            "ride",
+            "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;DDDLjava/lang/String;)Z",
+            &[
+                JValue::Object(&uuid),
+                JValue::Object(&dimension),
+                JValue::Object(&ty),
+                JValue::Double(position[0]),
+                JValue::Double(position[1]),
+                JValue::Double(position[2]),
+                JValue::Object(&snbt),
+            ],
+        )?
+        .z()
+    })?;
+    Ok(r.unwrap_or(false))
+}
+
+/// Precipitation ticks of `dimension` at columns topped by `tops` (x, y, z each): the
+/// biome's answers on the Java side with the mods' patches (Serene Seasons): per column
+/// {freezes below the top, snows at it, precipitation below it: 0 none, 1 rain, 2 snow}.
+pub fn precipitation(dimension: &str, tops: &[i32]) -> Result<Vec<i32>, String> {
+    let out = with_server(|env, _| {
+        let dimension = env.new_string(dimension)?;
+        let array = env.new_int_array(tops.len() as sys::jsize)?;
+        env.set_int_array_region(&array, 0, tops)?;
+        let result = call_vanilla(
+            env,
+            "precipitation",
+            "(Ljava/lang/String;[I)[I",
+            &[JValue::Object(&dimension), JValue::Object(&array)],
+        )?
+        .l()?;
+        let result = jni::objects::JIntArray::from(result);
+        let len = env.get_array_length(&result)? as usize;
+        let mut v = vec![0i32; len];
+        env.get_int_array_region(&result, 0, &mut v)?;
+        Ok(v)
+    })?;
+    Ok(out.unwrap_or_default())
+}
+
 /// What mods make of a player's break of a block ([`break_block`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BreakResult {

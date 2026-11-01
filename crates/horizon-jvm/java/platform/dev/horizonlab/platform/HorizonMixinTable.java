@@ -51,11 +51,23 @@ public final class HorizonMixinTable {
                     || mod.equals("fabricloader") || mod.equals("mixinextras");
         }
 
+        /**
+         * A performance mod's (Lithium, FerriteCore...): it keeps vanilla's behaviour, so its
+         * patches never make an action the mirror's.
+         */
+        public boolean performance() {
+            return PERFORMANCE.contains(mod);
+        }
+
         String describe() {
             String where = at.isEmpty() ? "" : " " + at + (atTarget.isEmpty() ? "" : " " + shortTarget(atTarget));
             return kind + where;
         }
     }
+
+    /** Mods whose patches only make vanilla faster, not different (they route nothing). */
+    static final Set<String> PERFORMANCE = Set.of("lithium", "ferritecore", "c2me", "krypton", "moreculling", "sodium",
+            "modernfix", "scalablelux", "noisium", "vmp", "immediatelyfast");
 
     /** By "owner.method" (owner with slashes): every patch there. */
     private static final Map<String, List<Patch>> PATCHES = new TreeMap<>();
@@ -243,7 +255,9 @@ public final class HorizonMixinTable {
             GAME_MODE + ".useItem", GAME_MODE + ".destroyBlock",
             // A player's hit on and use of Horizon's entities (HorizonVanillaActions.entity).
             "net/minecraft/world/entity/player/Player.attack", "net/minecraft/world/entity/player/Player.interactOn",
-            "net/minecraft/world/item/ItemStack.use");
+            "net/minecraft/world/item/ItemStack.use",
+            // A player picking a hotbar slot, getting onto a vehicle (HorizonVanillaActions).
+            "net/minecraft/world/entity/player/Inventory.setSelectedSlot", "net/minecraft/world/entity/Entity.startRiding");
 
     public static Where where(String owner, String method) {
         String key = owner + "." + method;
@@ -257,6 +271,14 @@ public final class HorizonMixinTable {
         if (owner.equals(GAME_MODE) && method.equals("destroyBlock")) return new Where("routed", "breaking a block");
         if (owner.equals(ITEM_ENTITY) && PICKUP.contains(method)) return new Where("routed", "item pickup");
         if (owner.equals(ORB) && XP.contains(method)) return new Where("routed", "experience orbs");
+        // A player's attack on Horizon's mobs: Player.attack runs on copies when mods patch it
+        // (HorizonCombat); precipitation asks the biomes on the mirror (HorizonVanillaActions).
+        if (key.equals("net/minecraft/world/entity/player/Player.attack")) return new Where("routed", "a player's attack (on copies of Horizon's mobs)");
+        if (owner.equals("net/minecraft/world/level/biome/Biome") && (method.equals("shouldSnow") || method.equals("shouldFreeze")
+                || method.equals("getPrecipitationAt") || method.equals("warmEnoughToRain") || method.equals("coldEnoughToSnow"))
+                || key.equals("net/minecraft/server/level/ServerLevel.tickPrecipitation")) {
+            return new Where("routed", "precipitation (ice, snow, cauldrons)");
+        }
         if (FIRED.contains(key)) return new Where("fired", "Horizon fires it");
         if (owner.equals("net/minecraft/world/inventory/ResultSlot")) {
             return new Where("java", "crafting results (vanilla's onTake on copies of the grid and result)");
@@ -340,7 +362,7 @@ public final class HorizonMixinTable {
             for (String method : patched) {
                 if (!methods.contains(method)) continue;
                 for (Patch p : PATCHES.get(owner + "." + method)) {
-                    if (p.platform() || p.client()) continue;
+                    if (p.platform() || p.client() || p.performance()) continue;
                     if (p.eventLike() && fired.contains(owner + "." + method)) continue;
                     return true;
                 }

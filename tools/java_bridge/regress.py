@@ -45,6 +45,8 @@ MODS = {
     "carryon": ["carryon*"],
     "seasons": ["sereneseasons*"],
     "clumps": ["clumps*"],
+    "bettercombat": ["bettercombat*"],
+    "playeranim": ["playeranimationlib*", "player-animation*"],
     "kotlin": ["fabric-language-kotlin*"],
     "oneblock": ["oneblock*"],
     "codxlib": ["codxlib*"],
@@ -153,9 +155,9 @@ CASES = {
         about="Right Click Harvest: a ripe wheat right-clicked is replanted and drops",
         mods=["rch", "jamlib"], scene="harvest",
         steps=['$C mouse right click >/dev/null; sleep 2; $C block $(cat $S/crop.pos) > $S/crop.json; '
-               '$C entities 6 minecraft:item > $S/drops.json'],
+               '{ $C entities 6 minecraft:item; $C inventory; } > $S/drops.json'],
         checks=[check_json("crop.json", ["state"], "minecraft:wheat[age=0]", "the wheat is replanted"),
-                check_file("drops.json", r"minecraft:wheat\b", "wheat dropped")],
+                check_file("drops.json", r"minecraft:wheat\b", "wheat dropped (on the ground or picked up)")],
     ),
     "carry": dict(
         about="Carry On: sneak-right-click picks a cow up, a right-click on the ground puts it down",
@@ -219,6 +221,60 @@ CASES = {
         checks=[check_log(r"the world spawn moves to 0, 64, 0", "the load function set the spawn"),
                 check_file("state.json", r'"block_pos":\[-?[01],6[45],-?[01]\]', "the player stands on the block")],
         forbid=[r"fell out of the world", r"functions stopped"],
+    ),
+    "attack": dict(
+        about="A mod patching Player.attack's inside (mixinmod: ten times the damage): the attack is the mods'",
+        fixtures=["mixinmod"], scene="fight",
+        steps=['$C mouse left click >/dev/null; sleep 1.5; $C entities 6 minecraft:cow > $S/cow.json; '
+               '$C look-at-entity $(cat $S/pig.id) >/dev/null; sleep 1; $C mouse left click >/dev/null; sleep 1; '
+               '$C entities 6 minecraft:pig > $S/pig.json'],
+        checks=[check_file("cow.json", r'"entities":\[\]', "the cow died to one hit (60 damage)"),
+                check_file("pig.json", r'"health":10\.0', "the pig was spared (Player.attack's head cancels it)"),
+                check_log(r"Players' attacks go to the mods", "attacks go to the mods")],
+    ),
+    "bettercombat": dict(
+        about="Better Combat: a click is its attack request; the cow takes the sword's hit",
+        mods=["bettercombat", "cloth", "playeranim"], scene="fight", env={"HORIZON_JAVA_DEBUG": "combat"},
+        steps=['$C mouse left click >/dev/null; sleep 1.5; $C entities 6 minecraft:cow > $S/cow.json'],
+        checks=[check_file("cow.json", r'"health":[0-4]\.', "the cow lost 6 health"),
+                check_log(r"combat: Better Combat combo 0", "Better Combat's attack ran")],
+    ),
+    "ride": dict(
+        about="Entity.startRiding's head (mixinmod: no minecarts): the cart refuses, the boat takes the player",
+        fixtures=["mixinmod"], scene="ride",
+        steps=['$C look-at $(cat $S/cart.pos) >/dev/null; sleep 0.5; $C mouse right click >/dev/null; sleep 1; $C status > $S/cart.json',
+               '$C look-at $(cat $S/boat.pos) >/dev/null; sleep 0.5; $C mouse right click >/dev/null; sleep 1; $C status > $S/boat.json'],
+        checks=[check_json("cart.json", ["riding"], None, "not in the minecart"),
+                check_file("boat.json", r'"riding":\{|"riding":[0-9]', "in the boat")],
+    ),
+    "slot": dict(
+        about="Inventory.setSelectedSlot's head (mixinmod: not the ninth): the slot stays",
+        fixtures=["mixinmod"], scene="none",
+        steps=['$C key 3 tap >/dev/null; sleep 0.5; $C key 9 tap >/dev/null; sleep 1; $C state > $S/state.json'],
+        checks=[check_json("state.json", ["selected"], 3, "still on the third slot")],
+    ),
+    "snow": dict(
+        about="Serene Seasons' snow: in winter rain, the plains' floor gets snow (the mods answer precipitation)",
+        mods=["seasons", "glitchcore"], scene="snow",
+        steps=['$C command "season set mid_winter" >/dev/null; $C command "gamerule random_tick_speed 300" >/dev/null; sleep 12; '
+               '$C command "gamerule random_tick_speed 3" >/dev/null; '
+               'read a b c d e f < $S/floor.pos; $C blocks $a $b $c $d $e $f > $S/floor.json'],
+        checks=[check_file("floor.json", r'"minecraft:snow":\s*[1-9]', "snow on the floor"),
+                check_log(r"Precipitation goes to the mods", "precipitation goes to the mods")],
+        look="snow layers on the stone",
+    ),
+    "mixins2": dict(
+        about="Round two's actions (mixinmod): no snowball throws, an emerald with each craft",
+        fixtures=["mixinmod"], scene="none",
+        steps=['$C command "gamemode survival" >/dev/null; $C command "give @s minecraft:snowball 4" >/dev/null; sleep 0.5; '
+               '$C select minecraft:snowball >/dev/null; $C look 0 -10 >/dev/null; $C mouse right click >/dev/null; sleep 1; '
+               '$C inventory > $S/snow.json',
+               '$C command "clear @s" >/dev/null; $C command "give @s minecraft:oak_log 1" >/dev/null; sleep 0.5; '
+               '$C open-inventory >/dev/null; sleep 0.5; $C click-slot 0 >/dev/null; sleep 0.3; $C click-slot 100 >/dev/null; '
+               'sleep 0.3; $C click-slot 200 >/dev/null; sleep 0.3; $C click-slot 1 >/dev/null; sleep 1; '
+               '$C key escape tap >/dev/null; sleep 1; $C inventory > $S/craft.json'],
+        checks=[check_file("snow.json", r'"minecraft:snowball":\s*4', "the snowballs stayed (not thrown)"),
+                check_file("craft.json", r'"minecraft:emerald":\s*1', "an emerald with the planks")],
     ),
     "prism": dict(
         about="Prism Launcher's wrapper: an instance's mods linked, Fabric API left out (no game)",

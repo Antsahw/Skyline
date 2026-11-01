@@ -1845,6 +1845,11 @@ public final class HorizonServer {
         return currentTick;
     }
 
+    /** Horizon's tick count, as the last mirror tick had it. */
+    static long currentTick() {
+        return currentTick;
+    }
+
     static String dimensionOf(Level level) {
         return level.dimension().identifier().toString();
     }
@@ -2166,6 +2171,8 @@ public final class HorizonServer {
                 List<net.minecraft.world.entity.Entity> all = new ArrayList<>();
                 if (players != null) all.addAll(players);
                 all.addAll(HorizonEntities.of(level));
+                // Copies of Horizon's mobs standing in for a routed attack (HorizonCombat).
+                all.addAll(HorizonCombat.visiting(level));
                 return all;
             }
 
@@ -2279,6 +2286,8 @@ public final class HorizonServer {
         List<String> out = new ArrayList<>();
         if (pickupRouted()) out.add("item_pickup");
         if (orbsRouted()) out.add("experience_orbs");
+        if (HorizonCombat.routed()) out.add("player_attack");
+        if (HorizonVanillaActions.weatherRouted()) out.add("precipitation");
         if (!out.isEmpty()) {
             Natives.log("Routed to the mods: " + out + " (item pickup: " + HorizonMixinTable.mods(ITEM_ENTITY, "playerTouch")
                     + ", orbs: " + HorizonMixinTable.mods(ORB, "playerTouch") + ")");
@@ -2772,7 +2781,7 @@ public final class HorizonServer {
     }
 
     /** Runs the tasks mods scheduled (those they schedule meanwhile wait for the next tick). */
-    private static void runTasks() {
+    static void runTasks() {
         for (int n = TASKS.size(); n > 0; n--) {
             Runnable task = TASKS.poll();
             if (task == null) break;

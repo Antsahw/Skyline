@@ -656,6 +656,16 @@ impl Behaviours {
     /// A player breaking a block (`playerWillDestroy` + `Level.destroyBlock`
     /// without drops; the caller handles the player's loot/tool). Double
     /// blocks (doors, tall plants, beds) remove their other half as vanilla.
+    /// `ServerLevel.tickPrecipitation` at a column whose top and biome answers the caller
+    /// has (a Java mod's seasons answer them: horizon-client's Java mods).
+    pub fn precipitation_tick_with<L: LevelAccess + ?Sized>(
+        &self,
+        level: &mut L,
+        ticks: &mut Ticks,
+        info: Precipitation,
+    ) {
+        self.sim(level, ticks).precipitation_tick(info);
+    }
     pub fn player_destroy_block<L: LevelAccess + ?Sized>(
         &self,
         level: &mut L,

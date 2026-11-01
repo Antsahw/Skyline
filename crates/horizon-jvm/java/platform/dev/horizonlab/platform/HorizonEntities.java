@@ -531,7 +531,7 @@ public final class HorizonEntities {
      * LivingEntity.detectEquipmentUpdates, which a mirrored player (not ticked) misses: the held
      * item's attribute modifiers (a sword's damage) apply before it hits.
      */
-    private static void equipment(net.minecraft.server.level.ServerPlayer player) {
+    static void equipment(net.minecraft.server.level.ServerPlayer player) {
         try {
             java.lang.reflect.Method detect = net.minecraft.world.entity.LivingEntity.class.getDeclaredMethod("detectEquipmentUpdates");
             detect.setAccessible(true);
