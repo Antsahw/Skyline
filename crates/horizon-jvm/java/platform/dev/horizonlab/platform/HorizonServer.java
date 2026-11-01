@@ -1984,8 +1984,21 @@ public final class HorizonServer {
      */
     private static final Map<Level, it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap<Kept>> KEPT = new IdentityHashMap<>();
 
+    /** The last thread's Sections (most reads come from the server thread, one after another). */
+    private record Owned(Thread thread, Sections sections) {}
+
+    private static volatile Owned lastOwned;
+
     private static Section section(Level level, int x, int y, int z) {
-        Sections sections = SECTIONS.get();
+        Owned owned = lastOwned;
+        Thread thread = Thread.currentThread();
+        Sections sections;
+        if (owned != null && owned.thread() == thread) {
+            sections = owned.sections();
+        } else {
+            sections = SECTIONS.get();
+            lastOwned = new Owned(thread, sections);
+        }
         long epoch = Natives.threadEpoch();
         if (epoch != sections.epoch) {
             sections.levels.clear();

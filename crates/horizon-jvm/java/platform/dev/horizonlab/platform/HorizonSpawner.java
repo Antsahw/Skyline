@@ -111,7 +111,8 @@ public final class HorizonSpawner {
         try {
             var generator = HorizonServer.generator(level);
             if (generator == null) return;
-            var resolver = generator.getBiomeSource().createCachingResolver(HorizonServer.randomState(level));
+            var noise = generator.getBiomeSource().createCachingResolver(HorizonServer.randomState(level));
+            var resolver = new HorizonBiomes(level, noise);
             java.lang.reflect.Field manager = net.minecraft.world.level.Level.class.getDeclaredField("biomeManager");
             manager.setAccessible(true);
             manager.set(level, new BiomeManager(resolver, BiomeManager.obfuscateSeed(seed)));
