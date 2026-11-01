@@ -32,11 +32,12 @@ fi
 S=$("$R/tools/java_bridge/launch.sh") || exit 1
 C="$R/target/fast/horizon-ctl --socket $S/ctl.sock"
 case "$SCENE" in
-  # Farmer's Delight: a lit stove, a cooking pot on it, beef and carrots; the pot opened.
+  # Farmer's Delight: a lit stove, a cooking pot on it, beef and carrots (an emptied
+  # inventory first: seeds the scene's setblocks drop may be picked up); the pot opened.
   pot) "$R/tools/java_bridge/around.sh" \
     'q "setblock $((X+2)) $Y $Z farmersdelight:stove[facing=west,lit=true]"' \
     'q "setblock $((X+2)) $((Y+1)) $Z farmersdelight:cooking_pot[facing=west,support=tray]"' \
-    'q "give @s minecraft:beef 3"' 'q "give @s minecraft:carrot 2"' \
+    'q "clear @s"' 'q "give @s minecraft:beef 3"' 'q "give @s minecraft:carrot 2"' \
     '$C look-at-block $((X+2)) $((Y+1)) $Z >/dev/null' '$C mouse right click >/dev/null' 'sleep 3' ;;
   # Tom's Storage: a chest (12 diamonds, 40 logs), a connector beside it, a terminal on the
   # connector facing it (pos=down: it reads the block below); the terminal opened.

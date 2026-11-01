@@ -1322,7 +1322,7 @@ mod run {
                 return;
             }
             state.calls = state.calls.wrapping_add(1);
-            if state.keys.is_none() || state.calls % 100 == 0 {
+            if state.keys.is_none() || state.calls.is_multiple_of(100) {
                 let keys = horizon_jvm::events::bound_keys().unwrap_or_else(|e| {
                     log::warn!("Java mods: their key bindings can't be read: {e}");
                     Vec::new()

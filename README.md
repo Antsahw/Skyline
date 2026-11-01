@@ -39,11 +39,11 @@ The Java bridge runs **real Fabric mods for 26.3** inside Horizon. A Java VM in 
 | Blocks, items, recipes, creative tabs | ✅ |
 | Machines and their screens (block entities, menus) | ✅ Farmer's Delight's pot and stove, Tom's Storage terminal |
 | Recipe book and REI (item list beside the inventory, search, R/U, `/recipes`) | ✅ (REI over mod machine screens: in progress) |
-| Mod mobs: AI, combat, models, saving, sounds, particles | ✅ 100 mobs ~8–15 ms a tick (GeckoLib: untested on a real mod) |
-| Mod worldgen: biomes, trees, colours, `/locate biome` and `structure` | ✅ Overworld, Nether (BetterNether, BOP), End (BetterEnd); skyblock data packs |
-| HUD mods, GPU-drawn mods | ✅ Jade, AppleSkin, Xaero's minimap (its GPU calls run on wgpu) |
+| Mod mobs: AI, combat, models, saving, sounds, particles | ✅ natural spawning; 100 mobs ~7–12 ms a tick on 2 cores (GeckoLib: untested on a real mod) |
+| Mod worldgen: biomes, trees, colours, `/locate biome` and `structure` | ✅ Overworld, Nether (BetterNether, BOP), End (BetterEnd); skyblock data packs; mod world types (One Block, Grid World) |
+| HUD mods, GPU-drawn mods | ✅ Jade, AppleSkin, Xaero's Minimap and World Map, JourneyMap's minimap (their GPU calls run on wgpu) |
 | Client↔server mod messages, key bindings, chunk loaders | ✅ |
-| Mixins that change vanilla behaviour | ✅ Veinminer; block breaking, random ticks, using items on blocks and pickups go to Java when a mod patches them (a table lists the rest) |
+| Mixins that change vanilla behaviour | ✅ Veinminer, Right Click Harvest, Carry On, Serene Seasons, Clumps: actions a mod patches (breaking, using, hitting, crafting, growth, pickups) go to Java |
 | Speed with big packs | 🚧 Chunk generation through Java is the cost left |
 | Multiplayer with mods | 🚧 |
 
