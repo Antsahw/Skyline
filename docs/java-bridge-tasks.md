@@ -77,3 +77,15 @@ Never write as the user; mark what you post (CLAUDE.md). Never run mod jars the 
   each tick of a held sneak asks Java once. Outside the area: `HorizonServer.entities`'
   `candidates` (3 lines). Test: `regress.py --jars <jars> sweep dismount` (Better Combat,
   Cloth Config, playerAnimator; the mixinmod fixture).
+
+- **mixins 2** (`bridge-mixins-2`, on top of `bridge-mixins-1`), by Claude for iaxivers: the
+  most-patched "Rust does" lines of the 107-jar table, after `Player.attack` (done):
+  `LivingEntity.addEffect` (6 mods) and `causeFallDamage` (5). Works: a player's fall damage
+  goes through vanilla's `causeFallDamage` on the mirror when a mod patches it (mixinmod: no
+  damage holding a feather, half the distance with a slime ball, 7 for 10 blocks with empty
+  hands); potions, food, totems and `/effect` ask the heads of `addEffect` (mixinmod's poison
+  immunity holds). Doesn't: beacons, conduits, raids and the Warden add effects without
+  asking; mace/wind-charge falls and in-frame single player stay Rust's. Outside the area:
+  the client lib's `landing.rs`/`motion.rs` (a `route_fall` flag and `FallEvent::Routed`),
+  `lan_actions.rs`, `potions.rs` (a few lines each). Test: `regress.py --jars <jars> fall
+  effects`.
