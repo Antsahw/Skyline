@@ -1363,6 +1363,8 @@ HUD).
 
 ## Working on it
 
+- **The task queue is [java-bridge-tasks.md](java-bridge-tasks.md)**: take your area's next task, follow its loop, add a report there.
+
 - One task a branch (`bridge-<task>` off `java-bridge`); keep PR-sized steps.
 - Commit as the user (`iaxivers`) with the Co-Authored-By line; never commit `.local/`.
 - Write comments like the code around: what vanilla does and why the mirror does it.
