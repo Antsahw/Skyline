@@ -21,20 +21,47 @@ impl Game<'_> {
         if jars.is_empty() {
             return;
         }
-        let root = checkout();
-        let side = bridge_side();
         // The head of the players' hurtServer asks the Java mods.
         let _ = horizon_client::health::HURT_HOOK.set(super::server_mods::java_hurt);
         let _ = horizon_world::level::RANDOM_TICK_HOOK.set(super::server_mods::java_random_tick);
         let _ = horizon_client::world::SET_HOOK.set(super::server_mods::java_block_set);
-        let spawned = std::thread::Builder::new()
-            .name("Java mods".into())
-            .spawn(move || {
-                start(&root, &dir, jars, side);
-            });
-        if let Err(e) = spawned {
-            log::warn!("Java mods: no thread to start them on: {e}");
-        }
+        // Started already while the resources loaded (`java_content`), as a rule.
+        spawn_start(dir, jars);
+    }
+}
+
+/// Starts Java and Fabric now, beside the rest of the resources' load, once the content root
+/// is there (built or reused: a build beside Java's start outgrew 6 GB for a 110-jar pack,
+/// the load after it doesn't): the JVM's start, over a minute for a big pack, no longer
+/// waits for the window's resources. `HORIZON_JAVA_EARLY_START=0` waits as before.
+pub(super) fn start_early() {
+    if std::env::var("HORIZON_JAVA_EARLY_START").is_ok_and(|v| v == "0") {
+        return;
+    }
+    let dir = Game::options_path().with_file_name(horizon_jvm::DIR);
+    let jars = horizon_jvm::jars(&dir);
+    if !jars.is_empty() {
+        spawn_start(dir, jars);
+    }
+}
+
+/// Starts the JVM and Fabric on the "Java mods" thread, once a process: from [`start_early`]
+/// once the content root is there, else from `start_java_mods`.
+fn spawn_start(dir: PathBuf, jars: Vec<PathBuf>) {
+    static SPAWNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if SPAWNED.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        return;
+    }
+    let root = checkout();
+    let side = bridge_side();
+    let spawned = std::thread::Builder::new()
+        .name("Java mods".into())
+        .spawn(move || {
+            start(&root, &dir, jars, side);
+        });
+    if let Err(e) = spawned {
+        log::warn!("Java mods: no thread to start them on: {e}");
+        SETTLED.store(true, std::sync::atomic::Ordering::SeqCst);
     }
 }
 
@@ -68,9 +95,7 @@ pub(super) fn java_content(base: &Path) -> Vec<PathBuf> {
     if jars.is_empty() {
         return Vec::new();
     }
-    let cache = std::env::current_dir()
-        .unwrap_or_default()
-        .join(".horizon-cache/java-content");
+    let cache = super::mods::horizon_cache().join("java-content");
     if let Some(folders) = horizon_jvm::content::cached(&jars, &cache) {
         return folders;
     }
@@ -98,9 +123,7 @@ pub(super) fn java_content(base: &Path) -> Vec<PathBuf> {
 /// Puts the creative tabs the Java mods' content build exported (their tabs, their items in
 /// vanilla's, the search index) over the prepared ones in the game's content root `out`.
 pub(super) fn java_creative(out: &Path) {
-    let cache = std::env::current_dir()
-        .unwrap_or_default()
-        .join(".horizon-cache/java-content");
+    let cache = super::mods::horizon_cache().join("java-content");
     // The mods' block tints, for the mesher (BOP's flowering leaves take the foliage colour).
     if let Some(tints) = horizon_jvm::content::tints(&cache) {
         match std::fs::read_to_string(&tints)
