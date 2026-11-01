@@ -77,3 +77,11 @@ Never write as the user; mark what you post (CLAUDE.md). Never run mod jars the 
   files aren't loaded at their next join; Farmer's Delight-style ConfigValues stay shared.
   Test: `tools/java_bridge/lan_test.sh '$G command "modconfig appleskin"'`, toggle, Save, then
   `$H command "modconfig appleskin"`; regress `join modsettings` (new) pass, `rei hud keys` too.
+
+- **client 2, a clear in-game message when a mod fails** (`bridge-client-2`, on client 1).
+  Works: every player gets "[Java mods] <mod> failed in <where>: <exception>: <message> (the
+  game goes on; the log has more)" in chat, once per mod and place (8 a session max), from
+  events, hooks, screens, HUD, ticks, joins, settings and the recipe viewer; startup failures
+  wait for the first join. Touched HorizonHooks/HorizonServer.fire with one call each.
+  Doesn't: failures outside those catch sites (worldgen, entity drawing) only log. Test:
+  regress `failmsg` (failmod fixture), or any pack: open chat after a failure.
