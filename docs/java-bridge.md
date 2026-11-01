@@ -463,6 +463,14 @@ gets SPIR-V, vertex layouts and uniform lists.
   mods look up themselves (`getAtlasOrThrow(GUI).getSprite`) are made on demand (name only)
   and drawn by name. `setScreenAndShow` draws a frame at once: `renderFrame` is a no-op
   headless. Screens that read `mouseHandler.xpos()` get Horizon's mouse.
+- Field initializers merged from mixins, on the headless client's player, run in this order:
+  empty collections, mods' factory methods returning a field's type (`create...`: Player
+  Animation Lib's animation manager fills its layer map), the server player's fields, a mod
+  type's constructor taking the player, then the constructor-end hooks, which now include
+  client mixins' (`HorizonHooks.read(..., constructorsOnly)`), with the player in a client level.
+- New worlds' dimensions: the preset's under the data packs' own (`WorldDimensions.bake` with
+  `context.datapackDimensions()`); before, a pack's `dimension/overworld.json` was ignored.
+- `Connection.isConnecting()` is `channel == null`: a mirrored connection says it isn't.
 - Mirrored levels now have a chunk map (`HorizonServer.chunkMap`, made without its
   constructor, then its constructor-end hooks with a world storage rooted in `horizon-java/`):
   GraphLib (Extended Drawers) keeps its graph storage there. `ChunkMapMixin` makes
@@ -778,9 +786,10 @@ reload listener fails.
 SkyFactory direction (tested 2026-10-31): no sieve mod exists for 26.3 Fabric (Ex Nihilo,
 Ex Deorum, Ex Compressum stop at 26.2 or NeoForge). Skyblock Infinite (void world + island
 function) works: the void generates through Java, its function places the island at 6 61 6,
-moves the world spawn and the player there. Simply OneBlock works after the first respawn
-(its load function runs after Horizon placed the first player in the void; the block and the
-world spawn come right after). One Block (theoneblock) and Grid World Generator need their
+moves the world spawn and the player there. Simply OneBlock works from the first spawn: a
+player who joins while the Java mods' load functions haven't run (or the spawn's chunks
+aren't there) waits, and joins a second after them, at the spawn they set (`hold_join` in
+`game/lan.rs`); its void overworld is the pack's own `dimension/overworld.json`. One Block (theoneblock) and Grid World Generator need their
 world preset, which Horizon's world creation can't pick yet. Just Hammers (needs Nanite
 Library, undeclared on Modrinth), CB Compressed Blocks, Forgiving Void load.
 A 107-jar pack (`big3`: the big pack plus Veinminer, Just Hammers, Compressed Blocks, XP Tome,
@@ -788,8 +797,13 @@ Moving Elevators, Simple Copper Pipes, Effortless Building, Nether Chested, Easy
 Boxes, Inventory Sorter, Wizards/Spell Engine/Runes, Jewelry, Archers, Mythic Upgrades,
 Forgiving Void, Elevator Mod, Mob Lassos, Hang Glider, FallingTree, Towns and Towers,
 Repurposed Structures, Open Parties and Claims, Better Combat): 265 mods, 20179 recipes, REI
-shows them (`/recipes justhammers:iron_hammer`). Left: Open Parties and Claims' server tick
-(a task holder null), FrozenLib's cape reload (client skins), Xaero's HUD (GPU).
+shows them (`/recipes justhammers:iron_hammer`). Fixed since (bridge-pack3): Open Parties and
+Claims (a mirrored connection isn't "connecting"), FrozenLib capes (no downloads), Better
+Combat / Spell Engine / Player Animation Lib on the client player, and the server tick that
+froze while the client's models reloaded (now prepared on background workers, applied by
+`tasks()`). Left: with Trinkets installed the models' reload never ends (its model discovery
+renews a future its client manager completes, which this reload doesn't run): Xaero's
+minimap gets no baked models; Puzzles Lib's join hook wants the client player's connection.
 
 Mods' sounds and particles (2026-10-31): a mod's sound event plays by name (its
 `sounds.json` and `.ogg` files are carried into the content mod, which Horizon's sound
@@ -818,7 +832,7 @@ with Architectury and Cloth Config, Biomes O' Plenty with TerraBlender and Glitc
 API); a case missing one is skipped, the fixture mods are built. Each case checks what
 horizon-ctl reports and the log, and prints `pass`/`FAIL`; screenshots and logs are in
 `/tmp/hz-regress/<case>/` (a `look` line names what to see on one). A new scene that works gets
-a case in `CASES`.
+a case in `CASES`. `skyblock` and `oneblock` take Skyblock Infinite's and Simply OneBlock's jars.
 
 ### Play a Prism instance
 

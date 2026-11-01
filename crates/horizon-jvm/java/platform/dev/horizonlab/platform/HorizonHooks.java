@@ -175,7 +175,10 @@ public final class HorizonHooks {
                         for (JsonElement name : json.getAsJsonArray(key)) {
                             String file = pkg + "/" + name.getAsString().replace('.', '/') + ".class";
                             Optional<Path> bytes = mod.findPath(file);
-                            if (bytes.isPresent()) readClient(id, Files.readAllBytes(bytes.get()));
+                            if (bytes.isPresent()) {
+                                readClient(id, Files.readAllBytes(bytes.get()));
+                                if (key.equals("client")) read(id, Files.readAllBytes(bytes.get()), true);
+                            }
                         }
                     }
                 } catch (Throwable t) {
@@ -405,6 +408,16 @@ public final class HorizonHooks {
 
     /** The event-like @Injects of one mixin class: how many. */
     private static int read(String mod, byte[] bytes) {
+        return read(mod, bytes, false);
+    }
+
+    /**
+     * {@code constructorsOnly}: a client mixin's, whose constructor-end injections an object the
+     * headless client makes without its constructor runs (constructed: the client's player,
+     * Better Combat's and Spell Engine's animation stacks); its other injections stay the
+     * client's own.
+     */
+    private static int read(String mod, byte[] bytes, boolean constructorsOnly) {
         ClassNode node = new ClassNode();
         new ClassReader(bytes).accept(node, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
         List<String> targets = new ArrayList<>();
@@ -432,6 +445,7 @@ public final class HorizonHooks {
                 if (!(methods instanceof List<?> specs)) continue;
                 for (Object spec : specs) {
                     String[] nameDesc = parseSpec((String) spec);
+                    if (constructorsOnly && !nameDesc[0].equals("<init>")) continue;
                     for (String owner : targets) {
                         HOOKS.computeIfAbsent(owner + "." + nameDesc[0], k -> new ArrayList<>())
                                 .add(new Hook(mod, owner, nameDesc[0], nameDesc[1], at, mixin, m.name, cancellable));
