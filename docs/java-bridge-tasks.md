@@ -85,3 +85,13 @@ Never write as the user; mark what you post (CLAUDE.md). Never run mod jars the 
   wait for the first join. Touched HorizonHooks/HorizonServer.fire with one call each.
   Doesn't: failures outside those catch sites (worldgen, entity drawing) only log. Test:
   regress `failmsg` (failmod fixture), or any pack: open chat after a failure.
+
+- **client 3, dedicated server: mod screens, HUD and REI for its players** (`bridge-client-3`,
+  on client 2). Works (screenshots): on `--dedicated`, a joined player gets Tech Reborn's
+  machine screens, Jade with TR energy, REI over the inventory and over TR's screens. Fixed on
+  the way (single player too): REI's list vanished from mod screens a few seconds after they
+  opened. REI reloads on its own at the client's join, which emptied the synced displays and
+  removed its overlay renderer; both are put back now. REI's settings are shared again (not
+  per player, unlike client 1 said): its copied config stopped the overlay. Test:
+  `MODS=<REI+TR+Jade...> tools/java_bridge/server_test.sh '$G key e tap; sleep 6'` (new);
+  regress `reiscreen` (new), `rei hud join modsettings failmsg` pass.
