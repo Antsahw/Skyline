@@ -89,3 +89,11 @@ Never write as the user; mark what you post (CLAUDE.md). Never run mod jars the 
   the client lib's `landing.rs`/`motion.rs` (a `route_fall` flag and `FallEvent::Routed`),
   `lan_actions.rs`, `potions.rs` (a few lines each). Test: `regress.py --jars <jars> fall
   effects`.
+
+- **mixins 3** (`bridge-mixins-3`, on top of `bridge-mixins-2`), by Claude for iaxivers: a
+  regress case per routed action. Works: the new fixture case `mixins1` covers breaking,
+  pickup, crop random ticks and entity use (new `MilkMixin`); with it every routed action has
+  a case (list in docs/java-bridge.md), the fixture ones without downloaded jars. All 16
+  mixin cases pass headless. Doesn't: use-on, orbs and precipitation are still only checked
+  with real mods (Right Click Harvest, Clumps, Serene Seasons). Test: `regress.py --jars
+  <jars> mixins1` (or the whole list).
