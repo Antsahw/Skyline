@@ -68,3 +68,12 @@ Never write as the user; mark what you post (CLAUDE.md). Never run mod jars the 
 ## Reports
 
 (Newest last. One short entry per task: area, task, branch, works / doesn't / how to test.)
+
+- **client 1, mod config per player on LAN** (`bridge-client-1`). Works: a guest's settings
+  are theirs (AutoConfig mods, Jade, AppleSkin, REI): in memory per player, and files a guest
+  saves go to `config/horizon-players/<uuid>/` while the host's stay (LAN-tested with
+  AppleSkin: guest off, host on, host's file on). Also fixed: Architectury's join NPE came back
+  with the per-player connections (they lacked `minecraft`/`connection`). Doesn't: a guest's
+  files aren't loaded at their next join; Farmer's Delight-style ConfigValues stay shared.
+  Test: `tools/java_bridge/lan_test.sh '$G command "modconfig appleskin"'`, toggle, Save, then
+  `$H command "modconfig appleskin"`; regress `join modsettings` (new) pass, `rei hud keys` too.
