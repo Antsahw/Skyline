@@ -1,5 +1,7 @@
 {
   "entity.horizon_critters.critter": "Critter",
   "item.horizon_critters.critter_spawn_egg": "Critter Spawn Egg",
-  "subtitles.horizon_critters.critter.squeak": "Critter squeaks"
+  "subtitles.horizon_critters.critter.squeak": "Critter squeaks",
+  "entity.horizon_critters.biter": "Biter",
+  "entity.horizon_critters.mount": "Mount"
 }

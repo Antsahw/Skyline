@@ -300,6 +300,21 @@ public final class HorizonEntities {
             passenger.stopRiding();
             return;
         }
+        // A Horizon player riding a mod's mob: Horizon ticks the player, not the mirror
+        // (ServerPlayer.rideTick would run its whole tick). Player.rideTick's part: the sneak
+        // key gets it off (wantsToStopRiding; stopRiding's dismountTo moves Horizon's player),
+        // else it sits where the mob's positionRider puts it.
+        if (passenger instanceof net.minecraft.server.level.ServerPlayer player && HorizonServer.isMirror(player)) {
+            if (player.isShiftKeyDown()) {
+                fire(vehicle, "Player.stopRiding", player::stopRiding);
+                player.setShiftKeyDown(false);
+            } else {
+                player.setOldPosAndRot();
+                vehicle.positionRider(player);
+                player.resetFallDistance();
+            }
+            return;
+        }
         passenger.setOldPosAndRot();
         passenger.tickCount++;
         passenger.rideTick();

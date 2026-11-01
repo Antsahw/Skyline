@@ -189,7 +189,34 @@ impl Game<'_> {
 
     /// The local player's tick in its vehicle, in place of its own movement:
     /// false when it rides nothing.
+    /// This game's player sits on a Java mod's mob (the server says so each tick).
+    pub(super) fn riding_java_mob(&self) -> bool {
+        #[cfg(feature = "java-mods")]
+        {
+            self.riding.is_none() && self.java_entities.ride.is_some()
+        }
+        #[cfg(not(feature = "java-mods"))]
+        {
+            false
+        }
+    }
+
     pub(super) fn remote_ride(&mut self, keys: Keys) -> bool {
+        // A Java mod's mob (game/java_entities.rs): the server's mirror moves it by this
+        // player's keys (PlayerInput) and says where the seat is; the player sits there, and
+        // its position packets carry the seat.
+        #[cfg(feature = "java-mods")]
+        if self.riding.is_none()
+            && let Some(ride) = self.java_entities.ride
+        {
+            if let Some(p) = self.player.as_mut() {
+                self.previous_position = p.position;
+                p.position = Vec3::new(ride.p[0], ride.p[1], ride.p[2]);
+                p.velocity = Vec3::ZERO;
+                p.fall_distance = 0.0;
+            }
+            return true;
+        }
         let Some(id) = self.riding else {
             return false;
         };

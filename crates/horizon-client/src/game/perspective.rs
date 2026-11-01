@@ -431,7 +431,7 @@ impl Game<'_> {
         let main = self.inventory[self.selected].clone();
         let off = self.offhand.as_ref().map(|s| s.item.clone());
         let armor = self.armor.clone();
-        let riding = self.riding.is_some();
+        let riding = self.riding.is_some() || self.riding_java_mob();
         let hurt = p.health.hurt_animation_time;
         let avatar = self.avatar;
         let previous_position = self.previous_position;

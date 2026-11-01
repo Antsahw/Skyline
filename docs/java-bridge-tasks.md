@@ -202,3 +202,45 @@ tests pass; fmt and clippy `-D warnings` clean (horizon-client, horizon-jvm).
   checks. No regress case (a cost); `regress.py --java-only`: all pass (`attack` failed once and
   passed on rerun: flaky). Test: `HORIZON_JAVA_PROFILE=1`, `grep "entity ticks" latest.log`.
 
+- **entities 2 (hostile mod mobs attack players)**, `bridge-entities-2`. Agent: Claude (iaxivers' chats).
+  Works: a mod's mob hurting a mirrored player (`ServerPlayer.hurtServer` on the mirror) goes to
+  Horizon (`ServerPlayerHurtMixin` → `Natives.hurtPlayer` → `Action::HurtPlayer` →
+  `java_hurt`): Horizon hurts its player as its own mobs do (armour, blocking, knockback from
+  where it came, invulnerable ticks, death), as that LAN guest or the window's player, and the
+  death message names the mob ("was slain by Biter"). A mod's damage type Horizon doesn't know
+  counts as a mob's attack. New fixture mob `horizon_critters:biter` (hunts players, 3 a bite).
+  Also: `regress.py` rebuilds a fixture whose sources changed (it reused stale jars), and can
+  build one against the case's jars (`FIXTURE_CP`). Touched `server_mods.rs` (mixins area: one
+  routed action) and `lan_e2e.py`. Test: `regress.py --jars … hostile` (the player loses health
+  to a biter); `lan_e2e.py --bin-dir target/fast --java-mods <critter jar folder> --check
+  javahostile` (a guest 20 → 17). Not done: mod mobs vs Horizon's own mobs (they don't see each
+  other), a mod's projectile is untested (same path).
+- **entities 3 (GeckoLib fixture animates)**, `bridge-entities-3`. Agent: Claude (iaxivers' chats).
+  Works: new fixture `geckomod` (`horizon_gecko:bobber`, a GeckoLib 5.5 entity with a looping
+  idle animation: its top turns and bobs) draws and animates. The fix: the bridge rendered at
+  partial tick 1.0, which GeckoLib reads as "game paused" (`AnimationController` stops); it now
+  renders at 0.999 (`HorizonEntityRender.PARTIAL_TICK`). New regress case `gecko` takes two
+  screenshots 0.7 s apart and checks they differ (`tools/java_bridge/changed.py`). Branch merges
+  `bridge-entities-2` (for `FIXTURE_CP`); touched tools only outside the area. Test:
+  `regress.py --jars <folder with geckolib-fabric-26.3-*.jar> gecko`.
+- **entities 4 (riding and getting off mod mobs)**, `bridge-entities-4` (on top of
+  `bridge-entities-3`). Agent: Claude (iaxivers' chats). Works: a mod's rideable mob (new
+  fixture `horizon_critters:mount`) takes a player on a use (its own `mobInteract` →
+  `startRiding` on the mirror); the player's movement keys (PlayerInput flags, now bits 16-22
+  of `HorizonServer.tick`'s `permissions`) become the mirror player's `xxa`/`zza`/jumping, and
+  `RiderAuthorityMixin` makes mirrored players non-authoritative so the mirror moves the mob
+  (vanilla leaves a ridden mob to the rider's client). `HorizonEntities.tickPassenger` doesn't
+  run a mirrored player's whole tick: it seats it (`positionRider`) or, on sneak, runs
+  `stopRiding` (`dismountTo` moves Horizon's player). The snapshot's `rides` tell each game its
+  seat; the game sits there (sitting pose, its own mount not aimed at) and its move packets
+  carry the seat. Touched outside the area: `remote_vehicles.rs`, `perspective.rs`,
+  `events.rs`, `HorizonServer.tick` (input bits), `lan_e2e.py`. Test: `regress.py --jars …
+  mount` (on 0.4 over the floor, drove ~20 blocks, off); `lan_e2e.py --java-mods <critter
+  jars> --check javamount`. Not done: in-frame (`--in-frame`) riding; other players see the
+  rider standing (Horizon's tracker doesn't know the mod's vehicle); horse-style charged
+  jumps (`PlayerCommand` riding jump) aren't forwarded.
+- **Seen while running entities 3 and 4 (not fixed, pack area):** `regress.py skyblock` fails
+  often on a 2-core box: the player joins before Skyblock Infinite's load function has run
+  (it waits on chunk 0 0, which Horizon hasn't loaded), so `held_joins` (game/lan.rs) lets
+  the player in at y -63 and it falls out of the world. The hold should also wait for a load
+  function deferred on an unloaded chunk.

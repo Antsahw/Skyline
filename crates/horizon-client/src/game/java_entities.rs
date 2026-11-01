@@ -108,6 +108,7 @@ pub(super) struct JavaEntities {
     before: HashMap<i32, Shown>,
     own: Vec<Shown>,
     pub(super) hands: Option<Hands>,
+    pub(super) ride: Option<Ride>,
 }
 
 /// The atlas key of an entity texture: `ns:textures/entity/x.png` is `ns:entity/x`
@@ -151,8 +152,20 @@ struct RawPayload {
     /// What mods draw in this player's first person, in view space.
     #[serde(default)]
     hands: Option<RawHands>,
+    /// The mod's mob this game's player rides, and its seat this tick.
+    #[serde(default)]
+    ride: Option<Ride>,
     #[serde(default)]
     models: HashMap<String, Value>,
+}
+
+/// A mod's mob the player rides (`HorizonEntityRender`'s "rides"): the mirror moves it from
+/// the player's keys and puts the player on it (`positionRider`); the game sits it there.
+#[derive(serde::Deserialize, Clone, Copy)]
+pub(super) struct Ride {
+    pub(super) id: i32,
+    /// The seat: where the mirror's `positionRider` put the player this tick.
+    pub(super) p: [f64; 3],
 }
 
 #[derive(serde::Deserialize)]
@@ -348,6 +361,7 @@ impl JavaEntities {
             })
             .collect();
         self.own = payload.own.into_iter().map(RawShown::shown).collect();
+        self.ride = payload.ride;
         self.hands = payload.hands.map(|h| Hands {
             models: h.models.into_iter().filter_map(RawModel::drawn).collect(),
             items: h.items.iter().filter_map(item).collect(),
@@ -615,9 +629,11 @@ impl Game<'_> {
         let dir = super::view_vector(self.yaw, self.pitch);
         let reach: f64 = if self.creative { 5.0 } else { 3.0 };
         let java = &self.java_entities;
+        // Not the mob it rides (ProjectileUtil.getEntityHitResult skips the shooter's vehicle).
+        let riding = java.ride.map(|r| r.id);
         java.now
             .iter()
-            .filter(|s| !s.block)
+            .filter(|s| !s.block && Some(s.id) != riding)
             .filter_map(|s| Some((s.id, super::ray_box(eye, dir, reach, java.bounds(s, 1.0))?)))
             .min_by(|a, b| a.1.total_cmp(&b.1))
     }

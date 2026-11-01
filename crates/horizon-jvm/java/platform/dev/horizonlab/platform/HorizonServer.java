@@ -1128,7 +1128,8 @@ public final class HorizonServer {
      *
      * @param world Horizon's world folder
      * @param motion five values per player: x, y, z, yaw, pitch
-     * @param permissions per player: vanilla's permission level, 0 to 4, in the low 8 bits; bit 8 the sneak key
+     * @param permissions per player: vanilla's permission level, 0 to 4, in the low 8 bits; bit 8 the sneak key;
+     *     bits 16-22 the movement keys (PlayerInput's flags)
      * @param kinds per event: 0 joined, 1 left, 2 chat, 3 broke a block, 4 placed a block, 5 died
      *     (texts: the damage type), 6 respawned
      * @param who per event: the player's UUID
@@ -1255,6 +1256,21 @@ public final class HorizonServer {
                 var pose = player.getPose();
                 if (sneaking && pose == net.minecraft.world.entity.Pose.STANDING) player.setPose(net.minecraft.world.entity.Pose.CROUCHING);
                 else if (!sneaking && pose == net.minecraft.world.entity.Pose.CROUCHING) player.setPose(net.minecraft.world.entity.Pose.STANDING);
+                // The movement keys (bits 16-22, the PlayerInput packet's flags): a mod's mob
+                // it rides steers by them (getRiddenInput reads xxa and zza, as the rider's
+                // client would set them; RiderAuthorityMixin lets the mirror move the mob).
+                int keys = (permissions[i] >> 16) & 0x7f;
+                player.setLastClientInput(new net.minecraft.world.entity.player.Input((keys & 1) != 0, (keys & 2) != 0,
+                        (keys & 4) != 0, (keys & 8) != 0, (keys & 16) != 0, (keys & 32) != 0, (keys & 64) != 0));
+                if (player.getVehicle() != null) {
+                    player.zza = ((keys & 1) != 0 ? 1.0F : 0.0F) - ((keys & 2) != 0 ? 1.0F : 0.0F);
+                    player.xxa = ((keys & 4) != 0 ? 1.0F : 0.0F) - ((keys & 8) != 0 ? 1.0F : 0.0F);
+                    player.setJumping((keys & 16) != 0);
+                } else {
+                    player.xxa = 0.0F;
+                    player.zza = 0.0F;
+                    player.setJumping(false);
+                }
                 mirrorInventory(player, inventories, i);
                 now.put(uuid, player);
             } catch (Throwable t) {

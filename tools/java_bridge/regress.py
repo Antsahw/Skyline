@@ -60,6 +60,7 @@ MODS = {
     "buildcraft": ["bcrefabricated*", "buildcraft*"],
     "fluidtank": ["largefluidtank*"],
     "scala": ["scalable-cats-force*"],
+    "geckolib": ["geckolib*"],
 }
 
 
@@ -139,6 +140,36 @@ CASES = {
                 check_file("entities.json", r'"kind":"java"[^}]*"type":"horizon_critters:critter"|"type":"horizon_critters:critter"[^}]*"kind":"java"',
                            "horizon-ctl sees the critters")],
         look="two critters ahead",
+    ),
+    "hostile": dict(
+        about="A hostile mod's mob (crittermod's biter) hunts a player in survival and bites: Horizon's player is hurt (Natives.hurtPlayer)",
+        fixtures=["crittermod"], scene="hostile",
+        steps=['sleep 3; $C state > $S/state.json'],
+        checks=[check_file("state.json", r'"player":\{[^}]*"health":(1?[0-9])\.', "the player lost health to the bites"),
+                check_log(r"Summoned new Biter", "the biter is summoned")],
+        look="a biter at the player, the hearts down",
+    ),
+    "mount": dict(
+        about="Riding a mod's mob (crittermod's mount): a use gets on, the movement keys steer it on the mirror, sneaking gets off",
+        fixtures=["crittermod"], scene="mount",
+        steps=['$C look-at $(cat $S/mount.pos) >/dev/null; sleep 0.3; $C mouse right click >/dev/null; sleep 1.5; $C state > $S/on.json',
+               '$C key w down >/dev/null; sleep 2.5; $C key w up >/dev/null; sleep 0.5; $C state > $S/drove.json; $C key f5 tap >/dev/null',
+               '$C key f5 tap >/dev/null; $C key f5 tap >/dev/null; $C key shift down >/dev/null; sleep 1; $C key shift up >/dev/null; sleep 1; $C state > $S/off.json; '
+               'python3 $R/tools/java_bridge/ride_check.py $S/floor.y $S/on.json $S/drove.json $S/off.json > $S/ride.txt'],
+        checks=[check_file("ride.txt", r"(?m)^seated", "a use put the player on the mount"),
+                check_file("ride.txt", r"(?m)^drove", "holding forward drove it (the player on it)"),
+                check_file("ride.txt", r"(?m)^off", "sneaking got the player off")],
+        look="the player on the mount, further east (mount-2.png: third person)",
+    ),
+    "gecko": dict(
+        about="GeckoLib (geckomod fixture, built against the GeckoLib jar): a mob's GeckoLib model drawn, its looping animation moving it",
+        fixtures=["geckomod"], mods=["geckolib"], scene="entity", env={"ENTITY": "horizon_gecko:bobber"},
+        steps=['sleep 2; $C screenshot $S/a.png >/dev/null; sleep 0.7; $C screenshot $S/b.png >/dev/null; '
+               '$C entities 8 > $S/entities.json; python3 "$R/tools/java_bridge/changed.py" $S/a.png $S/b.png > $S/moved.txt'],
+        checks=[check_file("entities.json", r'"type":"horizon_gecko:bobber"', "horizon-ctl sees the bobbers"),
+                check_file("moved.txt", r"^changed", "the animation moves them between two shots")],
+        forbid=[r"bobber.*(failed|couldn't)"],
+        look="two bobbers ahead, their tops turned",
     ),
     "worldgen": dict(
         about="Biomes O' Plenty's biomes: /locate finds one",
@@ -348,10 +379,18 @@ def find_jars(folder, names):
     return found, None
 
 
-def fixture(name, cache):
+def fixture(name, cache, against=()):
+    """The fixture mod `name` built (once, again when its sources change), against the case's
+    mod jars (`against`: a fixture that uses a library mod, GeckoLib)."""
     jar = cache / f"{name}.jar"
+    # Made again when its sources changed since (a new mob in the critter fixture).
+    sources = ROOT / "crates/horizon-jvm/java/fixtures" / name
+    newest = max((f.stat().st_mtime for f in sources.rglob("*") if f.is_file()), default=0)
+    if jar.exists() and jar.stat().st_mtime < newest:
+        jar.unlink()
     if not jar.exists():
-        r = subprocess.run([str(TOOLS / "fixture_mod.sh"), name, str(jar)], capture_output=True, text=True)
+        env = dict(os.environ, FIXTURE_CP=":".join(str(j) for j in against))
+        r = subprocess.run([str(TOOLS / "fixture_mod.sh"), name, str(jar)], capture_output=True, text=True, env=env)
         if r.returncode != 0 or not jar.exists():
             raise RuntimeError(f"fixture {name} did not build: {r.stderr[-400:]}")
     return jar
@@ -510,7 +549,7 @@ def main():
             more, _ = find_jars(a.jars, [opt])
             jars += more or []
         try:
-            jars += [fixture(f, fixtures) for f in case.get("fixtures", [])]
+            jars += [fixture(f, fixtures, list(jars)) for f in case.get("fixtures", [])]
             print(f"---- {name}: {case['about']}", flush=True)
             if case.get("prism"):
                 results, errors = run_prism(case, jars, out)

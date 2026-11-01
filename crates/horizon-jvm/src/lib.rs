@@ -496,6 +496,11 @@ fn boot(env: &mut JNIEnv, jars: &[PathBuf]) -> jni::errors::Result<String> {
                 fn_ptr: native_fresh_chunks as *mut c_void,
             },
             NativeMethod {
+                name: "hurtPlayer".into(),
+                sig: "(Ljava/lang/String;Ljava/lang/String;FDDDLjava/lang/String;)V".into(),
+                fn_ptr: native_hurt_player as *mut c_void,
+            },
+            NativeMethod {
                 name: "stateName".into(),
                 sig: "(I)Ljava/lang/String;".into(),
                 fn_ptr: native_state_name as *mut c_void,
@@ -1247,6 +1252,39 @@ extern "system" fn native_fresh_chunks<'local>(
         array.into_raw()
     }))
     .unwrap_or(std::ptr::null_mut())
+}
+
+#[allow(clippy::too_many_arguments)]
+extern "system" fn native_hurt_player<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    uuid: JString<'local>,
+    damage_type: JString<'local>,
+    amount: sys::jfloat,
+    x: sys::jdouble,
+    y: sys::jdouble,
+    z: sys::jdouble,
+    by: JString<'local>,
+) {
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let by = (!by.is_null())
+            .then(|| env.get_string(&by).map(String::from).ok())
+            .flatten();
+        let (Ok(uuid), Ok(damage_type)) = (
+            env.get_string(&uuid).map(String::from),
+            env.get_string(&damage_type).map(String::from),
+        ) else {
+            return;
+        };
+        let from = (!x.is_nan()).then_some([x, y, z]);
+        events::push(events::Action::HurtPlayer {
+            uuid,
+            damage_type,
+            amount,
+            from,
+            by,
+        });
+    }));
 }
 
 extern "system" fn native_chunk_revision<'local>(

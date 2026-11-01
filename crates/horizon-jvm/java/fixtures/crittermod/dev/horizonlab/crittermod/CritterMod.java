@@ -23,6 +23,17 @@ public final class CritterMod implements ModInitializer {
     public static final EntityType<Critter> CRITTER = Registry.register(BuiltInRegistries.ENTITY_TYPE, KEY,
             EntityType.Builder.of(Critter::new, MobCategory.CREATURE).sized(0.8F, 0.9F).build(KEY));
 
+    /** A hostile one: it hunts players and bites (a check of mods' mobs attacking players). */
+    public static final Identifier BITER_ID = Identifier.fromNamespaceAndPath("horizon_critters", "biter");
+    public static final ResourceKey<EntityType<?>> BITER_KEY = ResourceKey.create(Registries.ENTITY_TYPE, BITER_ID);
+    public static final EntityType<Biter> BITER = Registry.register(BuiltInRegistries.ENTITY_TYPE, BITER_KEY,
+            EntityType.Builder.of(Biter::new, MobCategory.MONSTER).sized(0.8F, 0.9F).build(BITER_KEY));
+    /** A critter players ride (Mount). */
+    public static final ResourceKey<EntityType<?>> MOUNT_KEY = ResourceKey.create(Registries.ENTITY_TYPE,
+            Identifier.fromNamespaceAndPath("horizon_critters", "mount"));
+    public static final EntityType<Mount> MOUNT = Registry.register(BuiltInRegistries.ENTITY_TYPE, MOUNT_KEY,
+            EntityType.Builder.of(Mount::new, MobCategory.CREATURE).sized(1.2F, 1.0F).build(MOUNT_KEY));
+
     /** Its own sound (assets/horizon_critters/sounds.json) and particle type (particles/sparkle.json). */
     public static final net.minecraft.sounds.SoundEvent SQUEAK = Registry.register(BuiltInRegistries.SOUND_EVENT,
             Identifier.fromNamespaceAndPath("horizon_critters", "critter.squeak"),
@@ -36,6 +47,14 @@ public final class CritterMod implements ModInitializer {
         FabricDefaultAttributeRegistry.register(CRITTER, Mob.createMobAttributes()
                 .add(Attributes.MAX_HEALTH, 8.0)
                 .add(Attributes.MOVEMENT_SPEED, 0.25));
+        FabricDefaultAttributeRegistry.register(MOUNT, Mob.createMobAttributes()
+                .add(Attributes.MAX_HEALTH, 20.0)
+                .add(Attributes.MOVEMENT_SPEED, 0.25));
+        FabricDefaultAttributeRegistry.register(BITER, Mob.createMobAttributes()
+                .add(Attributes.MAX_HEALTH, 10.0)
+                .add(Attributes.MOVEMENT_SPEED, 0.3)
+                .add(Attributes.ATTACK_DAMAGE, 3.0)
+                .add(Attributes.FOLLOW_RANGE, 16.0));
         ResourceKey<Item> egg = ResourceKey.create(Registries.ITEM,
                 Identifier.fromNamespaceAndPath("horizon_critters", "critter_spawn_egg"));
         Registry.register(BuiltInRegistries.ITEM, egg, new SpawnEggItem(new Item.Properties().spawnEgg(CRITTER).setId(egg)));

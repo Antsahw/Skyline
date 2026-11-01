@@ -352,7 +352,12 @@ mod run {
     /// What Java mods hear of a tick (crate horizon-jvm).
     use horizon_jvm::events::Event as JavaEvent;
 
+    /// Java's hurts of Horizon players (a mod's mob's bite), applied at the next Java tick.
+    #[cfg(feature = "java-mods")]
+    static PENDING_HURTS: std::sync::Mutex<Vec<horizon_jvm::events::Action>> =
+        std::sync::Mutex::new(Vec::new());
     /// Teleports Java mods asked for while the hub was out of `self.lan`, done next tick.
+    #[cfg(feature = "java-mods")]
     static PENDING_TELEPORTS: std::sync::Mutex<Vec<horizon_jvm::events::Action>> =
         std::sync::Mutex::new(Vec::new());
 
@@ -862,6 +867,11 @@ mod run {
             for action in pending {
                 self.java_teleport(action);
             }
+            let hurts =
+                std::mem::take(&mut *PENDING_HURTS.lock().unwrap_or_else(|e| e.into_inner()));
+            for action in hurts {
+                self.java_hurt(action);
+            }
             // A connection's facing, or the window's own player's in-frame.
             let rotation = |id: &str| -> [f32; 2] {
                 self.lan
@@ -910,6 +920,13 @@ mod run {
                         .iter()
                         .flat_map(|h| &h.hub.guests)
                         .any(|g| uuid_string(g.uuid) == p.id && g.sneaking),
+                    // A connection's keys (PlayerInput): a mod's mob it rides steers by them.
+                    input: self
+                        .lan
+                        .iter()
+                        .flat_map(|h| &h.hub.guests)
+                        .find(|g| uuid_string(g.uuid) == p.id)
+                        .map_or(0, |g| g.input),
                     inventory: self
                         .lan
                         .iter()
@@ -1083,6 +1100,9 @@ mod run {
                 /// What mods draw in each player's first person, by UUID.
                 #[serde(default, borrow)]
                 hands: HashMap<&'a str, &'a RawValue>,
+                /// Players riding a mod's mob, by UUID: `{"id", "p": the seat}`.
+                #[serde(default, borrow)]
+                rides: HashMap<&'a str, &'a RawValue>,
             }
             static SENT: std::sync::Mutex<Option<Sent>> = std::sync::Mutex::new(None);
             let _timed =
@@ -1129,6 +1149,7 @@ mod run {
                     .collect()
             };
             let hands = &snapshot.hands;
+            let rides = &snapshot.rides;
             let payload =
                 |sent: &mut Sent, who: u32, uuid: Option<&str>, entries: &[&Entry]| -> Vec<u8> {
                     let had = sent.has.remove(&who).unwrap_or_default();
@@ -1164,13 +1185,16 @@ mod run {
                     sent.has.insert(who, has);
                     out.push_str("],\"own\":[");
                     out.push_str(&own.join(","));
-                    if let Some(h) = uuid.and_then(|u| hands.get(u)) {
-                        out.push_str("],\"hands\":");
-                        out.push_str(h.get());
-                        out.push_str(",\"models\":{");
-                    } else {
-                        out.push_str("],\"models\":{");
+                    out.push(']');
+                    if let Some(r) = uuid.and_then(|u| rides.get(u)) {
+                        out.push_str(",\"ride\":");
+                        out.push_str(r.get());
                     }
+                    if let Some(h) = uuid.and_then(|u| hands.get(u)) {
+                        out.push_str(",\"hands\":");
+                        out.push_str(h.get());
+                    }
+                    out.push_str(",\"models\":{");
                     let have = sent.to.entry(who).or_default();
                     let mut first = true;
                     for e in entries {
@@ -1622,6 +1646,12 @@ mod run {
                             drops.push((dimension.clone(), drop));
                         }
                     }
+                    hurt @ horizon_jvm::events::Action::HurtPlayer { .. } => {
+                        PENDING_HURTS
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .push(hurt);
+                    }
                     horizon_jvm::events::Action::Packet { uuid, data } => {
                         let Some(host) = host.as_deref_mut().or(self.lan.as_mut()) else {
                             continue;
@@ -1807,9 +1837,60 @@ mod run {
             }
         }
 
+        #[cfg(feature = "java-mods")]
+        /// A Java hurt of a Horizon player (`Natives.hurtPlayer`): as Horizon's own mobs hurt
+        /// it (`hurt_player_from`: armour, blocking, knockback from where it came, death; the
+        /// attacker named as a projectile with no owner is), as that guest; the window's own
+        /// player in-frame. A type Horizon doesn't know (a mod's)
+        /// counts as a mob's attack, or generic damage when it came from nowhere.
+        fn java_hurt(&mut self, action: horizon_jvm::events::Action) {
+            let horizon_jvm::events::Action::HurtPlayer {
+                uuid,
+                damage_type,
+                amount,
+                from,
+                by,
+            } = action
+            else {
+                return;
+            };
+            let named = by.map(horizon_client::text::Text::literal);
+            let kind = if self.motion.health.damage.id(&damage_type).is_some() {
+                damage_type
+            } else if from.is_some() {
+                "minecraft:mob_attack".to_owned()
+            } else {
+                "minecraft:generic".to_owned()
+            };
+            if let Some(mut host) = self.lan.take() {
+                let conn = host
+                    .hub
+                    .guests
+                    .iter()
+                    .find(|g| uuid_string(g.uuid) == uuid)
+                    .map(|g| g.conn);
+                if let Some(conn) = conn {
+                    self.as_guest(&mut host, conn, |g| {
+                        g.combat.projectile_direct = named;
+                        g.hurt_player_from(amount, from, &kind, Some(None));
+                        g.combat.projectile_direct = None;
+                    });
+                    self.lan = Some(host);
+                    return;
+                }
+                self.lan = Some(host);
+            }
+            if self.serving.is_none() && self.remote.is_none() {
+                self.combat.projectile_direct = named;
+                self.hurt_player_from(amount, from, &kind, Some(None));
+                self.combat.projectile_direct = None;
+            }
+        }
+
         /// Moves a player as a Java mod asked: Horizon's own `/tp`, run by the server in the
         /// target dimension (`execute in`), so a connection, the window's player and other
         /// dimensions all go the way vanilla's teleports go.
+        #[cfg(feature = "java-mods")]
         fn java_teleport(&mut self, action: horizon_jvm::events::Action) {
             let horizon_jvm::events::Action::Teleport {
                 uuid,

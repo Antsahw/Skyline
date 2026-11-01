@@ -1493,3 +1493,13 @@ Sample it with gdb (`gdb -p $(pgrep -x horizon-client) -batch -ex bt`, every 2 s
 - One task a branch (`bridge-<task>` off `java-bridge`); keep PR-sized steps.
 - Commit as the user (`iaxivers`) with the Co-Authored-By line; never commit `.local/`.
 - Write comments like the code around: what vanilla does and why the mirror does it.
+
+- **GeckoLib and partial tick 1.0 (26.3 trap).** GeckoLib treats a partial tick of exactly 1.0
+  as a paused game and freezes every animation. The bridge renders at 0.999
+  (`HorizonEntityRender.PARTIAL_TICK`); never pass 1.0F to a mod's render state.
+
+- **Ridden mobs are client-authoritative (26.3).** `Player.isClientAuthoritative` is true, so
+  on a server `LivingEntity.travelRidden` zeroes a ridden mob's motion and waits for the
+  rider's client. Mirrored players have no Java client: `RiderAuthorityMixin` makes them
+  non-authoritative and the mirror moves the mob. Never call `ServerPlayer.rideTick` on a
+  mirrored player: it runs `ServerPlayer.tick`.

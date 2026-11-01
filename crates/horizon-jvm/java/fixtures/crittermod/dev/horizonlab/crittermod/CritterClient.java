@@ -26,6 +26,8 @@ public final class CritterClient implements ClientModInitializer {
     public void onInitializeClient() {
         ModelLayerRegistry.registerModelLayer(LAYER, Model::layer);
         EntityRendererRegistry.register(CritterMod.CRITTER, Renderer::new);
+        EntityRendererRegistry.register(CritterMod.BITER, Renderer::new);
+        EntityRendererRegistry.register(CritterMod.MOUNT, Renderer::new);
     }
 
     /** A body, a head that looks around and four legs that walk. */

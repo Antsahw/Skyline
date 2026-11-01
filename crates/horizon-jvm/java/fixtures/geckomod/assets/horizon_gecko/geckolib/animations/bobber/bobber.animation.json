@@ -1,0 +1,15 @@
+{
+  "format_version": "1.8.0",
+  "animations": {
+    "animation.bobber.idle": {
+      "loop": true,
+      "animation_length": 2.0,
+      "bones": {
+        "top": {
+          "rotation": {"0.0": [0, 0, 0], "1.0": [0, 180, 0], "2.0": [0, 360, 0]},
+          "position": {"0.0": [0, 0, 0], "1.0": [0, 4, 0], "2.0": [0, 0, 0]}
+        }
+      }
+    }
+  }
+}

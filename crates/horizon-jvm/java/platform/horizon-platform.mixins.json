@@ -10,6 +10,8 @@
     "LevelAccess",
     "ServerLevelAccess",
     "ServerPlayerMixin",
+    "ServerPlayerHurtMixin",
+    "RiderAuthorityMixin",
     "PlayerListMixin",
     "MinecraftServerMixin",
     "ServerLevelMixin",

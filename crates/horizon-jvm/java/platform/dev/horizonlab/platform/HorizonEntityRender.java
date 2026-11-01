@@ -239,7 +239,7 @@ public final class HorizonEntityRender {
         items = heldItems;
         try {
             var state = renderer.createRenderState();
-            renderer.extractRenderState(be, state, 1.0F, net.minecraft.world.phys.Vec3.ZERO, null);
+            renderer.extractRenderState(be, state, PARTIAL_TICK, net.minecraft.world.phys.Vec3.ZERO, null);
             CameraRenderState camera = new CameraRenderState();
             camera.orientation = new org.joml.Quaternionf();
             camera.pos = net.minecraft.world.phys.Vec3.ZERO;
@@ -358,6 +358,19 @@ public final class HorizonEntityRender {
             out.append(':').append(h.getValue());
         }
         HANDS.clear();
+        // Players riding a mod's mob: its id and the seat (positionRider's place this tick),
+        // by UUID: their games sit them there.
+        out.append("},\"rides\":{");
+        boolean firstRide = true;
+        for (net.minecraft.server.level.ServerPlayer p : HorizonServer.players()) {
+            Entity vehicle = p.getVehicle();
+            if (vehicle == null || !HorizonEntities.modded(vehicle.getType())) continue;
+            if (!firstRide) out.append(',');
+            firstRide = false;
+            HorizonJson.string(p.getStringUUID(), out);
+            out.append(":{\"id\":").append(vehicle.getId()).append(",\"p\":[")
+                    .append(p.getX()).append(',').append(p.getY()).append(',').append(p.getZ()).append("]}");
+        }
         out.append("},\"models\":{");
         boolean first = true;
         for (var t : NEW_TREES.entrySet()) {
@@ -596,7 +609,7 @@ public final class HorizonEntityRender {
             items = held;
             onlyMods = true;
             try {
-                HorizonClient.as(p, () -> made[0] = renderer.createRenderState(a, 1.0F));
+                HorizonClient.as(p, () -> made[0] = renderer.createRenderState(a, PARTIAL_TICK));
                 PoseStack pose = new PoseStack();
                 var offset = renderer.getRenderOffset(made[0]);
                 pose.translate(offset.x, offset.y, offset.z);
@@ -685,7 +698,7 @@ public final class HorizonEntityRender {
             handStack = stack;
             vanillaHand = false;
             try {
-                HorizonClient.as(p, () -> submitArm.invoke(hands, level, fp, 1.0F, a.getXRot(), hand, 0.0F, stack, 0.0F,
+                HorizonClient.as(p, () -> submitArm.invoke(hands, level, fp, PARTIAL_TICK, a.getXRot(), hand, 0.0F, stack, 0.0F,
                         new PoseStack(), collector(out), 0xF000F0));
             } finally {
                 firstPerson = false;
@@ -825,6 +838,13 @@ public final class HorizonEntityRender {
         }
     }
 
+    /**
+     * The partial tick entities are drawn at: the tick's end, a thousandth short of it.
+     * GeckoLib takes exactly 1 for a paused game and stops its animations there
+     * (AnimationController.checkControllerState); a thousandth of a tick shows nowhere.
+     */
+    private static final float PARTIAL_TICK = 0.999F;
+
     @SuppressWarnings({"unchecked", "rawtypes"})
     private static JsonArray modelsOf(Entity entity) {
         JsonArray out = new JsonArray();
@@ -846,7 +866,7 @@ public final class HorizonEntityRender {
             boolean[] always = new boolean[1];
             HorizonClient.ThrowingRunnable extract = () -> {
                 try {
-                    made[0] = renderer.createRenderState(entity, 1.0F);
+                    made[0] = renderer.createRenderState(entity, PARTIAL_TICK);
                 } finally {
                     dispatcher.crosshairPickEntity = null;
                 }

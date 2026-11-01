@@ -36,6 +36,9 @@ pub struct Player {
     pub permission: u8,
     /// The sneak key is held (`Player.isShiftKeyDown`: a mod's sneak-click, a wrench's mode).
     pub sneaking: bool,
+    /// The movement keys held (vanilla's PlayerInput flags: forward 1, backward 2, left 4,
+    /// right 8, jump 16, shift 32, sprint 64): a mod's mob it rides steers by them.
+    pub input: u8,
     /// The inventory, when it changed since the last tick (None: as it was): the
     /// [`INVENTORY_SLOTS`] slots in vanilla's `Inventory` order (hotbar 0-8, the rest 9-35,
     /// feet, legs, chest, head 36-39, off hand 40), each an item stack as vanilla's
@@ -215,6 +218,16 @@ pub enum Action {
     /// A clientbound packet a mod sent the player, to send as it is (a mod entity's sound,
     /// particles): vanilla's encoding, its id (a VarInt) then its body.
     Packet { uuid: String, data: Vec<u8> },
+    /// Java hurt a Horizon player (a mod's mob's bite): the damage type, the amount and where
+    /// it came from (none: no direction).
+    HurtPlayer {
+        uuid: String,
+        damage_type: String,
+        amount: f32,
+        from: Option<[f64; 3]>,
+        /// The attacker's name (the death message's killer).
+        by: Option<String>,
+    },
 }
 
 static ACTIONS: Mutex<Vec<Action>> = Mutex::new(Vec::new());
@@ -353,11 +366,15 @@ fn call_tick(
         .iter()
         .flat_map(|p| [p.food as f32, p.saturation])
         .collect();
-    // Per player: the permission level in the low 8 bits, bit 8 the sneak key
-    // (HorizonServer.tick's `permissions`).
+    // Per player: the permission level in the low 8 bits, bit 8 the sneak key, bits 16-22
+    // the movement keys (HorizonServer.tick's `permissions`).
     let permissions: Vec<i32> = players
         .iter()
-        .map(|p| i32::from(p.permission) | (i32::from(p.sneaking) << 8))
+        .map(|p| {
+            i32::from(p.permission)
+                | (i32::from(p.sneaking) << 8)
+                | (i32::from(p.input & 0x7f) << 16)
+        })
         .collect();
     // INVENTORY_SLOTS per player; nulls for a player whose inventory didn't change.
     let mut inventories: Vec<Option<&str>> = Vec::with_capacity(players.len() * INVENTORY_SLOTS);
