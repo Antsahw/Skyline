@@ -1288,6 +1288,33 @@ pub fn worldgen_start(
     Ok(modded.unwrap_or(false))
 }
 
+/// The chunk the world spawn's search starts from in a dimension the mods generate
+/// (`HorizonWorldgen.origin`: ChunkGenerator.getOrigin on the mods' random state); None for a
+/// dimension that generates as vanilla's.
+pub fn worldgen_origin(dimension: &str) -> Option<(i32, i32)> {
+    with_server(|env, class| {
+        let dimension = env.new_string(dimension)?;
+        let value = env
+            .call_static_method(
+                class,
+                "worldgenOrigin",
+                "(Ljava/lang/String;)[I",
+                &[JValue::Object(&dimension)],
+            )?
+            .l()?;
+        if value.is_null() {
+            return Ok(None);
+        }
+        let array = jni::objects::JIntArray::from(value);
+        let mut xz = [0i32; 2];
+        env.get_int_array_region(&array, 0, &mut xz)?;
+        Ok(Some((xz[0], xz[1])))
+    })
+    .ok()
+    .flatten()
+    .flatten()
+}
+
 /// Whether the mods' data-pack load functions have run on the mirror (or there is nothing to
 /// run, or they can't): `HorizonServer.functionsReady`.
 pub fn functions_ready() -> bool {

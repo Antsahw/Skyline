@@ -77,7 +77,11 @@ public final class HorizonHooks {
                         for (JsonElement name : json.getAsJsonArray(key)) {
                             String file = pkg + "/" + name.getAsString().replace('.', '/') + ".class";
                             Optional<Path> bytes = mod.findPath(file);
-                            if (bytes.isPresent()) injections += read(id, Files.readAllBytes(bytes.get()));
+                            if (bytes.isPresent()) {
+                                byte[] b = Files.readAllBytes(bytes.get());
+                                injections += read(id, b);
+                                readFieldInits(b);
+                            }
                         }
                     }
                 } catch (Throwable t) {
@@ -177,7 +181,10 @@ public final class HorizonHooks {
                             Optional<Path> bytes = mod.findPath(file);
                             if (bytes.isPresent()) {
                                 readClient(id, Files.readAllBytes(bytes.get()));
-                                if (key.equals("client")) read(id, Files.readAllBytes(bytes.get()), true);
+                                if (key.equals("client")) {
+                                    read(id, Files.readAllBytes(bytes.get()), true);
+                                    readFieldInits(Files.readAllBytes(bytes.get()));
+                                }
                             }
                         }
                     }
@@ -579,10 +586,15 @@ public final class HorizonHooks {
     public static void constructed(Object self, Object... extras) {
         // A level can be made before the census ran (the content export's).
         scan();
+        // The mixins' field initializers run first in a constructor.
+        initFields(self);
         List<Class<?>> chain = new ArrayList<>();
         for (Class<?> c = self.getClass(); c != null && c != Object.class; c = c.getSuperclass()) chain.add(0, c);
         for (Class<?> owner : chain) {
             List<Hook> hooks = HOOKS.get(owner.getName().replace('.', '/') + ".<init>");
+            // A call inside the constructor comes before its end (a level's, a chunk map's: an
+            // entity's wrapped calls make what the mirror's entity already has).
+            if (!(self instanceof net.minecraft.world.entity.Entity)) constructorWraps(owner, self, extras);
             if (hooks == null) continue;
             for (String at : new String[] {"RETURN", "TAIL"}) {
                 for (Method handler : constructorHandlers(owner, hooks, at)) {
@@ -602,6 +614,164 @@ public final class HorizonHooks {
                 }
             }
         }
+    }
+
+    /**
+     * The mods' mixin fields made with a no-argument {@code new} in the mixin's initializer
+     * ({@code private RollManager rollManager = new RollManager();}: Combat Roll's on the
+     * client player), by target class (internal name): (field, type). Mixin merges these into
+     * the target's constructors, which the mirror's objects skip.
+     */
+    private static final Map<String, List<String[]>> FIELD_INITS = new HashMap<>();
+    /** The mods' @WrapOperation handlers on calls in constructors, by target class: (mixin, handler, wrapped call). */
+    private static final Map<String, List<String[]>> CONSTRUCTOR_WRAPS = new HashMap<>();
+
+    private static void readFieldInits(byte[] bytes) {
+        ClassNode node = new ClassNode();
+        new ClassReader(bytes).accept(node, ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+        List<String> targets = new ArrayList<>();
+        for (AnnotationNode a : annotations(node.invisibleAnnotations, node.visibleAnnotations)) {
+            if (!"Lorg/spongepowered/asm/mixin/Mixin;".equals(a.desc)) continue;
+            if (get(a, "value") instanceof List<?> l) for (Object t : l) targets.add(((org.objectweb.asm.Type) t).getInternalName());
+            if (get(a, "targets") instanceof List<?> l) for (Object t : l) targets.add(((String) t).replace('.', '/'));
+        }
+        if (targets.isEmpty()) return;
+        String mixin = node.name.replace('/', '.');
+        for (MethodNode m : node.methods) {
+            for (AnnotationNode a : annotations(m.invisibleAnnotations, m.visibleAnnotations)) {
+                if (!("L" + WRAP_OPERATION.replace('.', '/') + ";").equals(a.desc)) continue;
+                if (!(get(a, "method") instanceof List<?> specs)) continue;
+                boolean init = false;
+                for (Object spec : specs) init |= parseSpec((String) spec)[0].equals("<init>");
+                List<?> ats = get(a, "at") instanceof List<?> l ? l : List.of();
+                if (!init || ats.isEmpty() || !(ats.get(0) instanceof AnnotationNode at)
+                        || !(get(at, "target") instanceof String target)) continue;
+                for (String t : targets) CONSTRUCTOR_WRAPS.computeIfAbsent(t, k -> new ArrayList<>()).add(new String[] {mixin, m.name, target});
+            }
+            if (!m.name.equals("<init>")) continue;
+            List<org.objectweb.asm.tree.AbstractInsnNode> code = new ArrayList<>();
+            for (var insn : m.instructions) if (insn.getOpcode() >= 0) code.add(insn);
+            for (int i = 0; i + 3 < code.size(); i++) {
+                // new T, dup, invokespecial T.<init>()V, putfield <mixin>.field
+                if (code.get(i) instanceof org.objectweb.asm.tree.TypeInsnNode n && n.getOpcode() == org.objectweb.asm.Opcodes.NEW
+                        && code.get(i + 1).getOpcode() == org.objectweb.asm.Opcodes.DUP
+                        && code.get(i + 2) instanceof org.objectweb.asm.tree.MethodInsnNode c
+                        && c.getOpcode() == org.objectweb.asm.Opcodes.INVOKESPECIAL && c.owner.equals(n.desc)
+                        && c.name.equals("<init>") && c.desc.equals("()V")
+                        && code.get(i + 3) instanceof org.objectweb.asm.tree.FieldInsnNode f
+                        && f.getOpcode() == org.objectweb.asm.Opcodes.PUTFIELD && f.owner.equals(node.name)) {
+                    for (String t : targets) FIELD_INITS.computeIfAbsent(t, k -> new ArrayList<>()).add(new String[] {f.name, n.desc});
+                }
+            }
+        }
+    }
+
+    /** The mixins' {@code new T()} fields of {@code self}'s classes that are still null, made ({@link #FIELD_INITS}). */
+    public static void initFields(Object self) {
+        scan();
+        for (Class<?> c = self.getClass(); c != null && c != Object.class; c = c.getSuperclass()) {
+            List<String[]> inits = FIELD_INITS.get(c.getName().replace('.', '/'));
+            if (inits == null) continue;
+            for (String[] init : inits) {
+                try {
+                    java.lang.reflect.Field field = c.getDeclaredField(init[0]);
+                    if (Modifier.isStatic(field.getModifiers())) continue;
+                    field.setAccessible(true);
+                    if (field.get(self) != null) continue;
+                    Class<?> type = Class.forName(init[1].replace('/', '.'), true, c.getClassLoader());
+                    var make = type.getDeclaredConstructor();
+                    make.setAccessible(true);
+                    field.set(self, make.newInstance());
+                } catch (Throwable t) {
+                    // A field Mixin renamed, or one that can't be made here, stays as it is.
+                }
+            }
+        }
+    }
+
+    private static final String WRAP_OPERATION = "com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation";
+
+    /**
+     * The mods' @WrapOperation handlers around a call inside {@code owner}'s constructor, run
+     * once as {@link #constructed} runs the TAIL ones: Biolith seeds its biome noise in one
+     * around ServerLevel's {@code getGeneratorState()} (without it every Java worldgen chunk
+     * failed). The handler's receiver and arguments are the object's fields of their types;
+     * its Operation calls the wrapped method (null if that fails); what it returns is dropped.
+     */
+    private static void constructorWraps(Class<?> owner, Object self, Object[] extras) {
+        List<String[]> wraps = CONSTRUCTOR_WRAPS.get(owner.getName().replace('.', '/'));
+        if (wraps == null) return;
+        for (Method m : owner.getDeclaredMethods()) {
+            MixinMerged merged = m.getAnnotation(MixinMerged.class);
+            // (MixinExtras' bridges to a handler carry its name too.)
+            if (merged == null || m.getName().contains("$mixinextras$bridge$")) continue;
+            String found = null;
+            for (String[] w : wraps) {
+                if (merged.mixin().equals(w[0]) && (m.getName().equals(w[1]) || m.getName().endsWith("$" + w[1]))) found = w[2];
+            }
+            if (found == null) continue;
+            final String target = found;
+            Class<?>[] params = m.getParameterTypes();
+            if (params.length == 0 || !params[params.length - 1].isInterface()) continue;
+            java.lang.reflect.Type[] types = m.getGenericParameterTypes();
+            Object[] call = new Object[params.length];
+            for (int i = 0; i < params.length - 1; i++) {
+                call[i] = extra(extras, params[i]);
+                if (call[i] == null) call[i] = argument(owner, self, params[i], types[i]);
+                // A chunk map's noise settings are its generator's (Lithostitched wraps their
+                // noiseRouter() as the map makes its random state).
+                if (call[i] == null && params[i] == net.minecraft.world.level.levelgen.NoiseGeneratorSettings.class) {
+                    for (Object e : extras) {
+                        if (e instanceof net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator noise) {
+                            call[i] = noise.generatorSettings().value();
+                        }
+                    }
+                }
+            }
+            Class<?> operation = params[params.length - 1];
+            call[params.length - 1] = java.lang.reflect.Proxy.newProxyInstance(operation.getClassLoader(),
+                    new Class<?>[] {operation}, (proxy, method, args) -> {
+                        if (method.getDeclaringClass() == Object.class) {
+                            return method.getName().equals("toString") ? "Horizon's operation " + target
+                                    : method.getName().equals("hashCode") ? System.identityHashCode(proxy) : proxy == args[0];
+                        }
+                        Object[] values = args != null && args.length == 1 && args[0] instanceof Object[] a ? a : args;
+                        return wrappedCall(target, values);
+                    });
+            try {
+                m.setAccessible(true);
+                m.invoke(Modifier.isStatic(m.getModifiers()) ? null : self, call);
+            } catch (Throwable t) {
+                Throwable cause = t instanceof java.lang.reflect.InvocationTargetException ite && ite.getCause() != null ? ite.getCause() : t;
+                Natives.log("A mod failed around a call in " + owner.getSimpleName() + "'s constructor ("
+                        + m.getName() + "): " + cause);
+            }
+        }
+    }
+
+    /** The method a @WrapOperation target names ({@code Lowner;name(desc)R}), called with these values (receiver first unless static); null when it can't be. */
+    private static Object wrappedCall(String target, Object[] values) {
+        int semi = target.indexOf(';'), paren = target.indexOf('(');
+        if (!target.startsWith("L") || semi < 0 || paren < semi) return null;
+        String name = target.substring(semi + 1, paren);
+        if (name.equals("<init>")) return null;
+        try {
+            Class<?> owner = Class.forName(target.substring(1, semi).replace('/', '.'), false,
+                    HorizonHooks.class.getClassLoader());
+            int count = org.objectweb.asm.Type.getArgumentTypes(target.substring(paren)).length;
+            for (Class<?> c = owner; c != null; c = c.getSuperclass()) {
+                for (Method method : c.getDeclaredMethods()) {
+                    if (!method.getName().equals(name) || method.getParameterCount() != count) continue;
+                    method.setAccessible(true);
+                    if (Modifier.isStatic(method.getModifiers())) return method.invoke(null, values);
+                    if (values == null || values.length == 0 || values[0] == null) return null;
+                    return method.invoke(values[0], java.util.Arrays.copyOfRange(values, 1, values.length));
+                }
+            }
+        } catch (Throwable t) {
+            // The original call failed on the mirror object: the handler gets null.
+        }
+        return null;
     }
 
     /**
