@@ -39,6 +39,9 @@ public final class HorizonFunctions {
     /** A function forced a chunk Horizon hasn't loaded: the rest of this run is dropped and the run retried. */
     private static boolean abort;
     private static final java.util.Set<String> WAITING = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    private record Waiting(net.minecraft.server.level.ServerLevel level, int x, int z) {}
+    /** {@link #WAITING}'s chunks, until Horizon has loaded them (a new player waits for them too). */
+    private static final java.util.Map<String, Waiting> WAITING_CHUNKS = new java.util.concurrent.ConcurrentHashMap<>();
 
     /**
      * ServerLevel.setChunkForced (/forceload add) on a mirrored level: vanilla loads the chunk
@@ -48,7 +51,9 @@ public final class HorizonFunctions {
      */
     public static void forced(net.minecraft.server.level.ServerLevel level, int x, int z) {
         if (running && !level.hasChunk(x, z)) {
-            if (WAITING.add(level.dimension().identifier() + " " + x + " " + z)) {
+            String key = level.dimension().identifier() + " " + x + " " + z;
+            WAITING_CHUNKS.put(key, new Waiting(level, x, z));
+            if (WAITING.add(key)) {
                 Natives.log("Java mods: a function forced chunk " + x + " " + z + " of " + level.dimension().identifier()
                         + "; it runs again once Horizon has loaded it");
             }
@@ -91,7 +96,9 @@ public final class HorizonFunctions {
         } catch (ReflectiveOperationException e) {
             return true;
         }
-        return settleAt >= 0 && gameTime >= settleAt;
+        // A function waiting for a chunk it forced (Skyblock Infinite's island at 0 0) holds
+        // the player too: the server can run the settle ticks faster than Horizon loads it.
+        return settleAt >= 0 && gameTime >= settleAt && WAITING_CHUNKS.isEmpty();
     }
 
     /** {@link #settleAt}, once the load functions have finished. */
@@ -126,6 +133,14 @@ public final class HorizonFunctions {
                 again.set(manager, true);
             }
             scheduled.tick(server, gameTime);
+            // The chunks waited for that Horizon has loaded now (the run that asked goes again).
+            WAITING_CHUNKS.entrySet().removeIf(e -> {
+                var w = e.getValue();
+                if (!w.level().hasChunk(w.x(), w.z())) return false;
+                WAITING.remove(e.getKey());
+                Natives.log("Java mods: forced chunk " + e.getKey() + " is loaded");
+                return true;
+            });
             HorizonFunctions.gameTime = gameTime;
             if (settleAt < 0) {
                 java.lang.reflect.Field done = ServerFunctionManager.class.getDeclaredField("postReload");

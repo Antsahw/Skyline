@@ -39,6 +39,8 @@ own files stay one-line calls into our files. Upstream's code wins where both bu
    horse-style charged jumps, and `--in-frame`.
 2. Mod mobs and Horizon's own mobs seeing each other (targets, fleeing, attacks both ways).
 3. A bigger mob pack (the 137-jar pack's mobs plus 10 more mob mods): measure, cut the top three.
+4. The `mount` case is flaky in a full run: the scene's ground slopes, so "drove" and "off"
+   compare against the wrong floor. Give it a flat floor (it passes alone).
 
 ### worldgen
 1. Startup: the ~10 s of Fabric biome changes calling TerraBlender; the 65 s of class loading in
@@ -52,7 +54,9 @@ own files stay one-line calls into our files. Upstream's code wins where both bu
 2. Lazy loot tables again, on top of upstream's design (its shared tables, pack overlays and
    the `native_loot_table_load` hook: parse on first use, the hook run then). pack-5's version
    was dropped in the merge (about 270 MB at 577k states).
-3. Skyblock: the island must exist before the first player is let in, with margin.
+3. Skyblock: a new player now also waits for chunks a function forced (boss fix in batch 4,
+   `HorizonFunctions.WAITING_CHUNKS`), but the island still lands ~1 s after the join: hold
+   until the function that waited has run again.
 
 ### client
 1. Run from a normal install: the bridge jars and Fabric's libraries shipped or fetched, a Java

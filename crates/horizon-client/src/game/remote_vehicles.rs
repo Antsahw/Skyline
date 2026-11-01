@@ -187,8 +187,6 @@ impl Game<'_> {
         }
     }
 
-    /// The local player's tick in its vehicle, in place of its own movement:
-    /// false when it rides nothing.
     /// This game's player sits on a Java mod's mob (the server says so each tick).
     pub(super) fn riding_java_mob(&self) -> bool {
         #[cfg(feature = "java-mods")]
@@ -201,6 +199,8 @@ impl Game<'_> {
         }
     }
 
+    /// The local player's tick in its vehicle, in place of its own movement:
+    /// false when it rides nothing.
     pub(super) fn remote_ride(&mut self, keys: Keys) -> bool {
         // A Java mod's mob (game/java_entities.rs): the server's mirror moves it by this
         // player's keys (PlayerInput) and says where the seat is; the player sits there, and

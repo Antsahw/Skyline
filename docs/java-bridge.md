@@ -844,6 +844,11 @@ Found in the upstream sync (2026-11-01):
   through `parked_dims` + `parked_world`.
 - `save::decode_with` takes the dimension's `ColumnLayout` (`VanillaTerrain::layout`, now pub).
 
+- **The server can run ticks faster than Horizon loads chunks** (after the upstream sync, a
+  catching-up server runs the 40 ticks Skyblock Infinite schedules within a second). Anything
+  that holds a player "until N ticks passed" must also wait for the chunks it needs: a new
+  player waits for every chunk a function forced (`HorizonFunctions.WAITING_CHUNKS`).
+
 ## Build and test
 
 ```sh
