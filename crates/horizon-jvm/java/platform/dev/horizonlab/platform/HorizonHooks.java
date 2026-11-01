@@ -259,7 +259,14 @@ public final class HorizonHooks {
                 Object value = get(at, "value");
                 if (!"HEAD".equals(value) && !"TAIL".equals(value) && !"RETURN".equals(value)) continue;
                 for (Object spec : specs) {
-                    if (!parseSpec((String) spec)[0].equals("extract")) continue;
+                    String name = parseSpec((String) spec)[0];
+                    // The frame's draw (render(), after extract): its head (Diorama bakes its map
+                    // tiles on the GPU there).
+                    if (name.equals("render") && "HEAD".equals(value)) {
+                        FRAME_HOOKS.add(new String[] {RENDER, mixin, m.name});
+                        continue;
+                    }
+                    if (!name.equals("extract")) continue;
                     FRAME_HOOKS.add(new String[] {"HEAD".equals(value) ? "HEAD" : "TAIL", mixin, m.name});
                 }
             }
@@ -272,8 +279,19 @@ public final class HorizonHooks {
      * (DeltaTracker.ONE, true) as the frame's arguments.
      */
     public static void fireFrame(Object gameRenderer, boolean head) {
+        fireFrame(gameRenderer, head ? "HEAD" : "TAIL");
+    }
+
+    /** The head of GameRenderer.render() (no arguments): the frame drawn after its extract. */
+    private static final String RENDER = "RENDER";
+
+    /** The mods' injections at the head of GameRenderer.render(), as the frame is drawn. */
+    public static void fireRender(Object gameRenderer) {
+        fireFrame(gameRenderer, RENDER);
+    }
+
+    private static void fireFrame(Object gameRenderer, String at) {
         if (FRAME_HOOKS.isEmpty() || gameRenderer == null) return;
-        String at = head ? "HEAD" : "TAIL";
         List<Method> handlers = FRAME_RESOLVED.computeIfAbsent(at, k -> {
             List<Method> found = new ArrayList<>();
             for (Method m : gameRenderer.getClass().getDeclaredMethods()) {
@@ -283,20 +301,25 @@ public final class HorizonHooks {
                     if (!h[0].equals(at) || !merged.mixin().equals(h[1])) continue;
                     if (!m.getName().equals(h[2]) && !m.getName().endsWith("$" + h[2])) continue;
                     Class<?>[] p = m.getParameterTypes();
-                    if (p.length == 3 && p[0] == net.minecraft.client.DeltaTracker.class && p[1] == boolean.class
-                            && CallbackInfo.class.isAssignableFrom(p[2])) {
+                    boolean fits = at.equals(RENDER)
+                            ? p.length == 1 && CallbackInfo.class.isAssignableFrom(p[0])
+                            : p.length == 3 && p[0] == net.minecraft.client.DeltaTracker.class && p[1] == boolean.class
+                                    && CallbackInfo.class.isAssignableFrom(p[2]);
+                    if (fits) {
                         m.setAccessible(true);
                         found.add(m);
                     }
                 }
             }
-            if (!found.isEmpty()) Natives.log("Horizon's client: " + found.size() + " mod injection(s) run at the " + at + " of each frame");
+            if (!found.isEmpty()) Natives.log("Horizon's client: " + found.size() + " mod injection(s) run at the "
+                    + (at.equals(RENDER) ? "draw" : at) + " of each frame");
             return found;
         });
         for (Method handler : handlers) {
             try {
-                handler.invoke(Modifier.isStatic(handler.getModifiers()) ? null : gameRenderer,
-                        net.minecraft.client.DeltaTracker.ONE, true, new CallbackInfo("extract", true));
+                Object self = Modifier.isStatic(handler.getModifiers()) ? null : gameRenderer;
+                if (at.equals(RENDER)) handler.invoke(self, new CallbackInfo("render", true));
+                else handler.invoke(self, net.minecraft.client.DeltaTracker.ONE, true, new CallbackInfo("extract", true));
             } catch (Throwable t) {
                 Throwable cause = t instanceof java.lang.reflect.InvocationTargetException ite && ite.getCause() != null ? ite.getCause() : t;
                 while (cause.getCause() != null && cause.getCause() != cause) cause = cause.getCause();

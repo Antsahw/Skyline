@@ -87,3 +87,14 @@ Never write as the user; mark what you post (CLAUDE.md). Never run mod jars the 
   a leaving player's VoxelMap map keeps its thread; JourneyMap's waypoints and settings are still
   shared. Test: `MODS=<JourneyMap + VoxelMap> tools/java_bridge/lan_test.sh '$H command "tp Guest ~40 ~ ~"; sleep 100'`,
   or `regress.py --jars … maps-lan`.
+- **gpu 3, other GPU mods** (`bridge-gpu-3`, on top of `bridge-gpu-2`). Scanned 12 popular 26.3
+  Fabric client mods; three draw with the GPU directly: Diorama, XaeroPlus, MiniHUD. Works:
+  Diorama's minimap (its baked map tiles, compass, coordinates). It needed (useful beyond it):
+  Fabric's `ClientChunkEvents` fired per player as Horizon's chunks come into view, the client
+  chunk cache answering with Horizon's chunks, `GameRenderer.render()` HEAD injections run,
+  GPU textures written from memory sent to the HUD, and players' client ticks held until the
+  models load. Fixed on the way: `hasChunk` made a full copy per call (VoxelMap stalled the
+  server thread with two players). Doesn't / not tried: Diorama's water colours unchecked
+  against the real game; XaeroPlus and MiniHUD (needs MaLiLib) not tried. Regress case
+  `diorama`. Test: Diorama alone in `~/hz-test/mods-java`, wait ~1 minute: the square map top
+  right.

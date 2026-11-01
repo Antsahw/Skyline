@@ -60,6 +60,7 @@ MODS = {
     "trinkets": ["trinkets*"],
     "journeymap": ["journeymap*"],
     "voxelmap": ["voxelmap*"],
+    "diorama": ["diorama*"],
 }
 
 
@@ -308,6 +309,14 @@ CASES = {
         checks=[check_log(r"gpu: a blit of horizon:dynamic/gpu", "VoxelMap's HUD target reaches the HUD")],
         forbid=[r"voxelmap\$onTick\): java"],
         look="VoxelMap's round minimap at the top right: land, arrow, coordinates",
+    ),
+    "diorama": dict(
+        about="Diorama: told of its chunks (ClientChunkEvents), it bakes map tiles and its minimap draws them",
+        mods=["diorama"], scene="none", env={"HORIZON_JAVA_DEBUG": "gpu"},
+        steps=['sleep 50'],
+        checks=[check_log(r"gpu: a blit of horizon:dynamic/gpu\d+ 512x512", "a baked 512 px tile reaches the HUD")],
+        forbid=[r"\[dev\.diorama\.\S+\]: java", r"\$diorama\$\w+\): java"],
+        look="Diorama's square minimap at the top right: the land around, N/E/S/W, the arrow",
     ),
     "maps-lan": dict(
         about="JourneyMap and VoxelMap per player: a host and a LAN guest 40 blocks east, each map their own",

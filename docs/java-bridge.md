@@ -694,6 +694,23 @@ gets SPIR-V, vertex layouts and uniform lists.
   the models' reload, after them, each failing alone (`failingAlone`); they used to be left out.
 - The client player's `levelCallback` is a no-op callback, not `NULL` (a copy of the server
   player's): JourneyMap gives no mapping task to a player not in a level (its map stayed empty).
+- Each player's client is told of its chunks (`HorizonClient.clientChunks`): Fabric's
+  `ClientChunkEvents.CHUNK_LOAD` for Horizon's chunks within the login radius, nearest first,
+  24 a tick, and `CHUNK_UNLOAD` beyond it (or at a dimension change). Diorama maps only what
+  it is told of. A client level's chunk cache answers with Horizon's chunks
+  (`ClientChunkCacheMixin`), and `ClientLevel.hasChunk` from the chunk's revision without a
+  copy (`HorizonChunks.has`: VoxelMap asks hundreds a tick; with copies the server thread
+  stalled and LAN guests were dropped).
+- While the client's models load, players' clients don't tick (the client stays at its title
+  screen), as a vanilla client loads its resources before joining: Diorama reads the models
+  once, when its player joins.
+- Mods' injections at the head of `GameRenderer.render()` run each frame after `extract`'s
+  tail (`HorizonHooks.fireRender`).
+- The HUD sends a GPU texture as an image when a render pass drew into it or it was written
+  from memory (`writeToTexture`: Diorama's tiles), unless it is an atlas (`Texture.atlas`).
+- VoxelMap and JourneyMap together: VoxelMap's client init fails registering a payload type
+  JourneyMap registered (probably the same on real Fabric); VoxelMap then has no world-id
+  packets.
 - The keys mods bind are read again every 100 server ticks and resent when they change
   (JourneyMap registers its keys at its first client tick, after the first join).
 - **Mixin strips the injector annotations off merged handlers**: only `@MixinMerged` (mixin,
@@ -1118,6 +1135,10 @@ Map mods (2026-11-01, `bridge-gpu2`, headless, llvmpipe):
   side's `LoadedChunkOverlayPlugin` fails each tick (`ChunkMap` of the mirror).
 - VoxelMap 1.16.13 (`bridge-gpu3`): its minimap draws (map, frame, arrow, compass,
   coordinates), through the game renderer's feature dispatcher.
+- Diorama 0.6.0 (`bridge-gpu-3`): its square minimap draws the map tiles it bakes on the CPU
+  from the client's chunks (512 px textures written from memory, blitted to the GUI). Its
+  water's colours are to be compared with the real game. XaeroPlus and MiniHUD also draw with
+  the GPU; not tried yet.
 - Per player (host and LAN guest): Xaero's minimap is each player's own (`bridge-gpu3`);
   JourneyMap's and VoxelMap's too since `bridge-gpu-2` (`HorizonClientState`): JourneyMap's
   minimap and full-screen `MapState`/`MapRenderer` per player (static finals, made non-final as

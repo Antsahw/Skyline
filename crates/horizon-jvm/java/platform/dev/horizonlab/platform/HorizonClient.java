@@ -842,6 +842,69 @@ public final class HorizonClient {
         return searchConnection;
     }
 
+    /** Each player's client's chunks: the client level they are of, and their positions. */
+    private static final java.util.Map<java.util.UUID, Object[]> CLIENT_CHUNKS = new java.util.concurrent.ConcurrentHashMap<>();
+    /** At most this many chunks are made known to a player's client a tick (copies are made). */
+    private static final int CHUNKS_A_TICK = 24;
+
+    /**
+     * A player's client's chunks, as the server sends them: those of Horizon's within the
+     * login's radius around the player, nearest first, are loaded (ClientChunkEvents.CHUNK_LOAD,
+     * a few a tick), and those beyond it unloaded (CHUNK_UNLOAD), as a client's chunk cache does.
+     */
+    private static void clientChunks(net.minecraft.server.level.ServerPlayer player) {
+        if (!(minecraft.level instanceof net.minecraft.client.multiplayer.ClientLevel level)
+                || !(player.level() instanceof net.minecraft.server.level.ServerLevel server)) return;
+        Object[] state = CLIENT_CHUNKS.get(player.getUUID());
+        @SuppressWarnings("unchecked")
+        java.util.Map<Long, net.minecraft.world.level.chunk.LevelChunk> have = state == null ? null
+                : (java.util.Map<Long, net.minecraft.world.level.chunk.LevelChunk>) state[1];
+        if (state == null || state[0] != level) {
+            // Another dimension: the last one's chunks go.
+            if (state != null) unloadAll((net.minecraft.client.multiplayer.ClientLevel) state[0], have);
+            have = new java.util.HashMap<>();
+            CLIENT_CHUNKS.put(player.getUUID(), new Object[] {level, have});
+        }
+        int cx = player.chunkPosition().x(), cz = player.chunkPosition().z(), radius = LOGIN_RADIUS;
+        // Those out of reach go first.
+        var it = have.entrySet().iterator();
+        while (it.hasNext()) {
+            var entry = it.next();
+            int x = net.minecraft.world.level.ChunkPos.getX(entry.getKey()), z = net.minecraft.world.level.ChunkPos.getZ(entry.getKey());
+            if (Math.max(Math.abs(x - cx), Math.abs(z - cz)) > radius + 1) {
+                it.remove();
+                var chunk = entry.getValue();
+                HorizonServer.fireEach("ClientChunkEvents.CHUNK_UNLOAD",
+                        net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientChunkEvents.CHUNK_UNLOAD, l -> l.onChunkUnload(level, chunk));
+            }
+        }
+        int made = 0;
+        for (int ring = 0; ring <= radius && made < CHUNKS_A_TICK; ring++) {
+            for (int dx = -ring; dx <= ring && made < CHUNKS_A_TICK; dx++) {
+                for (int dz = -ring; dz <= ring && made < CHUNKS_A_TICK; dz++) {
+                    if (Math.max(Math.abs(dx), Math.abs(dz)) != ring) continue;
+                    long key = net.minecraft.world.level.ChunkPos.pack(cx + dx, cz + dz);
+                    if (have.containsKey(key)) continue;
+                    var chunk = HorizonChunks.chunk(server, cx + dx, cz + dz, level);
+                    if (chunk == null) continue;
+                    have.put(key, chunk);
+                    made++;
+                    HorizonServer.fireEach("ClientChunkEvents.CHUNK_LOAD",
+                            net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientChunkEvents.CHUNK_LOAD, l -> l.onChunkLoad(level, chunk));
+                }
+            }
+        }
+    }
+
+    private static void unloadAll(net.minecraft.client.multiplayer.ClientLevel level,
+                                  java.util.Map<Long, net.minecraft.world.level.chunk.LevelChunk> have) {
+        for (var chunk : have.values()) {
+            HorizonServer.fireEach("ClientChunkEvents.CHUNK_UNLOAD",
+                    net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientChunkEvents.CHUNK_UNLOAD, l -> l.onChunkUnload(level, chunk));
+        }
+        have.clear();
+    }
+
     /** A connection's player list (getPlayerInfo: JourneyMap's skins), empty. */
     private static void players(net.minecraft.client.multiplayer.ClientPacketListener connection) throws ReflectiveOperationException {
         Class<?> owner = net.minecraft.client.multiplayer.ClientPacketListener.class;
@@ -945,6 +1008,7 @@ public final class HorizonClient {
      */
     static void left(java.util.UUID id) {
         JOINED.remove(id);
+        CLIENT_CHUNKS.remove(id);
         HorizonClientState.forget(id);
         var overlay = OVERLAYS.remove(id);
         OVERLAY_SENT.remove(id);
@@ -1242,7 +1306,10 @@ public final class HorizonClient {
         // (Minecraft.player, the open screen), with its own keys (bindings). With no player, a
         // client at its title screen.
         var players = HorizonServer.players();
-        if (players.isEmpty()) {
+        // While the client's models load, it stays at its title screen, as a vanilla client
+        // loads its resources before it joins a world: mods that read the models when their
+        // player joins (Diorama's block colours, built once) get them.
+        if (players.isEmpty() || pendingModels != null) {
             rest(null);
             tickOnce();
             return;
@@ -1258,6 +1325,9 @@ public final class HorizonClient {
                     t = HorizonProfile.add("client: tick", t);
                     // The chunks mods asked for on their own threads (JourneyMap's mapping).
                     HorizonChunks.serveWanted(64);
+                    // Their client's chunks come and go (Fabric's ClientChunkEvents: Diorama maps
+                    // the chunks it is told of).
+                    clientChunks(player);
                     // A frame: the mods' work at its start and end (GameRenderer.extract), its HUD
                     // between.
                     HorizonHooks.fireFrame(minecraft.gameRenderer, true);
@@ -1265,6 +1335,8 @@ public final class HorizonClient {
                     sendHud(player);
                     t = HorizonProfile.add("client: HUD", t);
                     HorizonHooks.fireFrame(minecraft.gameRenderer, false);
+                    // Then the frame is drawn (GameRenderer.render): the mods' work at its head.
+                    HorizonHooks.fireRender(minecraft.gameRenderer);
                     HorizonGpu.endFrame();
                     HorizonProfile.add("client: frame end", t);
                 }));
