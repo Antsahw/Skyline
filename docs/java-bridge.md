@@ -696,9 +696,36 @@ gets SPIR-V, vertex layouts and uniform lists.
   injections, the receiver and arguments from the object's fields, an `Operation` calling the
   wrapped method. Biolith seeds its biome noise in one in ServerLevel's (without it every Java
   worldgen chunk failed with an NPE in `OverworldBiomePlacement.getLocalNoise`).
-- Mixins' field initializers (`private RollManager rollManager = new RollManager();`) are
-  merged into the target's constructors: `HorizonHooks.initFields` makes the no-argument ones
-  on mirror objects (recorded from the mixins' own `<init>` by the census).
+  A wrapped call whose result the mirror makes itself elsewhere runs its wraps there:
+  `RandomState.create` in ChunkMap's (Lithostitched's noise router modifiers) runs in
+  `HorizonServer.makeRandomState` through `HorizonHooks.wrapConstructorCall`, the handler's
+  parameters matched by type (the call's arguments, then the locals it captures: the level,
+  the registries), its return value kept.
+- Mixins' field initializers (`private RollManager rollManager = new RollManager();`, or a
+  static getter: Enderscape's `variables = EnderscapeClient.clientsideVariables()` on the HUD)
+  are merged into the target's constructors: `HorizonHooks.initFields` makes them on mirror
+  objects (recorded from the mixins' own `<init>` by the census). A getter may have nothing
+  yet when the object is made (the mod's client entrypoint runs later): the HUD's run each
+  frame while null.
+- A client connection's `scoreboard()` is what `ClientLevel.getScoreboard()` answers, and
+  `Minecraft.getConnection()` is the player's own connection
+  (`HorizonClient.connection(player)`): each needs the shared one's client, network
+  connection and a scoreboard (Cardinal Components' client tick, Puzzles Lib's and
+  Architectury's handleLogin).
+- A Java mod can register its blocks under namespaces other than its id (BuildCraft's
+  modules: `buildcraftenergy`, `buildcraftbuilders`...): the content mod declares them under
+  each namespace it owns (`data/<ns>/horizon/block/`, the namespace in the manifest's
+  `namespaces`), and the port pipeline gives a jar the oracle's facts when its ids are under
+  any of them (it looked at the mod id only: every BuildCraft block was unknown).
+- The headless client's level reads the server's block entities, so a client handler can
+  change the server's state and make it send the same message again (Large Fluid Tank's
+  content message): `HorizonLoop.flush` delivers only what was queued when it started (it
+  drained until empty: the server thread never left it).
+- Mixin configs with a trailing comma in a list read as a null entry (lenient Gson):
+  skip it, or the whole config is lost to the census (Simple Pocket Machines').
+- The load functions can schedule what a first player needs (Skyblock Infinite places its
+  island 2 s after load, `schedule function … 2s`): the first player also waits until the
+  events queued when they finished, due within 10 s, have run (`HorizonFunctions.settle`).
 - `Minecraft.getConnection()` is `player.connection` (null for a player without one): the
   headless client's players have `HorizonClient.connection(level)`, whose network
   `Connection` is a mirror one (`HorizonServer.clientConnection`).
@@ -1200,6 +1227,22 @@ from 12 blocks, the Macaw's sets ~70,000): it needs more than this sandbox's 8 G
 pack peaks at 5.8 GB with its content made in the same run). A 32 GB PC runs it. The content
 root's per-state tables now keep new rows as text and stream to disk (they took over 6 GB as
 trees: `J::Raw` in `mod_content.rs`).
+
+Where the memory goes (2026-11-01, bridge-pack-5; `HORIZON_MEM_LOG=1` logs it after each load
+stage, `examples/state_memory_probe` measures a content root's tables; RSS kept, the heap
+trimmed first). Vanilla / the 577k-state pack: the block registry and before it 181 / 888 MB,
+the state models +28 / +665 MB (the baked models of every variant: Rechiseled's connected
+textures, Macaw's shapes), block textures +30 / +175, block facts +39 / +512 (the parsed
+`block-behaviours.json` stays until the world rest uses it), pack tables +28 / +176, items +22
+/ +243, the renderer +458 / +1044 (llvmpipe: GPU memory is system memory here; on a GPU most
+of it is VRAM), loot +9 / +216, worldgen data +33 / +418, the generator and streaming +25 /
++326. The world opens at 5.2 GB, and the JVM's start (heap, metaspace for 155 jars) passes
+this sandbox's ~6.2 GB limit. Next: baked models without per-variant copies, block facts
+without the behaviour JSON kept, a leaner `BlockState` (a `String` and a `BTreeMap` per
+state: ~1 KB). Fixed: `level::Behaviours` parsed `gameplay-facts.json` (314 MB for 208k
+states) as a JSON tree, 3.4 GB at its peak (now streamed: 453 MB); loot tables are read when
+used; the heap is trimmed after the big loads. Dead ends: heaptrack's interpreter runs out of
+memory on this game (tens of millions of live allocations), recording raw or not.
 
 Mods' sounds and particles (2026-10-31): a mod's sound event plays by name (its
 `sounds.json` and `.ogg` files are carried into the content mod, which Horizon's sound

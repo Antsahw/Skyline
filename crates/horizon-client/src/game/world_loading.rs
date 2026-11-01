@@ -56,6 +56,7 @@ impl WorldRequest {
             &options.resources,
             &horizon_world::loot::PackOverlay::NONE,
         );
+        horizon_client::mem_log::mark("loot data");
         let Self {
             save_root,
             folder,
@@ -212,6 +213,7 @@ impl WorldRequest {
             level.seed,
             &level.enabled_features,
         )?;
+        horizon_client::mem_log::mark("streaming (generator)");
         streaming.radius = settings.render_distance;
         let mut world = World::new(res.facts().air, level.seed);
         world.shape = shape;

@@ -56,6 +56,9 @@ MODS = {
     "codxlib": ["codxlib*"],
     "skyblock": ["skyblock-infinite*"],
     "simplyoneblock": ["simply_oneblock*", "simply-oneblock*"],
+    "buildcraft": ["bcrefabricated*", "buildcraft*"],
+    "fluidtank": ["largefluidtank*"],
+    "scala": ["scalable-cats-force*"],
 }
 
 
@@ -291,6 +294,18 @@ CASES = {
                 r"Java mods' worldgen: chunk -?\d+ -?\d+ failed", r"control socket did not open",
                 r"fell out of the world"],
         look="the pack's world, its HUD (minimap) drawn",
+    ),
+    "tech": dict(
+        about="BuildCraft's module blocks (buildcraftbuilders:quarry) and two Large Fluid Tanks placed; the game still answers",
+        mods=["buildcraft", "fluidtank", "scala"], scene="none",
+        steps=['$C command "setblock ~2 ~ ~ buildcraftbuilders:quarry" > $S/quarry.json; '
+               '$C command "setblock ~2 ~ ~2 fluidtank:tank_iron" > $S/tank.json; '
+               '$C command "setblock ~2 ~1 ~2 fluidtank:tank_iron" > /dev/null; sleep 5; '
+               '$C command "time query gametime" > $S/after.json'],
+        checks=[check_file("quarry.json", r"Changed the block", "BuildCraft's quarry is a block (a namespace besides its mod id)"),
+                check_file("tank.json", r"Changed the block", "a Large Fluid Tank is placed"),
+                check_file("after.json", r"game time is", "the server still answers after the tanks sync")],
+        forbid=[r"Unknown block type"],
     ),
     "prism": dict(
         about="Prism Launcher's wrapper: an instance's mods linked, Fabric API left out (no game)",

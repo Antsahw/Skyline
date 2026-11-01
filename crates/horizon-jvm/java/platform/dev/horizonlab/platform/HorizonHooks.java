@@ -76,6 +76,8 @@ public final class HorizonHooks {
                     for (String key : new String[] {"mixins", "server"}) {
                         if (!json.has(key) || !json.get(key).isJsonArray()) continue;
                         for (JsonElement name : json.getAsJsonArray(key)) {
+                            // (A trailing comma reads as a null entry: Simple Pocket Machines'.)
+                            if (name.isJsonNull()) continue;
                             String file = pkg + "/" + name.getAsString().replace('.', '/') + ".class";
                             Optional<Path> bytes = mod.findPath(file);
                             if (bytes.isPresent()) {
@@ -178,6 +180,8 @@ public final class HorizonHooks {
                     for (String key : new String[] {"mixins", "client"}) {
                         if (!json.has(key) || !json.get(key).isJsonArray()) continue;
                         for (JsonElement name : json.getAsJsonArray(key)) {
+                            // (A trailing comma reads as a null entry: Simple Pocket Machines'.)
+                            if (name.isJsonNull()) continue;
                             String file = pkg + "/" + name.getAsString().replace('.', '/') + ".class";
                             Optional<Path> bytes = mod.findPath(file);
                             if (bytes.isPresent()) {
@@ -655,9 +659,9 @@ public final class HorizonHooks {
             if (!m.name.equals("<init>")) continue;
             List<org.objectweb.asm.tree.AbstractInsnNode> code = new ArrayList<>();
             for (var insn : m.instructions) if (insn.getOpcode() >= 0) code.add(insn);
-            for (int i = 0; i + 3 < code.size(); i++) {
+            for (int i = 0; i + 1 < code.size(); i++) {
                 // new T, dup, invokespecial T.<init>()V, putfield <mixin>.field
-                if (code.get(i) instanceof org.objectweb.asm.tree.TypeInsnNode n && n.getOpcode() == org.objectweb.asm.Opcodes.NEW
+                if (i + 3 < code.size() && code.get(i) instanceof org.objectweb.asm.tree.TypeInsnNode n && n.getOpcode() == org.objectweb.asm.Opcodes.NEW
                         && code.get(i + 1).getOpcode() == org.objectweb.asm.Opcodes.DUP
                         && code.get(i + 2) instanceof org.objectweb.asm.tree.MethodInsnNode c
                         && c.getOpcode() == org.objectweb.asm.Opcodes.INVOKESPECIAL && c.owner.equals(n.desc)
@@ -665,6 +669,16 @@ public final class HorizonHooks {
                         && code.get(i + 3) instanceof org.objectweb.asm.tree.FieldInsnNode f
                         && f.getOpcode() == org.objectweb.asm.Opcodes.PUTFIELD && f.owner.equals(node.name)) {
                     for (String t : targets) FIELD_INITS.computeIfAbsent(t, k -> new ArrayList<>()).add(new String[] {f.name, n.desc});
+                }
+                // invokestatic Owner.getter()T, putfield <mixin>.field: a mod's shared object
+                // (Enderscape's EnderscapeClient.clientsideVariables() on the HUD).
+                if (code.get(i) instanceof org.objectweb.asm.tree.MethodInsnNode c
+                        && c.getOpcode() == org.objectweb.asm.Opcodes.INVOKESTATIC && c.desc.startsWith("()L")
+                        && code.get(i + 1) instanceof org.objectweb.asm.tree.FieldInsnNode f
+                        && f.getOpcode() == org.objectweb.asm.Opcodes.PUTFIELD && f.owner.equals(node.name)) {
+                    for (String t : targets) {
+                        FIELD_INITS.computeIfAbsent(t, k -> new ArrayList<>()).add(new String[] {f.name, c.owner, c.name});
+                    }
                 }
             }
         }
@@ -683,11 +697,23 @@ public final class HorizonHooks {
                     field.setAccessible(true);
                     if (field.get(self) != null) continue;
                     Class<?> type = Class.forName(init[1].replace('/', '.'), true, c.getClassLoader());
+                    if (init.length == 3) {
+                        // A static getter: (field, owner, method).
+                        Method getter = type.getDeclaredMethod(init[2]);
+                        getter.setAccessible(true);
+                        Object value = getter.invoke(null);
+                        if (value != null) field.set(self, value);
+                        else if (DEBUG) Natives.log("Mixin fields: " + c.getSimpleName() + "." + init[0] + ": " + init[2] + "() gave null");
+                        continue;
+                    }
                     var make = type.getDeclaredConstructor();
                     make.setAccessible(true);
                     field.set(self, make.newInstance());
                 } catch (Throwable t) {
                     // A field Mixin renamed, or one that can't be made here, stays as it is.
+                    if (FAILURES.merge("init " + c.getName() + "." + init[0], 1, Integer::sum) == 1) {
+                        Natives.log("Mixin fields: " + c.getSimpleName() + "." + init[0] + " not made: " + t);
+                    }
                 }
             }
         }
@@ -714,6 +740,8 @@ public final class HorizonHooks {
                 if (merged.mixin().equals(w[0]) && (m.getName().equals(w[1]) || m.getName().endsWith("$" + w[1]))) found = w[2];
             }
             if (found == null) continue;
+            // (A chunk map's random state is made with its wraps where it is kept: wrapConstructorCall.)
+            if (found.contains(RANDOM_STATE_CREATE)) continue;
             final String target = found;
             Class<?>[] params = m.getParameterTypes();
             if (params.length == 0 || !params[params.length - 1].isInterface()) continue;
@@ -751,6 +779,84 @@ public final class HorizonHooks {
                         + m.getName() + "): " + cause);
             }
         }
+    }
+
+    /** RandomState.create in ChunkMap's constructor (Lithostitched wraps the noise router there). */
+    public static final String RANDOM_STATE_CREATE = "RandomState;create";
+
+    /**
+     * The mods' @WrapOperation handlers around the call {@code targetPart} names in
+     * {@code owner}'s constructor, for a value the mirror makes itself where it keeps it (a
+     * chunk map's random state): each handler gets the value so far from its Operation, its
+     * parameters from {@code values} by type (the call's arguments and the constructor's
+     * locals it captures), and what it returns is the value.
+     */
+    public static Object wrapConstructorCall(Class<?> owner, Object self, String targetPart, Object original, Object... values) {
+        scan();
+        List<String[]> wraps = CONSTRUCTOR_WRAPS.get(owner.getName().replace('.', '/'));
+        if (wraps == null) return original;
+        Object result = original;
+        for (Method m : owner.getDeclaredMethods()) {
+            MixinMerged merged = m.getAnnotation(MixinMerged.class);
+            if (merged == null || m.getName().contains("$mixinextras$bridge$")) continue;
+            boolean match = false;
+            for (String[] w : wraps) {
+                match |= merged.mixin().equals(w[0]) && (m.getName().equals(w[1]) || m.getName().endsWith("$" + w[1]))
+                        && w[2].contains(targetPart);
+            }
+            if (!match) continue;
+            Class<?>[] params = m.getParameterTypes();
+            Object[] call = new Object[params.length];
+            boolean[] used = new boolean[values.length];
+            int operation = -1;
+            for (int i = 0; i < params.length; i++) {
+                if (params[i].isInterface() && params[i].getName().endsWith(".wrapoperation.Operation")) {
+                    operation = i;
+                    continue;
+                }
+                Class<?> type = boxed(params[i]);
+                for (int j = 0; j < values.length; j++) {
+                    if (!used[j] && values[j] != null && type.isInstance(values[j])) {
+                        call[i] = values[j];
+                        used[j] = true;
+                        break;
+                    }
+                }
+                if (call[i] == null && params[i].isPrimitive()) call[i] = zero(params[i]);
+            }
+            if (operation < 0) continue;
+            final Object current = result;
+            call[operation] = java.lang.reflect.Proxy.newProxyInstance(params[operation].getClassLoader(),
+                    new Class<?>[] {params[operation]}, (proxy, method, args) -> {
+                        if (method.getDeclaringClass() == Object.class) {
+                            return method.getName().equals("hashCode") ? System.identityHashCode(proxy)
+                                    : method.getName().equals("equals") ? proxy == args[0] : "Horizon's operation";
+                        }
+                        return current;
+                    });
+            try {
+                m.setAccessible(true);
+                Object made = m.invoke(Modifier.isStatic(m.getModifiers()) ? null : self, call);
+                if (made != null) result = made;
+            } catch (Throwable t) {
+                Throwable cause = t instanceof java.lang.reflect.InvocationTargetException ite && ite.getCause() != null ? ite.getCause() : t;
+                Natives.log("A mod failed around " + targetPart + " in " + owner.getSimpleName() + "'s constructor ("
+                        + m.getName() + "): " + cause);
+            }
+        }
+        return result;
+    }
+
+    private static Class<?> boxed(Class<?> type) {
+        if (!type.isPrimitive()) return type;
+        if (type == long.class) return Long.class;
+        if (type == int.class) return Integer.class;
+        if (type == boolean.class) return Boolean.class;
+        if (type == double.class) return Double.class;
+        if (type == float.class) return Float.class;
+        if (type == short.class) return Short.class;
+        if (type == byte.class) return Byte.class;
+        return Character.class;
     }
 
     /** The method a @WrapOperation target names ({@code Lowner;name(desc)R}), called with these values (receiver first unless static); null when it can't be. */

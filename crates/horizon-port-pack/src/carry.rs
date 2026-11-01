@@ -1049,116 +1049,137 @@ pub fn carry(
     };
     if let Some(facts) = facts {
         report.oracle = true;
-        let prefix = format!("{id}:");
         let mut declared = BTreeSet::new();
-        for (full, block) in facts.blocks.range(prefix.clone()..) {
-            let Some(b) = full.strip_prefix(&prefix) else {
-                break;
+        // The mod's blocks and items under each namespace it owns (BuildCraft's are under
+        // `buildcraftenergy`, `buildcraftfactory`..., not its id), declared there.
+        let namespaces: Vec<String> = std::iter::once(id.to_owned())
+            .chain(report.namespaces.iter().cloned())
+            .collect();
+        for ns in &namespaces {
+            let prefix = format!("{ns}:");
+            let decl = inside.join(format!("data/{ns}/horizon"));
+            let write_decl = |kind: &str, name: &str, v: &Value| {
+                let text = serde_json::to_vec_pretty(v).unwrap_or_default();
+                write(&decl.join(format!("{kind}/{name}.json")), &text)
             };
-            let (choice, own) = match facts.template(full, allowed) {
-                Some(choice) => (choice, None),
-                None => match facts.own_states(full, allowed) {
-                    Some((choice, states)) => (choice, Some(states)),
-                    None => {
-                        let props: Vec<&str> =
-                            block.properties.keys().map(String::as_str).collect();
-                        let why = format!(
-                            "no vanilla {} with properties [{}]",
-                            block.vanilla_class().rsplit('.').next().unwrap_or(""),
-                            props.join(", ")
-                        );
-                        report.blocks_unknown.insert(b.to_owned(), why);
-                        continue;
-                    }
-                },
+            // The report's names: the path under the id, `ns:path` under another namespace.
+            let key = |b: &str| {
+                if ns == id {
+                    b.to_owned()
+                } else {
+                    format!("{ns}:{b}")
+                }
             };
-            let mut v = json!({"template": choice.template, "properties": choice.properties});
-            if let Some(states) = own {
-                v["states"] = states;
-            }
-            let template_item = facts.blocks.get(&choice.template).map(|t| t.item.as_str());
-            if block.item == "minecraft:air" || template_item == Some("minecraft:air") {
-                v["item"] = json!(false);
-            } else if block.item != *full {
-                v["item"] = json!(false);
-                report
-                    .differences
-                    .entry(b.to_owned())
-                    .or_default()
-                    .push(format!("its item is {}", block.item));
-            } else {
-                declared.insert(full.clone());
-                let drop = (!block_loot.contains(b))
-                    .then(|| block.drops_itself(full))
-                    .flatten();
-                if let Some(drop) = drop {
-                    let mut entry = json!({"type": "minecraft:item", "name": full});
-                    if let crate::oracle::SelfDrop::When(property, value) = drop {
-                        entry["condition"] = json!({
-                            "type": "minecraft:match_block",
-                            "blocks": full,
-                            "state": {property: value}
+            for (full, block) in facts.blocks.range(prefix.clone()..) {
+                let Some(b) = full.strip_prefix(&prefix) else {
+                    break;
+                };
+                let (choice, own) = match facts.template(full, allowed) {
+                    Some(choice) => (choice, None),
+                    None => match facts.own_states(full, allowed) {
+                        Some((choice, states)) => (choice, Some(states)),
+                        None => {
+                            let props: Vec<&str> =
+                                block.properties.keys().map(String::as_str).collect();
+                            let why = format!(
+                                "no vanilla {} with properties [{}]",
+                                block.vanilla_class().rsplit('.').next().unwrap_or(""),
+                                props.join(", ")
+                            );
+                            report.blocks_unknown.insert(key(b), why);
+                            continue;
+                        }
+                    },
+                };
+                let mut v = json!({"template": choice.template, "properties": choice.properties});
+                if let Some(states) = own {
+                    v["states"] = states;
+                }
+                let template_item = facts.blocks.get(&choice.template).map(|t| t.item.as_str());
+                if block.item == "minecraft:air" || template_item == Some("minecraft:air") {
+                    v["item"] = json!(false);
+                } else if block.item != *full {
+                    v["item"] = json!(false);
+                    report
+                        .differences
+                        .entry(key(b))
+                        .or_default()
+                        .push(format!("its item is {}", block.item));
+                } else {
+                    declared.insert(full.clone());
+                    let drop = (!block_loot.contains(b))
+                        .then(|| block.drops_itself(full))
+                        .flatten();
+                    if let Some(drop) = drop {
+                        let mut entry = json!({"type": "minecraft:item", "name": full});
+                        if let crate::oracle::SelfDrop::When(property, value) = drop {
+                            entry["condition"] = json!({
+                                "type": "minecraft:match_block",
+                                "blocks": full,
+                                "state": {property: value}
+                            });
+                        }
+                        let table = json!({
+                            "type": "minecraft:block",
+                            "pools": [{
+                                "condition": {"type": "minecraft:survives_explosion"},
+                                "entries": [entry],
+                                "rolls": 1
+                            }],
+                            "random_sequence": format!("{ns}:blocks/{b}")
                         });
-                    }
-                    let table = json!({
-                        "type": "minecraft:block",
-                        "pools": [{
-                            "condition": {"type": "minecraft:survives_explosion"},
-                            "entries": [entry],
-                            "rolls": 1
-                        }],
-                        "random_sequence": format!("{id}:blocks/{b}")
-                    });
-                    let file = inside.join(format!("data/{id}/loot_table/blocks/{b}.json"));
-                    write(
-                        &file,
-                        &serde_json::to_vec_pretty(&table).unwrap_or_default(),
-                    )?;
-                    report.loot_tables_added += 1;
-                }
-            }
-            write_decl("block", b, &v)?;
-            report.blocks.insert(b.to_owned(), choice.template);
-            if !choice.differences.is_empty() {
-                report
-                    .differences
-                    .entry(b.to_owned())
-                    .or_default()
-                    .extend(choice.differences);
-            }
-        }
-        for (full, item) in facts.items.range(prefix.clone()..) {
-            let Some(name) = full.strip_prefix(&prefix) else {
-                break;
-            };
-            if declared.contains(full) {
-                continue;
-            }
-            if item
-                .block
-                .as_ref()
-                .is_some_and(|b| facts.blocks.contains_key(b))
-                && report.blocks_unknown.contains_key(name)
-            {
-                report
-                    .items_unknown
-                    .insert(name.to_owned(), "its block is left out".into());
-                continue;
-            }
-            match facts.item(full, &owned) {
-                Ok((v, differences)) => {
-                    write_decl("item", name, &v)?;
-                    report.items += 1;
-                    if !differences.is_empty() {
-                        report.differences.insert(name.to_owned(), differences);
+                        let file = inside.join(format!("data/{ns}/loot_table/blocks/{b}.json"));
+                        write(
+                            &file,
+                            &serde_json::to_vec_pretty(&table).unwrap_or_default(),
+                        )?;
+                        report.loot_tables_added += 1;
                     }
                 }
-                Err(e) => {
-                    report.items_unknown.insert(name.to_owned(), e);
+                write_decl("block", b, &v)?;
+                report.blocks.insert(key(b), choice.template);
+                if !choice.differences.is_empty() {
+                    report
+                        .differences
+                        .entry(key(b))
+                        .or_default()
+                        .extend(choice.differences);
+                }
+            }
+            for (full, item) in facts.items.range(prefix.clone()..) {
+                let Some(name) = full.strip_prefix(&prefix) else {
+                    break;
+                };
+                if declared.contains(full) {
+                    continue;
+                }
+                if item
+                    .block
+                    .as_ref()
+                    .is_some_and(|b| facts.blocks.contains_key(b))
+                    && report.blocks_unknown.contains_key(&key(name))
+                {
+                    report
+                        .items_unknown
+                        .insert(key(name), "its block is left out".into());
+                    continue;
+                }
+                match facts.item(full, &owned) {
+                    Ok((v, differences)) => {
+                        write_decl("item", name, &v)?;
+                        report.items += 1;
+                        if !differences.is_empty() {
+                            report.differences.insert(key(name), differences);
+                        }
+                    }
+                    Err(e) => {
+                        report.items_unknown.insert(key(name), e);
+                    }
                 }
             }
         }
         // 26.3 draws worn armour from an equipment asset per material, in the mod's own namespaces.
+        let prefix = format!("{id}:");
         let mut materials = BTreeSet::new();
         for (full, item) in facts.items.range(prefix.clone()..) {
             if !full.starts_with(&prefix) {

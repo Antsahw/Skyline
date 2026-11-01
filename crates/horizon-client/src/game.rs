@@ -11569,6 +11569,7 @@ impl Game<'_> {
     /// integrated-server selection. Server startup must use this entry point.
     fn load_world(&mut self, request: world_loading::WorldRequest) -> Result<()> {
         self.join_world_rest()?;
+        mem_mark("world rest joined");
         self.perf.world_opening();
         let prepared = request.prepare(
             &self.res,
@@ -11577,7 +11578,10 @@ impl Game<'_> {
             &self.settings,
             &horizon_world::datafix::progress::UpgradeProgress::new(),
         )?;
-        self.finish_open_world(prepared)
+        mem_mark("world prepared");
+        let opened = self.finish_open_world(prepared);
+        mem_mark("world opened");
+        opened
     }
 
     fn finish_open_world(&mut self, prepared: world_loading::PreparedWorld) -> Result<()> {
@@ -18751,6 +18755,7 @@ fn load_resources(
         root = vanilla_root.to_path_buf();
     };
     log::info!("load core tables: {:.2}s", started.elapsed().as_secs_f32());
+    mem_mark("core tables (assets, facts, biomes, collision, motion)");
     let CoreTables {
         assets,
         render,
@@ -18785,6 +18790,7 @@ fn load_resources(
         Arc::new(light),
     );
     log::info!("load pack tables: {:.2}s", started.elapsed().as_secs_f32());
+    mem_mark("pack tables");
     progress.set(4);
     if !menu {
         horizon_client::ui::load_metadata(&root);
@@ -18818,6 +18824,7 @@ fn load_resources(
     let prepared_at = Instant::now();
     let game_cpu = menu.then(|| GameCpuResources::load(&root)).transpose()?;
     let renderer_cpu = menu.then(|| prepare_renderer_textures(&pack));
+    mem_mark("renderer textures (CPU)");
     if menu {
         log::info!(
             "Horizon: handoff CPU resources prepared on worker in {} ms",
@@ -18852,6 +18859,7 @@ fn load_resources(
                     .set(rest)
                     .map_err(|_| "world resources already loaded".to_owned())?;
                 progress.set(9);
+                mem_mark("world rest");
                 horizon_client::telemetry::mark_rest_ready();
                 log::info!(
                     "Horizon: rest-ready after {} ms",
@@ -19000,6 +19008,7 @@ fn load_world_rest(
     let (animate, fog) = animate?;
     let (mob_types, mob_data) = mobs?;
     let (transformers, (player_type, player_arm, player_arm_slim, spin_attack)) = transformers?;
+    mem_mark("items, behaviours, block entities, animate, mobs");
     log::info!(
         "Horizon: resources loaded in {:.1}s; {} block states, {} items, {} biomes; {} worker threads",
         started.elapsed().as_secs_f32(),
@@ -19008,6 +19017,9 @@ fn load_world_rest(
         biomes.list.len(),
         threads
     );
+    // The tables' parse is done: its garbage (gigabytes for a modded pack) back to the system.
+    horizon_threads::trim_heap();
+    mem_mark("resources");
     progress.set(8);
     Ok(WorldRest {
         stations,
@@ -19098,6 +19110,7 @@ fn build_renderer(
         translucent_batching,
         shader_pack,
     ))?;
+    mem_mark("renderer");
     renderer.hud.sprite_animations = atlas
         .sprite_animations
         .iter()
@@ -20925,4 +20938,9 @@ fn write_level_for_role(
     } else {
         level.write_without_player(dir)
     }
+}
+
+/// [`horizon_client::mem_log::mark`].
+pub(crate) fn mem_mark(stage: &str) {
+    horizon_client::mem_log::mark(stage);
 }

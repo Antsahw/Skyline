@@ -706,7 +706,19 @@ public final class HorizonServer {
                     ? noise.generatorSettings().value()
                     : registries.lookupOrThrow(Registries.NOISE_SETTINGS)
                             .getOrThrow(net.minecraft.world.level.levelgen.NoiseGeneratorSettings.OVERWORLD).value();
-            return net.minecraft.world.level.levelgen.RandomState.create(noises, seed, settings);
+            var state = net.minecraft.world.level.levelgen.RandomState.create(noises, seed, settings);
+            // The mods' wraps of this call in ChunkMap's constructor (Lithostitched's noise
+            // router modifiers), with the level and registries it captures there.
+            net.minecraft.server.level.ChunkMap map = null;
+            try {
+                map = l.getChunkSource().chunkMap;
+            } catch (RuntimeException e) {
+                // No chunk source yet.
+            }
+            if (map == null) map = (net.minecraft.server.level.ChunkMap) Natives.allocate(net.minecraft.server.level.ChunkMap.class);
+            return (net.minecraft.world.level.levelgen.RandomState) HorizonHooks.wrapConstructorCall(
+                    net.minecraft.server.level.ChunkMap.class, map, HorizonHooks.RANDOM_STATE_CREATE, state,
+                    noises, seed, settings, l, registries);
         });
     }
 

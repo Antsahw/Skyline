@@ -500,12 +500,14 @@ impl Content {
                     "{name}: a mod adds files in its own namespaces ({top}/{id}/ and those listed in namespaces) or to vanilla and convention (c) tags"
                 ));
             }
-            if !own && top == "data" && rest.starts_with("horizon/") {
+            if !owned && top == "data" && rest.starts_with("horizon/") {
                 return Err(format!(
-                    "{name}: blocks, items, mob effects, entity types and menu types are declared in data/{id}/horizon/"
+                    "{name}: blocks, items, mob effects, entity types and menu types are declared in data/<namespace>/horizon/ of a namespace the mod owns"
                 ));
             }
-            let Some(decl) = (own && top == "data")
+            // Under the mod's id, or another namespace it owns (`namespaces`): the block is
+            // `<namespace>:<path>` (a Java mod's modules: BuildCraft's `buildcraftenergy`).
+            let Some(decl) = (owned && top == "data")
                 .then(|| rest.strip_prefix("horizon/"))
                 .flatten()
             else {
@@ -516,7 +518,7 @@ impl Content {
                     .strip_prefix(kind)?
                     .strip_prefix('/')?
                     .strip_suffix(".json")?;
-                Some(format!("{id}:{path}"))
+                Some(format!("{namespace}:{path}"))
             };
             if let Some(block) = parse("block") {
                 blocks.push((block, name.clone()));
@@ -532,7 +534,7 @@ impl Content {
                 menus.push((menu, name.clone()));
             } else {
                 return Err(format!(
-                    "{name}: data/{id}/horizon/ holds block/, item/, mob_effect/, creative_tab/, entity_type/ and menu/*.json only"
+                    "{name}: data/{namespace}/horizon/ holds block/, item/, mob_effect/, creative_tab/, entity_type/ and menu/*.json only"
                 ));
             }
         }
@@ -1443,10 +1445,13 @@ capabilities = ["registries"]
         let content = hmod("listed", &manifest, files).unwrap();
         assert_eq!(content.files.len(), 3);
         assert_eq!(content.namespaces, ["ruby", "kaisyn"]);
-        // Declarations stay in the id's namespace.
+        // A listed namespace declares blocks under its own name (a Java mod's modules).
         let decl: &[(&str, &[u8])] = &[("data/kaisyn/horizon/block/a.json", BLOCK)];
-        let e = hmod("listed-decl", &manifest, decl).unwrap_err();
-        assert!(e.contains("declared in data/ruby/horizon/"), "{e}");
+        let content = hmod("listed-decl", &manifest, decl).unwrap();
+        assert_eq!(content.blocks[0].id, "kaisyn:a");
+        // An unlisted one may not.
+        let unlisted: &[(&str, &[u8])] = &[("data/other/horizon/block/a.json", BLOCK)];
+        assert!(hmod("listed-undeclared", &manifest, unlisted).is_err());
         // A namespace it does not list is still outside.
         let other: &[(&str, &[u8])] = &[("data/other/structure/a.nbt", b"nbt")];
         assert!(hmod("listed-other", &manifest, other).is_err());

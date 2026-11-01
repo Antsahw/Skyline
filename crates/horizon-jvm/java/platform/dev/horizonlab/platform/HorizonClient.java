@@ -114,6 +114,8 @@ public final class HorizonClient {
         } catch (ReflectiveOperationException | RuntimeException e) {
             Natives.log("Horizon's client: no chat component: " + e);
         }
+        // Mods' fields on the HUD (Enderscape's hearts' variables), from their mixins' initializers.
+        HorizonHooks.initFields(hud);
         set(net.minecraft.client.gui.Gui.class, gui, "hud", hud);
         set(Minecraft.class, mc, "gui", gui);
         // Screens click through the game mode (handleContainerInput): GameModeClientMixin.
@@ -820,6 +822,10 @@ public final class HorizonClient {
             set(net.minecraft.client.multiplayer.ClientPacketListener.class, connection, "clockManager",
                     new net.minecraft.client.ClientClockManager());
             players(connection);
+            // Its scoreboard (ClientLevel.getScoreboard() is the connection's): an empty one, as
+            // a client's is before the server sends any (Cardinal Components' client tick).
+            set(net.minecraft.client.multiplayer.ClientPacketListener.class, connection, "scoreboard",
+                    new net.minecraft.world.scores.Scoreboard());
             // Its network connection: a mirror one with no channel, as the players' are
             // (connected, not connecting: MirrorConnectionMixin).
             set(net.minecraft.client.multiplayer.ClientCommonPacketListenerImpl.class, connection, "connection",
@@ -1495,6 +1501,15 @@ public final class HorizonClient {
                 }
                 set(net.minecraft.client.multiplayer.ClientPacketListener.class, copy, "clockManager",
                         new net.minecraft.client.ClientClockManager());
+                // As the shared one: its client (mods' handleLogin injections read
+                // minecraft.player through it: Architectury's, Puzzles Lib's), its network
+                // connection (getConnection().getConnection()), and a scoreboard of its own
+                // (Cardinal Components' client tick reads getConnection().scoreboard()).
+                set(net.minecraft.client.multiplayer.ClientCommonPacketListenerImpl.class, copy, "minecraft", minecraft);
+                set(net.minecraft.client.multiplayer.ClientCommonPacketListenerImpl.class, copy, "connection",
+                        HorizonServer.clientConnection());
+                set(net.minecraft.client.multiplayer.ClientPacketListener.class, copy, "scoreboard",
+                        new net.minecraft.world.scores.Scoreboard());
                 players(copy);
                 if (!(HorizonServer.server() instanceof net.minecraft.client.server.IntegratedServer)) {
                     set(net.minecraft.client.multiplayer.ClientCommonPacketListenerImpl.class, copy, "serverData",
@@ -2007,6 +2022,9 @@ public final class HorizonClient {
         } catch (ReflectiveOperationException e) {
             return graphics.ops();
         }
+        // Mods' fields on the HUD whose initializer had nothing to give when it was made
+        // (Enderscape's variables come from its client entrypoint, which runs later).
+        HorizonHooks.initFields(hud);
         var hooked = HorizonHooks.hudMethods();
         // Hearts and food show where the player can be hurt (Hud.extractHotbarAndDecorations).
         boolean hurtable = player.gameMode().isSurvival();
