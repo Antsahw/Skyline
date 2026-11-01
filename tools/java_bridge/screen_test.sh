@@ -66,6 +66,12 @@ case "$SCENE" in
     'q "summon ${ENTITY:-horizon_critters:critter} ~3 ~ ~2"' \
     'q "summon ${ENTITY:-horizon_critters:critter} ~2 ~ ~ {NoAI:1b}"' \
     'q "tp @s ~ ~ ~ -90 25"' 'sleep 3' ;;
+  # Hostile mods' mobs: a biter (the critter fixture's hostile one, 3 a bite) ahead of a
+  # player in survival, on normal difficulty; it comes and bites.
+  hostile) "$R/tools/java_bridge/around.sh" \
+    'q "difficulty normal"' 'q "gamemode survival"' \
+    'q "summon horizon_critters:biter ~4 ~ ~1"' \
+    'q "tp @s ~ ~ ~ -90 15"' 'sleep 2' ;;
   # Farmer's Delight's block entity renderers: beef on a lit stove's grill, a carrot on a
   # cutting board beside it; the player looking at both.
   ber) "$R/tools/java_bridge/around.sh" \

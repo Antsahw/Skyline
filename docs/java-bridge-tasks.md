@@ -68,3 +68,17 @@ Never write as the user; mark what you post (CLAUDE.md). Never run mod jars the 
 ## Reports
 
 (Newest last. One short entry per task: area, task, branch, works / doesn't / how to test.)
+
+- **entities 2 (hostile mod mobs attack players)**, `bridge-entities-2`. Agent: Claude (iaxivers' chats).
+  Works: a mod's mob hurting a mirrored player (`ServerPlayer.hurtServer` on the mirror) goes to
+  Horizon (`ServerPlayerHurtMixin` → `Natives.hurtPlayer` → `Action::HurtPlayer` →
+  `java_hurt`): Horizon hurts its player as its own mobs do (armour, blocking, knockback from
+  where it came, invulnerable ticks, death), as that LAN guest or the window's player, and the
+  death message names the mob ("was slain by Biter"). A mod's damage type Horizon doesn't know
+  counts as a mob's attack. New fixture mob `horizon_critters:biter` (hunts players, 3 a bite).
+  Also: `regress.py` rebuilds a fixture whose sources changed (it reused stale jars), and can
+  build one against the case's jars (`FIXTURE_CP`). Touched `server_mods.rs` (mixins area: one
+  routed action) and `lan_e2e.py`. Test: `regress.py --jars … hostile` (the player loses health
+  to a biter); `lan_e2e.py --bin-dir target/fast --java-mods <critter jar folder> --check
+  javahostile` (a guest 20 → 17). Not done: mod mobs vs Horizon's own mobs (they don't see each
+  other), a mod's projectile is untested (same path).

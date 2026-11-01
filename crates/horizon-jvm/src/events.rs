@@ -215,6 +215,16 @@ pub enum Action {
     /// A clientbound packet a mod sent the player, to send as it is (a mod entity's sound,
     /// particles): vanilla's encoding, its id (a VarInt) then its body.
     Packet { uuid: String, data: Vec<u8> },
+    /// Java hurt a Horizon player (a mod's mob's bite): the damage type, the amount and where
+    /// it came from (none: no direction).
+    HurtPlayer {
+        uuid: String,
+        damage_type: String,
+        amount: f32,
+        from: Option<[f64; 3]>,
+        /// The attacker's name (the death message's killer).
+        by: Option<String>,
+    },
 }
 
 static ACTIONS: Mutex<Vec<Action>> = Mutex::new(Vec::new());

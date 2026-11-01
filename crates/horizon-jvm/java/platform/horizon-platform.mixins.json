@@ -10,6 +10,7 @@
     "LevelAccess",
     "ServerLevelAccess",
     "ServerPlayerMixin",
+    "ServerPlayerHurtMixin",
     "PlayerListMixin",
     "MinecraftServerMixin",
     "ServerLevelMixin",

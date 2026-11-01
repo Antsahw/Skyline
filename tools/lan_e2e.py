@@ -310,7 +310,7 @@ CHECKS = ['tab', 'self', 'armour', 'nametags', 'walls', 'chest', 'crafting', 'sp
           'worn', 'blast', 'barter', 'deflect', 'fireball', 'light', 'time', 'swings', 'cracks', 'plates', 'effects',
           'portals', 'distance', 'growth', 'doors', 'flight', 'ladder', 'boats', 'minecarts', 'frames', 'hands',
           'lightning', 'riding', 'occupied_horse', 'mounts', 'worldspawn', 'beds', 'shield', 'deathmining', 'contacts', 'absorption',
-          'breath', 'lava', 'levels', 'drops', 'underwater', 'fireworks', 'javamobs']
+          'breath', 'lava', 'levels', 'drops', 'underwater', 'fireworks', 'javamobs', 'javahostile']
 # --java-mods: a folder of Fabric mod jars both games run (the javamobs check: the crittermod fixture).
 JAVA_MODS = None
 
@@ -8033,6 +8033,33 @@ def check_javamobs(host, guest, out):
 
 
 CHECK_FNS['javamobs'] = check_javamobs
+
+
+def check_javahostile(host, guest, out):
+    """A Java mod's hostile mob on a LAN server (--java-mods with the crittermod fixture): a biter
+    the host summons next to the guest (the host in creative, which it ignores) hunts the guest and
+    bites; the guest's health drops (the mods' hurt of a mirrored player goes to Horizon, which
+    hurts the guest as its own mobs do)."""
+    if not JAVA_MODS:
+        return 'skipped: no --java-mods'
+    host('command', command='gamemode creative')
+    host('command', command='difficulty normal')
+    guest('command', command='gamemode survival')
+    guest('command', command='effect give @s minecraft:instant_health 1 5 true')
+    guest.wait(10)
+    gx, gy, gz = pos_of(guest)
+    before = guest('state')['player']['health']
+    host('command', command=f'summon horizon_critters:biter {gx + 3:.2f} {gy:.2f} {gz:.2f}')
+    after = guest.until(lambda: guest('state')['player']['health'], lambda h: h < before, ticks=200)
+    guest.shot(out, 'javahostile')
+    host('command', command='kill @e[type=horizon_critters:biter]')
+    guest('command', command='effect give @s minecraft:instant_health 1 5 true')
+    seen = {'before': before, 'after': after}
+    assert after < before, seen
+    return seen
+
+
+CHECK_FNS['javahostile'] = check_javahostile
 
 
 if __name__ == '__main__':
