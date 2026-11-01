@@ -77,3 +77,13 @@ Never write as the user; mark what you post (CLAUDE.md). Never run mod jars the 
   no mapping task), fixed. Regress cases `maps`, `journeymap`, `voxelmap` (jars: Xaero's
   Minimap, Trinkets, JourneyMap, VoxelMap). Test: those four in `~/hz-test/mods-java`, join,
   wait ~1 minute: Xaero's map top left, JourneyMap's/VoxelMap's top right.
+- **gpu 2, JourneyMap and VoxelMap per player** (`bridge-gpu-2`, on top of `bridge-gpu-1`).
+  Works: host and LAN guest each see their own JourneyMap (map centred on them, own
+  coordinates and biome) and VoxelMap (own map image, no black gaps). How: `HorizonClientState`
+  slots can now make a fresh value per player (`field=Class(arg)`) and reach instances through
+  static fields; a new optional mixin config (`horizon-platform-mods.mixins.json`, plugin
+  `ModsPlugin`) makes JourneyMap's static final state non-final. Small change outside gpu:
+  `regress.py` runs `lan=True` cases with `lan_test.sh` (which now honours `NO_BUILD`). Doesn't:
+  a leaving player's VoxelMap map keeps its thread; JourneyMap's waypoints and settings are still
+  shared. Test: `MODS=<JourneyMap + VoxelMap> tools/java_bridge/lan_test.sh '$H command "tp Guest ~40 ~ ~"; sleep 100'`,
+  or `regress.py --jars … maps-lan`.

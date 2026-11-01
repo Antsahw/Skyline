@@ -236,7 +236,7 @@ fn platform(manifest: &Path, out: &Path, libs: &[PathBuf], bridge_classes: &Path
         zip.start_file(name, options).unwrap();
         zip.write_all(&std::fs::read(&file).unwrap()).unwrap();
     }
-    for resource in ["fabric.mod.json", "horizon-platform.mixins.json"] {
+    for resource in ["fabric.mod.json", "horizon-platform.mixins.json", "horizon-platform-mods.mixins.json"] {
         zip.start_file(resource, options).unwrap();
         zip.write_all(&std::fs::read(sources_dir.join(resource)).unwrap())
             .unwrap();

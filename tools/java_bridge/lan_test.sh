@@ -12,7 +12,9 @@ if ! "${JAVA_HOME:-/nonexistent}/bin/java" -version 2>&1 | grep -q '"25'; then
   JAVA_HOME=$(ls -d /usr/lib/jvm/*25* 2>/dev/null | head -1)
 fi
 export JAVA_HOME HORIZON_JAVA_HOME=$JAVA_HOME PATH=$JAVA_HOME/bin:$PATH
-if [ -n "$JAVA_ONLY" ]; then
+if [ -n "$NO_BUILD" ]; then
+  :  # the caller built already (regress.py)
+elif [ -n "$JAVA_ONLY" ]; then
   export HORIZON_JAVA_JARS=$("$R/tools/java_bridge/java.sh") || exit 1
 else
   cd "$R" && cargo build -q --profile fast -p horizon-client --features horizon-client/java-mods 2>&1 \

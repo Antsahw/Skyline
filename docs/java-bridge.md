@@ -1118,11 +1118,14 @@ Map mods (2026-11-01, `bridge-gpu2`, headless, llvmpipe):
   side's `LoadedChunkOverlayPlugin` fails each tick (`ChunkMap` of the mirror).
 - VoxelMap 1.16.13 (`bridge-gpu3`): its minimap draws (map, frame, arrow, compass,
   coordinates), through the game renderer's feature dispatcher.
-- Per player (host and LAN guest, `bridge-gpu3`): Xaero's minimap is each player's own.
-  JourneyMap's map is centred on each player, but its coordinates label is the other
-  player's (one player cache: `DataCache`). VoxelMap shares one map image between players: it
-  shifts by each player's moves in turn and shows black gaps. Both are written for one client;
-  per-player copies of their state are left.
+- Per player (host and LAN guest): Xaero's minimap is each player's own (`bridge-gpu3`);
+  JourneyMap's and VoxelMap's too since `bridge-gpu-2` (`HorizonClientState`): JourneyMap's
+  minimap and full-screen `MapState`/`MapRenderer` per player (static finals, made non-final as
+  the class loads by `mixin/mods/ModsPlugin`), its player cache and labels read again at each
+  switch; VoxelMap's `Map` per player (a new one for each, its images re-registered by name at
+  each switch, computed on the client's thread when there are several players). JourneyMap's
+  `MiniMap` object stays shared (a new one recurses through `UIManager`). Regress case
+  `maps-lan` (regress.py runs `lan=True` cases with lan_test.sh).
 
 Left: the client tick is ~35 ms with the minimap on llvmpipe (the frame's start ~25: Xaero's
 writer, the HUD ~10: the picture drawn and read back at 10 Hz).
