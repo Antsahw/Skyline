@@ -579,6 +579,55 @@ from the generation while it runs: `locatingChunk`): `betternether:pyramid`,
 mods' biomes put them (a taiga village with its bell, not Horizon's plains one).
 `tools/java_bridge/launch.sh` now removes the previous run's scratch folder (~1 GB each).
 
+World types from mods (tested 2026-11-01 with One Block 5.1.6 and Grid World Generator
+1.1.0; regress case `preset`; `WORLD=none tools/java_bridge/launch.sh` starts at the title
+screen, then `tools/java_bridge/new_world.sh "One Block"`): Create New World's World Type cycles Default, Superflat, then the mods' presets in
+`#minecraft:normal` (`create_world::mod_presets`: `data/*/worldgen/world_preset/` of the
+content root, named by the mods' `generator.<ns>.<path>`). The world keeps the preset's
+dimensions and its id (`horizon:preset` in `world_gen_settings`; dedicated:
+`level-type=oneblock:oneblock`); the Java side takes that preset's level stems for the world
+(`HorizonData.usePreset`/`stem`, read by `world()` from the world folder or one above it:
+the tick passes the dimension's folder). A mod's own generator (One Block's void, Grid's
+`GridChunkGenerator`) gives the spawn (`worldgen_origin`: getOrigin and getSpawnHeight; the
+spawn search waits until Java says whether it generates the overworld) and no far terrain
+(Horizon's noise would show land that isn't there). One Block: spawn on its grass block at
+0 64 0, `[OneBlock] Your island is at (0, 64, 0)`, breaking it gives the next block (stone,
+mangrove planks, wool), its break counter shows. Grid World: the 5-block grid of terrain.
+Fixed on the way: the mirror server had no `packRepository` (One Block's generator reads
+the selected packs).
+`/locate structure #minecraft:bastion_remnant` found nothing because there is no such tag
+(vanilla's bastion is `minecraft:bastion_remnant`, found at 599 blocks with the mods'
+Nether); an unknown tag now says so (`commands.locate.structure.invalid`).
+
+Worldgen speed (2026-11-01, bridge-worldgen-speed, 2 cores, BOP): where Java worldgen's
+CPU goes (JFR, `-XX:StartFlightRecording` in `JAVA_TOOL_OPTIONS`, `duration=` since the game
+doesn't exit the JVM): terrain 60% (noise fill 31, surface rules 25, carvers ~4), features
+13%, structure starts/references and biomes ~5%. Per chunk, all in (generation, light, mesh,
+by thread CPU over 900 chunks): Java ~86 ms, Horizon's own ~61 ms. With the software renderer
+the two cores are also the GPU's (llvmpipe takes ~1 core even at `maxFps:10`), so wall-clock
+throughput here says little.
+- Parallelism: the mirror's `randomState`/`generatorState` (every step asks, from every
+  worker) were `synchronized` statics, and the cache of lower-status chunks one synchronized
+  LRU map (289 reads a chunk's structure references): both lock-free now. TERRAIN's and
+  BIOMES' work runs on the Horizon worker that asked (`HorizonWorldgen.executor`, the
+  `buildTerrain`/`createBiomes` hops redirected) instead of vanilla's background executor:
+  Horizon's workers are behind the server and window threads and as many as the cores but
+  one; the executor's threads are as many again at normal priority. Default from 4 cores;
+  `HORIZON_JAVA_TERRAIN=inline|executor` picks. 2 cores: 300 chunks after a teleport, three
+  places, executor 33.6/24.9/30.5 s, inline 36.3/24.4/30.4 s (the earlier "inline slower"
+  was before the locks went). Not measurable here: a desktop's many cores.
+- Surface rules per biome: TerraBlender already compiles its rules per namespace and
+  dispatches by biome only where a chunk's 3x3 has biomes of two mods (`possibleBiomes`);
+  compiling is ~1% of the surface time. The cost is vanilla's own walk of every stone block
+  of the column through the rule tree (setBlockState 21% of it, ore veins' densities 14,
+  biome lookups 9): nothing to cache without changing results.
+- Skipping Java where a chunk has only vanilla biomes: most of a BOP world is vanilla's
+  (4 of 5 places sampled had no BOP biome within 6 chunks), but the result would differ:
+  feature seeds are indexes in the order of every feature of every possible biome
+  (`FeatureSorter.buildFeaturesPerStep` over the mods' biomes too), so Horizon's decoration
+  of a vanilla chunk isn't what the mods' generator makes, and features crossing into a
+  Java neighbour would be cut. The gain is ~25 ms of ~86 a chunk. Not done.
+
 Mods' worldgen (tested with BOP + TerraBlender + GlitchCore, a new world): the overworld
 generates through the mods' chunk steps; BOP biomes (orchard, lavender field...) with their
 trees, flowers and blocks, read back by Horizon with their biome ids (`horizon-ctl block`).
@@ -640,7 +689,9 @@ Next (top failure of the pack, in order):
    rules and features under the mods' biome colours); `/locate structure` from one
    dimension into another (`execute in … run locate`) asks the current dimension's
    generator; a world made before the mods keeps the mods' default preset (WorldWeaver's)
-   on the Java side, not its own.
+   on the Java side, not its own (a world made with a mod's world type keeps that one).
+   The tick passes `world()` the dimension's folder and worldgen the world's, so `worldDir`
+   flips between the two (the stores are made again each time).
    Seen once in five `SCENE=ber` runs (with FD, whose features route the overworld through
    Java): the stove placed by the scene was gone a few seconds later, its outline left. A
    chunk generated on the Java side landing after a block was set in it would do that: check
@@ -814,8 +865,8 @@ python3 tools/java_bridge/regress.py --list
 ```
 
 `--jars` is one folder of Modrinth jars (Farmer's Delight, Tom's Storage, Jade, AppleSkin, REI
-with Architectury and Cloth Config, Biomes O' Plenty with TerraBlender and GlitchCore, Fabric
-API); a case missing one is skipped, the fixture mods are built. Each case checks what
+with Architectury and Cloth Config, Biomes O' Plenty with TerraBlender and GlitchCore, One
+Block with CodxLib, Fabric API); a case missing one is skipped, the fixture mods are built. Each case checks what
 horizon-ctl reports and the log, and prints `pass`/`FAIL`; screenshots and logs are in
 `/tmp/hz-regress/<case>/` (a `look` line names what to see on one). A new scene that works gets
 a case in `CASES`.

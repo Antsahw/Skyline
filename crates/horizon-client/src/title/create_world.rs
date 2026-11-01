@@ -34,6 +34,11 @@ pub struct WorldOptions {
     pub flat: bool,
     /// CreateFlatWorldScreen's layers and biome, kept with the world type.
     pub flat_settings: Option<super::flat::FlatSettings>,
+    /// A mod's world preset (`oneblock:oneblock`) instead of Default or Superflat.
+    pub preset: Option<String>,
+    /// The mods' world presets the World Type button cycles through after Superflat
+    /// ([`mod_presets`]).
+    pub presets: Vec<String>,
     pub structures: bool,
     pub bonus_chest: bool,
     /// `getGameRules`: the Game Rules screen's values, saved with the world.
@@ -48,6 +53,8 @@ impl Default for WorldOptions {
             commands: None,
             flat: false,
             flat_settings: None,
+            preset: None,
+            presets: Vec::new(),
             structures: true,
             bonus_chest: false,
             rules: crate::gamerules::GameRules::default(),
@@ -74,6 +81,7 @@ impl WorldOptions {
                 .flat
                 .then(|| super::flat::FlatSettings::from_world(dir))
                 .flatten(),
+            preset: generation.preset.clone(),
             structures: generation.structures,
             bonus_chest: generation.bonus_chest,
             rules: crate::gamerules::GameRules::load(dir),
@@ -95,6 +103,7 @@ impl WorldOptions {
     pub fn world_gen(&self) -> crate::save::WorldGen {
         crate::save::WorldGen {
             flat: self.flat,
+            preset: self.preset.clone(),
             structures: self.structures,
             bonus_chest: self.bonus_chest(),
         }
@@ -118,11 +127,34 @@ impl WorldOptions {
             }
             23 => self.difficulty = (self.difficulty + 1) % DIFFICULTIES.len(),
             24 => self.commands = Some(!self.commands(*creative)),
+            // WorldCreationUiState's preset list: Default, Superflat, then the mods' presets
+            // in the `#minecraft:normal` tag.
             25 => {
-                self.flat = !self.flat;
-                if self.flat {
-                    // setWorldType starts the generator from the flat preset.
-                    self.flat_settings = Some(super::flat::FlatSettings::default());
+                let next = match (&self.preset, self.flat) {
+                    (None, false) => Some(None),
+                    (None, true) => self.presets.first().map(Some),
+                    (Some(p), _) => self
+                        .presets
+                        .iter()
+                        .position(|q| q == p)
+                        .and_then(|i| self.presets.get(i + 1))
+                        .map(Some),
+                };
+                match next {
+                    Some(None) => {
+                        self.flat = true;
+                        self.preset = None;
+                        // setWorldType starts the generator from the flat preset.
+                        self.flat_settings = Some(super::flat::FlatSettings::default());
+                    }
+                    Some(Some(p)) => {
+                        self.flat = false;
+                        self.preset = Some(p.clone());
+                    }
+                    None => {
+                        self.flat = false;
+                        self.preset = None;
+                    }
                 }
             }
             27 => self.structures = !self.structures,
@@ -130,6 +162,39 @@ impl WorldOptions {
             _ => {}
         }
     }
+}
+
+/// The mods' world presets a new world can take: those of `<root>/data/*/worldgen/world_preset/`
+/// in the `#minecraft:normal` tag (what CreateWorldScreen's World Type cycles through), mods'
+/// only (Horizon has Default and Superflat of vanilla's), sorted.
+pub fn mod_presets(root: &std::path::Path) -> Vec<String> {
+    let Ok(text) =
+        std::fs::read_to_string(root.join("data/minecraft/tags/worldgen/world_preset/normal.json"))
+    else {
+        return Vec::new();
+    };
+    let Ok(tag) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return Vec::new();
+    };
+    let mut out: Vec<String> = tag
+        .get("values")
+        .and_then(|v| v.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|v| v.as_str().or_else(|| v.get("id").and_then(|i| i.as_str())))
+        .filter(|id| !id.starts_with('#'))
+        .filter_map(|id| {
+            let (ns, path) = id.split_once(':').unwrap_or(("minecraft", id));
+            (ns != "minecraft"
+                && root
+                    .join(format!("data/{ns}/worldgen/world_preset/{path}.json"))
+                    .is_file())
+            .then(|| format!("{ns}:{path}"))
+        })
+        .collect();
+    out.sort();
+    out.dedup();
+    out
 }
 
 /// `Mth.roundToward`: up to a multiple of `step`.
@@ -257,11 +322,19 @@ pub(super) fn buttons(w: f32, h: f32, creative: bool, o: &WorldOptions) -> Vec<B
                 150.0,
                 labelled(
                     "selectWorld.mapType",
-                    tr(if o.flat {
-                        "generator.minecraft.flat"
-                    } else {
-                        "generator.minecraft.normal"
-                    }),
+                    match &o.preset {
+                        // WorldPreset's description: generator.<namespace>.<path>.
+                        Some(p) => {
+                            let key = format!("generator.{}", p.replacen(':', ".", 1));
+                            let name = tr(&key);
+                            if name == key { p.clone() } else { name }
+                        }
+                        None => tr(if o.flat {
+                            "generator.minecraft.flat"
+                        } else {
+                            "generator.minecraft.normal"
+                        }),
+                    },
                 ),
                 true,
                 25,

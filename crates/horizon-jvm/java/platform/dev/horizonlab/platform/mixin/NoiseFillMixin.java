@@ -8,6 +8,7 @@ import net.minecraft.world.level.levelgen.NoiseChunk;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
@@ -15,11 +16,19 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * The noise fill of a chunk the mods' worldgen makes (HorizonWorldgen): Horizon's own noise
  * (the same router, aquifers and ore veins) filled it already when it handed the proto over,
  * so doFill's sampling is skipped. Surface rules and carvers still run here, on the mods'
- * biomes. With HORIZON_JAVA_PROFILE, buildTerrain's parts are timed.
+ * biomes. With HORIZON_JAVA_PROFILE, buildTerrain's parts are timed. buildTerrain runs on
+ * the calling Horizon worker when HorizonWorldgen.executor says so.
  */
 @Mixin(NoiseBasedChunkGenerator.class)
 public abstract class NoiseFillMixin {
     private static final ThreadLocal<long[]> horizon$started = ThreadLocal.withInitial(() -> new long[4]);
+
+    /** buildTerrain's hop to vanilla's background executor: on Horizon's worker instead (HorizonWorldgen.executor). */
+    @Redirect(method = "buildTerrain", require = 0,
+            at = @At(value = "INVOKE", target = "Lnet/minecraft/TracingExecutor;forName(Ljava/lang/String;)Ljava/util/concurrent/Executor;"))
+    private java.util.concurrent.Executor horizon$terrainExecutor(net.minecraft.TracingExecutor executor, String name) {
+        return HorizonWorldgen.executor(executor, name);
+    }
 
     @Inject(method = "doFill", at = @At("HEAD"), cancellable = true)
     private void horizon$fill(NoiseChunk noise, ChunkAccess chunk, CallbackInfo ci) {

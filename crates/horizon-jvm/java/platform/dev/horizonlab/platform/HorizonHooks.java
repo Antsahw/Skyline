@@ -607,8 +607,7 @@ public final class HorizonHooks {
         // handlers read), from the registries by the level's dimension.
         if (type == net.minecraft.world.level.dimension.LevelStem.class && self instanceof net.minecraft.world.level.Level level) {
             try {
-                return level.registryAccess().lookupOrThrow(net.minecraft.core.registries.Registries.LEVEL_STEM)
-                        .getValue(net.minecraft.resources.Identifier.parse(level.dimension().identifier().toString()));
+                return HorizonData.stem(level.dimension().identifier());
             } catch (RuntimeException e) {
                 return null;
             }

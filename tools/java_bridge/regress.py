@@ -39,6 +39,8 @@ MODS = {
     "terrablender": ["terrablender*"],
     "glitchcore": ["glitchcore*"],
     "fabric-api": ["fabric-api*"],
+    "oneblock": ["oneblock*"],
+    "codxlib": ["codxlib*"],
 }
 
 
@@ -125,6 +127,16 @@ CASES = {
         steps=['$C command "locate biome biomesoplenty:redwood_forest" >/dev/null; sleep 6; $C messages > $S/messages.json'],
         checks=[check_file("messages.json", r"redwood_forest[^\"]*is at|nearest[^\"]*redwood", "a redwood forest is found")],
         forbid=[r"features failed"],
+    ),
+    "preset": dict(
+        about="A mod's world type (One Block) picked in Create New World: its block, its gameplay",
+        mods=["oneblock", "codxlib"], scene="none", env={"WORLD": "none"},
+        steps=['"$R/tools/java_bridge/new_world.sh" "One Block"',
+               '$C block 0 64 0 > $S/block.json; $C look-at-block 0 64 0 >/dev/null; sleep 2; $C messages > $S/messages.json'],
+        checks=[check_file("block.json", r"grass_block", "the one block at 0 64 0"),
+                check_file("messages.json", r"Your island is at", "One Block's own join message")],
+        forbid=[r"worldgen: proto failed"],
+        look="the grass block below, nothing else",
     ),
     "prism": dict(
         about="Prism Launcher's wrapper: an instance's mods linked, Fabric API left out (no game)",
