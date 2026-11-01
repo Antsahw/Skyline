@@ -1495,6 +1495,11 @@ public final class HorizonClient {
                 }
                 set(net.minecraft.client.multiplayer.ClientPacketListener.class, copy, "clockManager",
                         new net.minecraft.client.ClientClockManager());
+                // Its Minecraft and network connection, as the shared one has (Architectury's and
+                // Puzzles Lib's join read minecraft.player and getConnection().getConnection()).
+                Class<?> common = net.minecraft.client.multiplayer.ClientCommonPacketListenerImpl.class;
+                set(common, copy, "minecraft", minecraft);
+                set(common, copy, "connection", field(common, shared, "connection"));
                 players(copy);
                 if (!(HorizonServer.server() instanceof net.minecraft.client.server.IntegratedServer)) {
                     set(net.minecraft.client.multiplayer.ClientCommonPacketListenerImpl.class, copy, "serverData",
@@ -2365,6 +2370,7 @@ public final class HorizonClient {
                         acting = null;
                     }
                     HorizonServer.afterScreenInput();
+                    HorizonClientConfig.afterInput(id);
                     sendOverlay(id);
                 }
             }
@@ -2549,6 +2555,8 @@ public final class HorizonClient {
             acting = null;
         }
         HorizonServer.afterScreenInput();
+        // Settings a player other than the owner saved go to their own folder (HorizonClientConfig).
+        HorizonClientConfig.afterInput(id);
         send(id);
     }
 

@@ -80,6 +80,8 @@ final class HorizonClientState {
     /** The fields hold {@code player}'s values (put away whose were there). */
     static synchronized void load(UUID player) {
         if (player == null || player.equals(loaded)) return;
+        // Their mods' settings too (HorizonClientConfig).
+        HorizonClientConfig.swap(loaded, player);
         List<Slot> all = slots();
         if (all.isEmpty()) {
             loaded = player;
@@ -109,6 +111,7 @@ final class HorizonClientState {
     /** A player left: their values go (and the fields', when theirs are in them). */
     static synchronized void forget(UUID player) {
         SAVED.remove(player);
+        HorizonClientConfig.forget(player);
         if (player.equals(loaded)) {
             for (Slot slot : slots()) {
                 try {

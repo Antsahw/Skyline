@@ -185,8 +185,18 @@ saying something works.
   mods' "modmenu" entrypoints: without Mod Menu, `HorizonModMenuApi` makes its API's
   interfaces (ModMenuApi, ConfigScreenFactory, UpdateChecker, default methods answering
   "none") with ASM and puts them on the class path first, so those entrypoints load (tested:
-  Jade, AppleSkin, Farmer's Delight, Cloth Config, REI via Architectury). Settings are one
-  set of config files for the whole client: a guest changing Jade's changes the host's too.
+  Jade, AppleSkin, Farmer's Delight, Cloth Config, REI via Architectury).
+- Settings per player (`HorizonClientConfig`): the objects holding mods' settings (every
+  cloth-config AutoConfig holder, Jade's JsonConfig values, AppleSkin's `ModConfig.INSTANCE`,
+  REI's config object) are swapped with the rest of a player's client state; a player new to
+  the client gets a deep copy (the mod's own objects copied; the game's, the JDK's and
+  libraries' shared). On disk, the first player the client serves (the host) owns `config/`:
+  after another player's screen input, files changed under `config/` move to
+  `config/horizon-players/<uuid>/` and the owner's are put back. Tested on LAN: the guest turns
+  AppleSkin's tooltip off and saves; the host's screen and file still say on, the guest's say
+  off. Not yet: a guest's saved files aren't loaded at their next join (their session's
+  settings start from the host's); mods holding settings elsewhere (Farmer's Delight's
+  ConfigValues) are still shared. Add a mod's holder in `holders()`.
 
 ## Mods' overlay on Horizon's inventory (REI)
 
