@@ -90,3 +90,24 @@ Never write as the user; mark what you post (CLAUDE.md). Never run mod jars the 
   screenshots 0.7 s apart and checks they differ (`tools/java_bridge/changed.py`). Branch merges
   `bridge-entities-2` (for `FIXTURE_CP`); touched tools only outside the area. Test:
   `regress.py --jars <folder with geckolib-fabric-26.3-*.jar> gecko`.
+- **entities 4 (riding and getting off mod mobs)**, `bridge-entities-4` (on top of
+  `bridge-entities-3`). Agent: Claude (iaxivers' chats). Works: a mod's rideable mob (new
+  fixture `horizon_critters:mount`) takes a player on a use (its own `mobInteract` →
+  `startRiding` on the mirror); the player's movement keys (PlayerInput flags, now bits 16-22
+  of `HorizonServer.tick`'s `permissions`) become the mirror player's `xxa`/`zza`/jumping, and
+  `RiderAuthorityMixin` makes mirrored players non-authoritative so the mirror moves the mob
+  (vanilla leaves a ridden mob to the rider's client). `HorizonEntities.tickPassenger` doesn't
+  run a mirrored player's whole tick: it seats it (`positionRider`) or, on sneak, runs
+  `stopRiding` (`dismountTo` moves Horizon's player). The snapshot's `rides` tell each game its
+  seat; the game sits there (sitting pose, its own mount not aimed at) and its move packets
+  carry the seat. Touched outside the area: `remote_vehicles.rs`, `perspective.rs`,
+  `events.rs`, `HorizonServer.tick` (input bits), `lan_e2e.py`. Test: `regress.py --jars …
+  mount` (on 0.4 over the floor, drove ~20 blocks, off); `lan_e2e.py --java-mods <critter
+  jars> --check javamount`. Not done: in-frame (`--in-frame`) riding; other players see the
+  rider standing (Horizon's tracker doesn't know the mod's vehicle); horse-style charged
+  jumps (`PlayerCommand` riding jump) aren't forwarded.
+- **Seen while running entities 3 and 4 (not fixed, pack area):** `regress.py skyblock` fails
+  often on a 2-core box: the player joins before Skyblock Infinite's load function has run
+  (it waits on chunk 0 0, which Horizon hasn't loaded), so `held_joins` (game/lan.rs) lets
+  the player in at y -63 and it falls out of the world. The hold should also wait for a load
+  function deferred on an unloaded chunk.

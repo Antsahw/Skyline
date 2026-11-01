@@ -1072,6 +1072,13 @@ mod run {
                         .iter()
                         .flat_map(|h| &h.hub.guests)
                         .any(|g| uuid_string(g.uuid) == p.id && g.sneaking),
+                    // A connection's keys (PlayerInput): a mod's mob it rides steers by them.
+                    input: self
+                        .lan
+                        .iter()
+                        .flat_map(|h| &h.hub.guests)
+                        .find(|g| uuid_string(g.uuid) == p.id)
+                        .map_or(0, |g| g.input),
                     inventory: self
                         .lan
                         .iter()
@@ -1246,6 +1253,9 @@ mod run {
                 /// What mods draw in each player's first person, by UUID.
                 #[serde(default, borrow)]
                 hands: HashMap<&'a str, &'a RawValue>,
+                /// Players riding a mod's mob, by UUID: `{"id", "p": the seat}`.
+                #[serde(default, borrow)]
+                rides: HashMap<&'a str, &'a RawValue>,
             }
             static SENT: std::sync::Mutex<Option<Sent>> = std::sync::Mutex::new(None);
             let _timed =
@@ -1292,6 +1302,7 @@ mod run {
                     .collect()
             };
             let hands = &snapshot.hands;
+            let rides = &snapshot.rides;
             let payload =
                 |sent: &mut Sent, who: u32, uuid: Option<&str>, entries: &[&Entry]| -> Vec<u8> {
                     let had = sent.has.remove(&who).unwrap_or_default();
@@ -1327,13 +1338,16 @@ mod run {
                     sent.has.insert(who, has);
                     out.push_str("],\"own\":[");
                     out.push_str(&own.join(","));
-                    if let Some(h) = uuid.and_then(|u| hands.get(u)) {
-                        out.push_str("],\"hands\":");
-                        out.push_str(h.get());
-                        out.push_str(",\"models\":{");
-                    } else {
-                        out.push_str("],\"models\":{");
+                    out.push(']');
+                    if let Some(r) = uuid.and_then(|u| rides.get(u)) {
+                        out.push_str(",\"ride\":");
+                        out.push_str(r.get());
                     }
+                    if let Some(h) = uuid.and_then(|u| hands.get(u)) {
+                        out.push_str(",\"hands\":");
+                        out.push_str(h.get());
+                    }
+                    out.push_str(",\"models\":{");
                     let have = sent.to.entry(who).or_default();
                     let mut first = true;
                     for e in entries {

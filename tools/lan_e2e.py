@@ -310,7 +310,7 @@ CHECKS = ['tab', 'self', 'armour', 'nametags', 'walls', 'chest', 'crafting', 'sp
           'worn', 'blast', 'barter', 'deflect', 'fireball', 'light', 'time', 'swings', 'cracks', 'plates', 'effects',
           'portals', 'distance', 'growth', 'doors', 'flight', 'ladder', 'boats', 'minecarts', 'frames', 'hands',
           'lightning', 'riding', 'occupied_horse', 'mounts', 'worldspawn', 'beds', 'shield', 'deathmining', 'contacts', 'absorption',
-          'breath', 'lava', 'levels', 'drops', 'underwater', 'fireworks', 'javamobs', 'javahostile']
+          'breath', 'lava', 'levels', 'drops', 'underwater', 'fireworks', 'javamobs', 'javahostile', 'javamount']
 # --java-mods: a folder of Fabric mod jars both games run (the javamobs check: the crittermod fixture).
 JAVA_MODS = None
 
@@ -8060,6 +8060,52 @@ def check_javahostile(host, guest, out):
 
 
 CHECK_FNS['javahostile'] = check_javahostile
+
+
+def check_javamount(host, guest, out):
+    """Riding a Java mod's mob on a LAN server (--java-mods with the crittermod fixture): the guest
+    uses a mount the host summons beside it and sits on it (the mirror's startRiding; the server's
+    snapshot gives the guest's game the seat), holds forward and the mount carries it (the mirror
+    moves the mob by the guest's PlayerInput keys), then sneaks off it."""
+    if not JAVA_MODS:
+        return 'skipped: no --java-mods'
+    kind = 'horizon_critters:mount'
+    guest('command', command='gamemode creative')
+    guest.wait(10)
+    gx, gy, gz = pos_of(guest)
+    host('command', command=f'summon {kind} {gx + 2.0:.2f} {gy:.2f} {gz:.2f}')
+    mount = guest.until(lambda: java_entities(guest, kind), lambda l: len(l) == 1, ticks=100)
+    seen = {'guest sees': len(mount)}
+    mx, my, mz = mount[0]['pos']
+    guest.raw('look-at', f'{mx:.2f}', f'{my + 0.5:.2f}', f'{mz:.2f}')
+    guest.wait(5)
+    guest.raw('mouse', 'right', 'click')
+    on = guest.until(lambda: pos_of(guest), lambda p: p[1] - my > 0.3, ticks=60)
+    seen['seated'] = round(on[1] - my, 2)
+    guest.raw('key', 'w', 'down')
+    guest.wait(50)
+    guest.raw('key', 'w', 'up')
+    drove = pos_of(guest)
+    seen['drove'] = round(((drove[0] - on[0]) ** 2 + (drove[2] - on[2]) ** 2) ** 0.5, 2)
+    guest.raw('key', 'f5', 'tap')
+    guest.wait(5)
+    guest.shot(out, 'javamount')
+    guest.raw('key', 'f5', 'tap')
+    guest.raw('key', 'f5', 'tap')
+    guest.raw('key', 'shift', 'down')
+    guest.wait(20)
+    guest.raw('key', 'shift', 'up')
+    guest.wait(20)
+    off = guest('state')['player']
+    seen['off'] = {'on_ground': off['on_ground'], 'y over the mount': round(off['position'][1] - my, 2)}
+    host('command', command=f'kill @e[type={kind}]')
+    assert seen['guest sees'] == 1 and seen['seated'] > 0.3, seen
+    assert seen['drove'] > 1.5, seen
+    assert seen['off']['y over the mount'] < 0.3, seen
+    return seen
+
+
+CHECK_FNS['javamount'] = check_javamount
 
 
 if __name__ == '__main__':

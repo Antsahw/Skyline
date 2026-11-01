@@ -355,7 +355,7 @@ impl Game<'_> {
             .as_ref()
             .map(|s| s.item.clone());
         let off = self.offhand.as_ref().map(|s| s.item.clone());
-        let riding = self.riding.is_some();
+        let riding = self.riding.is_some() || self.riding_java_mob();
         let hurt = p.health.hurt_animation_time;
         let Some(m) = self.player_model.as_mut() else {
             return;

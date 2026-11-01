@@ -358,6 +358,19 @@ public final class HorizonEntityRender {
             out.append(':').append(h.getValue());
         }
         HANDS.clear();
+        // Players riding a mod's mob: its id and the seat (positionRider's place this tick),
+        // by UUID: their games sit them there.
+        out.append("},\"rides\":{");
+        boolean firstRide = true;
+        for (net.minecraft.server.level.ServerPlayer p : HorizonServer.players()) {
+            Entity vehicle = p.getVehicle();
+            if (vehicle == null || !HorizonEntities.modded(vehicle.getType())) continue;
+            if (!firstRide) out.append(',');
+            firstRide = false;
+            HorizonJson.string(p.getStringUUID(), out);
+            out.append(":{\"id\":").append(vehicle.getId()).append(",\"p\":[")
+                    .append(p.getX()).append(',').append(p.getY()).append(',').append(p.getZ()).append("]}");
+        }
         out.append("},\"models\":{");
         boolean first = true;
         for (var t : NEW_TREES.entrySet()) {
