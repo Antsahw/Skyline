@@ -68,3 +68,18 @@ Never write as the user; mark what you post (CLAUDE.md). Never run mod jars the 
 ## Reports
 
 (Newest last. One short entry per task: area, task, branch, works / doesn't / how to test.)
+
+- **entities 1 (mob cost in the 137-jar pack)**, `bridge-entities-1`. Agent: Claude (iaxivers' chats).
+  Measured (`HORIZON_JAVA_PROFILE=1`, 50–60 mod mobs around a walking player): Naturalist's
+  whale 0.7–0.9 ms each (8 of them: 6–7 ms a tick), Promenade's lush creeper ~0.3 ms, Naturalist's
+  jellyfish 0.15–0.36 ms; all mobs 16–20 ms of ticks, ~2.5 ms of snapshot. JFR (in a small pack
+  of Naturalist and Promenade, 6 of each summoned: the 137-jar pack runs out of the sandbox's
+  8 GB with JFR attached): Promenade's `tickMovement` mixin asks every living entity's biome each
+  tick, and the mirror's `BiomeManager` sampled the climate noise for each. Now the mirrored
+  levels read Horizon's own chunk biomes, kept per chunk (`HorizonBiomes`, noise only where
+  Horizon has no chunk), and block reads skip the thread-local lookup when the same thread reads
+  again. Whale 0.75 → ~0.58 ms, jellyfish 0.25 → ~0.16 ms, lush creeper ~0.2 ms (noisy: the mods'
+  worldgen shares the 2 cores). The whale's rest is its own body parts' collisions and fluid
+  checks. No regress case (a cost); `regress.py --java-only`: all pass (`attack` failed once and
+  passed on rerun: flaky). Test: `HORIZON_JAVA_PROFILE=1`, `grep "entity ticks" latest.log`.
+
