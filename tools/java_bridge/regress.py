@@ -136,6 +136,14 @@ CASES = {
                            "horizon-ctl sees the critters")],
         look="two critters ahead",
     ),
+    "hostile": dict(
+        about="A hostile mod's mob (crittermod's biter) hunts a player in survival and bites: Horizon's player is hurt (Natives.hurtPlayer)",
+        fixtures=["crittermod"], scene="hostile",
+        steps=['sleep 3; $C state > $S/state.json'],
+        checks=[check_file("state.json", r'"player":\{[^}]*"health":(1?[0-9])\.', "the player lost health to the bites"),
+                check_log(r"Summoned new Biter", "the biter is summoned")],
+        look="a biter at the player, the hearts down",
+    ),
     "worldgen": dict(
         about="Biomes O' Plenty's biomes: /locate finds one",
         mods=["bop", "terrablender", "glitchcore"], scene="none",
@@ -314,10 +322,18 @@ def find_jars(folder, names):
     return found, None
 
 
-def fixture(name, cache):
+def fixture(name, cache, against=()):
+    """The fixture mod `name` built (once, again when its sources change), against the case's
+    mod jars (`against`: a fixture that uses a library mod, GeckoLib)."""
     jar = cache / f"{name}.jar"
+    # Made again when its sources changed since (a new mob in the critter fixture).
+    sources = ROOT / "crates/horizon-jvm/java/fixtures" / name
+    newest = max((f.stat().st_mtime for f in sources.rglob("*") if f.is_file()), default=0)
+    if jar.exists() and jar.stat().st_mtime < newest:
+        jar.unlink()
     if not jar.exists():
-        r = subprocess.run([str(TOOLS / "fixture_mod.sh"), name, str(jar)], capture_output=True, text=True)
+        env = dict(os.environ, FIXTURE_CP=":".join(str(j) for j in against))
+        r = subprocess.run([str(TOOLS / "fixture_mod.sh"), name, str(jar)], capture_output=True, text=True, env=env)
         if r.returncode != 0 or not jar.exists():
             raise RuntimeError(f"fixture {name} did not build: {r.stderr[-400:]}")
     return jar
@@ -476,7 +492,7 @@ def main():
             more, _ = find_jars(a.jars, [opt])
             jars += more or []
         try:
-            jars += [fixture(f, fixtures) for f in case.get("fixtures", [])]
+            jars += [fixture(f, fixtures, list(jars)) for f in case.get("fixtures", [])]
             print(f"---- {name}: {case['about']}", flush=True)
             if case.get("prism"):
                 results, errors = run_prism(case, jars, out)

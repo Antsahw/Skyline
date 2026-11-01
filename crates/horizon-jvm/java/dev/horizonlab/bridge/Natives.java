@@ -154,6 +154,12 @@ public final class Natives {
     public static native void packet(String uuid, byte[] data);
 
     /**
+     * Java hurt a Horizon player (ServerPlayerHurtMixin): Horizon hurts its player. NaN: no
+     * source position; {@code by}: the attacker's name, or null.
+     */
+    public static native void hurtPlayer(String uuid, String damageType, float amount, double x, double y, double z, String by);
+
+    /**
      * The chunks mods' tickets keep loaded and ticking in a dimension, as forced chunks
      * (ticket level 31): "x,z;x,z;..." (empty: none). Sent when they change.
      */

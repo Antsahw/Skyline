@@ -351,6 +351,10 @@ mod run {
 
     /// Teleports Java mods asked for while the hub was out of `self.lan`, done next tick.
     #[cfg(feature = "java-mods")]
+    /// Java's hurts of Horizon players (a mod's mob's bite), applied at the next Java tick.
+    #[cfg(feature = "java-mods")]
+    static PENDING_HURTS: std::sync::Mutex<Vec<horizon_jvm::events::Action>> =
+        std::sync::Mutex::new(Vec::new());
     static PENDING_TELEPORTS: std::sync::Mutex<Vec<horizon_jvm::events::Action>> =
         std::sync::Mutex::new(Vec::new());
 
@@ -1009,6 +1013,11 @@ mod run {
                 std::mem::take(&mut *PENDING_TELEPORTS.lock().unwrap_or_else(|e| e.into_inner()));
             for action in pending {
                 self.java_teleport(action);
+            }
+            let hurts =
+                std::mem::take(&mut *PENDING_HURTS.lock().unwrap_or_else(|e| e.into_inner()));
+            for action in hurts {
+                self.java_hurt(action);
             }
             // A connection's facing, or the window's own player's in-frame.
             let rotation = |id: &str| -> [f32; 2] {
@@ -1778,6 +1787,12 @@ mod run {
                             drops.push((dimension.clone(), drop));
                         }
                     }
+                    hurt @ horizon_jvm::events::Action::HurtPlayer { .. } => {
+                        PENDING_HURTS
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .push(hurt);
+                    }
                     horizon_jvm::events::Action::Packet { uuid, data } => {
                         let Some(host) = host.as_deref_mut().or(self.lan.as_mut()) else {
                             continue;
@@ -1969,6 +1984,55 @@ mod run {
         /// target dimension (`execute in`), so a connection, the window's player and other
         /// dimensions all go the way vanilla's teleports go.
         #[cfg(feature = "java-mods")]
+        /// A Java hurt of a Horizon player (`Natives.hurtPlayer`): as Horizon's own mobs hurt
+        /// it (`hurt_player_from`: armour, blocking, knockback from where it came, death; the
+        /// attacker named as a projectile with no owner is), as that guest; the window's own
+        /// player in-frame. A type Horizon doesn't know (a mod's)
+        /// counts as a mob's attack, or generic damage when it came from nowhere.
+        fn java_hurt(&mut self, action: horizon_jvm::events::Action) {
+            let horizon_jvm::events::Action::HurtPlayer {
+                uuid,
+                damage_type,
+                amount,
+                from,
+                by,
+            } = action
+            else {
+                return;
+            };
+            let named = by.map(horizon_client::text::Text::literal);
+            let kind = if self.motion.health.damage.id(&damage_type).is_some() {
+                damage_type
+            } else if from.is_some() {
+                "minecraft:mob_attack".to_owned()
+            } else {
+                "minecraft:generic".to_owned()
+            };
+            if let Some(mut host) = self.lan.take() {
+                let conn = host
+                    .hub
+                    .guests
+                    .iter()
+                    .find(|g| uuid_string(g.uuid) == uuid)
+                    .map(|g| g.conn);
+                if let Some(conn) = conn {
+                    self.as_guest(&mut host, conn, |g| {
+                        g.combat.projectile_direct = named;
+                        g.hurt_player_from(amount, from, &kind, Some(None));
+                        g.combat.projectile_direct = None;
+                    });
+                    self.lan = Some(host);
+                    return;
+                }
+                self.lan = Some(host);
+            }
+            if self.serving.is_none() && self.remote.is_none() {
+                self.combat.projectile_direct = named;
+                self.hurt_player_from(amount, from, &kind, Some(None));
+                self.combat.projectile_direct = None;
+            }
+        }
+
         fn java_teleport(&mut self, action: horizon_jvm::events::Action) {
             let horizon_jvm::events::Action::Teleport {
                 uuid,

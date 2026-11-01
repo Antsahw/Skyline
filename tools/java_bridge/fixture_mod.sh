@@ -18,6 +18,8 @@ CP="$R/.local/minecraft/26.3/jars/client.jar"
 for j in "$R"/.local/minecraft/26.3/libraries/**/*.jar "$R"/.local/bridge/lib/*.jar "$MODULES"/*.jar; do
   CP="$CP:$j"
 done
+# FIXTURE_CP: mod jars a fixture builds against (GeckoLib for geckomod), ':'-separated.
+[ -n "$FIXTURE_CP" ] && CP="$CP:$FIXTURE_CP"
 W=$(mktemp -d)
 "$JAVA_HOME/bin/javac" -nowarn -proc:none -d "$W" -cp "$CP" $(find "$SRC" -name '*.java')
 cp "$SRC/fabric.mod.json" "$W/"
