@@ -152,8 +152,13 @@ impl JavaTerrain {
         let tables = self
             .tables
             .get_or_init(|| horizon_client::save::SaveTables::new(&self.assets));
-        let mut chunk =
-            horizon_client::save::decode_with(&root, self.registry, &self.biomes, Some(tables))?;
+        let mut chunk = horizon_client::save::decode_with(
+            &root,
+            self.registry,
+            &self.biomes,
+            Some(tables),
+            self.inner.layout(),
+        )?;
         if (chunk.x, chunk.z) != (x, z) {
             return None;
         }
@@ -670,7 +675,8 @@ impl JavaLod {
                 column.spans[k].state = state;
             } else {
                 column.spans[k].max = y;
-                column.spans.insert(
+                let mut spans = column.spans.to_vec();
+                spans.insert(
                     k + 1,
                     horizon_client::lod::Span {
                         min: y,
@@ -679,6 +685,7 @@ impl JavaLod {
                         ..span
                     },
                 );
+                column.spans = spans.into();
             }
         }
     }

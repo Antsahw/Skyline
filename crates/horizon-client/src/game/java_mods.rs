@@ -24,9 +24,9 @@ impl Game<'_> {
         let root = checkout();
         let side = bridge_side();
         // The head of the players' hurtServer asks the Java mods.
-        let _ = horizon_client::health::HURT_HOOK.set(super::server_mods::java_hurt);
-        let _ = horizon_world::level::RANDOM_TICK_HOOK.set(super::server_mods::java_random_tick);
-        let _ = horizon_client::world::SET_HOOK.set(super::server_mods::java_block_set);
+        let _ = horizon_client::health::HURT_HOOK.set(super::java_server::java_hurt);
+        let _ = horizon_world::level::RANDOM_TICK_HOOK.set(super::java_server::java_random_tick);
+        let _ = horizon_client::world::SET_HOOK.set(super::java_server::java_block_set);
         let spawned = std::thread::Builder::new()
             .name("Java mods".into())
             .spawn(move || {

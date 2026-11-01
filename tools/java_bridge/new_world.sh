@@ -9,7 +9,14 @@ S=$(cat /tmp/hz-bridge-scratch); C="$R/target/fast/horizon-ctl --socket $S/ctl.s
 label() {
   $C screen | python3 -c "import json,sys; print(next((b['label'] for b in json.load(sys.stdin)['buttons'] if b['label'].startswith('World Type')), ''))"
 }
-$C click-button Singleplayer >/dev/null; sleep 2
+# A fresh game folder opens on the first-launch accessibility screen
+# (AccessibilityOnboardingScreen) before the title screen.
+$C click-button Continue >/dev/null 2>&1
+for _ in $(seq 20); do
+  $C click-button Singleplayer 2>/dev/null | grep -q '"ok":true' && break
+  sleep 0.5
+done
+sleep 2
 $C click-button World >/dev/null; sleep 1
 for _ in 1 2 3 4 5 6 7 8; do
   cur=$(label)
