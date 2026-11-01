@@ -1114,6 +1114,7 @@ public final class HorizonServer {
                 Throwable root = t;
                 while (root.getCause() != null && root.getCause() != root) root = root.getCause();
                 Natives.log("A mod failed in " + event + ": " + root);
+                HorizonFailures.report(event, root);
                 StackTraceElement[] frames = root.getStackTrace();
                 for (int f = 0; f < Math.min(frames.length, 12); f++) {
                     if (frames[f].getClassName().startsWith("dev.horizonlab.platform")) break;

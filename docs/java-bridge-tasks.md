@@ -303,3 +303,30 @@ tests pass; fmt and clippy `-D warnings` clean (horizon-client, horizon-jvm).
   against the real game; XaeroPlus and MiniHUD (needs MaLiLib) not tried. Regress case
   `diorama`. Test: Diorama alone in `~/hz-test/mods-java`, wait ~1 minute: the square map top
   right.
+
+- **client 1, mod config per player on LAN** (`bridge-client-1`). Works: a guest's settings
+  are theirs (AutoConfig mods, Jade, AppleSkin, REI): in memory per player, and files a guest
+  saves go to `config/horizon-players/<uuid>/` while the host's stay (LAN-tested with
+  AppleSkin: guest off, host on, host's file on). Also fixed: Architectury's join NPE came back
+  with the per-player connections (they lacked `minecraft`/`connection`). Doesn't: a guest's
+  files aren't loaded at their next join; Farmer's Delight-style ConfigValues stay shared.
+  Test: `tools/java_bridge/lan_test.sh '$G command "modconfig appleskin"'`, toggle, Save, then
+  `$H command "modconfig appleskin"`; regress `join modsettings` (new) pass, `rei hud keys` too.
+
+- **client 2, a clear in-game message when a mod fails** (`bridge-client-2`, on client 1).
+  Works: every player gets "[Java mods] <mod> failed in <where>: <exception>: <message> (the
+  game goes on; the log has more)" in chat, once per mod and place (8 a session max), from
+  events, hooks, screens, HUD, ticks, joins, settings and the recipe viewer; startup failures
+  wait for the first join. Touched HorizonHooks/HorizonServer.fire with one call each.
+  Doesn't: failures outside those catch sites (worldgen, entity drawing) only log. Test:
+  regress `failmsg` (failmod fixture), or any pack: open chat after a failure.
+
+- **client 3, dedicated server: mod screens, HUD and REI for its players** (`bridge-client-3`,
+  on client 2). Works (screenshots): on `--dedicated`, a joined player gets Tech Reborn's
+  machine screens, Jade with TR energy, REI over the inventory and over TR's screens. Fixed on
+  the way (single player too): REI's list vanished from mod screens a few seconds after they
+  opened. REI reloads on its own at the client's join, which emptied the synced displays and
+  removed its overlay renderer; both are put back now. REI's settings are shared again (not
+  per player, unlike client 1 said): its copied config stopped the overlay. Test:
+  `MODS=<REI+TR+Jade...> tools/java_bridge/server_test.sh '$G key e tap; sleep 6'` (new);
+  regress `reiscreen` (new), `rei hud join modsettings failmsg` pass.

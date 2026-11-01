@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "horizon_fail",
+  "version": "1.0.0",
+  "name": "Horizon Fail",
+  "description": "Fails on purpose (a server tick listener and a client tick listener throw, once a while): a check that players are told which mod failed.",
+  "environment": "*",
+  "entrypoints": {
+    "main": ["dev.horizonlab.failmod.FailMod"],
+    "client": ["dev.horizonlab.failmod.FailClient"]
+  },
+  "depends": {
+    "fabricloader": ">=0.20",
+    "minecraft": "26.3",
+    "fabric-api": "*"
+  }
+}

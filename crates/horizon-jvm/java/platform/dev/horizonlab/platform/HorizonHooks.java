@@ -151,6 +151,7 @@ public final class HorizonHooks {
                     Throwable cause = t instanceof java.lang.reflect.InvocationTargetException ite && ite.getCause() != null ? ite.getCause() : t;
                     if (FAILURES.merge(m.toString(), 1, Integer::sum) <= 3) {
                         Natives.log("A mod failed in the HUD's " + method + " (" + h[3] + "'s " + h[2] + "): " + cause);
+                        HorizonFailures.report("the HUD", cause, m);
                         StackTraceElement[] frames = cause.getStackTrace();
                         for (int f = 0; f < Math.min(frames.length, 8); f++) Natives.log("    at " + frames[f]);
                     }
@@ -329,6 +330,7 @@ public final class HorizonHooks {
                 while (cause.getCause() != null && cause.getCause() != cause) cause = cause.getCause();
                 if (FAILURES.merge(handler.toString(), 1, Integer::sum) <= 3) {
                     Natives.log("A mod failed in the client's frame (" + handler.getName() + "): " + cause);
+                    HorizonFailures.report("the client's frame", cause, handler);
                     StackTraceElement[] frames = cause.getStackTrace();
                     for (int f = 0; f < Math.min(frames.length, 16); f++) Natives.log("    at " + frames[f]);
                 }
@@ -391,6 +393,7 @@ public final class HorizonHooks {
                 while (cause.getCause() != null && cause.getCause() != cause) cause = cause.getCause();
                 if (FAILURES.merge(handler.toString(), 1, Integer::sum) <= 3) {
                     Natives.log("A mod failed in the client's " + method + " (" + handler.getName() + "): " + cause);
+                    HorizonFailures.report("the client's " + method, cause, handler);
                     StackTraceElement[] frames = cause.getStackTrace();
                     for (int f = 0; f < Math.min(frames.length, 14); f++) Natives.log("    at " + frames[f]);
                 }
@@ -602,6 +605,7 @@ public final class HorizonHooks {
                 Throwable cause = t instanceof java.lang.reflect.InvocationTargetException ite && ite.getCause() != null ? ite.getCause() : t;
                 if (FAILURES.merge(handler.toString(), 1, Integer::sum) <= 3) {
                     Natives.log("A mod failed at " + at + " of " + owner.getSimpleName() + "." + method + " (" + handler.getName() + "): " + cause);
+                    HorizonFailures.report(owner.getSimpleName() + "." + method, cause, handler);
                     StackTraceElement[] frames = cause.getStackTrace();
                     for (int f = 0; f < Math.min(frames.length, 8); f++) Natives.log("    at " + frames[f]);
                 }

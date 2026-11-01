@@ -152,6 +152,15 @@ saying something works.
   the originals: particle kept; content FORMAT 11), or Horizon drew the model still.
 - The client connection has its `minecraft` (Architectury's join event read
   `this.minecraft.player`: NPE at the client's join).
+- **A mod's failure is told in chat** (`HorizonFailures.report`): "[Java mods] <mod> failed in
+  <where>: <exception>: <message> (the game goes on; the log has more)", to every player, once
+  per mod and place, eight in a session at most (then one "more failed" line); failures before
+  anyone joined are told at the first join. The mod is the first stack frame in a mod's jar
+  (past the game, Fabric, Horizon), or the mixin of a failing handler (`MixinMerged`). Called
+  where the bridge catches mods' failures: events (`HorizonServer.fire`), hooks
+  (`HorizonHooks`: HUD, client frame and methods, injections), and the client's screens,
+  overlay, HUD, ticks, tasks, joins, settings screens and the recipe viewer. Fixture:
+  `fixture_mod.sh failmod` (its ticks throw now and then); regress `failmsg`.
 - `HORIZON_JAVA_DEBUG=loop` logs messages between the halves; `=screens` also logs each sent
   screen frame (first 4000 chars) and the inventory overlay's input; `=hud` logs the block
   looked at and its state.
@@ -185,8 +194,34 @@ saying something works.
   mods' "modmenu" entrypoints: without Mod Menu, `HorizonModMenuApi` makes its API's
   interfaces (ModMenuApi, ConfigScreenFactory, UpdateChecker, default methods answering
   "none") with ASM and puts them on the class path first, so those entrypoints load (tested:
-  Jade, AppleSkin, Farmer's Delight, Cloth Config, REI via Architectury). Settings are one
-  set of config files for the whole client: a guest changing Jade's changes the host's too.
+  Jade, AppleSkin, Farmer's Delight, Cloth Config, REI via Architectury).
+- Settings per player (`HorizonClientConfig`): the objects holding mods' settings (every
+  cloth-config AutoConfig holder, Jade's JsonConfig values, AppleSkin's `ModConfig.INSTANCE`) are
+  swapped with the rest of a player's client state; a player new to
+  the client gets a deep copy (the mod's own objects copied; the game's, the JDK's and
+  libraries' shared). On disk, the first player the client serves (the host) owns `config/`:
+  after another player's screen input, files changed under `config/` move to
+  `config/horizon-players/<uuid>/` and the owner's are put back. Tested on LAN: the guest turns
+  AppleSkin's tooltip off and saves; the host's screen and file still say on, the guest's say
+  off. Not yet: a guest's saved files aren't loaded at their next join (their session's
+  settings start from the host's); mods holding settings elsewhere (Farmer's Delight's
+  ConfigValues) are still shared. Add a mod's holder in `holders()`. REI's config object stays
+  shared: it holds REI's entry stacks, and a copy of it stopped REI's overlay drawing.
+- `HorizonClientState` gives a player new to the client a fresh empty collection for a
+  collection field (null before): REI's own reload cleared `lastDisplayScreen` and threw on
+  null.
+- Dedicated servers: `tools/java_bridge/server_test.sh` starts `horizon-client --dedicated
+  --nogui` with MODS in its `mods-java/` (console through a FIFO: `sv "op Player"`) and a game
+  that joins it; steps with `$G`, screenshots of the player's game. Its players get mod screens
+  (Tech Reborn's machines), HUD mods (Jade with TR's energy) and REI over their inventory and
+  over mod screens: the dedicated server runs the same headless client as a LAN host.
+- **REI reloads on its own** at a client's join (Architectury's join event, now that joins
+  run; on REI's thread): that empties the client's display registry of the server's displays,
+  and REI's reload removes the overlay renderer it applied to the open screen (the renderer
+  provider applied at INIT_POST), so its list vanished from a mod screen a few seconds after it
+  opened. `HorizonRecipeViewer.keepSynced` (each server tick) syncs the displays again when
+  the registry shrank, and `afterOwnReload` applies the renderer again per open screen (and
+  queues the overlay's reload and the list's search). Regress `reiscreen`.
 
 ## Mods' overlay on Horizon's inventory (REI)
 
