@@ -143,6 +143,19 @@ pub(super) fn wait_for_java(limit: std::time::Duration) -> bool {
     horizon_jvm::events::ready()
 }
 
+/// Whether the Java mods' start is still pending, or their data-pack load functions haven't
+/// run on the mirror yet: a new player waits (`Game::hold_join`), as a vanilla server runs
+/// them before anyone joins (Simply OneBlock's sets the world spawn and its block).
+pub(super) fn java_loading() -> bool {
+    if !has_java_mods() {
+        return false;
+    }
+    if !SETTLED.load(std::sync::atomic::Ordering::SeqCst) {
+        return true;
+    }
+    horizon_jvm::events::ready() && !horizon_jvm::events::functions_ready()
+}
+
 /// Whether `mods-java/` holds jars (the Java mods start, or started).
 pub(super) fn has_java_mods() -> bool {
     !horizon_jvm::jars(&Game::options_path().with_file_name(horizon_jvm::DIR)).is_empty()

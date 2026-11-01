@@ -39,6 +39,8 @@ MODS = {
     "terrablender": ["terrablender*"],
     "glitchcore": ["glitchcore*"],
     "fabric-api": ["fabric-api*"],
+    "skyblock": ["skyblock-infinite*"],
+    "oneblock": ["simply_oneblock*", "simply-oneblock*"],
 }
 
 
@@ -125,6 +127,24 @@ CASES = {
         steps=['$C command "locate biome biomesoplenty:redwood_forest" >/dev/null; sleep 6; $C messages > $S/messages.json'],
         checks=[check_file("messages.json", r"redwood_forest[^\"]*is at|nearest[^\"]*redwood", "a redwood forest is found")],
         forbid=[r"features failed"],
+    ),
+    "skyblock": dict(
+        about="Skyblock Infinite: a void world; its load function places the island and moves the player onto it",
+        mods=["skyblock"], scene="none",
+        steps=['sleep 25; $C state > $S/state.json'],
+        checks=[check_log(r"generates through the mods \(mr_skyblock_infinite\)", "the overworld is the pack's void"),
+                check_log(r"the world spawn moves to 6, 64, 6", "the island function set the spawn"),
+                check_file("state.json", r'"block_pos":\[[0-9]+,6[0-9],[0-9]+\]', "the player stands on the island")],
+        forbid=[r"fell out of the world", r"functions stopped"],
+        look="the player on a small island in the void",
+    ),
+    "oneblock": dict(
+        about="Simply OneBlock: the first player is placed after its load function, on its block",
+        mods=["oneblock"], scene="none",
+        steps=['sleep 25; $C state > $S/state.json'],
+        checks=[check_log(r"the world spawn moves to 0, 64, 0", "the load function set the spawn"),
+                check_file("state.json", r'"block_pos":\[-?[01],6[45],-?[01]\]', "the player stands on the block")],
+        forbid=[r"fell out of the world", r"functions stopped"],
     ),
     "prism": dict(
         about="Prism Launcher's wrapper: an instance's mods linked, Fabric API left out (no game)",

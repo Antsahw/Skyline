@@ -108,10 +108,10 @@ public final class HorizonData {
         WorldLoader.InitConfig init = new WorldLoader.InitConfig(
                 packConfig, Commands.CommandSelection.DEDICATED, LevelBasedPermissionSet.OWNER);
         WorldLoader.WorldDataSupplier<net.minecraft.world.level.storage.PrimaryLevelData> world = context -> {
-            MappedRegistry<net.minecraft.world.level.dimension.LevelStem> stems =
-                    new MappedRegistry<>(Registries.LEVEL_STEM, Lifecycle.stable());
+            // The preset's dimensions under the data packs' own (`dimension/overworld.json`:
+            // Simply OneBlock's void overworld), as vanilla bakes a new world's.
             var dimensions = defaultDimensions(context.datapackWorldRegistries())
-                    .bake(stems.freeze());
+                    .bake(context.datapackDimensions().lookupOrThrow(Registries.LEVEL_STEM));
             // The world's settings, as the game-test server makes them. Horizon's own (game
             // mode, difficulty, rules) are mirrored over them as it hands them over.
             net.minecraft.world.level.LevelSettings settings = new net.minecraft.world.level.LevelSettings(

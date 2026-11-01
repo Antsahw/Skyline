@@ -69,7 +69,11 @@ public final class HorizonClient {
         // Its textures: named, never uploaded (TextureManagerMixin, HorizonTextures).
         set(Minecraft.class, mc, "textureManager", Natives.allocate(net.minecraft.client.renderer.texture.TextureManager.class));
         // Its skins: each profile's default (SkinManagerMixin).
-        set(Minecraft.class, mc, "skinManager", Natives.allocate(net.minecraft.client.resources.SkinManager.class));
+        var skins = Natives.allocate(net.minecraft.client.resources.SkinManager.class);
+        // Its downloader (FrozenLib's capes): downloads nothing (SkinDownloaderMixin).
+        set(net.minecraft.client.resources.SkinManager.class, skins, "skinTextureDownloader",
+                Natives.allocate(net.minecraft.client.renderer.texture.SkinTextureDownloader.class));
+        set(Minecraft.class, mc, "skinManager", skins);
         // The in-game GUI's object (screens reach its HUD), made without its constructor.
         var gui = (net.minecraft.client.gui.Gui) Natives.allocate(net.minecraft.client.gui.Gui.class);
         var hud = (net.minecraft.client.gui.Hud) Natives.allocate(net.minecraft.client.gui.Hud.class);

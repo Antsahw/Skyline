@@ -69,6 +69,19 @@ public final class HorizonFunctions {
         return was;
     }
 
+    /** Whether the load functions have run (or won't: no data, a failure). */
+    static boolean ready() {
+        if (failed || HorizonData.loaded == null) return true;
+        if (manager == null) return false;
+        try {
+            java.lang.reflect.Field pending = ServerFunctionManager.class.getDeclaredField("postReload");
+            pending.setAccessible(true);
+            return !(boolean) pending.get(manager);
+        } catch (ReflectiveOperationException e) {
+            return true;
+        }
+    }
+
     /** One server tick of functions, once a world is open (its saved data holds the schedule). */
     static void tick(MinecraftServer server, long gameTime) {
         if (failed || HorizonData.loaded == null || !HorizonSavedData.ready()) return;
