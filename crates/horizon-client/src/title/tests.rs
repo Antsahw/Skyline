@@ -817,6 +817,7 @@ fn create_world_tabs_follow_vanilla_and_their_choices_reach_the_action() {
         options.world_gen(),
         crate::save::WorldGen {
             flat: true,
+            preset: None,
             structures: true,
             bonus_chest: true
         }
@@ -835,10 +836,11 @@ fn new_world_generation_settings_round_trip() {
     let dir = f.root.join("flat");
     let options = crate::save::WorldGen {
         flat: true,
+        preset: None,
         structures: false,
         bonus_chest: true,
     };
-    crate::save::write_world_gen_settings(&dir, 42, options).unwrap();
+    crate::save::write_world_gen_settings(&dir, 42, options.clone()).unwrap();
     assert_eq!(crate::save::WorldGen::read(&dir), Some(options));
     let settings = crate::save::world_gen_settings(&dir).unwrap();
     assert_eq!(
@@ -851,6 +853,71 @@ fn new_world_generation_settings_round_trip() {
         )
         .as_deref(),
         Some("minecraft:flat")
+    );
+}
+
+#[test]
+fn mod_world_presets_cycle_and_keep_their_dimensions() {
+    let f = Fixture::new();
+    let root = f.root.join("content");
+    let write = |path: &str, text: &str| {
+        let p = root.join(path);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, text).unwrap();
+    };
+    write(
+        "data/minecraft/tags/worldgen/world_preset/normal.json",
+        r#"{"values":["minecraft:normal","minecraft:flat","oneblock:oneblock","gone:missing"]}"#,
+    );
+    write(
+        "data/oneblock/worldgen/world_preset/oneblock.json",
+        r#"{"dimensions":{"minecraft:overworld":{"type":"minecraft:overworld","generator":{"type":"oneblock:oneblock"}}}}"#,
+    );
+    // Mods' presets only, and only those whose file is there.
+    let presets = super::create_world::mod_presets(&root);
+    assert_eq!(presets, ["oneblock:oneblock"]);
+    // Default, Superflat, the mod's, Default again.
+    let mut o = super::WorldOptions {
+        presets,
+        ..Default::default()
+    };
+    let mut creative = false;
+    let mut seen = Vec::new();
+    for _ in 0..4 {
+        o.press(25, &mut creative);
+        seen.push((o.flat, o.preset.clone()));
+    }
+    assert_eq!(
+        seen,
+        [
+            (true, None),
+            (false, Some("oneblock:oneblock".to_owned())),
+            (false, None),
+            (true, None)
+        ]
+    );
+    // The world keeps the preset's id and its dimensions.
+    let dir = f.root.join("oneblock");
+    let options = crate::save::WorldGen {
+        preset: Some("oneblock:oneblock".into()),
+        ..Default::default()
+    };
+    let dimensions = crate::save::preset_dimensions(&root, "oneblock:oneblock");
+    assert!(dimensions.is_some());
+    crate::save::write_world_gen_settings_preset(&dir, 7, options.clone(), None, dimensions)
+        .unwrap();
+    assert_eq!(crate::save::WorldGen::read(&dir), Some(options));
+    let settings = crate::save::world_gen_settings(&dir).unwrap();
+    assert_eq!(
+        crate::save::text(
+            settings
+                .get("dimensions")
+                .and_then(|d| d.get("minecraft:overworld"))
+                .and_then(|o| o.get("generator"))
+                .and_then(|g| g.get("type"))
+        )
+        .as_deref(),
+        Some("oneblock:oneblock")
     );
 }
 

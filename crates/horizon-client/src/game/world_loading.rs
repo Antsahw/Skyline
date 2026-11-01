@@ -93,11 +93,17 @@ impl WorldRequest {
             level.hardcore = o.hardcore;
             level.difficulty = horizon_client::title::DIFFICULTIES[o.difficulty()].into();
             level.allow_commands = Some(o.commands(creative));
-            horizon_client::save::write_world_gen_settings_with(
+            // A mod's world preset: its dimensions, from the mods' data.
+            let preset = o
+                .preset
+                .as_deref()
+                .and_then(|p| horizon_client::save::preset_dimensions(&options.resources, p));
+            horizon_client::save::write_world_gen_settings_preset(
                 &save_root,
                 level.seed,
                 o.world_gen(),
                 o.flat_settings(),
+                preset,
             )?;
             // WorldCreationUiState.getGameRules, written with the level.
             level.game_rules = o.rules.by_name();

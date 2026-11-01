@@ -93,11 +93,10 @@ impl Game<'_> {
         if self.options.test_terrain {
             return Ok(((0, 0), 64));
         }
-        let origin = match self.end.locator() {
-            Some(terrain) => terrain.origin()?,
-            None => horizon_core::position::ChunkPos::new(0, 0),
-        };
-        Ok(((origin.x, origin.z), 64))
+        match self.end.locator() {
+            Some(terrain) => terrain.spawn_origin(),
+            None => Ok(((0, 0), 64)),
+        }
     }
     /// MinecraftServer.setInitialSpawn: the first chunk of the spiral with a
     /// valid respawn column gives the world spawn, else the origin chunk's
@@ -105,7 +104,14 @@ impl Game<'_> {
     pub(super) fn find_world_spawn(&mut self) -> Result<Option<[i32; 3]>> {
         let ((ox, oz), height) = match self.spawn_origin {
             Some(origin) => origin,
-            None => *self.spawn_origin.insert(self.spawn_origin()?),
+            None => {
+                // Java mods may generate the overworld with a generator of their own (a mod's
+                // world type: One Block's spawn is its block): wait until that is known.
+                if self.end.locator().is_some_and(|t| !t.oracle_decided()) {
+                    return Ok(None);
+                }
+                *self.spawn_origin.insert(self.spawn_origin()?)
+            }
         };
         while let Some((dx, dz)) = self.spawn_spiral.current() {
             if self.spawn_spiral.tested() {

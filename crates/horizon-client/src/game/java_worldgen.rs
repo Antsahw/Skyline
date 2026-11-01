@@ -25,6 +25,9 @@ pub(super) struct JavaTerrain {
     world: std::path::PathBuf,
     /// Whether the mods generate this dimension, asked once (the first chunk waits for Java).
     modded: Arc<OnceLock<bool>>,
+    /// Whether that generator is a mod's own (One Block's, Grid World's): Horizon's noise
+    /// says nothing of its land, so far terrain stays empty.
+    custom: Arc<OnceLock<bool>>,
     /// Whether Horizon's noise fills the Java protos (asked once the mods generate it).
     horizon_noise: OnceLock<bool>,
     registry: &'static BlockRegistry,
@@ -69,13 +72,19 @@ impl JavaTerrain {
         biomes: Arc<Biomes>,
     ) -> Option<Self> {
         let registry = assets.registry;
-        super::java_mods::has_java_mods().then(|| Self {
+        if !super::java_mods::has_java_mods() {
+            return None;
+        }
+        // Until the mods say whether they generate it, the spawn search waits.
+        inner.expect_oracle();
+        Some(Self {
             inner,
             dimension: Arc::from(dimension),
             seed,
             structures,
             world: world.to_path_buf(),
             modded: Arc::new(OnceLock::new()),
+            custom: Arc::new(OnceLock::new()),
             horizon_noise: OnceLock::new(),
             registry,
             assets,
@@ -86,34 +95,49 @@ impl JavaTerrain {
 
     fn modded(&self) -> bool {
         *self.modded.get_or_init(|| {
-            if !super::java_mods::wait_for_java(JAVA_START) {
-                log::warn!(
-                    "Java mods: not running, so {} generates as vanilla's",
-                    self.dimension
-                );
-                return false;
+            let modded = self.start();
+            if !modded {
+                self.custom.get_or_init(|| false);
+                self.inner.no_oracle();
             }
-            match horizon_jvm::events::worldgen_start(
-                &self.dimension,
-                self.seed,
-                self.structures,
-                &self.world,
-            ) {
-                Ok(true) => {
-                    // /locate biome and maps of places not generated yet ask the mods too.
-                    self.inner.set_biome_oracle(Arc::new(JavaBiomes {
-                        dimension: self.dimension.clone(),
-                        biomes: self.biomes.clone(),
-                    }));
-                    true
-                }
-                Ok(false) => false,
-                Err(e) => {
-                    log::warn!("Java mods' worldgen: {}: {e}", self.dimension);
-                    false
-                }
-            }
+            modded
         })
+    }
+
+    fn start(&self) -> bool {
+        if !super::java_mods::wait_for_java(JAVA_START) {
+            log::warn!(
+                "Java mods: not running, so {} generates as vanilla's",
+                self.dimension
+            );
+            return false;
+        }
+        match horizon_jvm::events::worldgen_start(
+            &self.dimension,
+            self.seed,
+            self.structures,
+            &self.world,
+        ) {
+            Ok(true) => {
+                let origin = horizon_jvm::events::worldgen_origin(&self.dimension)
+                    .ok()
+                    .flatten();
+                self.custom.get_or_init(|| origin.is_some_and(|o| o.custom));
+                // /locate biome and maps of places not generated yet ask the mods too, and
+                // the spawn comes from their generator's origin.
+                self.inner.set_biome_oracle(Arc::new(JavaBiomes {
+                    dimension: self.dimension.clone(),
+                    biomes: self.biomes.clone(),
+                    origin,
+                }));
+                true
+            }
+            Ok(false) => false,
+            Err(e) => {
+                log::warn!("Java mods' worldgen: {}: {e}", self.dimension);
+                false
+            }
+        }
     }
 
     /// The chunk the Java side gave (vanilla's save form), as Horizon's final column.
@@ -180,9 +204,11 @@ impl ChunkGenerator for JavaTerrain {
         Box::new(JavaLod {
             inner: self.inner.clone().lod_sampler(),
             modded: self.modded.clone(),
+            custom: self.custom.clone(),
             oracle: JavaBiomes {
                 dimension: self.dimension.clone(),
                 biomes: self.biomes.clone(),
+                origin: None,
             },
         })
     }
@@ -193,6 +219,9 @@ impl ChunkGenerator for JavaTerrain {
         x: i32,
         z: i32,
     ) -> Option<horizon_client::lod::Surface> {
+        if self.custom.get() == Some(&true) {
+            return None;
+        }
         self.inner.lod_surface(worker, x, z)
     }
 
@@ -397,6 +426,8 @@ impl ChunkGenerator for JavaTerrain {
 struct JavaBiomes {
     dimension: Arc<str>,
     biomes: Arc<Biomes>,
+    /// The mods' generator's origin and spawn height (`HorizonWorldgen.origin`).
+    origin: Option<horizon_jvm::events::WorldgenOrigin>,
 }
 
 impl JavaBiomes {
@@ -414,6 +445,10 @@ impl JavaBiomes {
 }
 
 impl horizon_client::vanillagen::BiomeOracle for JavaBiomes {
+    fn spawn_origin(&self) -> Option<((i32, i32), i32)> {
+        self.origin.map(|o| ((o.x, o.z), o.height))
+    }
+
     fn noise_biomes(&self, quarts: &[[i32; 3]]) -> Option<Vec<Option<String>>> {
         horizon_jvm::events::worldgen_biomes(&self.dimension, quarts)
             .ok()
@@ -463,12 +498,19 @@ impl horizon_client::vanillagen::BiomeOracle for JavaBiomes {
 struct JavaLod {
     inner: Box<dyn LodSampler>,
     modded: Arc<OnceLock<bool>>,
+    custom: Arc<OnceLock<bool>>,
     oracle: JavaBiomes,
 }
 
 impl JavaLod {
     fn modded(&self) -> bool {
         self.modded.get() == Some(&true)
+    }
+
+    /// A mod's own generator makes the dimension (a void with one block, a grid): Horizon's
+    /// columns would show land that isn't there.
+    fn custom(&self) -> bool {
+        self.custom.get() == Some(&true)
     }
 
     /// Sets each column's biome to the mods' at `(x, surface, z)`.
@@ -509,9 +551,11 @@ impl LodSampler for JavaLod {
         Some(Box::new(JavaLod {
             inner: self.inner.fork()?,
             modded: self.modded.clone(),
+            custom: self.custom.clone(),
             oracle: JavaBiomes {
                 dimension: self.oracle.dimension.clone(),
                 biomes: self.oracle.biomes.clone(),
+                origin: None,
             },
         }))
     }
@@ -522,6 +566,14 @@ impl LodSampler for JavaLod {
 
     fn drain_details(&mut self) -> Vec<horizon_client::streaming::LodDetail> {
         let mut details = self.inner.drain_details();
+        if self.custom() {
+            for (_, columns) in &mut details {
+                *columns = Arc::new(std::array::from_fn(|_| {
+                    horizon_client::lod::Column::default()
+                }));
+            }
+            return details;
+        }
         if self.modded() {
             for ((cx, cz), columns) in &mut details {
                 let mut owned = (**columns).clone();
@@ -541,11 +593,17 @@ impl LodSampler for JavaLod {
     }
 
     fn column(&mut self, x: i32, z: i32) -> horizon_client::lod::Column {
+        if self.custom() {
+            return horizon_client::lod::Column::default();
+        }
         let column = self.inner.column(x, z);
         self.remap_one(column, x, z)
     }
 
     fn reduced_column(&mut self, x: i32, z: i32, width: i32) -> horizon_client::lod::Column {
+        if self.custom() {
+            return horizon_client::lod::Column::default();
+        }
         let column = self.inner.reduced_column(x, z, width);
         self.remap_one(column, x + width / 2, z + width / 2)
     }
@@ -557,6 +615,9 @@ impl LodSampler for JavaLod {
         stride: i32,
         side: usize,
     ) -> Vec<horizon_client::lod::Column> {
+        if self.custom() {
+            return vec![horizon_client::lod::Column::default(); side * side];
+        }
         let mut columns = self.inner.grid(x, z, stride, side);
         if self.modded() {
             let at: Vec<(i32, i32)> = (0..columns.len())

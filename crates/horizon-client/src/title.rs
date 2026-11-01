@@ -1546,6 +1546,9 @@ impl Title {
                 },
                 Some(id),
             ) if id != 21 && id != 22 => {
+                if id == 25 && options.presets.is_empty() {
+                    options.presets = create_world::mod_presets(&self.resources);
+                }
                 options.press(id, creative);
                 Action::None
             }

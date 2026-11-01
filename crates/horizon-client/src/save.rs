@@ -2452,10 +2452,13 @@ const INT_RULES: [&str; 11] = [
 /// the player file.
 /// The world options CreateWorldScreen sets (`WorldOptions` and the world
 /// preset) that `world_gen_settings` keeps.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct WorldGen {
     /// The `minecraft:flat` preset (Superflat) instead of `normal`.
     pub flat: bool,
+    /// A mod's world preset (`oneblock:oneblock`): its dimensions are the world's, generated
+    /// by the Java mods (kept as `horizon:preset` in `world_gen_settings`).
+    pub preset: Option<String>,
     pub structures: bool,
     pub bonus_chest: bool,
 }
@@ -2471,6 +2474,7 @@ impl WorldGen {
         Some(Self {
             flat: text(generator.and_then(|g| g.get("type")))
                 .is_some_and(|t| t.trim_start_matches("minecraft:") == "flat"),
+            preset: text(settings.get(PRESET_KEY)).filter(|p| !p.is_empty()),
             structures: flag("generate_structures", true),
             bonus_chest: flag("bonus_chest", false),
         })
@@ -2480,10 +2484,26 @@ impl Default for WorldGen {
     fn default() -> Self {
         Self {
             flat: false,
+            preset: None,
             structures: true,
             bonus_chest: false,
         }
     }
+}
+/// `world_gen_settings`' key naming a mod's world preset the world was made with.
+pub const PRESET_KEY: &str = "horizon:preset";
+/// A mod's world preset's dimensions (`<root>/data/<ns>/worldgen/world_preset/<path>.json`'s
+/// `dimensions`) as `world_gen_settings` keeps them; None if it has none.
+pub fn preset_dimensions(root: &Path, preset: &str) -> Option<Tag> {
+    let (ns, path) = preset.split_once(':').unwrap_or(("minecraft", preset));
+    let text =
+        fs::read_to_string(root.join(format!("data/{ns}/worldgen/world_preset/{path}.json")))
+            .ok()?;
+    let json: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let dimensions = json.get("dimensions")?;
+    dimensions
+        .is_object()
+        .then(|| horizon_client_core::scoreboard::json_to_tag(dimensions))
 }
 /// Writes a new world's `world_gen_settings` (seed, options and dimensions).
 pub fn write_world_gen_settings(dir: &Path, seed: i64, options: WorldGen) -> Result<()> {
@@ -2497,6 +2517,17 @@ pub fn write_world_gen_settings_with(
     seed: i64,
     options: WorldGen,
     flat_settings: Option<Tag>,
+) -> Result<()> {
+    write_world_gen_settings_preset(dir, seed, options, flat_settings, None)
+}
+/// [`write_world_gen_settings_with`] with a mod's world preset's dimensions
+/// ([`preset_dimensions`]) in place of the vanilla ones, when `options.preset` names one.
+pub fn write_world_gen_settings_preset(
+    dir: &Path,
+    seed: i64,
+    options: WorldGen,
+    flat_settings: Option<Tag>,
+    preset_dimensions: Option<Tag>,
 ) -> Result<()> {
     fs::create_dir_all(dir)?;
     // worldgen/world_preset/flat.json's overworld: the classic flat layers.
@@ -2564,38 +2595,43 @@ pub fn write_world_gen_settings_with(
                 Tag::Byte(i8::from(options.structures)),
             ),
             ("bonus_chest", Tag::Byte(i8::from(options.bonus_chest))),
+            (PRESET_KEY, string(options.preset.as_deref().unwrap_or(""))),
             (
                 "dimensions",
-                Tag::compound([
-                    (
-                        "minecraft:overworld",
-                        if options.flat {
-                            flat
-                        } else {
-                            dimension(
+                preset_dimensions
+                    .filter(|_| options.preset.is_some())
+                    .unwrap_or_else(|| {
+                        Tag::compound([
+                            (
                                 "minecraft:overworld",
-                                "minecraft:overworld",
-                                preset("minecraft:overworld"),
-                            )
-                        },
-                    ),
-                    (
-                        "minecraft:the_nether",
-                        dimension(
-                            "minecraft:the_nether",
-                            "minecraft:nether",
-                            preset("minecraft:nether"),
-                        ),
-                    ),
-                    (
-                        "minecraft:the_end",
-                        dimension(
-                            "minecraft:the_end",
-                            "minecraft:end",
-                            Tag::compound([("type", string("minecraft:the_end"))]),
-                        ),
-                    ),
-                ]),
+                                if options.flat {
+                                    flat
+                                } else {
+                                    dimension(
+                                        "minecraft:overworld",
+                                        "minecraft:overworld",
+                                        preset("minecraft:overworld"),
+                                    )
+                                },
+                            ),
+                            (
+                                "minecraft:the_nether",
+                                dimension(
+                                    "minecraft:the_nether",
+                                    "minecraft:nether",
+                                    preset("minecraft:nether"),
+                                ),
+                            ),
+                            (
+                                "minecraft:the_end",
+                                dimension(
+                                    "minecraft:the_end",
+                                    "minecraft:end",
+                                    Tag::compound([("type", string("minecraft:the_end"))]),
+                                ),
+                            ),
+                        ])
+                    }),
             ),
         ]),
     )

@@ -4,6 +4,7 @@ import com.mojang.serialization.Lifecycle;
 import dev.horizonlab.bridge.Natives;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import net.minecraft.commands.Commands;
 import net.minecraft.core.LayeredRegistryAccess;
 import net.minecraft.core.MappedRegistry;
@@ -60,6 +61,59 @@ public final class HorizonData {
             // No WorldWeaver.
         }
         return "normal";
+    }
+
+    /**
+     * The open world's level stems when it was made with a mod's world preset (One Block's,
+     * Grid World's: Horizon's world creation writes its id as {@code horizon:preset}), by
+     * dimension; empty for the default preset, whose stems are the registries' (made at start,
+     * before a world is chosen).
+     */
+    private static volatile Map<net.minecraft.resources.Identifier, net.minecraft.world.level.dimension.LevelStem> presetStems = Map.of();
+    private static volatile String preset = "";
+
+    /** The world's mod preset (an id, or empty for the default): its stems from now on. */
+    static synchronized void usePreset(String id) {
+        if (id == null) id = "";
+        if (id.equals(preset)) return;
+        Map<net.minecraft.resources.Identifier, net.minecraft.world.level.dimension.LevelStem> stems = new java.util.HashMap<>();
+        if (!id.isEmpty() && loaded != null) {
+            try {
+                var key = net.minecraft.resources.ResourceKey.create(Registries.WORLD_PRESET,
+                        net.minecraft.resources.Identifier.parse(id));
+                var found = loaded.registries().compositeAccess().lookupOrThrow(Registries.WORLD_PRESET).get(key);
+                if (found.isPresent()) {
+                    found.get().value().createWorldDimensions().dimensions()
+                            .forEach((k, stem) -> stems.put(k.identifier(), stem));
+                    Natives.log("Java mods: the world's preset is " + id + " (" + stems.size() + " dimensions)");
+                } else {
+                    Natives.log("Java mods: the world's preset " + id + " isn't in the data packs; the default's dimensions");
+                }
+            } catch (RuntimeException e) {
+                Natives.log("Java mods: the world's preset " + id + " failed: " + e);
+            }
+        }
+        presetStems = Map.copyOf(stems);
+        preset = id;
+    }
+
+    /** The world's preset (empty: the default). */
+    static String preset() {
+        return preset;
+    }
+
+    /**
+     * Dimension {@code id}'s level stem: the world's preset's, else the registries' (the
+     * default preset's); null if neither has it.
+     */
+    public static net.minecraft.world.level.dimension.LevelStem stem(net.minecraft.resources.Identifier id) {
+        var own = presetStems.get(id);
+        if (own != null) return own;
+        Loaded data = loaded;
+        if (data == null) return null;
+        return data.registries().compositeAccess().lookupOrThrow(Registries.LEVEL_STEM)
+                .get(net.minecraft.resources.ResourceKey.create(Registries.LEVEL_STEM, id))
+                .map(net.minecraft.core.Holder::value).orElse(null);
     }
 
     private static net.minecraft.world.level.levelgen.WorldDimensions defaultDimensions(

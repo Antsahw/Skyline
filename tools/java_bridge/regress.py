@@ -46,6 +46,8 @@ MODS = {
     "seasons": ["sereneseasons*"],
     "clumps": ["clumps*"],
     "kotlin": ["fabric-language-kotlin*"],
+    "oneblock": ["oneblock*"],
+    "codxlib": ["codxlib*"],
 }
 
 
@@ -187,6 +189,16 @@ CASES = {
                '$C command "summon experience_orb ~ ~0.5 ~ {Value:7}" >/dev/null; done; sleep 2; $C state > $S/state.json'],
         checks=[check_json("state.json", ["player", "xp", "total"], 42, "all six orbs' points (42)"),
                 check_log(r"experience_orbs go to the mods", "orb pickup goes to the mods")],
+    ),
+    "preset": dict(
+        about="A mod's world type (One Block) picked in Create New World: its block, its gameplay",
+        mods=["oneblock", "codxlib"], scene="none", env={"WORLD": "none"},
+        steps=['"$R/tools/java_bridge/new_world.sh" "One Block"',
+               '$C block 0 64 0 > $S/block.json; $C look-at-block 0 64 0 >/dev/null; sleep 2; $C messages > $S/messages.json'],
+        checks=[check_file("block.json", r"grass_block", "the one block at 0 64 0"),
+                check_file("messages.json", r"Your island is at", "One Block's own join message")],
+        forbid=[r"worldgen: proto failed"],
+        look="the grass block below, nothing else",
     ),
     "prism": dict(
         about="Prism Launcher's wrapper: an instance's mods linked, Fabric API left out (no game)",

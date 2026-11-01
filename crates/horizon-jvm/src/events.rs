@@ -1399,6 +1399,47 @@ pub fn worldgen_start(
     Ok(modded.unwrap_or(false))
 }
 
+/// Where a dimension the mods generate starts: ChunkGenerator.getOrigin's chunk and
+/// getSpawnHeight, and whether the generator is a mod's own (not vanilla's noise generator).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WorldgenOrigin {
+    pub x: i32,
+    pub z: i32,
+    pub height: i32,
+    pub custom: bool,
+}
+
+/// [`WorldgenOrigin`] of `dimension`; None if the mods don't generate it.
+pub fn worldgen_origin(dimension: &str) -> Result<Option<WorldgenOrigin>, String> {
+    let found = with_server(|env, class| {
+        let dimension = env.new_string(dimension)?;
+        let array = env
+            .call_static_method(
+                class,
+                "worldgenOrigin",
+                "(Ljava/lang/String;)[I",
+                &[JValue::Object(&dimension)],
+            )?
+            .l()?;
+        if array.is_null() {
+            return Ok(None);
+        }
+        let array = jni::objects::JIntArray::from(array);
+        let mut out = [0i32; 4];
+        if env.get_array_length(&array)? < 4 {
+            return Ok(None);
+        }
+        env.get_int_array_region(&array, 0, &mut out)?;
+        Ok(Some(WorldgenOrigin {
+            x: out[0],
+            z: out[1],
+            height: out[2],
+            custom: out[3] != 0,
+        }))
+    })?;
+    Ok(found.flatten())
+}
+
 /// Brings chunk `x z` of `dimension` to vanilla's TERRAIN status on the Java side and holds
 /// it: a token for [`worldgen_finish`] and [`worldgen_forget`], None when it failed.
 pub fn worldgen_proto(dimension: &str, x: i32, z: i32) -> Result<Option<i64>, String> {

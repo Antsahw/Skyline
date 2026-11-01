@@ -53,6 +53,9 @@ pub struct VanillaTerrain {
     /// Where this dimension's biomes really come from, when mods generate it (the Java mod
     /// bridge): biome queries of places not generated yet ask it first.
     biome_oracle: std::sync::OnceLock<Arc<dyn BiomeOracle>>,
+    /// Another generator may take this dimension over ([`Self::expect_oracle`]) and hasn't
+    /// said yet whether it does: the spawn search waits.
+    oracle_pending: std::sync::atomic::AtomicBool,
 }
 /// A chunk's blocks after the noise fill ([`VanillaTerrain::noise_fill`]): `blocks[i]` (`i` =
 /// `((y - min_y) * 16 + z) * 16 + x`) indexes `palette` (`minecraft:water[level=0]`);
@@ -67,6 +70,10 @@ pub struct NoiseFill {
 pub trait BiomeOracle: Send + Sync {
     /// `BiomeSource.getNoiseBiome` at each quart position; None to use Horizon's own.
     fn noise_biomes(&self, quarts: &[[i32; 3]]) -> Option<Vec<Option<String>>>;
+    /// ChunkGenerator.getOrigin's chunk and getSpawnHeight; None to use Horizon's own.
+    fn spawn_origin(&self) -> Option<((i32, i32), i32)> {
+        None
+    }
     /// `/locate structure` of `selector` (an id or a `#tag`) from `from` within `radius`
     /// chunks (ChunkGenerator.findNearestMapStructure); None to use Horizon's own search.
     fn locate_structure(
@@ -235,6 +242,7 @@ impl VanillaTerrain {
             last_proto: std::sync::atomic::AtomicU64::new(0),
             created: std::time::Instant::now(),
             biome_oracle: std::sync::OnceLock::new(),
+            oracle_pending: std::sync::atomic::AtomicBool::new(false),
         })
     }
     /// The difficulty (0 peaceful to 3 hard) and overworld clock structure
@@ -453,6 +461,35 @@ impl VanillaTerrain {
     /// Makes `oracle` the source of this dimension's biome queries (once).
     pub fn set_biome_oracle(&self, oracle: Arc<dyn BiomeOracle>) {
         let _ = self.biome_oracle.set(oracle);
+        self.no_oracle();
+    }
+    /// An oracle may come ([`Self::set_biome_oracle`]) or not ([`Self::no_oracle`]): until
+    /// then [`Self::oracle_decided`] is false.
+    pub fn expect_oracle(&self) {
+        if self.biome_oracle.get().is_none() {
+            self.oracle_pending
+                .store(true, std::sync::atomic::Ordering::Release);
+        }
+    }
+    /// No oracle comes: Horizon's generator is this dimension's.
+    pub fn no_oracle(&self) {
+        self.oracle_pending
+            .store(false, std::sync::atomic::Ordering::Release);
+    }
+    /// Whether it is known which generator makes this dimension.
+    pub fn oracle_decided(&self) -> bool {
+        !self
+            .oracle_pending
+            .load(std::sync::atomic::Ordering::Acquire)
+    }
+    /// ChunkGenerator.getOrigin and getSpawnHeight: the other generator's when it has its
+    /// own (a mod's world type), else Horizon's origin at height 64.
+    pub fn spawn_origin(&self) -> crate::Result<((i32, i32), i32)> {
+        if let Some(found) = self.biome_oracle.get().and_then(|o| o.spawn_origin()) {
+            return Ok(found);
+        }
+        let origin = self.origin()?;
+        Ok(((origin.x, origin.z), 64))
     }
     /// `BiomeSource.getNoiseBiome` at quart positions, for places that may not
     /// be generated yet (`MapItem.renderBiomePreviewMap`).

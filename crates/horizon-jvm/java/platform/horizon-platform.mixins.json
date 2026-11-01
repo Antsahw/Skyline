@@ -31,6 +31,7 @@
     "EntityFluidInteractionMixin",
     "WorldGenRegionMixin",
     "NoiseFillMixin",
+    "ChunkGeneratorMixin",
     "EntitySelectorMixin",
     "BlockScanMixin",
     "ChunkMapMixin",

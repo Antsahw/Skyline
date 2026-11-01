@@ -4,7 +4,6 @@ import dev.horizonlab.bridge.Natives;
 import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -79,13 +78,26 @@ public final class HorizonWorldgen {
         final Map<Long, Live> live = new ConcurrentHashMap<>();
         /** Horizon's noise fills the protos (horizonNoise). */
         boolean horizonNoise;
-        final Map<Long, ProtoChunk> partial = java.util.Collections.synchronizedMap(
-                new LinkedHashMap<>(PARTIAL_CHUNKS, 0.75f, true) {
-                    @Override
-                    protected boolean removeEldestEntry(Map.Entry<Long, ProtoChunk> eldest) {
-                        return size() > PARTIAL_CHUNKS;
-                    }
-                });
+        /**
+         * Lower-status chunks, oldest first out (a lock-free map: every chunk's structure
+         * references read 289 of them, from every worker at once; a synchronized LRU map was
+         * one lock for all).
+         */
+        final Map<Long, ProtoChunk> partial = new ConcurrentHashMap<>();
+        private final java.util.concurrent.ConcurrentLinkedQueue<Long> partialOrder = new java.util.concurrent.ConcurrentLinkedQueue<>();
+
+        /** Keeps {@code chunk} as chunk {@code key}'s unless one is kept: the kept one. */
+        ProtoChunk keep(long key, ProtoChunk chunk) {
+            ProtoChunk raced = partial.putIfAbsent(key, chunk);
+            if (raced != null) return raced;
+            partialOrder.add(key);
+            while (partial.size() > PARTIAL_CHUNKS) {
+                Long old = partialOrder.poll();
+                if (old == null) break;
+                partial.remove(old);
+            }
+            return chunk;
+        }
 
         Dimension(ServerLevel level, ChunkGenerator generator, WorldGenContext context, PalettedContainerFactory containers) {
             this.level = level;
@@ -222,8 +234,7 @@ public final class HorizonWorldgen {
      * constructor's arguments as a server would (no storage, an inline executor).
      */
     private static void levelHooks(ServerLevel level, String dimension, long seed) {
-        var key = ResourceKey.create(Registries.LEVEL_STEM, level.dimension().identifier());
-        var stem = level.registryAccess().lookupOrThrow(Registries.LEVEL_STEM).getValue(key);
+        var stem = HorizonData.stem(level.dimension().identifier());
         if (stem == null) return;
         Object[] args = {HorizonServer.server(), (java.util.concurrent.Executor) Runnable::run, null,
                 HorizonData.loaded.worldData(), level.dimension(), stem, false,
@@ -341,7 +352,8 @@ public final class HorizonWorldgen {
         // (12-13 ms a chunk, plus 3 ms to copy and 1 to apply) costs a little more than
         // vanilla's doFill (11 ms: HotSpot's batched sampleVolume), and chunks came ~5% slower.
         if (!"horizon".equals(System.getenv("HORIZON_JAVA_NOISE"))) return false;
-        if (!(generator instanceof net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator noise)) return false;
+        if (!(generator instanceof net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator noise)
+                || generator.getClass() != net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator.class) return false;
         var vanilla = switch (dimension) {
             case "minecraft:overworld" -> net.minecraft.world.level.levelgen.NoiseGeneratorSettings.OVERWORLD;
             case "minecraft:the_nether" -> net.minecraft.world.level.levelgen.NoiseGeneratorSettings.NETHER;
@@ -460,6 +472,27 @@ public final class HorizonWorldgen {
                 net.minecraft.world.level.levelgen.Heightmap.Types.WORLD_SURFACE_WG));
         int[] post = fill.postprocess();
         for (int i = 0; i + 2 < post.length; i += 3) chunk.markPosForPostProcessing(new BlockPos(post[i], post[i + 1], post[i + 2]));
+    }
+
+    /**
+     * Where a dimension the mods generate starts (MinecraftServer.setInitialSpawn's
+     * ChunkGenerator.getOrigin and getSpawnHeight), and whether its generator is a mod's own
+     * rather than vanilla's noise generator (One Block's void, Grid World's grid): {x, z,
+     * height, own}. Null if the mods don't generate it.
+     */
+    public static int[] origin(String dimension) {
+        Thread.currentThread().setContextClassLoader(HorizonWorldgen.class.getClassLoader());
+        Dimension d = DIMENSIONS.get(dimension);
+        if (d == null) return null;
+        try {
+            ChunkPos origin = d.generator.getOrigin(d.level.getChunkSource().randomState());
+            int height = d.generator.getSpawnHeight(d.level);
+            boolean own = d.generator.getClass() != net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator.class;
+            return new int[] {origin.x(), origin.z(), height, own ? 1 : 0};
+        } catch (Throwable t) {
+            failed("origin", t);
+            return null;
+        }
     }
 
     /** Brings chunk x z of dimension to TERRAIN and holds it for Horizon: its token (0: failed). */
@@ -734,6 +767,28 @@ public final class HorizonWorldgen {
 
     // ---- Steps ------------------------------------------------------------------------------
 
+    /**
+     * Whether TERRAIN's and BIOMES' work runs on the Horizon worker that asked for the chunk
+     * instead of hopping to vanilla's background executor (HORIZON_JAVA_TERRAIN=inline or
+     * executor; by default inline from 4 cores). Horizon's workers are behind the server and
+     * window threads and as many as the cores but one; the executor's threads are as many
+     * again at normal priority, so on a desktop the hop doubled the threads generating and
+     * took time from ticks and frames. On 2 cores Horizon has 1 worker and the executor is the
+     * second core's work, so the hop stays.
+     */
+    private static final boolean INLINE = switch (String.valueOf(System.getenv("HORIZON_JAVA_TERRAIN"))) {
+        case "inline" -> true;
+        case "executor" -> false;
+        default -> Runtime.getRuntime().availableProcessors() >= 4;
+    };
+    /** Set while a Horizon worker runs a step (advance). */
+    private static final ThreadLocal<Boolean> ON_WORKER = ThreadLocal.withInitial(() -> false);
+
+    /** The executor a generation step's async part runs on (the generator mixins' hop). */
+    public static java.util.concurrent.Executor executor(net.minecraft.TracingExecutor executor, String name) {
+        return INLINE && ON_WORKER.get() ? Runnable::run : executor.forName(name);
+    }
+
     private static ProtoChunk fresh(Dimension d, int x, int z) {
         return new ProtoChunk(new ChunkPos(x, z), UpgradeData.EMPTY, d.level, d.containers, null);
     }
@@ -751,7 +806,14 @@ public final class HorizonWorldgen {
                 if (chunk.getPersistedStatus().isOrAfter(status)) continue;
                 ChunkStep step = ChunkPyramid.GENERATION_PYRAMID.getStepTo(status);
                 long started = HorizonProfile.start();
-                step.apply(d.context, around(d, chunk, step), chunk).join();
+                var cache = around(d, chunk, step);
+                boolean outer = ON_WORKER.get();
+                ON_WORKER.set(true);
+                try {
+                    step.apply(d.context, cache, chunk).join();
+                } finally {
+                    ON_WORKER.set(outer);
+                }
                 HorizonProfile.add("worldgen " + status.getName(), started);
                 if (!chunk.getPersistedStatus().isOrAfter(status)) chunk.setPersistedStatus(status);
             }
@@ -775,11 +837,7 @@ public final class HorizonWorldgen {
         long key = ChunkPos.pack(x, z);
         Live live = d.live.get(key);
         ProtoChunk chunk = live != null ? live.chunk() : d.partial.get(key);
-        if (chunk == null) {
-            chunk = fresh(d, x, z);
-            ProtoChunk raced = d.partial.putIfAbsent(key, chunk);
-            if (raced != null) chunk = raced;
-        }
+        if (chunk == null) chunk = d.keep(key, fresh(d, x, z));
         advance(d, chunk, status);
         return chunk;
     }

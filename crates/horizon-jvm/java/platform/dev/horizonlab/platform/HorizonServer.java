@@ -261,6 +261,14 @@ public final class HorizonServer {
             Natives.log("Horizon's server mirror has no tick rate: " + e);
         }
         emptyCollections(server, server.getClass());
+        // Its data packs (One Block's generator reads the selected ones for its void options).
+        try {
+            java.lang.reflect.Field packs = MinecraftServer.class.getDeclaredField("packRepository");
+            packs.setAccessible(true);
+            if (packs.get(server) == null && HorizonData.repository != null) packs.set(server, HorizonData.repository);
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            Natives.log("Horizon's server mirror has no pack repository: " + e);
+        }
         // Its debug subscribers (entities ask whether anyone watches their debug data): none.
         try {
             java.lang.reflect.Field debug = MinecraftServer.class.getDeclaredField("debugSubscribers");
@@ -606,24 +614,43 @@ public final class HorizonServer {
      * (Nature's Compass searches its biome source), and Horizon's generation is vanilla's.
      */
     public static net.minecraft.world.level.chunk.ChunkGenerator generator(ServerLevel level) {
-        HorizonData.Loaded data = HorizonData.loaded;
-        if (data == null) return null;
-        return data.registries().compositeAccess().lookupOrThrow(Registries.LEVEL_STEM)
-                .get(ResourceKey.create(Registries.LEVEL_STEM, level.dimension().identifier()))
-                .map(stem -> stem.value().generator()).orElse(null);
+        // The world's preset's stem (a mod's world type) or the registries'.
+        var stem = HorizonData.stem(level.dimension().identifier());
+        return stem == null ? null : stem.generator();
     }
 
-    private static final Map<ServerLevel, net.minecraft.world.level.levelgen.RandomState> RANDOM_STATES = new IdentityHashMap<>();
-    private static final Map<ServerLevel, net.minecraft.world.level.chunk.ChunkGeneratorStructureState> STRUCTURE_STATES = new IdentityHashMap<>();
-    private static long statesSeed;
+    private static final Map<ServerLevel, net.minecraft.world.level.levelgen.RandomState> RANDOM_STATES =
+            new java.util.concurrent.ConcurrentHashMap<>();
+    private static final Map<ServerLevel, net.minecraft.world.level.chunk.ChunkGeneratorStructureState> STRUCTURE_STATES =
+            new java.util.concurrent.ConcurrentHashMap<>();
+    private static volatile long statesSeed;
+    private static volatile String statesPreset = "";
 
-    /** ServerChunkCache.randomState: the generator's noises with Horizon's seed (ChunkMap's constructor). */
-    public static synchronized net.minecraft.world.level.levelgen.RandomState randomState(ServerLevel level) {
-        if (statesSeed != seed) {
-            RANDOM_STATES.clear();
-            STRUCTURE_STATES.clear();
-            statesSeed = seed;
-        }
+    /** Whether the states made are for this seed and world preset. */
+    private static boolean statesCurrent() {
+        return statesSeed == seed && statesPreset.equals(HorizonData.preset());
+    }
+
+    /** The states made for another seed or preset go. */
+    private static synchronized void refreshStates() {
+        if (statesCurrent()) return;
+        RANDOM_STATES.clear();
+        STRUCTURE_STATES.clear();
+        statesPreset = HorizonData.preset();
+        statesSeed = seed;
+    }
+
+    /**
+     * ServerChunkCache.randomState: the generator's noises with Horizon's seed (ChunkMap's
+     * constructor). Every generation step asks, from every worker: lock-free once made.
+     */
+    public static net.minecraft.world.level.levelgen.RandomState randomState(ServerLevel level) {
+        if (!statesCurrent()) refreshStates();
+        var made = RANDOM_STATES.get(level);
+        return made != null ? made : makeRandomState(level);
+    }
+
+    private static synchronized net.minecraft.world.level.levelgen.RandomState makeRandomState(ServerLevel level) {
         return RANDOM_STATES.computeIfAbsent(level, l -> {
             var registries = HorizonData.loaded.registries().compositeAccess();
             var noises = registries.lookupOrThrow(Registries.NOISE);
@@ -635,8 +662,14 @@ public final class HorizonServer {
         });
     }
 
-    /** ServerChunkCache.getGeneratorState: where structures may be (a locator's search). */
-    public static synchronized net.minecraft.world.level.chunk.ChunkGeneratorStructureState generatorState(ServerLevel level) {
+    /** ServerChunkCache.getGeneratorState: where structures may be (a locator's search). Lock-free once made. */
+    public static net.minecraft.world.level.chunk.ChunkGeneratorStructureState generatorState(ServerLevel level) {
+        if (!statesCurrent()) refreshStates();
+        var made = STRUCTURE_STATES.get(level);
+        return made != null ? made : makeGeneratorState(level);
+    }
+
+    private static synchronized net.minecraft.world.level.chunk.ChunkGeneratorStructureState makeGeneratorState(ServerLevel level) {
         var random = randomState(level);
         return STRUCTURE_STATES.computeIfAbsent(level, l -> generator(l).createState(
                 HorizonData.loaded.registries().compositeAccess().lookupOrThrow(Registries.STRUCTURE_SET), random, seed));
@@ -649,10 +682,40 @@ public final class HorizonServer {
      * mods' hooks, Fabric's data attachments among them, read the server's saved data).
      */
     static void world(String world) {
-        if (world != null && !world.isEmpty()) worldDir = java.nio.file.Paths.get(world).toAbsolutePath();
+        if (world != null && !world.isEmpty()) {
+            java.nio.file.Path dir = java.nio.file.Paths.get(world).toAbsolutePath().normalize();
+            // A world made with a mod's world type: its dimensions are that preset's.
+            if (!dir.equals(worldDir)) {
+                String preset = worldPreset(dir);
+                if (preset != null) HorizonData.usePreset(preset);
+            }
+            worldDir = dir;
+        }
         HorizonBlockEntities.world(worldDir);
         HorizonSavedData.world(server, worldDir);
         HorizonEntities.world(worldDir);
+    }
+
+    /**
+     * The mod world preset Horizon's world creation wrote ({@code horizon:preset}) in the world
+     * at {@code dir} (or a folder above it: a dimension's own), "" for none; null when no
+     * world's settings are there.
+     */
+    private static String worldPreset(java.nio.file.Path dir) {
+        java.nio.file.Path file = null;
+        for (java.nio.file.Path at = dir; at != null && file == null; at = at.getParent()) {
+            java.nio.file.Path settings = at.resolve("data").resolve("minecraft").resolve("world_gen_settings.dat");
+            if (java.nio.file.Files.isRegularFile(settings)) file = settings;
+            if (at.getFileName() != null && at.getFileName().toString().equals("saves")) break;
+        }
+        if (file == null) return null;
+        try {
+            net.minecraft.nbt.CompoundTag root = net.minecraft.nbt.NbtIo.readCompressed(file, net.minecraft.nbt.NbtAccounter.unlimitedHeap());
+            return root.getCompoundOrEmpty("data").getStringOr("horizon:preset", "");
+        } catch (java.io.IOException | RuntimeException e) {
+            Natives.log("Java mods: the world's settings can't be read: " + e);
+            return "";
+        }
     }
 
     public static boolean worldgenStart(String dimension, long seed, boolean structures, String world) {
@@ -662,10 +725,14 @@ public final class HorizonServer {
         // world() makes the stores the tick reads (a second time mid-tick: a
         // ConcurrentModificationException in the tick).
         if (world != null && !world.isEmpty()
-                && !java.nio.file.Paths.get(world).toAbsolutePath().equals(worldDir)) {
+                && !java.nio.file.Paths.get(world).toAbsolutePath().normalize().equals(worldDir)) {
             world(world);
         }
         return HorizonWorldgen.start(dimension, seed, structures);
+    }
+
+    public static int[] worldgenOrigin(String dimension) {
+        return HorizonWorldgen.origin(dimension);
     }
 
     public static long worldgenProto(String dimension, int x, int z) {
