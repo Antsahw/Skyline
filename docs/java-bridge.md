@@ -497,12 +497,22 @@ gets SPIR-V, vertex layouts and uniform lists.
   every model-view matrix zero, nothing drawn).
 - naga sizes a std140 uniform block rounded to 16 (the 40-byte `Fog` block needs 48 bound):
   buffers are made in 16-byte steps and uniform bindings rounded up.
+- Biome tints need the colour maps (`GrassColor.pixels`...: their reload listeners) or every
+  grass and leaf is black; a client level without a `BiomeManager` throws in `getBiome`.
+- Atlas definitions fail ("Unknown element id: minecraft:directory") and item models too
+  ("minecraft:model") until `ClientBootstrap.bootstrap()` has run.
 - `DynamicGpuDataStorageMapped` grows its ring every frame unless `getDynamicUniforms().reset()`
   runs at the frame's end.
-- Xaero's minimap: its session starts in `ClientPacketListener.handleLogin` (the client's join
-  fires the mods' injections there, `HorizonClient.joined`), names its world by
-  `Minecraft.getSingleplayerServer()` (the mirror, set at the join when it is an
-  `IntegratedServer`), follows the world from `Player.tick` HEAD, writes its map chunks from
+- Each player's client has its own `ClientPacketListener` (`LocalPlayer.connection`,
+  `Minecraft.getConnection()`): mods keep per-client state on it. Its join fires the mods'
+  injections into `handleLogin` (no packet) and `handleSetSpawn` (the level's spawn) on it.
+  On a dedicated server it has a `ServerData` ("horizon"), as a multiplayer client's.
+- Xaero's minimap: its session starts in `ClientPacketListener.handleLogin` and lives on the
+  connection (`HudSession.getForPlayer`); the static `XaeroMinimapCore.currentSession` (the
+  last joined) is cleared before each join, or the next join ends the previous player's
+  session. It names its world by `Minecraft.getSingleplayerServer()` (the mirror, set at the
+  join when it is an `IntegratedServer`), or on a dedicated server by the `ServerData` and the
+  spawn from `handleSetSpawn`, follows the world from `Player.tick` HEAD, writes its map chunks from
   `GameRenderer.extract` HEAD and draws in a picture in picture (`MinimapPipRenderer`), reading
   `gameRenderer.guiRenderer`'s projection, `lighting()`, `mainRenderTarget()`, a client level's
   `clockManager()` (`ClientPacketListener.clockManager`) and `Minecraft.getResourceManager()`.
@@ -744,19 +754,24 @@ HUD frames go to every player but each player's
 client tick shares the mods' static state;
 saved data is written every 10 s and when the world saves.
 
-Mods that draw with the GPU (tested 2026-10-31 headless, Xaero's Minimap 26.6.2 alone,
-llvmpipe): Xaero's minimap draws on Horizon's HUD at its place: the map of the land around
-(its own colours from the blocks' models and textures, terrain slopes), its frame, the
-compass marks, the player's arrow and the coordinates under it, all through Xaero's own
-pipelines and shaders on wgpu. The client's block and item models are loaded at the client's
-start (`HorizonClient.models`: `BlockColors.createDefault`, a real `AtlasManager` and a
-`ModelManager` reloaded over the client resources, ~4 s; the real atlases join the headless
-GUI one in `Minecraft.getAtlasManager()`). Left: the compass letters (text drawn on the GPU:
-the headless font has no glyph textures), water and other tints to check against the real
-game; the client tick is ~35 ms with the minimap on llvmpipe (the frame's start ~25: Xaero's
-writer, the HUD ~10: the picture drawn and read back at 10 Hz); dedicated servers' players
-get no minimap world yet (the mirror isn't an `IntegratedServer` there); every player shares
-Xaero's one session.
+Mods that draw with the GPU (tested 2026-11-01 headless, Xaero's Minimap 26.6.2 alone,
+llvmpipe): Xaero's minimap draws on Horizon's HUD at its place: the map of the land around in
+its real colours (block textures, grass and foliage tints from vanilla's colour maps and the
+biomes of Horizon's chunks, water), its frame, the compass letters, the player's arrow, other
+players' dots and the coordinates under it, all through Xaero's own pipelines and shaders on
+wgpu. Each player has their own minimap (single player, LAN guests, a dedicated server's
+players: tested with a host and a LAN guest, and a guest on `--dedicated`).
+
+What the headless client loads for it at its start (`HorizonClient.models`, ~4 s): the client
+bootstrap (`ClientBootstrap`: atlas sources, item model types), `BlockColors.createDefault`, a
+real `AtlasManager` and a `ModelManager` reloaded over the client resources with the colour
+map listeners (`GrassColorReloadListener`...), and a real `FontManager` (`fonts`): the
+client's Font answers with its glyphs from then on (text drawn on the GPU shows). The real
+atlases join the headless GUI one in `Minecraft.getAtlasManager()`. Client levels get a
+`BiomeManager` over their own chunks with the world's seed.
+
+Left: the client tick is ~35 ms with the minimap on llvmpipe (the frame's start ~25: Xaero's
+writer, the HUD ~10: the picture drawn and read back at 10 Hz).
 
 Big pack (tested 2026-10-31, `SCENE=none`, 72 jars, 213 mods with nested ones: the 40-mod
 pack plus REI, Modonomicon, Tech Reborn, Energized Power, Storage Drawers, Extended Drawers,
