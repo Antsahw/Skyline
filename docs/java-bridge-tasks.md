@@ -176,3 +176,9 @@ tests pass; fmt and clippy `-D warnings` clean (horizon-client, horizon-jvm).
   show 4-block holes). Regress case `gridlod` (needs `gridgen*.jar`), unit test
   `grid_mask_keeps_pillars_layers_and_nothing_else`. Test: Grid World with `lodDistance:256`,
   fly up: the grid near, thin layers far, no solid land.
+
+- **worldgen 3, content preparation time** (bridge-worldgen-3): the slow part was port-pack's
+  nearest-shape search (`oracle::own_states`: every mod state against every vanilla state).
+  Now over vanilla's distinct shapes, memoized: 110-jar pack 173 s → 107 s, output identical.
+  Left: the Java oracle's class loading (~65 s). Test: delete `.horizon-cache/java-content`,
+  start with the pack, `grep "content mod(s) made" latest.log`.

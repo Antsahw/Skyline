@@ -31,6 +31,22 @@ struct ShapeIndex {
     exact: BTreeMap<(String, String), String>,
     /// Each state, its outline's bounds and its collision's.
     all: Vec<(String, Option<[f64; 6]>, Option<[f64; 6]>)>,
+    /// `all` with one entry per (outline bounds, collision bounds): the first name of each
+    /// (the nearest search ties by name), a few hundred instead of every state.
+    distinct: Vec<(String, Option<[f64; 6]>, Option<[f64; 6]>)>,
+    /// The nearest vanilla state found for each (outline bounds, collision bounds) asked:
+    /// a mod's blocks share a few shapes over thousands of states.
+    nearest: std::sync::Mutex<std::collections::HashMap<BoundsKey, String>>,
+}
+
+/// A pair of shapes' bounds, bit for bit, as a map key.
+type BoundsKey = (Option<[u64; 6]>, Option<[u64; 6]>);
+
+fn bounds_key(outline: Option<[f64; 6]>, collision: Option<[f64; 6]>) -> BoundsKey {
+    (
+        outline.map(|b| b.map(f64::to_bits)),
+        collision.map(|b| b.map(f64::to_bits)),
+    )
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -473,7 +489,7 @@ impl Facts {
         .into_iter()
         .find(|t| allowed(t) && self.blocks.get(*t).is_some_and(|b| b.properties.is_empty()))?;
         let mut choice = self.choice(block, template, &self.blocks[template], allowed);
-        let ShapeIndex { exact, all } = self.shapes.get_or_init(|| {
+        self.shapes.get_or_init(|| {
             let mut index = ShapeIndex::default();
             for (name, v) in &self.blocks {
                 if !name.starts_with("minecraft:") || !allowed(name) {
@@ -490,8 +506,24 @@ impl Facts {
                         .push((full, bounds(&st.outline), bounds(&st.collision)));
                 }
             }
+            let mut first: BTreeMap<BoundsKey, usize> = BTreeMap::new();
+            for (i, (name, o, c)) in index.all.iter().enumerate() {
+                let at = first.entry(bounds_key(*o, *c)).or_insert(i);
+                if name < &index.all[*at].0 {
+                    *at = i;
+                }
+            }
+            let mut picked: Vec<usize> = first.into_values().collect();
+            picked.sort_unstable();
+            index.distinct = picked.into_iter().map(|i| index.all[i].clone()).collect();
             index
         });
+        let ShapeIndex {
+            exact,
+            distinct,
+            nearest,
+            ..
+        } = self.shapes.get().expect("built above");
         let default = state_key(&block.default);
         let default_light = block.default_state().map_or(0, |s| s.emission);
         let mut near = 0;
@@ -503,12 +535,32 @@ impl Facts {
                 None => {
                     near += 1;
                     let (outline, collision) = (bounds(&st.outline), bounds(&st.collision));
-                    let d = |(_, o, c): &(String, Option<[f64; 6]>, Option<[f64; 6]>)| {
-                        bounds_distance(*c, collision) + bounds_distance(*o, outline) * 0.5
-                    };
-                    all.iter()
-                        .min_by(|a, b| d(a).total_cmp(&d(b)).then(a.0.cmp(&b.0)))
-                        .map(|(n, _, _)| n.clone())?
+                    let key = bounds_key(outline, collision);
+                    let known = nearest
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .get(&key)
+                        .cloned();
+                    match known {
+                        Some(n) => n,
+                        None => {
+                            let d = |(_, o, c): &(String, Option<[f64; 6]>, Option<[f64; 6]>)| {
+                                bounds_distance(*c, collision) + bounds_distance(*o, outline) * 0.5
+                            };
+                            // Over one state per pair of bounds: the same distances, and the
+                            // tie on the name goes to the same state (each entry's name is
+                            // the least of its pair's).
+                            let n = distinct
+                                .iter()
+                                .min_by(|a, b| d(a).total_cmp(&d(b)).then(a.0.cmp(&b.0)))
+                                .map(|(n, _, _)| n.clone())?;
+                            nearest
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner())
+                                .insert(key, n.clone());
+                            n
+                        }
+                    }
                 }
             };
             let properties: Map<String, Value> = pairs(&key)
