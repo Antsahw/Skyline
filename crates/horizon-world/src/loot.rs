@@ -171,7 +171,7 @@ impl Enchantment {
 
 /// Loot tables, items, enchantments and the tags they reference.
 pub struct LootData {
-    tables: Arc<HashMap<String, Value>>,
+    tables: Arc<LootTables>,
     modifiers: HashMap<String, Value>,
     predicates: HashMap<String, Value>,
     items: HashMap<String, ItemFacts>,
@@ -349,11 +349,8 @@ fn overlay_map(overlay: &PackOverlay, kind: &str, out: &mut HashMap<String, Valu
 /// same root and packs hold one map, not a copy each (7 MB). The key holds
 /// the packs' bytes and each root file's size and modification time, so a
 /// table changed on disk is read again rather than taken from a held map.
-pub fn shared_tables(
-    root: &Path,
-    overlay: &PackOverlay,
-) -> io::Result<Arc<HashMap<String, Value>>> {
-    static LOADED: Mutex<Vec<(u64, Weak<HashMap<String, Value>>)>> = Mutex::new(Vec::new());
+pub fn shared_tables(root: &Path, overlay: &PackOverlay) -> io::Result<Arc<LootTables>> {
+    static LOADED: Mutex<Vec<(u64, Weak<LootTables>)>> = Mutex::new(Vec::new());
     let key = {
         use std::hash::{DefaultHasher, Hash, Hasher};
         let mut hasher = DefaultHasher::new();
@@ -374,7 +371,7 @@ pub fn shared_tables(
             .for_each(|file| file.hash(&mut hasher));
         hasher.finish()
     };
-    let held = |loaded: &mut Vec<(u64, Weak<HashMap<String, Value>>)>| {
+    let held = |loaded: &mut Vec<(u64, Weak<LootTables>)>| {
         loaded.retain(|(_, tables)| tables.strong_count() > 0);
         loaded
             .iter()
@@ -384,14 +381,15 @@ pub fn shared_tables(
     if let Some(tables) = held(&mut LOADED.lock().unwrap_or_else(|e| e.into_inner())) {
         return Ok(tables);
     }
-    let mut tables = HashMap::new();
-    load_kind(&root.join("data"), "loot_table", &mut tables)?;
-    overlay_map(overlay, "loot_table", &mut tables);
-    // The mods' hooks run outside the lock.
-    let mut each: Vec<_> = tables.iter_mut().collect();
-    each.sort_by(|a, b| a.0.cmp(b.0));
-    for (id, table) in each {
-        native_loot_table_load(id, table);
+    // Listed, not read: each table is read and parsed, and the mods' hook run on it, when it
+    // is first used ([`LootTables`]).
+    let mut tables = LootTables::default();
+    list_tables(&root.join("data"), &mut tables);
+    for (id, files) in overlay.kind("loot_table") {
+        let bytes: Arc<[u8]> = Arc::from(PackOverlay::top(files));
+        tables
+            .0
+            .insert(id.to_owned(), LazyTable::new(TableSource::Bytes(bytes)));
     }
     let mut loaded = LOADED.lock().unwrap_or_else(|e| e.into_inner());
     // Another thread may have loaded the same tables meanwhile: keep one.
@@ -409,14 +407,125 @@ pub fn shared_tables(
 /// rolls it (NeoForge's `LootTableLoadEvent`, Fabric's `LootTableEvents.MODIFY`). Add pools to
 /// `table["pools"]` or entries to a pool's `entries`, change or replace it (no pools: it drops
 /// nothing; keep its `random_sequence` when replacing it, as a mob's table without one drops
-/// nothing). Called once per table and load, in id order, wherever the tables load: the server,
-/// and a client too, so make the same change each time, and don't load loot tables from here.
-/// Two loads may run at once on two threads. A `/reload` or a world opened with other packs
+/// nothing). Called once per table and load, when the table is first used (a modded pack has
+/// tens of thousands of tables, few of them rolled: they are parsed on demand), wherever the
+/// tables load: the server, and a client too, so make the same change each time, and don't load
+/// loot tables from here. Two loads may run at once on two threads. A `/reload` or a world opened with other packs
 /// may load them again, or keep the tables already loaded from the same files. API
 /// 75.
 #[inline(never)]
 pub fn native_loot_table_load(id: &str, table: &mut Value) {
     let _ = (id, table);
+}
+
+/// Loot tables by id (`minecraft:chests/simple_dungeon`), each read, parsed and passed to
+/// [`native_loot_table_load`] when first asked for: a modded pack's tens of thousands of tables
+/// (Rechiseled: one per block) took about 270 MB as JSON trees, though a session rolls few. A
+/// table that doesn't parse reads as missing. Shared by [`shared_tables`].
+#[derive(Default)]
+pub struct LootTables(HashMap<String, LazyTable>);
+
+struct LazyTable {
+    source: TableSource,
+    value: std::sync::OnceLock<Option<Value>>,
+}
+
+enum TableSource {
+    File(std::path::PathBuf),
+    /// A data pack's file (the overlay's top one).
+    Bytes(Arc<[u8]>),
+    /// Already a value (made in code: tests).
+    Value(Value),
+}
+
+impl LazyTable {
+    fn new(source: TableSource) -> Self {
+        Self {
+            source,
+            value: std::sync::OnceLock::new(),
+        }
+    }
+}
+
+impl LootTables {
+    /// The table `id`, parsed and through the mods' hook the first time.
+    pub fn get(&self, id: &str) -> Option<&Value> {
+        let (key, table) = self.0.get_key_value(id)?;
+        table
+            .value
+            .get_or_init(|| {
+                let mut value = match &table.source {
+                    TableSource::File(path) => {
+                        serde_json::from_slice(&fs::read(path).ok()?).ok()?
+                    }
+                    TableSource::Bytes(bytes) => serde_json::from_slice(bytes).ok()?,
+                    TableSource::Value(value) => value.clone(),
+                };
+                native_loot_table_load(key, &mut value);
+                Some(value)
+            })
+            .as_ref()
+    }
+    /// Whether a table `id` exists (unread).
+    pub fn contains_key(&self, id: &str) -> bool {
+        self.0.contains_key(id)
+    }
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl std::ops::Index<&str> for LootTables {
+    type Output = Value;
+    fn index(&self, id: &str) -> &Value {
+        self.get(id).unwrap_or_else(|| panic!("no loot table {id}"))
+    }
+}
+
+impl FromIterator<(String, Value)> for LootTables {
+    fn from_iter<I: IntoIterator<Item = (String, Value)>>(iter: I) -> Self {
+        Self(
+            iter.into_iter()
+                .map(|(id, value)| (id, LazyTable::new(TableSource::Value(value))))
+                .collect(),
+        )
+    }
+}
+
+/// Every namespace's loot table files under `data` into `out`, unread.
+fn list_tables(data: &Path, out: &mut LootTables) {
+    let Ok(entries) = fs::read_dir(data) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let Some(ns) = entry.file_name().to_str().map(str::to_owned) else {
+            continue;
+        };
+        if entry.path().is_dir() {
+            list_dir(&entry.path().join("loot_table"), &ns, "", out);
+        }
+    }
+}
+
+fn list_dir(dir: &Path, namespace: &str, prefix: &str, out: &mut LootTables) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        if path.is_dir() {
+            list_dir(&path, namespace, &format!("{prefix}{stem}/"), out);
+        } else if path.extension().is_some_and(|e| e == "json") {
+            let id = format!("{namespace}:{prefix}{stem}");
+            out.0.insert(id, LazyTable::new(TableSource::File(path)));
+        }
+    }
 }
 
 fn load_kind(data: &Path, kind: &str, out: &mut HashMap<String, Value>) -> io::Result<()> {
@@ -1734,6 +1843,8 @@ mod namespace_tests {
         let again = shared_tables(&root, &PackOverlay::NONE).unwrap();
         assert!(Arc::ptr_eq(&first, &again));
         assert!(first.contains_key("minecraft:chests/a"));
+        // Read once (tables parse on first use): `first` keeps what it read.
+        assert!(first["minecraft:chests/a"].get("random_sequence").is_none());
         let files = [(
             "loot_table/minecraft:chests/b".to_owned(),
             vec![br#"{"pools": []}"#.to_vec()],
