@@ -361,3 +361,12 @@ tests pass; fmt and clippy `-D warnings` clean (horizon-client, horizon-jvm).
 - **worldgen 5.2, lost blocks** (bridge-worldgen-5): still none. `lost` passed in the full
   regress run and 3 more times (0 of 33–36 lost), and the repro on the 110-jar pack
   (`lost_blocks.sh`, 40 s wait): 0 of 27, no "generated again while loaded". No change.
+
+- **worldgen 5.3, big pack far terrain** (bridge-worldgen-5): two findings. (1) Here (2 cores)
+  far terrain draws nothing for minutes at render distance 12, mods or not: upstream's `Lod`
+  holds meshing on ≤4-core machines while near chunks load; `horizon-ctl status` now shows
+  `lod.near_loading(_parts)`. (2) The real gap: Tectonic's density functions change the land,
+  far terrain still draws vanilla noise (ocean where the land is). A Java-side fix works but is
+  far too slow (0.4 s–80 ms a column), parked on `bridge-worldgen-5-farnoise-wip`; the fix
+  worth doing is Horizon's noise reading the pack's density-function JSON. Screens:
+  `lod-bop5.png` (BOP far terrain fine), `lod-big5c.png` (big pack seam).

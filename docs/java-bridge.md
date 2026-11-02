@@ -1625,6 +1625,28 @@ synthetic classes and our census watch transforms happen: not tried), then ~30 s
 spawn's worldgen (`settle_spawn`, Java's protos with the models' reload beside), ~25 s more
 for the 3×3 spawn chunks.
 
+### Far terrain of the big pack (2026-11-02, bridge-worldgen-5)
+
+110 jars, far terrain 256, headless on 2 cores (llvmpipe):
+- At render distance 12 nothing far is drawn for minutes, with or without mods: on a machine
+  of four cores or fewer `Lod` holds its meshing while the near terrain loads
+  (`set_near_loading`, upstream's), and Java's near worldgen keeps it loading. Not a bridge
+  bug; on a desktop it doesn't hold. Test far terrain here at render distance 5. `horizon-ctl
+  status` now says it: `lod.near_loading` and `near_loading_parts` (generating, decorating,
+  viewing, finishing, lighting, meshing, queued).
+- **Wrong land**: Tectonic (and Lithostitched, Enderscape) ship density functions; Tectonic
+  replaces `minecraft:overworld/continents`, `depth`… So the mods' land isn't vanilla's
+  noise, but far terrain draws Horizon's vanilla noise: ocean where the near chunks are land,
+  a seam at the render distance. Tried (branch `bridge-worldgen-5-farnoise-wip`, not merged):
+  a `vanillaNoise` check (no mod pack with noise settings, density functions or noises) and,
+  when it fails, far columns from Java. Correct land, but far too slow: `getBaseColumn` and
+  `getBaseHeight` build a NoiseChunk a column (~80 ms warm with this pack's routers, then 2–7
+  ms), and the router's `finalDensity` through `RandomState.getSampler(…).sampleValue`
+  (uncached context) was slower still (~0.4 s a column). The way that would work: Horizon's own
+  noise reading the pack's density-function JSON (Tectonic is data only), as it reads
+  vanilla's.
+- Elsewhere far terrain follows the mods (BOP: land, biomes, tops), without trees (known).
+
 ## Working on it
 
 - **The task queue is [java-bridge-tasks.md](java-bridge-tasks.md)**: take your area's next task, follow its loop, add a report there.
