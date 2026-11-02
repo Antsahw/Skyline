@@ -367,3 +367,14 @@ tests pass; fmt and clippy `-D warnings` clean (horizon-client, horizon-jvm).
   breathing (asked each tick) and the trial omen swap don't ask. Outside the area: one line
   per site in beacon.rs, block_entity_anims.rs (conduit), raids.rs, sculk.rs. Test:
   `regress.py --jars <jars> effects2 effects`.
+
+- **mixins 5-3** (`bridge-mixins-5-3`, on top of `bridge-mixins-5-2`), by Claude for
+  iaxivers: falls. Works: a routed fall after a mace hit or wind charge burst cuts its
+  distance at the impact point first (it stayed Rust's before); `FallEvent::Routed` carries
+  the mod block landed on, and `routed_fall_damage` runs upstream's `mod_block_fall` on the
+  mods' damage. `windfall`: a wind charge lifts the player ~6 blocks, the landing goes to the
+  mods and does no damage. Also: around.sh's scenes kill the items their fills dropped (plants
+  picked up into slot 0 made `veinminer`/`dismount` flaky). All 20 mixin cases pass in one run.
+  Doesn't: `mod_block_fall` on the routed path isn't tested at runtime (it needs a native mod
+  block). Outside the area: the client lib's `landing.rs`, `lan_actions.rs` (a few lines).
+  Test: `regress.py --jars <jars> windfall fall`.
