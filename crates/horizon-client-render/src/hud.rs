@@ -3495,7 +3495,8 @@ texture=wide",
         let _ = fs::remove_dir_all(&root);
         assert_eq!(atlas.sprites["mymod:gui/container/machine"].w, 176);
         assert!(atlas.sprites.contains_key("gui/container/furnace"));
-        assert!(!atlas.sprites.contains_key("mymod:block/machine"));
+        // The Java bridge adds mods' block textures too (their block entity renderers draw them).
+        assert!(atlas.sprites.contains_key("mymod:block/machine"));
     }
     #[test]
     fn the_default_textures_keep_a_4096_wide_atlas() {

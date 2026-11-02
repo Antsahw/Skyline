@@ -3342,7 +3342,7 @@ mod tests {
                         || input.ranges.near_finished(x, z, reach))
                         && missing(x, z)
                     {
-                        wanted.push((input.ranges.priority(x, z, input.loading), x, z));
+                        wanted.push((input.ranges.priority(x, z), x, z));
                     }
                 }
             }
@@ -3357,7 +3357,7 @@ mod tests {
                 for dx in -forced_reach..=forced_reach {
                     let (x, z) = (fx + dx, fz + dz);
                     if missing(x, z) {
-                        wanted.push((input.ranges.priority(x, z, input.loading), x, z));
+                        wanted.push((input.ranges.priority(x, z), x, z));
                     }
                 }
             }
