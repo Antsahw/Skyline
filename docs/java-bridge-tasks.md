@@ -537,3 +537,20 @@ tests pass; fmt and clippy `-D warnings` clean (horizon-client, horizon-jvm).
   players, so a filtered search can briefly come out with another player's switch; the
   craftable search is very slow here (30+ s, 2 cores), so the guest's filtered list may lag.
   Test: regress `rei-lan` (new, LAN), `rei reiscreen modsettings` pass.
+
+- **mixins 6-1** (`bridge-mixins-6-1`), by Claude for iaxivers: the rest of our hooks onto
+  upstream's hook points. Works: deaths (`java_player_died` right before `native_player_died`,
+  one call instead of three notes; `death`: eventsmod's DeathMixin hears a lava death by its
+  message and a fall death by the tracker), placing (`java_block_event` right before
+  `native_place_block`). Commands and `java_attack_mob` were already beside the native
+  decision. Entity attack/use at the packet (Java's own entities) has no fit: a proposed hook
+  point `native_unknown_entity_interact` is written up in java-bridge.md for Ludovic. Test:
+  `regress.py --jars <jars> death punch hurt`; all 18 older mixin cases still pass.
+- **mixins 6-2** (same branch, same commit), by Claude for iaxivers: the turtle helmet's
+  water breathing and Bad Omen → Trial Omen ask the mods. Works: `effects3` (new scene
+  `omen`): mixinmod refuses the helmet's water breathing and the Trial Omen; the spawner
+  still turns ominous and takes the Bad Omen. Found and fixed on the way: on a server thread
+  the swap never reached the guest (it changed the serving game's own effects, by the world
+  owner's UUID). Unit test `a_refused_trial_omen_still_takes_the_bad_omen`. Outside the
+  area: `trial_spawner.rs`, `potions.rs` (a few lines). Test: `regress.py --jars <jars>
+  effects3 effects2 effects`.
