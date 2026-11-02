@@ -739,3 +739,29 @@ out (the bridge adds them since round 2; it failed on java-bridge too). Not run 
   per-player state errors). Xaero's Minimap already works there (regress `server`). Test on
   the PC: `python3 tools/java_bridge/regress.py --jars ~/hz-test/mods-java maps-server`, then
   look at /tmp/hz-regress/maps-server/server-*.png.
+
+- **gpu r7, tasks 1-3** (`bridge-gpu-9`, on `java-bridge` bcd6589), by Claude for iaxivers.
+  Java and regress.py only (no Rust change). Tested headless here (llvmpipe), screenshots.
+  - Task 1, Legendary Tooltips' 3D model: works for tools, weapons and other items (an iron
+    sword turns in its box). Needed: the client's item model resolver over the mirror's
+    models, the GUI's lights set from the start (pipelines reading `Lighting` drew nothing),
+    `Minecraft.renderFrame` injections run each client tick. Armour doesn't: Iceberg draws it
+    on an armour stand through the entity renderers, whose context has no equipment renderer
+    (entities area: `HorizonEntityRender.context`). Regress `tooltips` (stronger).
+  - Task 2, World Map without the models: works. Models are now baked on first use when they
+    don't fit (`HorizonLazyModels`, two mixins) instead of skipped: there's always a
+    `ModelManager`; Xaero's maps baked ~1k of 36k states. Regress `worldmap-lazy`
+    (`HORIZON_JAVA_MODELS=off`). Not tried on the big pack here (it doesn't fit this sandbox).
+  - Task 3, more GPU mods: one of three. Scanned the 300 most downloaded client-required 26.3
+    Fabric mods again (44 reference renderpearl drawing; most draw the world, which Horizon
+    draws itself). Pufferfish's Skills works: K opens its tree, item icons (oversized items on
+    the GPU), lines at their angle. Not drawn: its category background; toasts. Its Default
+    Skill Trees pack needs Pufferfish's Attributes (no 26.3 build). Regress `skills`. Left for
+    next time from the scan: Cape Provider (its player picture in picture), Resourcify (pack
+    browser: needs a way into vanilla's pack screen), Puzzles Lib's pictures in picture, TSL
+    Entity Status, Spell Engine.
+  Outside the area (small): `HorizonLoop` (messages carried by their codecs, client joined
+  before its first message), `HorizonHooks` (`renderFrame` in the client methods),
+  `HorizonClient` (toast manager). Regress `skills pot terminal computer rei reiscreen hud
+  tooltips worldmap-lazy maps xaeroplus` pass. Test: build, then
+  `regress.py --jars ~/hz-test/mods-java tooltips worldmap-lazy skills`.
