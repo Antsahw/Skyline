@@ -346,3 +346,16 @@ tests pass; fmt and clippy `-D warnings` clean (horizon-client, horizon-jvm).
   per player, unlike client 1 said): its copied config stopped the overlay. Test:
   `MODS=<REI+TR+Jade...> tools/java_bridge/server_test.sh '$G key e tap; sleep 6'` (new);
   regress `reiscreen` (new), `rei hud join modsettings failmsg` pass.
+
+- **client r5-1, run from a normal install** (`bridge-client-4`). Works (headless, screenshot):
+  a launcher-like install (binary, research-lock.json, the preparation's `.local/minecraft` and
+  `.local/horizon-client`), the game started as the launcher starts it (game folder,
+  `--resources` only, no HORIZON_ROOT/JAVA_HOME/Java on the PATH): the bridge finds the install
+  above `--resources`, fetches Fabric's jars, downloads Mojang's Java 25 (147 files, 26 s) into
+  the launcher's runtime folder, and Farmer's Delight's blocks show. The launcher needs no
+  change (it already starts the game that way; `mods-java/` in the game folder). Touched
+  outside the area: `horizon-jvm` (runtime.rs, the download agent, find_java_home) and
+  `Cargo.lock` (rustls/webpki-roots edges, no new crates). Doesn't: release builds with
+  `java-mods` (CI needs a prepared game for the platform mod); no Mods page for `mods-java/`
+  in the launcher. Test: `MODS=~/hz-test/mods-java tools/java_bridge/install_test.sh 'sleep 3'`;
+  regress `pot join rei reiscreen` pass.
