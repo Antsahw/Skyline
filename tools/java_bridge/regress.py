@@ -365,6 +365,21 @@ CASES = {
                '$C state | python3 -c "import json,sys;print(sorted(e[\'id\'] for e in json.load(sys.stdin)[\'player\'][\'effects\']))" > $S/effects.txt'],
         checks=[check_file("effects.txt", r"^\['speed'\]$", "speed, no poison")],
     ),
+    "effects2": dict(
+        about="Effects Horizon adds itself ask LivingEntity.addEffect's head (mixinmod refuses haste and Bad Omen): a beacon, an ominous bottle",
+        fixtures=["mixinmod"], scene="beacon",
+        steps=['$C command "setblock $(cat $S/beacon.pos) minecraft:beacon{primary_effect:\\"minecraft:haste\\"}" >/dev/null; sleep 6; '
+               '$C state | python3 -c "import json,sys;print(sorted(e[\'id\'] for e in json.load(sys.stdin)[\'player\'][\'effects\']))" > $S/haste.txt',
+               '$C command "setblock $(cat $S/beacon.pos) minecraft:beacon{primary_effect:\\"minecraft:speed\\"}" >/dev/null; sleep 6; '
+               '$C state | python3 -c "import json,sys;print(sorted(e[\'id\'] for e in json.load(sys.stdin)[\'player\'][\'effects\']))" > $S/speed.txt',
+               '$C command "item replace entity @s weapon.mainhand with minecraft:ominous_bottle" >/dev/null; sleep 0.5; '
+               '$C mouse right down >/dev/null; sleep 2.5; $C mouse right up >/dev/null; sleep 1; '
+               '$C state | python3 -c "import json,sys;print(sorted(e[\'id\'] for e in json.load(sys.stdin)[\'player\'][\'effects\']))" > $S/omen.txt; $C inventory > $S/bottle.json'],
+        checks=[check_file("haste.txt", r"^\[\]$", "no haste from the beacon"),
+                check_file("speed.txt", r"'speed'", "speed from the beacon (the control)"),
+                check_file("omen.txt", r"\A(?!.*bad_omen)", "no Bad Omen from the bottle"),
+                check_file("bottle.json", r'"held":null|"held":\{"count":0', "the bottle drunk")],
+    ),
     "slot": dict(
         about="Inventory.setSelectedSlot's head (mixinmod: not the ninth): the slot stays",
         fixtures=["mixinmod"], scene="none",

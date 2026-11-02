@@ -390,7 +390,9 @@ it does nothing unless Horizon fires it or hands the action to the mirror.
     in-frame single player isn't routed.
   - A player's new effect (`Game::add_player_effect`: potions, food, totems, `/effect`): the
     heads of `LivingEntity.addEffect` with the instance; a cancel drops it. Beacons,
-    conduits, raids' Bad Omen and the Warden's darkness add theirs directly (not asked).
+    conduits, raids' Hero of the Village, the ominous bottle's Bad Omen and the Warden's
+    darkness ask too (`Game::add_effect_asking_mods`), only when a mod hooks `addEffect`
+    (routed action `effects`). The turtle helmet's water breathing (each tick) doesn't ask.
   - Precipitation (`ServerLevel.tickPrecipitation`), when a mod patches the biomes' weather
     (`Biome.shouldSnow`, `shouldFreeze`, `getPrecipitationAt`...: Serene Seasons): the game
     keeps each column's top (`GameLevel::precipitation` → `java_precipitation`) and, at the

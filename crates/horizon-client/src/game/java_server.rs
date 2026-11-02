@@ -264,6 +264,22 @@ pub(super) fn java_hurt(hurting: &horizon_client::health::Hurting<'_>, amount: &
     }
 }
 
+impl Game<'_> {
+    /// Adds `effect` to the player acting now unless a Java mod's head of
+    /// `LivingEntity.addEffect` refuses it: the effects Horizon adds itself (beacons, conduits,
+    /// raids' Hero of the Village, Bad Omen, the Warden's darkness). Whether it was added.
+    pub(super) fn add_effect_asking_mods(
+        &mut self,
+        effect: horizon_client::effects::EffectInstance,
+    ) -> bool {
+        if self.java_add_effect(&effect) {
+            return false;
+        }
+        self.potions.effects.add(effect);
+        true
+    }
+}
+
 #[cfg(not(feature = "java-mods"))]
 impl Game<'_> {
     pub(super) fn tick_java_server(&mut self) {}
@@ -2960,7 +2976,8 @@ mod run {
         ) -> bool {
             #[cfg(feature = "java-mods")]
             {
-                if !java_mods_on() || !self.hears_players() {
+                // Only when a mod hooks addEffect (beacons and conduits ask every few seconds).
+                if !java_mods_on() || !self.hears_players() || !super::java_routed("effects") {
                     return false;
                 }
                 let uuid = self

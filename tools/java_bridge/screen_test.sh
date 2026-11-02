@@ -165,6 +165,12 @@ case "$SCENE" in
     'q "setblock $((X+3)) $Y $Z minecraft:poppy"' 'q "setblock $((X+3)) $Y $((Z+2)) minecraft:dandelion"' \
     'echo "$((X+3)) $Y $Z" > "$S/poppy.pos"' 'echo "$((X+3)) $Y $((Z+2))" > "$S/dandelion.pos"' \
     '$C look-at-block $((X+3)) $Y $Z west >/dev/null' ;;
+  # A one-level beacon three blocks east (iron 3x3 under it, open sky above), survival; the
+  # beacon's position in $S/beacon.pos (its power is the steps').
+  beacon) "$R/tools/java_bridge/around.sh" \
+    'q "gamemode survival"' 'q "fill $((X+2)) $Y $((Z-1)) $((X+4)) $Y $((Z+1)) minecraft:iron_block"' \
+    'q "fill $((X+3)) $((Y+1)) $Z $((X+3)) 319 $Z minecraft:air"' \
+    'echo "$((X+3)) $((Y+1)) $Z" > "$S/beacon.pos"' '$C look-at $(p $X+3.5) $(p $Y+1.5) $(p $Z+0.5) >/dev/null' ;;
   none) ;;
 esac
 # For steps: aim FILE looks at the block whose "x y z" FILE holds (a small one too: a flower),

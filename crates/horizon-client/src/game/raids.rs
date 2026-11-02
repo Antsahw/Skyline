@@ -637,7 +637,7 @@ impl Game<'_> {
                     let mut effect =
                         EffectInstance::new("hero_of_the_village", raid::HERO_DURATION, amplifier);
                     effect.visible = false;
-                    g.potions.effects.add(effect);
+                    g.add_effect_asking_mods(effect);
                     g.stats.custom("raid_win", 1);
                     g.trigger_player("minecraft:hero_of_the_village");
                 }
@@ -1381,10 +1381,10 @@ impl Game<'_> {
             horizon_client::effects::EffectInstance::new("bad_omen", 120_000, i32::from(amplifier));
         effect.visible = false;
         let new = self.potions.effects.get("bad_omen").is_none();
-        self.potions.effects.add(effect);
+        let added = self.add_effect_asking_mods(effect);
         let eye = self.eye_position().unwrap_or_default();
         // MobEffect.onEffectAdded: Bad Omen's sound when it is new.
-        if new {
+        if new && added {
             self.audio
                 .play("minecraft:event.mob_effect.bad_omen", Some(eye), 1.0, 1.0);
         }
