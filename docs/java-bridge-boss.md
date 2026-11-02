@@ -89,6 +89,10 @@ pasting their final message here; patches come as attachments.
 
 ## Test jars
 
+Always in a merge round's run: the `server` case (dedicated server) and the LAN cases
+(`maps-lan`, `rei-lan`, `lan_e2e.py --java-mods … --check javamount`). Batch 4 broke dedicated
+servers and the headless set didn't see it.
+
 Not in the repo. `regress.py --jars <folder>` picks jars by name (`MODS` in regress.py). A boss
 chat's container starts empty: download the Modrinth jars the cases need (list in
 java-bridge.md), or run only the fixture cases (keys, entity, attack, ride, slot, mixins2).
@@ -101,17 +105,17 @@ Upstream removed WebAssembly code mods (our `server_mods.rs` is `game/java_serve
 moved rendering into `crates/horizon-client-render`. Sync every day or two (a one-off chat, or
 the boss when it's small); keep hooks in shared Horizon files to one-line calls into our files.
 
-## Status (2026-11-01, merge-batch4)
+## Status (2026-11-02, merge-batch5)
 
-`java-bridge` has upstream main (6f54a627d) and every chat's round 4. Works headless: everything
-of before, plus (round 4) hostile mod mobs, riding mod mobs, GeckoLib animation, map mods with
-Trinkets and per player, Diorama, 17 tech mods (BuildCraft, EE, RFTools Power...), mod settings
-per LAN player, in-game mod failure messages, dedicated servers' mod screens/REI/Jade, Better
-Combat sweeps, mods judging fall damage and effects, faster startup (110 jars: 193 → 120 s) and
-content builds (173 → 107 s), much less memory while loading.
+Round 5 merged. New since batch 4: runs from a normal install (fetches Java 25 itself),
+dedicated servers work again (batch 4 had broken them: always run the `server` case),
+REI and JourneyMap settings per player, XaeroPlus and MiniHUD, riders seen sitting, horse-style
+jumps, mod mobs hunting Horizon's mobs, mod mob drawing 42% cheaper, three hooks on upstream's
+hook points, beacons/conduits/Warden/mace falls asking the mods, lazy loot again, the full
+pack's world at 3.76 GB (was 5.2), Java's classes kept between runs.
 
-Not yet: anything on real hardware; 157 jars in 8 GB (memory); dedicated servers' other client
-mods; running from a normal install; Windows.
+Not yet: the user's PC run of the full pack; release builds and the launcher page; Windows;
+Horizon's mobs reacting to mod mobs; far terrain with Tectonic.
 
 ## Next big steps
 

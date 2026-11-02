@@ -30,56 +30,47 @@ Never write as the user; mark what you post (CLAUDE.md). Never run mod jars the 
 
 ## Queue (in order)
 
-Round 5 (after merge-batch4, 2026-11-01): `java-bridge` now has upstream main (6f54a627d).
-Start from it; the old `server_mods.rs` is `game/java_server.rs`, and our hooks in Horizon's
-own files stay one-line calls into our files. Upstream's code wins where both built the same.
+Round 6 (after merge-batch5, 2026-11-02). Start from the newest `java-bridge`. New for every
+area: a case that fails only in a full regress run is a bug in the case (shared state, timing,
+terrain): make it stable when you meet one (`mount`, `preset`, `veinminer` were).
 
 ### entities
-1. Riding: other players see the rider sitting (Horizon's tracker learns the mod's vehicle),
-   horse-style charged jumps. (`--in-frame` is deprecated upstream: skip it.)
-2. Mod mobs and Horizon's own mobs seeing each other (targets, fleeing, attacks both ways).
-3. A bigger mob pack (the 137-jar pack's mobs plus 10 more mob mods): measure, cut the top three.
-4. The `mount` case is flaky in a full run: the scene's ground slopes, so "drove" and "off"
-   compare against the wrong floor. Give it a flat floor (it passes alone).
+1. Horizon's own mobs see mod mobs: target, flee, and strike back when one hurts them.
+2. The rider's HUD shows the mod mob's hearts (as a vanilla mount's).
+3. The `preset` case flakes in a full run (an oak log where One Block's grass should be): find why.
 
 ### worldgen
-1. Startup: the ~10 s of Fabric biome changes calling TerraBlender; the 65 s of class loading in
-   the content build (cache what can be cached between runs).
-2. Keep the new `lost` case running; fix if it ever shows.
-3. Mods' worldgen in far terrain (LOD) for the big pack: what's missing or slow.
+1. Far terrain for packs that change the land's shape (Tectonic): Horizon's own noise reading
+   the pack's worldgen files (density functions, noise settings), not a Java call per column.
+2. The quit through Java (class archive): check quitting from a world, the title screen, a
+   dedicated server's stop and a crash all still end the process, and how long each takes.
 
 ### pack
-1. Memory, the big rewrites: block models (+665 MB at 577k states), block facts (+512 MB), the
-   ~1 KB per state in the registry. Goal: the 157-jar pack in 8 GB.
-2. Lazy loot tables again, on top of upstream's design (its shared tables, pack overlays and
-   the `native_loot_table_load` hook: parse on first use, the hook run then). pack-5's version
-   was dropped in the merge (about 270 MB at 577k states).
-3. Skyblock: a new player now also waits for chunks a function forced (boss fix in batch 4,
-   `HorizonFunctions.WAITING_CHUNKS`), but the island still lands ~1 s after the join: hold
-   until the function that waited has run again.
+1. The full pack with Java in 8 GB: the JVM's own share (heap, metaspace, class data); what
+   Fabric and the mirror keep that Horizon already has.
+2. Grow toward SkyFactory: more tech, storage and automation mods; fix what breaks.
 
 ### client
-1. Run from a normal install: the bridge jars and Fabric's libraries shipped or fetched, a Java
-   25 runtime fetched, no `.local/` needed. Then: the launcher can start it.
-2. Dedicated server: the rest of the client mods for its players (maps, HUD mods).
-3. REI's settings per player (copying them stopped REI drawing).
+1. Release builds with Java mods (the `java-mods` feature in the launcher's builds, opt-in), and
+   the launcher's page for the Java mods folder (add, remove, see which failed).
+2. REI's search for all players at once: each player's filter, and its speed on few cores.
+3. Dedicated server: JourneyMap, VoxelMap and Xaero's World Map for its players.
 
 ### mixins
-1. Move our hooks onto upstream's native-mod hook points where one fits (the list in
-   java-bridge.md "Hooks in Horizon's shared files": random tick, hurt, block break/place,
-   clicks, commands, deaths). One at a time, a regress case each.
-2. Effects from beacons, conduits, raids and the Warden ask the mods too.
-3. Falls: maces and wind charges routed; the routed fall's block contact (upstream's
-   `mod_block_fall`). (`--in-frame` is deprecated upstream: skip it.)
+1. The rest of our hooks onto upstream's hook points where they fit: entity attack and use,
+   deaths, commands, block placing (add a hook point upstream-style where none fits, kept
+   small, as a proposal for Ludovic).
+2. The turtle helmet's water breathing and Bad Omen → Trial Omen asking the mods.
+3. The next "Rust does" lines from `mixin-table.tsv` in the big pack, most-patched first.
 
 ### gpu
-1. XaeroPlus and MiniHUD (with MaLiLib).
-2. JourneyMap's waypoints and settings per player; VoxelMap's thread of a player who left.
-3. Diorama's water colours (compare with real Fabric on the user's PC).
+1. Other GPU mods: find 5 more popular 26.3 Fabric client mods that draw with the GPU and get
+   them working.
+2. Map mods on a dedicated server (with client 3).
 
-### one-off
-- Windows: build and run the bridge on Windows (paths, the JVM's DLL, the launcher).
-- NeoForge for 26.3: research only (the loader, its events, what the mirror needs).
+### upstream sync (one-off chat)
+1. Sync with upstream main every day or two (`bridge-upstream-sync-N`), regress, report.
+2. Windows: build and run the bridge on Windows.
 
 ## Reports
 
