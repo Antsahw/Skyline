@@ -159,12 +159,12 @@ public final class HorizonHooks {
             }
         }
     }
-    private static final java.util.Set<String> CLIENT_METHODS = java.util.Set.of("runTick", "tick");
+    private static final java.util.Set<String> CLIENT_METHODS = java.util.Set.of("runTick", "tick", "renderFrame");
     private static final List<ClientHook> CLIENT_HOOKS = new ArrayList<>();
     private static final Map<String, List<Method>> CLIENT_RESOLVED = new ConcurrentHashMap<>();
 
     /**
-     * The mods' injections into Minecraft.runTick and Minecraft.tick, from their client Mixin
+     * The mods' injections into Minecraft.runTick, tick and renderFrame, from their client Mixin
      * configs too: every @Inject (at any point: an INVOKE inside a frame is once a frame) and
      * every @ModifyArg there. The headless client runs no frame, so fireClient calls them.
      */
@@ -505,7 +505,7 @@ public final class HorizonHooks {
                 boolean fits = h.modifyArg()
                         ? params.length == 1 && params[0] == boolean.class
                         // runTick's handlers may take its boolean or leave it out, as Mixin allows.
-                        : method.equals("runTick")
+                        : method.equals("runTick") || method.equals("renderFrame")
                                 ? (params.length == 2 && params[0] == boolean.class && CallbackInfo.class.isAssignableFrom(params[1]))
                                         || (params.length == 1 && CallbackInfo.class.isAssignableFrom(params[0]))
                                 // The constructor's: its GameConfig may be taken (null here).

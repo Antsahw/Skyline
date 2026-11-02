@@ -1592,6 +1592,10 @@ public final class HorizonClient {
         try {
             reload.done().join();
             set(Minecraft.class, minecraft, "modelManager", models);
+            // The client's item models over them (Iceberg's 3D item in Legendary Tooltips:
+            // getItemModelResolver().updateForTopItem). With a model manager the resolver is
+            // vanilla's (ItemModelResolverMixin keeps items only for resolvers without one).
+            set(Minecraft.class, minecraft, "itemModelResolver", new net.minecraft.client.renderer.item.ItemModelResolver(models));
             Class<?> owner = net.minecraft.client.resources.model.sprite.AtlasManager.class;
             set(owner, minecraft.getAtlasManager(), "spriteLookup", field(owner, atlases, "spriteLookup"));
             fonts(atlases, skins);
@@ -1659,7 +1663,13 @@ public final class HorizonClient {
         // size at the window's scale: drawing aimed at the screen lands there, unseen).
         Class<?> owner = net.minecraft.client.renderer.GameRenderer.class;
         ThrowingRunnable[] parts = {
-            () -> set(owner, gameRenderer, "lighting", new com.mojang.blaze3d.platform.Lighting()),
+            () -> {
+                // The GUI's lights from the start (vanilla's frame sets them; Iceberg's 3D item
+                // draws in them, its pipeline's Lighting unbound otherwise: no draw).
+                var lighting = new com.mojang.blaze3d.platform.Lighting();
+                lighting.setupFor(com.mojang.blaze3d.platform.Lighting.Entry.ITEMS_3D);
+                set(owner, gameRenderer, "lighting", lighting);
+            },
             () -> set(owner, gameRenderer, "overlayTexture", new net.minecraft.client.renderer.texture.OverlayTexture()),
             () -> set(owner, gameRenderer, "lightmap", new net.minecraft.client.renderer.Lightmap()),
             () -> {
@@ -1669,6 +1679,13 @@ public final class HorizonClient {
             },
             () -> set(owner, gameRenderer, "mainRenderTarget", new com.mojang.blaze3d.pipeline.TextureTarget("main", width * 3, height * 3,
                     com.mojang.renderpearl.api.GpuFormat.RGBA8_UNORM, com.mojang.renderpearl.api.GpuFormat.D32_FLOAT)),
+            // The Globals uniform (GameRenderer.render updates it each frame): pipelines on the
+            // GLOBALS layout (item_cutout: Iceberg's 3D item) skipped their draws without it.
+            () -> {
+                var globals = new net.minecraft.client.renderer.GlobalSettingsUniform();
+                globals.update(width * 3, height * 3, 1.0, 0L, 0.0F, 0, net.minecraft.world.phys.Vec3.ZERO, false);
+                set(owner, gameRenderer, "globalSettingsUniform", globals);
+            },
         };
         for (var part : parts) {
             try {
@@ -1933,6 +1950,10 @@ public final class HorizonClient {
     private static void tickOnce() {
         HorizonHooks.fireClient(minecraft, "runTick");
         HorizonHooks.fireClient(minecraft, "tick");
+        // Once a frame in the game (the headless client's frames are its ticks, getDeltaTracker
+        // whole ticks): Iceberg's render tick (Legendary Tooltips' turning 3D item, its targets'
+        // pool given back).
+        HorizonHooks.fireClient(minecraft, "renderFrame");
         HorizonServer.fireEach("ClientTickEvents.START_CLIENT_TICK",
                 net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents.START_CLIENT_TICK, l -> l.onStartTick(minecraft));
         // The client player's tick (the client level ticks it: Player.tick), as far as mods hook

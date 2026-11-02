@@ -630,11 +630,15 @@ CASES = {
     ),
     "tooltips": dict(
         about="Legendary Tooltips (Iceberg, Prism) over a mod screen: tooltips draw through vanilla's path, where its mixins run (centred title, the border in the item's rarity colour)",
-        mods=["legendarytooltips", "iceberg", "prism-lib", "fd"], scene="pot",
-        steps=['$C click-at 141 187; sleep 1; $C click-at 141 187; sleep 3'],
-        checks=[check_log(r"Java screens' tooltips draw as vanilla's", "tooltips take vanilla's path")],
-        forbid=[r"A mod failed in", r"iceberg\S*: java"],
-        look="the pot's screen, Raw Beef's tooltip: title centred, a white border (common rarity), not vanilla's purple",
+        mods=["legendarytooltips", "iceberg", "prism-lib", "fd"], scene="pot", env={"HORIZON_JAVA_DEBUG": "gpu"},
+        steps=['$C click-at 141 187; sleep 1; $C click-at 141 187; sleep 3',
+               # An iron sword's tooltip: Iceberg draws its turning 3D model on the headless GPU.
+               '$C command "give @s minecraft:iron_sword"; sleep 2; $C click-at 177 187; sleep 1; $C click-at 177 187; sleep 3'],
+        checks=[check_log(r"Java screens' tooltips draw as vanilla's", "tooltips take vanilla's path"),
+                check_log(r"gpu: horizon:dynamic/gpu\d+ 96x96, [1-9]\d* pixels not transparent", "the sword's 3D model drew (Iceberg's target)"),
+                check_log(r"mod injection\(s\) run each client renderFrame", "Iceberg's render tick runs (the model turns)")],
+        forbid=[r"A mod failed in", r"iceberg\S*: java", r"a draw skipped: \S+: uniform \d+ unbound"],
+        look="pot-0: Raw Beef's tooltip: title centred, a white border (common rarity), not vanilla's purple; pot-1: the Iron Sword's tooltip with the sword's 3D model in its box",
     ),
     "maps-lan": dict(
         about="JourneyMap and VoxelMap per player: a host and a LAN guest 40 blocks east, each map their own",

@@ -378,7 +378,7 @@ public final class HorizonGpu implements GpuDeviceBackend {
         long id = Gpu.pipeline(d.toString(),
                 vertex == null ? 0 : MemoryUtil.memAddress(vertex), vertex == null ? 0 : vertex.remaining(),
                 MemoryUtil.memAddress(fragment), fragment.remaining());
-        if (DEBUG) Natives.log("gpu: pipeline " + create.name() + " -> " + id);
+        if (DEBUG) Natives.log("gpu: pipeline " + create.name() + " -> " + id + " " + uniforms);
         if (id == 0) return BackendRenderPipeline.Pending.NULL;
         Pipeline pipeline = new Pipeline(id, create.name());
         return () -> pipeline;
