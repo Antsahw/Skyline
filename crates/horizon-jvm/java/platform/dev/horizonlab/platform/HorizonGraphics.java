@@ -267,6 +267,7 @@ public final class HorizonGraphics extends GuiGraphicsExtractor {
     /** While a picture in picture draws: where its blit is kept. */
     private Object[] recording;
     private static long debugImages;
+    private static final java.util.Set<String> DEBUG_NAMES = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     /** HORIZON_JAVA_DEBUG=gpu: a GPU texture blitted is saved as /tmp/horizon-gpu-N.png now and then. */
     private static void debugImage(String name, int w, int h, byte[] rgba) {
@@ -274,23 +275,32 @@ public final class HorizonGraphics extends GuiGraphicsExtractor {
             Natives.log("gpu: " + name + " has no pixels");
             return;
         }
-        if (debugImages++ % 100 != 0) return;
-        int opaque = 0;
-        var image = new java.awt.image.BufferedImage(w, h, java.awt.image.BufferedImage.TYPE_INT_ARGB);
-        for (int y = 0; y < h; y++) {
-            for (int x = 0; x < w; x++) {
-                int i = (y * w + x) * 4;
-                int a = rgba[i + 3] & 255;
-                if (a != 0) opaque++;
-                image.setRGB(x, y, (a << 24) | ((rgba[i] & 255) << 16) | ((rgba[i + 1] & 255) << 8) | (rgba[i + 2] & 255));
+        // Every 100th image is saved and counted; a target's first that isn't all black is
+        // counted too (a check can name it).
+        boolean save = debugImages++ % 100 == 0;
+        if (!save && DEBUG_NAMES.contains(name)) return;
+        int opaque = 0, lit = 0;
+        for (int i = 0; i < w * h * 4; i += 4) {
+            if (rgba[i + 3] == 0) continue;
+            opaque++;
+            if ((rgba[i] | rgba[i + 1] | rgba[i + 2]) != 0) lit++;
+        }
+        if (!save && (lit == 0 || !DEBUG_NAMES.add(name))) return;
+        if (save) {
+            var image = new java.awt.image.BufferedImage(w, h, java.awt.image.BufferedImage.TYPE_INT_ARGB);
+            for (int y = 0; y < h; y++) {
+                for (int x = 0; x < w; x++) {
+                    int i = (y * w + x) * 4;
+                    image.setRGB(x, y, ((rgba[i + 3] & 255) << 24) | ((rgba[i] & 255) << 16) | ((rgba[i + 1] & 255) << 8) | (rgba[i + 2] & 255));
+                }
+            }
+            try {
+                javax.imageio.ImageIO.write(image, "png", new java.io.File("/tmp/horizon-gpu-" + (debugImages / 100) + ".png"));
+            } catch (java.io.IOException e) {
+                Natives.log("gpu: " + e);
             }
         }
-        try {
-            javax.imageio.ImageIO.write(image, "png", new java.io.File("/tmp/horizon-gpu-" + (debugImages / 100) + ".png"));
-        } catch (java.io.IOException e) {
-            Natives.log("gpu: " + e);
-        }
-        Natives.log("gpu: " + name + " " + w + "x" + h + ", " + opaque + " pixels not transparent");
+        Natives.log("gpu: " + name + " " + w + "x" + h + ", " + opaque + " pixels not transparent, " + lit + " not black");
     }
     private static final java.util.Map<String, Integer> PIP_FAILURES = new java.util.concurrent.ConcurrentHashMap<>();
     private static final java.util.Map<Class<?>, net.minecraft.client.gui.render.pip.PictureInPictureRenderer<?>> PIP_RENDERERS =
@@ -358,34 +368,13 @@ public final class HorizonGraphics extends GuiGraphicsExtractor {
         if (DEBUG_GPU) Natives.log("gpu: a blit of " + name + " " + view.getWidth(0) + "x" + view.getHeight(0) + " at " + x0 + "," + y0 + " " + x1 + "," + y1
                 + " uv " + u0 + "," + v0 + " " + u1 + "," + v1 + (modsOnly && !drawnByModNow() ? " (not a mod's)" : ""));
         if (read && imagesSent != null && (!modsOnly || drawnByModNow())) {
-            // A big target (a full-screen map: the window's size) is read at most PIP_INTERVAL
-            // apart for each receiver, and sent shrunk to the window's largest image (512 px).
-            int w = view.getWidth(0), h = view.getHeight(0);
-            int shrink = Math.max(1, (Math.max(w, h) + MAX_IMAGE - 1) / MAX_IMAGE);
-            Object key = java.util.List.of(name, System.identityHashCode(imagesSent));
-            long now = System.nanoTime();
-            Long last = shrink > 1 ? BIG_LAST.get(key) : null;
-            byte[] rgba = last != null && now - last < PIP_INTERVAL ? null : HorizonGpu.pixels(view);
-            if (rgba != null && shrink > 1) {
-                BIG_LAST.put(key, now);
-                rgba = shrink(rgba, w, h, shrink);
-                w /= shrink;
-                h /= shrink;
-            }
-            if (DEBUG_GPU) debugImage(name, w, h, rgba);
-            if (rgba != null) {
-                int version = java.util.Arrays.hashCode(rgba);
-                if (!Integer.valueOf(version).equals(imagesSent.get(name))) {
-                    imagesSent.put(name, version);
-                    var image = new JsonObject();
-                    image.addProperty("op", "image");
-                    image.addProperty("name", name);
-                    image.addProperty("width", w);
-                    image.addProperty("height", h);
-                    image.addProperty("rgba", java.util.Base64.getEncoder().encodeToString(rgba));
-                    ops.add(image);
-                }
-            }
+            // Its pixels are read when the frame's ops are taken, not now: a mod may still draw
+            // into the target (or clear it first: XaeroPlus clears the World Map's target as
+            // it adds its GUI element, and draws the map after), as the real game's GUI draws
+            // its elements after the whole screen is extracted.
+            var image = new JsonObject();
+            ops.add(image);
+            pendingReads.add(new Object[]{image, view, name});
         }
         pose().pushMatrix();
         pose().identity();
@@ -403,6 +392,50 @@ public final class HorizonGraphics extends GuiGraphicsExtractor {
             if (color != -1) o.addProperty("color", color);
         } finally {
             pose().popMatrix();
+        }
+    }
+
+    /** Image ops waiting for their GPU texture's pixels: {placeholder, view, name}. */
+    private final java.util.List<Object[]> pendingReads = new java.util.ArrayList<>();
+
+    /** Fills the image ops of the GPU textures blitted this frame, or drops them (no change). */
+    private void readPending() {
+        var drop = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<JsonObject, Boolean>());
+        for (Object[] p : pendingReads) {
+            var image = (JsonObject) p[0];
+            var view = (HorizonGpu.View) p[1];
+            var name = (String) p[2];
+            // A big target (a full-screen map: the window's size) is read at most PIP_INTERVAL
+            // apart for each receiver, and sent shrunk to the window's largest image (512 px).
+            int w = view.getWidth(0), h = view.getHeight(0);
+            int shrink = Math.max(1, (Math.max(w, h) + MAX_IMAGE - 1) / MAX_IMAGE);
+            Object key = java.util.List.of(name, System.identityHashCode(imagesSent));
+            long now = System.nanoTime();
+            Long last = shrink > 1 ? BIG_LAST.get(key) : null;
+            byte[] rgba = last != null && now - last < PIP_INTERVAL || view.isClosed() ? null : HorizonGpu.pixels(view);
+            if (rgba != null && shrink > 1) {
+                BIG_LAST.put(key, now);
+                rgba = shrink(rgba, w, h, shrink);
+                w /= shrink;
+                h /= shrink;
+            }
+            if (DEBUG_GPU) debugImage(name, w, h, rgba);
+            int version = rgba == null ? 0 : java.util.Arrays.hashCode(rgba);
+            if (rgba == null || Integer.valueOf(version).equals(imagesSent.get(name))) {
+                drop.add(image);
+                continue;
+            }
+            imagesSent.put(name, version);
+            image.addProperty("op", "image");
+            image.addProperty("name", name);
+            image.addProperty("width", w);
+            image.addProperty("height", h);
+            image.addProperty("rgba", java.util.Base64.getEncoder().encodeToString(rgba));
+        }
+        pendingReads.clear();
+        if (drop.isEmpty()) return;
+        for (int i = ops.size() - 1; i >= 0; i--) {
+            if (ops.get(i) instanceof JsonObject o && drop.contains(o)) ops.remove(i);
         }
     }
 
@@ -499,6 +532,7 @@ public final class HorizonGraphics extends GuiGraphicsExtractor {
 
     /** The frame's operations, in order. */
     public JsonArray ops() {
+        if (!pendingReads.isEmpty()) readPending();
         return ops;
     }
 

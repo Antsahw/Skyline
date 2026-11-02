@@ -85,6 +85,12 @@ final class HorizonClientState {
         "journeymap.client.ui.minimap.MiniMap#mapRenderer=journeymap.client.render.map.MapRenderer(journeymap.client.ui.UI.Minimap)",
         "journeymap.client.ui.fullscreen.Fullscreen#state=journeymap.client.model.map.MapState()",
         "journeymap.client.ui.fullscreen.Fullscreen#mapRenderer=journeymap.client.render.map.MapRenderer(journeymap.client.ui.UI.Fullscreen)",
+        // JourneyMap: its waypoints (handler: DAO and backend; the stores of waypoints and
+        // groups). A new player's are made when asked for, from their own waypoint folder
+        // (mixin.mods.JourneyMapFilesMixin), and loaded (loadedNow).
+        "journeymap.client.waypoint.WaypointHandler#instance",
+        "journeymap.common.waypoint.WaypointStore#INSTANCE",
+        "journeymap.common.waypoint.WaypointGroupStore#INSTANCE",
         // VoxelMap: its minimap (the map image it shifts as its player moves, its zoom).
         "com.mamiyaotaru.voxelmap.VoxelConstants#getVoxelMapInstance()#map=com.mamiyaotaru.voxelmap.Map()",
     };
@@ -94,6 +100,11 @@ final class HorizonClientState {
     private static final Map<UUID, Object[]> SAVED = new ConcurrentHashMap<>();
     /** The player whose values are in the fields now (null: nobody's yet). */
     private static UUID loaded;
+
+    /** The player whose values are in the fields now (null: nobody's yet). */
+    static UUID loaded() {
+        return loaded;
+    }
 
     private static synchronized List<Slot> slots() {
         if (slots != null) return slots;
@@ -167,8 +178,9 @@ final class HorizonClientState {
                 }
                 slot.field().set(slot.target(), value);
             }
+            boolean newGuest = first && loaded != null;
             loaded = player;
-            loadedNow(first);
+            loadedNow(first, newGuest);
         } catch (Exception e) {
             Throwable root = e;
             while (root.getCause() != null && root.getCause() != root) root = root.getCause();
@@ -178,17 +190,48 @@ final class HorizonClientState {
 
     /** A player left: their values go (and the fields', when theirs are in them). */
     static synchronized void forget(UUID player) {
-        SAVED.remove(player);
+        Object[] gone = SAVED.remove(player);
         HorizonClientConfig.forget(player);
+        List<Slot> all = slots();
         if (player.equals(loaded)) {
-            for (Slot slot : slots()) {
+            gone = new Object[all.size()];
+            for (int i = 0; i < all.size(); i++) {
+                Slot slot = all.get(i);
                 try {
+                    gone[i] = slot.field().get(slot.target());
                     slot.field().set(slot.target(), slot.first());
                 } catch (Exception e) {
                     // Left as it is.
                 }
             }
             loaded = null;
+        }
+        if (gone != null) stopped(gone, all);
+    }
+
+    /**
+     * What a player who left had that runs on its own: VoxelMap's map's thread (each Map
+     * starts one as it's made) is stopped, unless another player's values hold that map.
+     */
+    private static void stopped(Object[] gone, List<Slot> all) {
+        for (int i = 0; i < gone.length; i++) {
+            Object value = gone[i];
+            if (value == null || !value.getClass().getName().equals("com.mamiyaotaru.voxelmap.Map")) continue;
+            boolean kept = false;
+            for (Object[] other : SAVED.values()) kept |= other.length > i && other[i] == value;
+            try {
+                Slot slot = all.get(i);
+                kept |= slot.field().get(slot.target()) == value;
+            } catch (ReflectiveOperationException | RuntimeException e) {
+                kept = true;
+            }
+            if (kept) continue;
+            try {
+                value.getClass().getMethod("shutdown").invoke(value);
+                Natives.log("Horizon's client: VoxelMap's map of a player who left stopped its thread");
+            } catch (ReflectiveOperationException | RuntimeException e) {
+                Natives.log("Horizon's client: VoxelMap's map of a player who left couldn't stop: " + e);
+            }
         }
     }
 
@@ -198,8 +241,26 @@ final class HorizonClientState {
      * (it draws them by name), and a new map knows the world and computes on the client's
      * thread (its own thread reads Minecraft.player, which is the first player between ticks).
      */
-    private static void loadedNow(boolean first) {
+    private static void loadedNow(boolean first, boolean newGuest) {
         ClassLoader loader = HorizonClientState.class.getClassLoader();
+        if (newGuest) {
+            // A new player's JourneyMap waypoints: their stores made and filled from their DAO.
+            try {
+                Object groups = Class.forName("journeymap.common.waypoint.WaypointGroupStore", false, loader).getMethod("getInstance").invoke(null);
+                groups.getClass().getMethod("reset").invoke(groups);
+                Object store = Class.forName("journeymap.common.waypoint.WaypointStore", false, loader).getMethod("getInstance").invoke(null);
+                store.getClass().getMethod("reset", boolean.class).invoke(store, false);
+                Object all = store.getClass().getMethod("getAll").invoke(store);
+                Natives.log("Horizon's client: a new player's JourneyMap waypoints, from their own folder: "
+                        + ((java.util.Collection<?>) all).size());
+            } catch (ClassNotFoundException e) {
+                // No JourneyMap.
+            } catch (ReflectiveOperationException | RuntimeException e) {
+                Throwable root = e;
+                while (root.getCause() != null && root.getCause() != root) root = root.getCause();
+                Natives.log("Horizon's client: a new player's JourneyMap waypoints couldn't load: " + root);
+            }
+        }
         try {
             Class<?> cache = Class.forName("journeymap.client.data.DataCache", false, loader);
             Object instance = cache.getField("INSTANCE").get(null);

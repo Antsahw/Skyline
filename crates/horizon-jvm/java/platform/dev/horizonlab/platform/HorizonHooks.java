@@ -139,7 +139,7 @@ public final class HorizonHooks {
             if (merged == null) continue;
             for (String[] h : HUD_HOOKS) {
                 if (!h[0].equals(method) || !merged.mixin().equals(h[1])) continue;
-                if (!m.getName().equals(h[2]) && !m.getName().endsWith("$" + h[2])) continue;
+                if (!handlerNamed(m.getName(), h[2])) continue;
                 Class<?>[] params = m.getParameterTypes();
                 if (params.length != args.length + 1 || !CallbackInfo.class.isAssignableFrom(params[args.length])) continue;
                 Object[] call = java.util.Arrays.copyOf(args, args.length + 1);
@@ -204,10 +204,92 @@ public final class HorizonHooks {
         }
     }
 
+    /**
+     * Whether a merged method is the handler {@code handler} of a mixin: Mixin renames it
+     * {@code handler$<id>$<mod>$<name>}, and drops a leading {@code <mod>_} from the name
+     * (MaLiLib's {@code malilib_onPreGameInit} becomes {@code ...$malilib$onPreGameInit}).
+     */
+    static boolean handlerNamed(String merged, String handler) {
+        if (merged.equals(handler) || merged.endsWith("$" + handler)) return true;
+        int prefix = handler.indexOf('_');
+        if (prefix <= 0) return false;
+        String mod = handler.substring(0, prefix);
+        return merged.endsWith("$" + mod + "$" + handler.substring(prefix + 1));
+    }
+
+    /** The in-game GUI, whose frame (extractRenderState) mods hook at its tail (MaLiLib's overlays). */
+    private static final String GUI_OWNER = "net/minecraft/client/gui/Gui";
+    /** The mods' injections at the tail of Gui.extractRenderState: (mixin, handler, mod). */
+    private static final List<String[]> GUI_HOOKS = new ArrayList<>();
+    private static List<Method> guiResolved;
+
+    private static void readGui(String mod, ClassNode node) {
+        String mixin = node.name.replace('/', '.');
+        for (MethodNode m : node.methods) {
+            for (AnnotationNode a : annotations(m.invisibleAnnotations, m.visibleAnnotations)) {
+                if (!"Lorg/spongepowered/asm/mixin/injection/Inject;".equals(a.desc)) continue;
+                if (!(get(a, "method") instanceof List<?> specs)) continue;
+                List<?> ats = get(a, "at") instanceof List<?> l ? l : List.of();
+                if (ats.size() != 1 || !(ats.get(0) instanceof AnnotationNode at)) continue;
+                if (!"TAIL".equals(get(at, "value")) && !"RETURN".equals(get(at, "value"))) continue;
+                for (Object spec : specs) {
+                    if (parseSpec((String) spec)[0].equals("extractRenderState")) GUI_HOOKS.add(new String[] {mixin, m.name, mod});
+                }
+            }
+        }
+    }
+
+    /**
+     * The mods' injections at the tail of Gui.extractRenderState, the in-game GUI's frame:
+     * {@code graphics} as its GuiGraphicsExtractor (a captured local too), the frame's delta
+     * ONE, booleans true.
+     */
+    public static void fireGui(Object gui, net.minecraft.client.gui.GuiGraphicsExtractor graphics) {
+        if (GUI_HOOKS.isEmpty() || gui == null) return;
+        if (guiResolved == null) {
+            List<Method> found = new ArrayList<>();
+            for (Method m : gui.getClass().getDeclaredMethods()) {
+                MixinMerged merged = m.getAnnotation(MixinMerged.class);
+                if (merged == null) continue;
+                for (String[] h : GUI_HOOKS) {
+                    if (!merged.mixin().equals(h[0])) continue;
+                    if (!handlerNamed(m.getName(), h[1])) continue;
+                    m.setAccessible(true);
+                    found.add(m);
+                }
+            }
+            if (!found.isEmpty()) Natives.log("Horizon's client: " + found.size() + " mod injection(s) run at the end of the GUI's frame");
+            guiResolved = found;
+        }
+        for (Method handler : guiResolved) {
+            Class<?>[] params = handler.getParameterTypes();
+            Object[] call = new Object[params.length];
+            for (int i = 0; i < params.length; i++) {
+                if (params[i] == boolean.class) call[i] = true;
+                else if (params[i] == float.class) call[i] = 1F;
+                else if (CallbackInfo.class.isAssignableFrom(params[i])) call[i] = new CallbackInfo("extractRenderState", true);
+                else if (params[i] == net.minecraft.client.DeltaTracker.class) call[i] = net.minecraft.client.DeltaTracker.ONE;
+                else if (params[i].isInstance(graphics)) call[i] = graphics;
+            }
+            try {
+                handler.invoke(Modifier.isStatic(handler.getModifiers()) ? null : gui, call);
+            } catch (Throwable t) {
+                Throwable cause = t instanceof java.lang.reflect.InvocationTargetException ite && ite.getCause() != null ? ite.getCause() : t;
+                while (cause.getCause() != null && cause.getCause() != cause) cause = cause.getCause();
+                if (FAILURES.merge(handler.toString(), 1, Integer::sum) <= 3) {
+                    Natives.log("A mod failed in the GUI's frame (" + handler.getName() + "): " + cause);
+                    HorizonFailures.report("the HUD", cause, handler);
+                    StackTraceElement[] frames = cause.getStackTrace();
+                    for (int f = 0; f < Math.min(frames.length, 14); f++) Natives.log("    at " + frames[f]);
+                }
+            }
+        }
+    }
+
     private static void readClient(String mod, byte[] bytes) {
         ClassNode node = new ClassNode();
         new ClassReader(bytes).accept(node, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
-        boolean minecraft = false, hud = false, frame = false;
+        boolean minecraft = false, hud = false, frame = false, gui = false;
         for (AnnotationNode a : annotations(node.invisibleAnnotations, node.visibleAnnotations)) {
             if (!"Lorg/spongepowered/asm/mixin/Mixin;".equals(a.desc)) continue;
             if (get(a, "value") instanceof List<?> list) {
@@ -215,6 +297,7 @@ public final class HorizonHooks {
                     minecraft |= CLIENT_OWNER.equals(((org.objectweb.asm.Type) t).getInternalName());
                     hud |= HUD_OWNER.equals(((org.objectweb.asm.Type) t).getInternalName());
                     frame |= FRAME_OWNER.equals(((org.objectweb.asm.Type) t).getInternalName());
+                    gui |= GUI_OWNER.equals(((org.objectweb.asm.Type) t).getInternalName());
                 }
             }
             if (get(a, "targets") instanceof List<?> list) {
@@ -226,6 +309,7 @@ public final class HorizonHooks {
         }
         if (hud) readHud(mod, node);
         if (frame) readFrame(mod, node);
+        if (gui) readGui(mod, node);
         if (!minecraft) return;
         String mixin = node.name.replace('/', '.');
         for (MethodNode m : node.methods) {
@@ -304,7 +388,7 @@ public final class HorizonHooks {
                 if (merged == null) continue;
                 for (String[] h : FRAME_HOOKS) {
                     if (!h[0].equals(at) || !merged.mixin().equals(h[1])) continue;
-                    if (!m.getName().equals(h[2]) && !m.getName().endsWith("$" + h[2])) continue;
+                    if (!handlerNamed(m.getName(), h[2])) continue;
                     Class<?>[] p = m.getParameterTypes();
                     boolean fits = at.equals(RENDER)
                             ? p.length == 1 && CallbackInfo.class.isAssignableFrom(p[0])
@@ -347,15 +431,22 @@ public final class HorizonHooks {
      * there (Trinkets Updated's), which register receivers of payloads its common init made.
      */
     public static final String START_OPTIONS = "<start at the options>";
+    /** Minecraft's constructor's end: after START_OPTIONS (FabricBoot runs both then). */
+    public static final String START_END = "<start at its end>";
 
     /** START_BEFORE or START_AFTER for an @At at Minecraft.<init>'s first Thread.currentThread(); else null. */
     private static String startPoint(Object at) {
         List<?> ats = at instanceof List<?> l ? l : at == null ? List.of() : List.of(at);
         if (ats.size() != 1 || !(ats.get(0) instanceof AnnotationNode node)) return null;
+        // The constructor's end (MaLiLib's game-init-done: its mods register their renderers).
+        if ("RETURN".equals(get(node, "value")) || "TAIL".equals(get(node, "value"))) return START_END;
         if (!"INVOKE".equals(get(node, "value"))) return null;
         // The options' construction comes after the entrypoints (Yumi runs its mods' client
-        // initializers there: Trinkets Updated's).
-        if (String.valueOf(get(node, "target")).startsWith("Lnet/minecraft/client/Options;<init>(")) return START_OPTIONS;
+        // initializers there: Trinkets Updated's); the save folder's validator after them
+        // (MaLiLib's pre-init: its config folder).
+        String target = String.valueOf(get(node, "target"));
+        if (target.startsWith("Lnet/minecraft/client/Options;<init>(")
+                || target.startsWith("Lnet/minecraft/world/level/storage/LevelStorageSource;parseValidator(")) return START_OPTIONS;
         if (!"Ljava/lang/Thread;currentThread()Ljava/lang/Thread;".equals(get(node, "target"))) return null;
         Object ordinal = get(node, "ordinal");
         if (ordinal instanceof Integer o && o != 0) return null;
@@ -385,6 +476,7 @@ public final class HorizonHooks {
             for (int i = 0; i < params.length; i++) {
                 if (params[i] == boolean.class) call[i] = true;
                 else if (CallbackInfo.class.isAssignableFrom(params[i])) call[i] = new CallbackInfo(method, true);
+                else if (params[i] == net.minecraft.client.main.GameConfig.class) call[i] = HorizonClient.gameConfig();
             }
             try {
                 handler.invoke(Modifier.isStatic(handler.getModifiers()) ? null : minecraft, call);
@@ -408,7 +500,7 @@ public final class HorizonHooks {
             if (merged == null) continue;
             for (ClientHook h : CLIENT_HOOKS) {
                 if (!h.method().equals(method) || !merged.mixin().equals(h.mixin())) continue;
-                if (!m.getName().equals(h.handler()) && !m.getName().endsWith("$" + h.handler())) continue;
+                if (!handlerNamed(m.getName(), h.handler())) continue;
                 Class<?>[] params = m.getParameterTypes();
                 boolean fits = h.modifyArg()
                         ? params.length == 1 && params[0] == boolean.class
@@ -418,6 +510,7 @@ public final class HorizonHooks {
                                         || (params.length == 1 && CallbackInfo.class.isAssignableFrom(params[0]))
                                 // The constructor's: its GameConfig may be taken (null here).
                                 : method.equals(START_AFTER) || method.equals(START_BEFORE) || method.equals(START_OPTIONS)
+                                        || method.equals(START_END)
                                         ? (params.length == 1 && CallbackInfo.class.isAssignableFrom(params[0]))
                                                 || (params.length == 2 && params[0] == net.minecraft.client.main.GameConfig.class
                                                         && CallbackInfo.class.isAssignableFrom(params[1]))
@@ -778,7 +871,7 @@ public final class HorizonHooks {
             if (merged == null || m.getName().contains("$mixinextras$bridge$")) continue;
             String found = null;
             for (String[] w : wraps) {
-                if (merged.mixin().equals(w[0]) && (m.getName().equals(w[1]) || m.getName().endsWith("$" + w[1]))) found = w[2];
+                if (merged.mixin().equals(w[0]) && handlerNamed(m.getName(), w[1])) found = w[2];
             }
             if (found == null) continue;
             // (A chunk map's random state is made with its wraps where it is kept: wrapConstructorCall.)
@@ -842,7 +935,7 @@ public final class HorizonHooks {
             if (merged == null || m.getName().contains("$mixinextras$bridge$")) continue;
             boolean match = false;
             for (String[] w : wraps) {
-                match |= merged.mixin().equals(w[0]) && (m.getName().equals(w[1]) || m.getName().endsWith("$" + w[1]))
+                match |= merged.mixin().equals(w[0]) && handlerNamed(m.getName(), w[1])
                         && w[2].contains(targetPart);
             }
             if (!match) continue;
@@ -995,7 +1088,7 @@ public final class HorizonHooks {
                 for (Hook h : hooks) {
                     if (!h.at().equals(at) || h.mod().equals("horizon")) continue;
                     if (!merged.mixin().equals(h.mixin())) continue;
-                    if (!m.getName().equals(h.handler()) && !m.getName().endsWith("$" + h.handler())) continue;
+                    if (!handlerNamed(m.getName(), h.handler())) continue;
                     Class<?>[] params = m.getParameterTypes();
                     if (params.length == 0 || !CallbackInfo.class.isAssignableFrom(params[params.length - 1])) continue;
                     m.setAccessible(true);
@@ -1026,7 +1119,7 @@ public final class HorizonHooks {
             if (merged == null) continue;
             for (Hook h : wanted.values()) {
                 if (!merged.mixin().equals(h.mixin())) continue;
-                if (!m.getName().equals(h.handler()) && !m.getName().endsWith("$" + h.handler())) continue;
+                if (!handlerNamed(m.getName(), h.handler())) continue;
                 Class<?>[] params = m.getParameterTypes();
                 // The method's arguments, then the CallbackInfo; locals captured after it can't
                 // be given (no vanilla frame runs), so such a handler is left out.

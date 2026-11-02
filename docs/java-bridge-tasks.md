@@ -472,3 +472,44 @@ tests pass; fmt and clippy `-D warnings` clean (horizon-client, horizon-jvm).
   ticks (vanilla's own movement code; the bridge's block reads are a part of it). Test:
   `regress.py --jars … entity gecko hostile mount carry ber`; to measure, a mobs pack and
   `HORIZON_JAVA_PROFILE=1` ("entity snapshot" lines).
+
+- **gpu 4, XaeroPlus and MiniHUD** (`bridge-gpu-4`, round 5 gpu 1), by Claude for iaxivers.
+  Works: XaeroPlus over Xaero's Minimap and World Map (minimap and M's World Map), MiniHUD with
+  MaLiLib (its info lines top left). Fixes useful beyond them: a GPU texture blitted to the
+  GUI is read back at the frame's end, not at its blit (XaeroPlus clears the World Map's target
+  as it's added, then the map is drawn: read at once, it was black); Mixin's renamed handlers
+  (`<mod>_` prefix dropped) are found (`handlerNamed`); `Gui.extractRenderState` TAIL
+  injections run (`fireGui`) and `Minecraft.<init>` RETURN ones (`START_END`);
+  `isGameLoadFinished()` is true once the models load; `Gui.minecraft` is set. Small changes
+  outside gpu: `HorizonHooks` (mixins: `fireGui`, `handlerNamed`, `START_END`) and
+  `HorizonClient` (client: `gameConfig()`, the GUI hook in `hud()`, the load flag). Regress
+  cases `xaeroplus`, `minihud` (new); `maps diorama journeymap voxelmap` pass. Test: XaeroPlus +
+  Xaero's Minimap + World Map in `~/hz-test/mods-java`, join, M; or MiniHUD + MaLiLib: the lines
+  top left.
+
+- **gpu 5, JourneyMap per player, VoxelMap's leaving thread** (`bridge-gpu-5`, on top of
+  `bridge-gpu-4`; round 5 gpu 2), by Claude for iaxivers. Works (LAN, headless): a guest's
+  JourneyMap settings are theirs in memory (its properties objects join `HorizonClientConfig`;
+  a guest's never overwrite the host's files) and their waypoints are their own, in
+  `waypoints/horizon-players/<uuid>/` of the world's JourneyMap folder (two new optional
+  mixins in `horizon-platform-mods.mixins.json`); a guest who leaves has their VoxelMap thread
+  stopped. Doesn't: a guest's JourneyMap settings last their session only (as other mods'); the
+  shared `MiniMap` object may keep the host's minimap properties for its shape; JourneyMap's
+  server-side `START_SERVER_TICK` NPE and VoxelMap's `sendWorldIDPacket` NPE (seen before) are
+  still there. Small change outside gpu: `HorizonClientConfig` is public (the mixins read it).
+  Regress `maps-lan` now also quits the guest and checks both (pass). Test: JourneyMap +
+  VoxelMap, `tools/java_bridge/lan_test.sh '$G quit'`: "VoxelMap's map of a player who left
+  stopped its thread" in the log.
+
+- **gpu 6, Diorama's water colours** (`bridge-gpu-6`, on top of `bridge-gpu-5`; round 5 gpu 3),
+  by Claude for iaxivers. Checked headless, each against vanilla's values: the client chunks'
+  biomes (plains, water `3f76e4`, grass `91bd59`), Diorama's blended tints, its tint kinds
+  (water → water resolver, grass, leaves), the fluid model's sprite and its image, and its
+  block looks (water `b2b2b2` tinted, grass `959595` tinted). All match. Found and fixed: the
+  client level's light engine gave no sections (`getDataLayerData` null; Diorama then takes
+  sky 15 everywhere): now Horizon's light, a section at a time (new native `lightSection`).
+  Not changed: shallow rivers still bake grey-lilac, likely Diorama's own "clear water" over a
+  sand/clay bed. Needs the user's eye: real Fabric + Diorama 0.6.0, a world with seed 1234,
+  `/tp -525 67 66`, compare the minimap's river with Horizon's (the screenshot in the report).
+  Small change outside gpu: `horizon-jvm/src/lib.rs` and `Natives` (the native),
+  `HorizonLight`. Regress `diorama voxelmap journeymap` pass.

@@ -459,15 +459,24 @@ gets SPIR-V, vertex layouts and uniform lists.
   real atlases' quads go the headless sprites' way. A bigger one (a full-screen map's target,
   the window's 1281x720) is read at most 10 times a second per player and sent shrunk
   (`HorizonGraphics.shrink`, box filter) to 512.
+- A GPU texture's pixels are read when the frame's ops are taken (`HorizonGraphics.ops()`:
+  `readPending`), not at its blit: the real GUI draws its elements after the whole screen is
+  extracted, and mods rely on it. XaeroPlus clears the World Map's target as Xaero adds it to the
+  GUI, then Xaero draws the map into it; read at the blit, the map was black.
 - Mods' blits of a screen-sized target land in `gameRenderState().guiRenderState` (Xaero's
   World Map): the capture's `GuiRenderState` stands there while a screen or the HUD draws.
 - `HORIZON_JAVA_GPU=0` turns the device off. `HORIZON_JAVA_DEBUG=gpu` logs textures,
-  pipelines and GPU blits (and saves one in 100 as `/tmp/horizon-gpu-N.png`);
+  pipelines and GPU blits (and saves one in 100 as `/tmp/horizon-gpu-N.png`; logs each target's
+  first picture that isn't all black: "gpu: <name> WxH, N pixels not transparent, M not black");
   `HORIZON_GPU_TRACE=1` logs each pass (targets, draws, pipelines, its first draw's vertices and
   uniforms, the target's lit pixels after it); `HORIZON_JAVA_GPU_DUMP=dir` writes each
   pipeline's SPIR-V, which `HORIZON_SPV_DIR=dir cargo test -p horizon-jvm gpu` reads back.
 
 ## 26.3 facts that cost time
+
+- Mixin renames a merged handler `handler$<id>$<mod>$<name>`, and drops a leading `<mod>_`
+  from `<name>` (MaLiLib's handlers: `malilib_foo` becomes `handler$<id>$malilib$foo`). Match
+  handlers with `HorizonHooks.handlerNamed`, not `endsWith("$" + name)`.
 
 - Keys are SDL3: `KeyEvent(scancode, keycode, mods)`; letters' scancodes from 4, keycodes are
   ASCII (`java_screen.rs`: `sdl_key`, `sdl_keycode`). Shift mod is 3, control 192.
@@ -1268,8 +1277,20 @@ Map mods (2026-11-01, `bridge-gpu2`, headless, llvmpipe):
   coordinates), through the game renderer's feature dispatcher.
 - Diorama 0.6.0 (`bridge-gpu-3`): its square minimap draws the map tiles it bakes on the CPU
   from the client's chunks (512 px textures written from memory, blitted to the GUI). Its
-  water's colours are to be compared with the real game. XaeroPlus and MiniHUD also draw with
-  the GPU; not tried yet.
+  water (`bridge-gpu-6`): what it reads matches vanilla (plains water `3f76e4`, grass `91bd59`
+  from the client chunks' biomes, blend radius 2; water's look `b2b2b2` tinted by water, grass
+  `959595` by grass), and the client level's light engine now gives whole sections
+  (`HorizonLight.getDataLayerData`, native `lightSection`; it was null). Its shallow rivers
+  still bake grey-lilac: Diorama's "clear water" shows the bed (sand, clay) through shallow
+  water; compare with real Fabric (seed 1234, near -525 64 70) before changing anything.
+- XaeroPlus 2.37.2 (over Xaero's Minimap 26.6.2 and World Map 1.47.2, `bridge-gpu-4`): the
+  minimap, and M's World Map (its target's pixels read at the frame's end, above). Regress
+  case `xaeroplus`.
+- MiniHUD 0.41.2 with MaLiLib 0.30.2 (`bridge-gpu-4`): its info lines (date, coordinates,
+  facing) at the top left. MaLiLib draws from `Gui.extractRenderState` TAIL
+  (`HorizonHooks.fireGui`, run at the end of the HUD), starts from `Minecraft.<init>` RETURN
+  (`START_END`) and `Options.<init>` (`START_OPTIONS`); MiniHUD waits for
+  `Minecraft.isGameLoadFinished()` (set once the models load). Regress case `minihud`.
 - Per player (host and LAN guest): Xaero's minimap is each player's own (`bridge-gpu3`);
   JourneyMap's and VoxelMap's too since `bridge-gpu-2` (`HorizonClientState`): JourneyMap's
   minimap and full-screen `MapState`/`MapRenderer` per player (static finals, made non-final as
@@ -1278,6 +1299,13 @@ Map mods (2026-11-01, `bridge-gpu2`, headless, llvmpipe):
   each switch, computed on the client's thread when there are several players). JourneyMap's
   `MiniMap` object stays shared (a new one recurses through `UIManager`). Regress case
   `maps-lan` (regress.py runs `lan=True` cases with lan_test.sh).
+- JourneyMap's settings and waypoints per player (`bridge-gpu-5`): its eight properties objects
+  (`JourneymapClient`'s fields) are swapped with the other mods' settings
+  (`HorizonClientConfig`; a guest's aren't saved to disk: `mixin/mods/JourneyMapPropertiesMixin`);
+  its waypoint handler and stores (`WaypointHandler.instance`, `WaypointStore.INSTANCE`,
+  `WaypointGroupStore.INSTANCE`) are per player (`HorizonClientState`), a guest's read from and
+  saved to `waypoints/horizon-players/<uuid>/` (`mixin/mods/JourneyMapFilesMixin`). A player
+  who leaves: their VoxelMap `Map`'s thread is stopped (`Map.shutdown`).
 
 Left: the client tick is ~35 ms with the minimap on llvmpipe (the frame's start ~25: Xaero's
 writer, the HUD ~10: the picture drawn and read back at 10 Hz).

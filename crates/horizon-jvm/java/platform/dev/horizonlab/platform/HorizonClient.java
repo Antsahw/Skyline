@@ -57,6 +57,28 @@ public final class HorizonClient {
     /** Minecraft's constructor at its options, after the registries' freeze (FabricBoot). */
     public static void optionsStart() {
         HorizonHooks.fireClient(minecraft, HorizonHooks.START_OPTIONS);
+        HorizonHooks.fireClient(minecraft, HorizonHooks.START_END);
+    }
+
+    private static net.minecraft.client.main.GameConfig gameConfig;
+
+    /**
+     * The game's start-up configuration, which Minecraft's constructor takes (mods' injections
+     * there read its folders: MaLiLib's config folder): the game folder's, made without its
+     * constructor (no user, window or quick play here).
+     */
+    static synchronized net.minecraft.client.main.GameConfig gameConfig() {
+        if (gameConfig != null) return gameConfig;
+        try {
+            var config = (net.minecraft.client.main.GameConfig) Natives.allocate(net.minecraft.client.main.GameConfig.class);
+            File dir = minecraft.gameDirectory;
+            set(net.minecraft.client.main.GameConfig.class, config, "location", new net.minecraft.client.main.GameConfig.FolderData(
+                    dir, new File(dir, "resourcepacks"), new File(dir, "assets"), null));
+            gameConfig = config;
+        } catch (ReflectiveOperationException e) {
+            Natives.log("Horizon's client: no game config for the mods: " + e);
+        }
+        return gameConfig;
     }
 
     public static void finish() throws ReflectiveOperationException {
@@ -122,6 +144,8 @@ public final class HorizonClient {
         // Mods' fields on the HUD (Enderscape's hearts' variables), from their mixins' initializers.
         HorizonHooks.initFields(hud);
         set(net.minecraft.client.gui.Gui.class, gui, "hud", hud);
+        // Its client (mods' injections into its frame read gui's minecraft: Xaero's).
+        set(net.minecraft.client.gui.Gui.class, gui, "minecraft", mc);
         set(Minecraft.class, mc, "gui", gui);
         // Screens click through the game mode (handleContainerInput): GameModeClientMixin.
         set(Minecraft.class, mc, "gameMode", Natives.allocate(net.minecraft.client.multiplayer.MultiPlayerGameMode.class));
@@ -1310,6 +1334,15 @@ public final class HorizonClient {
                     net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents.CLIENT_STARTED, l -> l.onClientStarted(minecraft));
         }
         finishModels();
+        // Its loading is done once the models are (Minecraft.isGameLoadFinished: MiniHUD draws
+        // nothing before).
+        if (pendingModels == null && !minecraft.isGameLoadFinished()) {
+            try {
+                set(Minecraft.class, minecraft, "gameLoadFinished", true);
+            } catch (ReflectiveOperationException e) {
+                Natives.log("Horizon's client: its loading can't be marked done: " + e);
+            }
+        }
         // Each player's game is a client of its own: its tick runs as that player
         // (Minecraft.player, the open screen), with its own keys (bindings). With no player, a
         // client at its title screen.
@@ -2152,6 +2185,8 @@ public final class HorizonClient {
         graphics.imagesSent = imagesSent(player.getUUID());
         var delta = net.minecraft.client.DeltaTracker.ONE;
         fabricHudElements(graphics, delta);
+        // The end of the in-game GUI's frame: the mods' overlays there (MaLiLib's: MiniHUD).
+        HorizonHooks.fireGui(minecraft.gui, graphics);
         Object hud;
         try {
             hud = field(net.minecraft.client.gui.Gui.class, minecraft.gui, "hud");
