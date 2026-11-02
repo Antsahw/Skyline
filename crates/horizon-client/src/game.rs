@@ -18549,7 +18549,6 @@ struct CoreTables {
 }
 /// The block facts and the tables read from them.
 struct GameplayTables {
-    behaviour_json: serde_json::Value,
     facts: BlockFacts,
     gameplay_projection: Vec<horizon_client::blocks::GameplayProjection>,
     light: LightTables,
@@ -18653,6 +18652,8 @@ fn gameplay_tables(
     let (facts, gameplay_projection) =
         BlockFacts::load_with_projection(root, assets.registry, &behaviour_json, parallel)
             .map_err(|e| e.to_string())?;
+    // Read again only if the level behaviours' snapshot misses (`load_world_rest`).
+    drop(behaviour_json);
     horizon_client::block_contact::set_mod_blocks(
         facts
             .states
@@ -18671,7 +18672,6 @@ fn gameplay_tables(
     Ok(GameplayTables {
         light: light?,
         motion: motion?,
-        behaviour_json,
         facts,
         gameplay_projection,
     })
@@ -18763,7 +18763,6 @@ fn load_resources(
         visibility,
         gameplay:
             GameplayTables {
-                behaviour_json,
                 facts,
                 gameplay_projection,
                 light,
@@ -18846,7 +18845,6 @@ fn load_resources(
                     &root,
                     &resources,
                     &assets,
-                    &behaviour_json,
                     &gameplay_projection,
                     visibility,
                     &progress,
@@ -18876,7 +18874,6 @@ fn load_resources(
             &root,
             &resources,
             &assets,
-            &behaviour_json,
             &gameplay_projection,
             visibility,
             progress,
@@ -18905,7 +18902,6 @@ fn load_world_rest(
     root: &std::path::Path,
     resources: &Resources,
     assets: &Assets,
-    behaviour_json: &serde_json::Value,
     gameplay_projection: &[horizon_client::blocks::GameplayProjection],
     visibility: horizon_world::block_render::FaceVisibility,
     progress: &Progress,
@@ -18931,7 +18927,9 @@ fn load_world_rest(
         Ok((items, recipes, stations))
     };
     let load_behaviours =
-        || Behaviours::load_with_gameplay(registry, root, behaviour_json, gameplay_projection);
+        // `block-behaviours.json` is read again only if the snapshot misses: its tree went
+        // with the facts' load (hundreds of MB for a modded pack, kept until here before).
+        || Behaviours::load_with_gameplay_from_file(registry, root, gameplay_projection);
     let load_block_entity_render = || {
         if !draws {
             return Ok(Default::default());

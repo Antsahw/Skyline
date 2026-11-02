@@ -257,7 +257,19 @@ impl StateModels {
             baked.push((variant, model));
         }
         // Every variant of every definition was baked above.
-        let choices = choices.iter().map(|c| c.map(|v| index[&key(v)])).collect();
+        let choices: Vec<CompiledChoices<u32>> =
+            choices.iter().map(|c| c.map(|v| index[&key(v)])).collect();
+        let faces: usize = baked.iter().map(|(_, m)| m.faces.len()).sum();
+        let multipart: usize = states
+            .iter()
+            .filter(|s| matches!(s, Some((_, SelectedModels::Multipart(_)))))
+            .count();
+        log::info!(
+            "Horizon: {} baked block models, {faces} faces, {} definitions; {multipart} multipart states of {}",
+            baked.len(),
+            choices.len(),
+            states.len()
+        );
         Ok(Self {
             choices,
             states,
