@@ -612,6 +612,9 @@ impl Game<'_> {
             let a = &tree.list[ai];
             let was = self.adv.progress.done(a);
             let criterion = &a.criteria[ci].name;
+            if self.java_award_refused_in(a, criterion) {
+                continue;
+            }
             if self.adv.progress.grant(&a.id, criterion, &date) {
                 self.advancement_progress(&a.id, criterion, true);
                 if let (Some(player), Some(name)) =
@@ -625,6 +628,17 @@ impl Game<'_> {
                 self.award(ai);
             }
         }
+    }
+    /// Whether the Java mods refuse `criterion` of `a` (their patches of
+    /// `PlayerAdvancements.award`, run on the mirror with the progress so far).
+    fn java_award_refused_in(&mut self, a: &adv::Advancement, criterion: &str) -> bool {
+        let done: Vec<&str> = a
+            .criteria
+            .iter()
+            .map(|c| c.name.as_str())
+            .filter(|c| self.adv.progress.has(&a.id, c))
+            .collect();
+        self.java_award_refused(&a.id, criterion, &done)
     }
     /// `PlayerAdvancements.award` / `revoke` after a criterion's progress changed.
     fn advancement_progress(&mut self, advancement: &str, criterion: &str, granted: bool) {
@@ -1994,6 +2008,9 @@ impl Game<'_> {
         let mut changed = false;
         for c in names {
             let was = self.adv.progress.done(a);
+            if !self.adv.progress.has(&a.id, c) && self.java_award_refused_in(a, c) {
+                continue;
+            }
             if self.adv.progress.grant(&a.id, c, &date) {
                 changed = true;
                 self.advancement_progress(&a.id, c, true);

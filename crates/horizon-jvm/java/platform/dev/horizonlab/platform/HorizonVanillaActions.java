@@ -301,26 +301,41 @@ public final class HorizonVanillaActions {
     }
 
     /**
-     * A player jumped (ServerGamePacketListenerImpl.handleMovePlayer calls jumpFromGround on the
-     * server's copy; Horizon made the jump): the mods' injections at the heads of
-     * Player/LivingEntity.jumpFromGround, then at their ends. Hearing only: a cancel at a head
-     * doesn't undo Horizon's jump.
+     * A player jumps (ServerGamePacketListenerImpl.handleMovePlayer calls jumpFromGround on the
+     * server's copy): the mods' injections at the heads of Player/LivingEntity.jumpFromGround,
+     * before Horizon makes the jump. True when one cancelled: Horizon doesn't jump the player
+     * (no statistic, no exhaustion) and pulls it back to where it took off.
      */
-    public static void jumped(String uuid) {
+    public static boolean jumpStart(String uuid) {
+        Thread.currentThread().setContextClassLoader(HorizonVanillaActions.class.getClassLoader());
+        ServerPlayer player = HorizonServer.player(UUID.fromString(uuid));
+        if (player == null || !jumpsHooked()) return false;
+        boolean cancelled = false;
+        for (Class<?> owner : JUMP_CHAIN) {
+            if (!HorizonHooks.hooked(owner.getName().replace('.', '/'), "jumpFromGround")) continue;
+            if (HorizonHooks.fire(player, owner, "jumpFromGround", "()V", "HEAD", new Object[0], null, true).cancelled()) {
+                cancelled = true;
+                break;
+            }
+        }
+        HorizonServer.afterCall();
+        if (DEBUG) Natives.log("entities: " + player.getName().getString() + (cancelled ? " may not jump" : " jumps"));
+        return cancelled;
+    }
+
+    /** Player first: Player.jumpFromGround calls super's, so its head runs first. */
+    private static final Class<?>[] JUMP_CHAIN = {Player.class, LivingEntity.class};
+
+    /** After Horizon made a jump the heads let through: their ends, in vanilla's order back out. */
+    public static void jumpEnd(String uuid) {
         Thread.currentThread().setContextClassLoader(HorizonVanillaActions.class.getClassLoader());
         ServerPlayer player = HorizonServer.player(UUID.fromString(uuid));
         if (player == null || !jumpsHooked()) return;
-        Object[] none = {};
-        Class<?>[] chain = {Player.class, LivingEntity.class};
-        for (Class<?> owner : chain) {
-            if (HorizonHooks.hooked(owner.getName().replace('.', '/'), "jumpFromGround")) {
-                HorizonHooks.fire(player, owner, "jumpFromGround", "()V", "HEAD", none, null, true);
+        for (int i = JUMP_CHAIN.length - 1; i >= 0; i--) {
+            if (!HorizonHooks.hooked(JUMP_CHAIN[i].getName().replace('.', '/'), "jumpFromGround")) continue;
+            for (String at : new String[] {"RETURN", "TAIL"}) {
+                HorizonHooks.fire(player, JUMP_CHAIN[i], "jumpFromGround", "()V", at, new Object[0], null, true);
             }
-        }
-        for (int i = chain.length - 1; i >= 0; i--) {
-            String owner = chain[i].getName().replace('.', '/');
-            if (!HorizonHooks.hooked(owner, "jumpFromGround")) continue;
-            for (String at : new String[] {"RETURN", "TAIL"}) HorizonHooks.fire(player, chain[i], "jumpFromGround", "()V", at, none, null, true);
         }
         HorizonServer.afterCall();
         if (DEBUG) Natives.log("entities: " + player.getName().getString() + " jumped");
@@ -333,20 +348,35 @@ public final class HorizonVanillaActions {
         return HorizonHooks.hooked("net/minecraft/server/level/ServerPlayer", "teleport");
     }
 
+    private static Object[] transition(String dimension, double x, double y, double z, float yaw, float pitch) {
+        ServerLevel level = HorizonServer.level(dimension);
+        return new Object[] {new net.minecraft.world.level.portal.TeleportTransition(level, new Vec3(x, y, z), Vec3.ZERO, yaw,
+                pitch, net.minecraft.world.level.portal.TeleportTransition.DO_NOTHING)};
+    }
+
     /**
-     * Horizon teleported a player in its level (commands, a pearl, chorus fruit): the mods'
-     * injections at the head of ServerPlayer.teleport (the player where it was), then at its
-     * ends (the player moved there). Hearing only.
+     * Horizon is about to teleport a player to {@code dimension} (its own level or another:
+     * commands, a pearl, chorus fruit, a portal): the mods' injections at the head of
+     * ServerPlayer.teleport, the player where it is. True when one cancelled: Horizon leaves
+     * the player where it was (vanilla's teleport returns before moving it).
      */
-    public static void teleported(String uuid, String dimension, double x, double y, double z, float yaw, float pitch) {
+    public static boolean teleportStart(String uuid, String dimension, double x, double y, double z, float yaw, float pitch) {
+        Thread.currentThread().setContextClassLoader(HorizonVanillaActions.class.getClassLoader());
+        ServerPlayer player = HorizonServer.player(UUID.fromString(uuid));
+        if (player == null || !teleportsHooked()) return false;
+        boolean cancelled = HorizonHooks.fire(player, ServerPlayer.class, "teleport", TELEPORT, "HEAD",
+                transition(dimension, x, y, z, yaw, pitch), null, true).cancelled();
+        HorizonServer.afterCall();
+        if (DEBUG && cancelled) Natives.log("entities: " + player.getName().getString() + " may not go to " + x + " " + y + " " + z);
+        return cancelled;
+    }
+
+    /** After Horizon teleported a player the heads let through: ServerPlayer.teleport's ends, the player there. */
+    public static void teleportEnd(String uuid, String dimension, double x, double y, double z, float yaw, float pitch) {
         Thread.currentThread().setContextClassLoader(HorizonVanillaActions.class.getClassLoader());
         ServerPlayer player = HorizonServer.player(UUID.fromString(uuid));
         if (player == null || !teleportsHooked()) return;
-        ServerLevel level = HorizonServer.level(dimension);
-        var transition = new net.minecraft.world.level.portal.TeleportTransition(level, new Vec3(x, y, z), Vec3.ZERO, yaw, pitch,
-                net.minecraft.world.level.portal.TeleportTransition.DO_NOTHING);
-        Object[] args = {transition};
-        HorizonHooks.fire(player, ServerPlayer.class, "teleport", TELEPORT, "HEAD", args, null, true);
+        Object[] args = transition(dimension, x, y, z, yaw, pitch);
         player.snapTo(x, y, z, yaw, pitch);
         for (String at : new String[] {"RETURN", "TAIL"}) HorizonHooks.fire(player, ServerPlayer.class, "teleport", TELEPORT, at, args, player, true);
         HorizonServer.afterCall();
@@ -542,5 +572,86 @@ public final class HorizonVanillaActions {
             });
         }
         return out;
+    }
+
+    // ---- Advancements -----------------------------------------------------------------------
+
+    private static Boolean advancementsRouted;
+
+    /** Whether a mod patches PlayerAdvancements.award (Balm's, Puzzles Lib's advancement events). */
+    public static boolean advancementsRouted() {
+        if (advancementsRouted == null) {
+            advancementsRouted = HorizonMixinTable.patchedInside(net.minecraft.server.PlayerAdvancements.class,
+                    java.util.Set.of("award"), java.util.Set.of());
+        }
+        return advancementsRouted;
+    }
+
+    private static java.lang.reflect.Field advancementTree, advancementProgress;
+
+    /**
+     * Horizon is about to grant player {@code uuid} criterion {@code criterion} of advancement
+     * {@code id}, of which {@code done} are already granted: vanilla's PlayerAdvancements.award
+     * runs on the mirrored player's advancements, with the mods' patches anywhere in it. The
+     * advancement is the mirror's (the server's data: criteria, requirements), its progress
+     * set to Horizon's first; its rewards and chat announcement are left out (Horizon gives
+     * them). True when the mods refused it (award left the criterion ungranted).
+     */
+    public static boolean award(String uuid, String id, String criterion, String[] done) {
+        Thread.currentThread().setContextClassLoader(HorizonVanillaActions.class.getClassLoader());
+        ServerPlayer player = HorizonServer.player(UUID.fromString(uuid));
+        if (player == null || !advancementsRouted() || HorizonData.loaded == null) return false;
+        var manager = HorizonData.loaded.reloadable().getAdvancements();
+        var real = manager.get(net.minecraft.resources.Identifier.parse(id));
+        if (real == null) return false;
+        var a = real.value();
+        var display = a.display().map(d -> new net.minecraft.advancements.DisplayInfo(d.icon(), d.title(),
+                d.description(), d.background(), d.type(), d.showToast(), false, d.hidden()));
+        var holder = new net.minecraft.advancements.AdvancementHolder(real.id(), new net.minecraft.advancements.Advancement(
+                a.parent(), display, net.minecraft.advancements.AdvancementRewards.EMPTY, a.criteria(), a.requirements(), false));
+        var advancements = player.getAdvancements();
+        try {
+            if (advancementTree == null) {
+                advancementTree = net.minecraft.server.PlayerAdvancements.class.getDeclaredField("tree");
+                advancementTree.setAccessible(true);
+                advancementProgress = net.minecraft.server.PlayerAdvancements.class.getDeclaredField("progress");
+                advancementProgress.setAccessible(true);
+            }
+            advancementTree.set(advancements, manager.tree());
+            var progress = new net.minecraft.advancements.AdvancementProgress();
+            progress.update(a.requirements());
+            for (String c : done) progress.grantProgress(c);
+            @SuppressWarnings("unchecked")
+            var map = (Map<net.minecraft.advancements.AdvancementHolder, net.minecraft.advancements.AdvancementProgress>)
+                    advancementProgress.get(advancements);
+            map.put(holder, progress);
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException(e);
+        }
+        boolean refused;
+        try {
+            boolean granted = advancements.award(holder, criterion);
+            var c = advancements.getOrStartProgress(holder).getCriterion(criterion);
+            refused = !granted && (c == null || !c.isDone());
+        } finally {
+            // Horizon sends the player its progress: nothing waits here for flushDirty.
+            emptyCollections(advancements);
+        }
+        HorizonServer.afterCall();
+        if (DEBUG) Natives.log("entities: " + player.getName().getString() + " " + id + " " + criterion + (refused ? " refused" : " awarded"));
+        return refused;
+    }
+
+    /** Clears the advancements' change sets (progressChanged, rootsToUpdate, visible). */
+    private static void emptyCollections(net.minecraft.server.PlayerAdvancements advancements) {
+        for (String name : new String[] {"progressChanged", "rootsToUpdate"}) {
+            try {
+                var f = net.minecraft.server.PlayerAdvancements.class.getDeclaredField(name);
+                f.setAccessible(true);
+                ((java.util.Collection<?>) f.get(advancements)).clear();
+            } catch (ReflectiveOperationException | RuntimeException ignored) {
+                // Nothing to clear.
+            }
+        }
     }
 }

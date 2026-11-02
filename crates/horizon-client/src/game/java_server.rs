@@ -343,8 +343,28 @@ impl Game<'_> {
     ) -> bool {
         false
     }
+    pub(super) fn java_jump_refused(&mut self) -> bool {
+        false
+    }
     pub(super) fn java_jumped(&mut self) {}
-    pub(super) fn java_teleported(&mut self, _player: u128, _at: [f64; 3], _look: [f32; 2]) {}
+    pub(super) fn java_player_teleport(
+        &mut self,
+        _player: u128,
+        _dim: &str,
+        _at: [f64; 3],
+        _look: [f32; 2],
+        _end: bool,
+    ) -> bool {
+        false
+    }
+    pub(super) fn java_award_refused(
+        &mut self,
+        _id: &str,
+        _criterion: &str,
+        _done: &[&str],
+    ) -> bool {
+        false
+    }
     pub(super) fn java_fall(
         &mut self,
         _distance: f64,
@@ -3168,50 +3188,106 @@ mod run {
             self.java_add_effect_to(None, effect)
         }
 
-        /// The player acting now jumped (the server's `jumpFromGround`): the Java mods'
-        /// injections there, heard only, when a mod hooks it (routed action `jumps`).
+        /// The player acting now is about to jump (the server's `jumpFromGround`): the Java
+        /// mods' heads there, when a mod hooks it (routed action `jumps`). True when one
+        /// cancelled: the caller doesn't jump the player.
+        pub(in crate::game) fn java_jump_refused(&mut self) -> bool {
+            #[cfg(feature = "java-mods")]
+            {
+                if !java_mods_on() || !self.hears_players() || !super::java_routed("jumps") {
+                    return false;
+                }
+                let uuid = self.acting_uuid_string();
+                match self.with_java_world(|| horizon_jvm::events::jump_start(&uuid)) {
+                    Ok(refused) => return refused,
+                    Err(e) => log::warn!("Java mods: a jump failed: {e}"),
+                }
+            }
+            false
+        }
+
+        /// The player acting now jumped: the ends of `jumpFromGround` for the Java mods.
         pub(in crate::game) fn java_jumped(&mut self) {
             #[cfg(feature = "java-mods")]
             {
                 if !java_mods_on() || !self.hears_players() || !super::java_routed("jumps") {
                     return;
                 }
-                let uuid = self
-                    .lan_acting_uuid
-                    .map(uuid_string)
-                    .unwrap_or_else(|| uuid_string(self.player_uuid()));
-                if let Err(e) = self.with_java_world(|| horizon_jvm::events::jumped(&uuid)) {
+                let uuid = self.acting_uuid_string();
+                if let Err(e) = self.with_java_world(|| horizon_jvm::events::jump_end(&uuid)) {
                     log::warn!("Java mods: a jump failed: {e}");
                 }
             }
         }
 
-        /// `player` was teleported in its level (commands, a pearl, chorus fruit) to `at`
-        /// facing `look`: the Java mods' injections at `ServerPlayer.teleport`'s head and ends
-        /// (Serene Seasons' GlitchCore, Balm's events), heard only, when a mod hooks it.
-        pub(in crate::game) fn java_teleported(
+        #[cfg(feature = "java-mods")]
+        fn acting_uuid_string(&self) -> String {
+            self.lan_acting_uuid
+                .map(uuid_string)
+                .unwrap_or_else(|| uuid_string(self.player_uuid()))
+        }
+
+        /// `player` is about to be teleported to `at` in `dim` facing `look` (commands, a
+        /// pearl, chorus fruit, a portal), or was (`end`): the Java mods' injections at
+        /// `ServerPlayer.teleport`'s head, or its ends (Serene Seasons' GlitchCore, Balm's
+        /// events), when a mod hooks it. True when a head cancelled: the caller leaves the
+        /// player where it is.
+        pub(in crate::game) fn java_player_teleport(
             &mut self,
             player: u128,
+            dim: &str,
             at: [f64; 3],
             look: [f32; 2],
-        ) {
+            end: bool,
+        ) -> bool {
             #[cfg(feature = "java-mods")]
             {
                 if !java_mods_on() || !super::java_routed("teleports") {
-                    return;
+                    return false;
                 }
                 let uuid = uuid_string(player);
-                let dim = self.dim.id();
-                let r =
-                    self.with_java_world(|| horizon_jvm::events::teleported(&uuid, dim, at, look));
-                if let Err(e) = r {
-                    log::warn!("Java mods: a teleport failed: {e}");
+                let r = self
+                    .with_java_world(|| horizon_jvm::events::teleport(&uuid, dim, at, look, end));
+                match r {
+                    Ok(refused) => return refused,
+                    Err(e) => log::warn!("Java mods: a teleport failed: {e}"),
                 }
             }
             #[cfg(not(feature = "java-mods"))]
             {
-                let _ = (player, at, look);
+                let _ = (player, dim, at, look, end);
             }
+            false
+        }
+
+        /// The player acting now is about to get `criterion` of advancement `id`, having
+        /// `done`: vanilla's `PlayerAdvancements.award` on the mirror, when a mod patches it
+        /// (routed action `advancements`: Balm's, Puzzles Lib's advancement events). True
+        /// when the mods refused it.
+        pub(in crate::game) fn java_award_refused(
+            &mut self,
+            id: &str,
+            criterion: &str,
+            done: &[&str],
+        ) -> bool {
+            #[cfg(feature = "java-mods")]
+            {
+                if !java_mods_on() || !self.hears_players() || !super::java_routed("advancements") {
+                    return false;
+                }
+                let uuid = self.acting_uuid_string();
+                let r =
+                    self.with_java_world(|| horizon_jvm::events::award(&uuid, id, criterion, done));
+                match r {
+                    Ok(refused) => return refused,
+                    Err(e) => log::warn!("Java mods: an advancement failed: {e}"),
+                }
+            }
+            #[cfg(not(feature = "java-mods"))]
+            {
+                let _ = (id, criterion, done);
+            }
+            false
         }
 
         /// [`Game::java_add_effect`] for `player` (None: the player acting now).
