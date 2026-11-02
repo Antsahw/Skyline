@@ -513,6 +513,7 @@ public final class HorizonWorldgen {
     public static long proto(String dimension, int x, int z, String[] palette, int[] blocks, int[] postprocess) {
         // Horizon's generation threads, attached to the JVM, have no context class loader.
         Thread.currentThread().setContextClassLoader(HorizonWorldgen.class.getClassLoader());
+        HorizonDataFixer.check();
         Dimension d = DIMENSIONS.get(dimension);
         if (d == null) return 0;
         long key = ChunkPos.pack(x, z);
@@ -544,6 +545,7 @@ public final class HorizonWorldgen {
     public static void decorate(String dimension, int x, int z) {
         // Horizon's generation threads, attached to the JVM, have no context class loader.
         Thread.currentThread().setContextClassLoader(HorizonWorldgen.class.getClassLoader());
+        HorizonDataFixer.check();
         Dimension d = DIMENSIONS.get(dimension);
         if (d == null) return;
         Live live = d.live.get(ChunkPos.pack(x, z));

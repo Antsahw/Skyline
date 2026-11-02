@@ -619,3 +619,29 @@ out (the bridge adds them since round 2; it failed on java-bridge too). Not run 
   1 delegate), `mounts.rs`, `control.rs`, `events.rs`. Test: `regress.py --jars … golem
   strikeback mounthud preset`. Full regress: all pass but `mixins1` once (its wheat didn't grow
   in 6 s of a busy run; passes alone 3 of 3): its step now waits up to 20 s for the growth.
+
+- **pack round 6, task 1: the full pack with Java in 8 GB** (`bridge-pack-7`; Claude for
+  iaxivers). Works: the 148-jar pack (577k states) with Java now loads and joins here (it was
+  killed before the join): Java's heap ran out in mods' worldgen, from DataFixerUpper keeping
+  a rule chain per old structure DataVersion (250 MB; now cleared past 6 chains) and the
+  mirror's baked models (~700 MB at 577k; skipped when the heap can't hold them, logged,
+  `HORIZON_JAVA_MODELS=on|off`). G1 now gives unused heap back; `HORIZON_JVM_OPTIONS` passes
+  options (`-Xmx3g`). Xaero's minimap draws (screenshot). Doesn't: it lives ~3 min in this
+  sandbox, then passes its ~6.2 GB as chunks load (5.7 → 6.0 GB, ~1.2 GB of it llvmpipe's
+  textures: should hold on a GPU, untested); with the models skipped, Xaero's World Map's
+  frame hook fails (no ModelManager). Test: regress `fixer` (new: D&T, chains let go, new land
+  still generates) and `bigpack` (now forbids `OutOfMemoryError` and the packet-rate kick);
+  `pot worldgen lost skyblock tech` pass.
+
+- **pack round 6, task 2: toward SkyFactory, more tech** (`bridge-pack-7`). Tried 12 more
+  26.3 Fabric tech, storage and automation mods (plus deps, 22 jars), alone: XNet, Simple
+  Copper Pipes, Chunk Loaders, XP Storage, ALA Industrial, Heater, HydroFarm, Ultimate
+  Compression, FabricAutoCrafter, More Barrel Variants, Mineral Chance, Energetic Sheep (most
+  other popular ones are already in the 148-jar pack). Works: they load and the player joins
+  (regress `bigpack` with this folder); their blocks place and draw; XNet's controller and
+  HydroFarm's autocrafter open their screens (screenshot). Fixed: McJtyLib's machines threw on
+  use (the mirror's `ChunkMap.updatingChunkMap` was null: fastutil fields are now filled on
+  mirror objects). Doesn't: ALA Industrial's content is dropped (its pipes' 76k-state
+  declarations pass the 16 MiB fence; needs a compact own-states form, see java-bridge.md);
+  More Barrel Variants' barrels, Heater's heater and Chunk Loaders' loader open no screen on
+  use; one of the 12 blocks draws the missing texture. Test: regress `xnet` (new).

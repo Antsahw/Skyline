@@ -386,9 +386,11 @@ public final class HorizonServer {
                 else if (type == java.util.Queue.class || type == java.util.Deque.class) empty = new java.util.concurrent.ConcurrentLinkedDeque<>();
                 else if ((java.util.Collection.class.isAssignableFrom(type) || Map.class.isAssignableFrom(type))
                         && !type.isInterface() && !java.lang.reflect.Modifier.isAbstract(type.getModifiers())
-                        && type.getName().startsWith("java.util.")) {
+                        && (type.getName().startsWith("java.util.") || type.getName().startsWith("it.unimi.dsi.fastutil."))) {
                     // A concrete JDK collection a mod's mixin declares (Spell Engine's ArrayList
-                    // on ServerLevel): a new empty one of that class.
+                    // on ServerLevel), or vanilla's fastutil maps (ChunkMap.updatingChunkMap,
+                    // which Fabric's block entity attachments read: McJtyLib's machines): a new
+                    // empty one of that class.
                     try {
                         empty = type.getDeclaredConstructor().newInstance();
                     } catch (ReflectiveOperationException | RuntimeException e) {
@@ -1406,6 +1408,7 @@ public final class HorizonServer {
         phase = HorizonProfile.add("block entities", phase);
         HorizonTickets.tick(new ArrayList<>(LEVELS.values()));
         HorizonSavedData.tick();
+        HorizonDataFixer.check();
         phase = HorizonProfile.add("tickets, saved data", phase);
         // Mods' entities, as ServerLevel.tick's entity loop runs them.
         HorizonEntities.tick();
