@@ -579,6 +579,17 @@ CASES = {
         forbid=[r"settings can't be kept per player"],
         look="lan-2-guest.png: the filter green; lan-2-host.png: red, the item list",
     ),
+    "maps-server": dict(
+        about="Map mods for a dedicated server's player: JourneyMap, VoxelMap, Xaero's minimap and World Map (M)",
+        mods=["journeymap", "voxelmap", "xaero", "xaeroworldmap"], scene="none", server=True,
+        steps=['sleep 90; $G state > $S/player.json', '$G key m tap; sleep 8', '$G key escape tap; sleep 2'],
+        checks=[check_log(r"Done \(", "the server starts"),
+                check_file("player.json", r'"screen":"playing"', "the player plays")],
+        forbid=[r"per-player state couldn't be swapped", r"couldn't change player", r"StackOverflowError",
+                r"JourneyMap waypoints couldn't load", r"JourneyMap's settings can't be kept",
+                r"waited two minutes for the Java mods"],
+        look="server-1.png: the three minimaps; server-2.png: Xaero's World Map",
+    ),
     "bigpack": dict(
         about="A whole pack (--pack): Java starts, the registries load, a player joins in time, the mods' worldgen runs",
         pack=True, scene="none", timeout=2700,
