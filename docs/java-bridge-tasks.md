@@ -550,3 +550,16 @@ tests pass; fmt and clippy `-D warnings` clean (horizon-client, horizon-jvm).
   frame hook fails (no ModelManager). Test: regress `fixer` (new: D&T, chains let go, new land
   still generates) and `bigpack` (now forbids `OutOfMemoryError` and the packet-rate kick);
   `pot worldgen lost skyblock tech` pass.
+
+- **pack round 6, task 2: toward SkyFactory, more tech** (`bridge-pack-7`). Tried 12 more
+  26.3 Fabric tech, storage and automation mods (plus deps, 22 jars), alone: XNet, Simple
+  Copper Pipes, Chunk Loaders, XP Storage, ALA Industrial, Heater, HydroFarm, Ultimate
+  Compression, FabricAutoCrafter, More Barrel Variants, Mineral Chance, Energetic Sheep (most
+  other popular ones are already in the 148-jar pack). Works: they load and the player joins
+  (regress `bigpack` with this folder); their blocks place and draw; XNet's controller and
+  HydroFarm's autocrafter open their screens (screenshot). Fixed: McJtyLib's machines threw on
+  use (the mirror's `ChunkMap.updatingChunkMap` was null: fastutil fields are now filled on
+  mirror objects). Doesn't: ALA Industrial's content is dropped (its pipes' 76k-state
+  declarations pass the 16 MiB fence; needs a compact own-states form, see java-bridge.md);
+  More Barrel Variants' barrels, Heater's heater and Chunk Loaders' loader open no screen on
+  use; one of the 12 blocks draws the missing texture. Test: regress `xnet` (new).

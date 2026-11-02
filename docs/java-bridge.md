@@ -1461,6 +1461,17 @@ in 8 GB (untested). Next: what grows in-world (chunks, meshes, LOD on the Rust s
 metaspace as mods' features first run), and Fabric's open mod jars (`ZipFileSystem` index
 nodes: 290k, ~25 MB with names).
 
+- **Mirror objects made without their constructors get empty fastutil maps too**
+  (`HorizonServer.emptyCollections`): `ChunkMap.updatingChunkMap` was null, and Fabric API's
+  block entity attachments (`BlockEntity.fabric_markChanged` → `getUpdatingChunkIfPresent`)
+  threw on every McJtyLib machine (XNet, RFTools) when its screen opened.
+- **A block declaration over 16 MiB drops the whole mod's content.** `horizon-mods`' fence
+  (`MAX_FILE`) is per file; a block with its own states lists each state's properties and
+  shape (`horizon-port-pack` carry). ALA Industrial's pipes have 76,832 states each (26.7 MB
+  pretty, 18.8 MB compact, 49 distinct shapes), so its 234 blocks were unknown. The way out is a
+  compact own-states form (the shapes once, an index per state, in registry order), not a bigger
+  fence: those pipes add ~400k states.
+
 Mods' sounds and particles (2026-10-31): a mod's sound event plays by name (its
 `sounds.json` and `.ogg` files are carried into the content mod, which Horizon's sound
 registry reads). A mod's own particle type goes as `horizon:java_particles` (JSON: the type's
