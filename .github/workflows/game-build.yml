@@ -33,6 +33,14 @@ on:
         description: Sign the macOS programs with Developer ID and notarize the zip (the runner's keychain)
         type: boolean
         default: true
+      java_mods:
+        # Opt-in (the java-bridge fork): Linux and Windows also build the game with Fabric Java mods
+        # (feature java-mods), packaged beside the plain one as <asset>-java. The build has no Minecraft
+        # jar: the bridge carries its platform mod's sources and builds them on the player's machine
+        # against their own game (crates/horizon-jvm/src/platform.rs).
+        description: Also build the Java mods variant (Linux, Windows)
+        type: boolean
+        default: false
 permissions:
   contents: read
 jobs:
@@ -94,10 +102,14 @@ jobs:
             # The server build too: packaging/server/install.sh installs it on Linux.
             server_dir: horizon-server-linux-x86_64
             server_asset: horizon-server-linux-x86_64.tar.gz
+            java_dir: horizon-linux-x86_64-java
+            java_asset: horizon-linux-x86_64-java.tar.gz
           - name: windows
             os: windows-latest
             dir: horizon-windows-x64
             asset: horizon-windows-x64.zip
+            java_dir: horizon-windows-x64-java
+            java_asset: horizon-windows-x64-java.zip
             exe: .exe
             # The C runtime linked in, so the game runs without the Visual C++ redistributable.
             rustflags: -C target-feature=+crt-static
@@ -272,6 +284,41 @@ jobs:
         with:
           name: ${{ matrix.asset }}
           path: dist/${{ matrix.asset }}
+          if-no-files-found: error
+          retention-days: 3
+      - name: Java 25 for the Java mods variant
+        if: inputs.java_mods && matrix.java_asset
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: The Java mods variant (feature java-mods; its platform mod is built on the player's machine)
+        if: inputs.java_mods && matrix.java_asset
+        shell: bash
+        env:
+          # The sources, never a platform jar: this machine must not build against a Minecraft jar.
+          HORIZON_BRIDGE_PLATFORM: source
+          CARGO_TARGET_DIR: target-java
+        run: |
+          set -euo pipefail
+          cargo build --release --locked ${{ matrix.target && format('--target {0}', matrix.target) || '' }} -p horizon-client --features java-mods --bin horizon-client
+          bin="target-java/${{ matrix.target && format('{0}/', matrix.target) || '' }}release"
+          "$bin/horizon-client${{ matrix.exe }}" --help | grep -q -- '--resources'
+          # The other programs are the plain build's (package takes them from beside the game).
+          for tool in horizon-ctl horizon-prepare horizon-server; do cp "$BIN/$tool${{ matrix.exe }}" "$bin/"; done
+          cargo run --locked -p xtask -- package "$bin/horizon-client${{ matrix.exe }}" "dist/${{ matrix.java_dir }}"
+          cd dist
+          rm -f "${{ matrix.java_asset }}"
+          case "${{ matrix.java_asset }}" in
+            *.tar.gz) tar czf "${{ matrix.java_asset }}" "${{ matrix.java_dir }}" ;;
+            *) 7z a -tzip "${{ matrix.java_asset }}" "${{ matrix.java_dir }}" > /dev/null ;;
+          esac
+          ls -l "${{ matrix.java_asset }}"
+      - uses: actions/upload-artifact@v4
+        if: inputs.java_mods && matrix.java_asset
+        with:
+          name: ${{ matrix.java_asset }}
+          path: dist/${{ matrix.java_asset }}
           if-no-files-found: error
           retention-days: 3
       - name: The server build (the game without sound or controllers, as horizon-engine)

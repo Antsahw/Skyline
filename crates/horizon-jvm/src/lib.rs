@@ -22,6 +22,7 @@ pub mod events;
 pub mod facade;
 pub mod gpu;
 pub mod libs;
+pub mod platform;
 pub mod runtime;
 pub mod world;
 
@@ -47,6 +48,9 @@ const BRIDGE_JAR: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/horizon-brid
 /// prepared game jar and Fabric API; empty when the checkout had no prepared game to build it
 /// against.
 const PLATFORM_JAR: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/horizon-platform.jar"));
+/// The platform mod's sources, when the build had no game to build it against (a release
+/// build): built on the player's machine ([`platform::ensure`]); empty when the jar is built in.
+const PLATFORM_SRC: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/horizon-platform-src.zip"));
 
 static BRIDGE: OnceLock<Bridge> = OnceLock::new();
 /// Held while a JVM is being made, so two threads never both try.
@@ -315,7 +319,33 @@ fn write_jar(work: &Path, name: &str, bytes: &[u8]) -> Result<PathBuf, String> {
 
 /// Whether this build carries the platform mod (game events for mods).
 pub fn has_platform() -> bool {
-    !PLATFORM_JAR.is_empty()
+    !PLATFORM_JAR.is_empty() || !PLATFORM_SRC.is_empty()
+}
+
+/// The platform mod's jar: a developer's (`HORIZON_JAVA_JARS`), the one built in, or the one
+/// built here from its sources.
+fn platform_jar(
+    config: &Config,
+    fabric: &Fabric,
+    bridge: &Path,
+    fabric_libs: &[PathBuf],
+) -> Result<PathBuf, String> {
+    let dev = std::env::var_os(DEV_JARS).map(|d| Path::new(&d).join("horizon-platform.jar"));
+    if !PLATFORM_JAR.is_empty() || dev.as_ref().is_some_and(|d| d.is_file()) {
+        return write_jar(&config.work, "horizon-platform.jar", PLATFORM_JAR);
+    }
+    let fabric_api = libs::ensure_fabric_api(&config.work.join("fabric-api"))?;
+    platform::ensure(
+        PLATFORM_SRC,
+        &config.home,
+        &config.work,
+        bridge,
+        fabric_libs,
+        &fabric_api,
+        &fabric.game_jar,
+        &fabric.libraries,
+        &|line| log::info!("{line}"),
+    )
 }
 
 type CreateJavaVm =
@@ -328,9 +358,12 @@ pub fn start(config: &Config) -> Result<&'static Bridge, String> {
     if let Some(bridge) = BRIDGE.get() {
         return Ok(bridge);
     }
-    let mut class_path = vec![write_jar(&config.work, "horizon-bridge.jar", BRIDGE_JAR)?];
+    let bridge_jar = write_jar(&config.work, "horizon-bridge.jar", BRIDGE_JAR)?;
+    let mut class_path = vec![bridge_jar.clone()];
+    let mut fabric_libs = Vec::new();
     if config.fabric.is_some() {
-        class_path.extend(libs::ensure(&config.work.join("lib"))?);
+        fabric_libs = libs::ensure(&config.work.join("lib"))?;
+        class_path.extend(fabric_libs.iter().cloned());
     }
     class_path.extend(config.class_path.iter().cloned());
     let vm = create_vm(&config.home, &class_path, config.class_archive.as_deref())?;
@@ -343,11 +376,7 @@ pub fn start(config: &Config) -> Result<&'static Bridge, String> {
             let mut add_mods = fabric.add_mods.clone();
             let platform = fabric.platform && has_platform();
             if platform {
-                add_mods.push(write_jar(
-                    &config.work,
-                    "horizon-platform.jar",
-                    PLATFORM_JAR,
-                )?);
+                add_mods.push(platform_jar(config, fabric, &bridge_jar, &fabric_libs)?);
             }
             let mods =
                 start_fabric(&mut env, fabric, &add_mods).map_err(|e| describe(&mut env, e))?;

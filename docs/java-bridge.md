@@ -1482,6 +1482,26 @@ launcher finds it too. `HORIZON_JAVA_NO_DOWNLOAD=1` only looks. The downloads tr
 roots and the system's CA bundle (`SSL_CERT_FILE` or the distribution's file: a TLS-inspecting
 proxy or antivirus the system trusts) and use `HTTPS_PROXY`.
 
+**A build without the game** (a release build: no Minecraft jar on the build machine) carries
+the platform mod's sources instead of its jar (`build.rs`: no prepared game, or
+`HORIZON_BRIDGE_PLATFORM=source`), and the player's first start builds it with the Java the mods
+run on (`platform.rs`: `javac` of that Java home, which Mojang's runtime has; ~11 s, 116 sources),
+against their own game jar, its libraries, Fabric Loader and Fabric API, into
+`<work>/platform/<key>/` (the key: the sources, the game jar and the bridge jar). A Java with
+no `javac` (a JRE) is told to use a JDK. `game-build.yml` builds Linux and Windows variants with
+Java mods when its opt-in `java_mods` input is set (assets `<asset>-java`, the game built with
+`HORIZON_BRIDGE_PLATFORM=source`); nothing calls it with that yet (release and nightly signing
+are the maintainer's). Tested headless: `HORIZON_BRIDGE_PLATFORM=source` build, install_test with no
+Java: Mojang's Java downloaded, the platform built, Farmer's Delight's pot screen opens.
+
+**The launcher's Java mods tab** (Home, beside Mods: `launcher/src/java_mods_page.rs`, core in
+`java_mods.rs`): shows for an instance whose game folder has `mods-java/`; lists the jars with
+their Fabric names and versions, Add (file picker or dropped jars; a jar without
+`fabric.mod.json` is refused), Open folder, Remove (to the trash, confirmed), and which mods
+failed in the last game (its `logs/latest.log`: the "[Java mods] <mod> failed in …" lines, a start
+that failed) on their rows. CLI: `horizon-launcher java-mods list|add <jar>|remove <name>|failed
+[--instance <name>]`.
+
 `tools/java_bridge/install_test.sh` checks it: a scratch install laid out like a launcher
 version (binary, research-lock.json, the preparation's folders linked from the checkout), the
 game started as the launcher starts it (in its game folder, `--resources` only; no

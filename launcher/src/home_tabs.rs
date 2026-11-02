@@ -8,6 +8,8 @@ pub(super) enum HomeTab {
     #[default]
     Overview,
     Mods,
+    /// The Fabric jars of `mods-java/` (only with that folder: Java mods are opt-in).
+    JavaMods,
     Worlds,
     Multiplayer,
     Packs,
@@ -16,11 +18,12 @@ pub(super) enum HomeTab {
 }
 
 impl HomeTab {
-    /// `HORIZON_LAUNCHER_PAGE=worlds` (or `instance-mods`, `multiplayer`, `packs`, `screenshots`,
+    /// `HORIZON_LAUNCHER_PAGE=worlds` (or `instance-mods`, `java-mods`, `multiplayer`, `packs`, `screenshots`,
     /// `console`) opens Home on that tab, for screenshots.
     pub(super) fn from_env() -> Self {
         match std::env::var("HORIZON_LAUNCHER_PAGE").as_deref() {
             Ok("instance-mods") => HomeTab::Mods,
+            Ok("java-mods") => HomeTab::JavaMods,
             Ok("worlds") => HomeTab::Worlds,
             Ok("multiplayer") => HomeTab::Multiplayer,
             Ok("packs") => HomeTab::Packs,
@@ -41,6 +44,9 @@ impl Launcher {
         }
         if self.has_mods_tab() {
             tabs.push((HomeTab::Mods, self.instance_mods_count(cx)));
+        }
+        if self.has_java_mods_tab() {
+            tabs.push((HomeTab::JavaMods, Some(self.java_mods_count())));
         }
         tabs.push((HomeTab::Worlds, self.worlds_count(cx)));
         tabs.push((HomeTab::Multiplayer, Some(self.servers_count())));
@@ -73,6 +79,7 @@ impl Launcher {
                 let name = match tab {
                     HomeTab::Overview => tr("Overview"),
                     HomeTab::Mods => tr("Mods"),
+                    HomeTab::JavaMods => tr("Java mods"),
                     HomeTab::Worlds => tr("Worlds"),
                     HomeTab::Multiplayer => tr("Multiplayer"),
                     HomeTab::Packs => tr("Packs"),
@@ -97,6 +104,7 @@ impl Launcher {
                 let (actions, body) = split(self.instance_mods_tab(cx));
                 (Some(actions), Some(body))
             }
+            HomeTab::JavaMods => self.java_mods_section(cx).map(split).unzip(),
             HomeTab::Worlds => (
                 None,
                 self.worlds_section(cx).map(IntoElement::into_any_element),
