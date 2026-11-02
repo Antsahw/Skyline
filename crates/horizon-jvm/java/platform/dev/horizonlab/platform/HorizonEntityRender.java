@@ -323,10 +323,18 @@ public final class HorizonEntityRender {
             int listStart = out.length();
             var entities = all.get(level);
             if (entities != null) {
+                // Its players' places: how far each entity is from the nearest.
+                var players = level.players();
+                double[] seen = new double[players.size() * 3];
+                for (int i = 0; i < players.size(); i++) {
+                    seen[i * 3] = players.get(i).getX();
+                    seen[i * 3 + 1] = players.get(i).getY();
+                    seen[i * 3 + 2] = players.get(i).getZ();
+                }
                 for (Entity entity : entities) {
                     if (entity.isRemoved()) continue;
                     if (out.length() > listStart) out.append(',');
-                    entry(entity, out);
+                    entry(entity, nearest(entity, seen), out);
                 }
             }
             // What mods draw on its players (their layers, as entries marked "block": no box).
@@ -388,8 +396,29 @@ public final class HorizonEntityRender {
         return out.toString();
     }
 
+    /** The squared distance from the entity to the nearest of these places (x, y, z each). */
+    private static double nearest(Entity entity, double[] at) {
+        double best = Double.MAX_VALUE;
+        for (int i = 0; i + 2 < at.length; i += 3) {
+            double dx = entity.getX() - at[i], dy = entity.getY() - at[i + 1], dz = entity.getZ() - at[i + 2];
+            best = Math.min(best, dx * dx + dy * dy + dz * dz);
+        }
+        return best;
+    }
+
+    /**
+     * How many ticks apart an entity this far (squared) from the nearest player is drawn again:
+     * every tick within 24 blocks, every 2nd to 48, every 4th beyond (its position still each
+     * tick; the game keeps its look between). A renderer's work (a GeckoLib model's animated
+     * mesh) is most of the snapshot's time.
+     */
+    static int drawEvery(double distance2) {
+        if (distance2 <= 24.0 * 24.0) return 1;
+        return distance2 <= 48.0 * 48.0 ? 2 : 4;
+    }
+
     /** One entity's routed entry: {x, y, z, id, keys, keep?, e: the entry}. */
-    private static void entry(Entity entity, StringBuilder out) {
+    private static void entry(Entity entity, double distance2, StringBuilder out) {
         StringBuilder head = new StringBuilder(96);
         head.append("\"id\":").append(entity.getId()).append(",\"type\":");
         HorizonJson.string(BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString(), head);
@@ -402,8 +431,12 @@ public final class HorizonEntityRender {
         Look had = LOOKS.get(entity);
         // It didn't tick (far and idle, HorizonEntities.active): it looks as it did. Standing
         // still, it is drawn every other tick (its idle animation at 10 Hz, lerped).
+        // Far from every player, it is drawn every 2nd or 4th tick (drawEvery), unless hurt.
+        int every = drawEvery(distance2);
+        boolean hurt = entity instanceof net.minecraft.world.entity.LivingEntity l && (l.hurtTime > 0 || l.deathTime > 0);
         boolean reuse = had != null && (HorizonEntities.resting(entity)
-                || ((entity.tickCount + entity.getId()) & 1) == 1 && had.still(entity));
+                || ((entity.tickCount + entity.getId()) & 1) == 1 && had.still(entity)
+                || every > 1 && !hurt && Math.floorMod(entity.tickCount + entity.getId(), every) != 0);
         Look look = reuse ? had : look(entity);
         boolean keep = had != null && had.json().equals(look.json());
         if (!reuse) LOOKS.put(entity, look);
@@ -1012,13 +1045,19 @@ public final class HorizonEntityRender {
         o.addProperty("tex", texture);
         o.addProperty("overlay", recorder.overlay);
         if (glows(type)) o.addProperty("glow", true);
-        JsonArray v = new JsonArray();
+        // Written as text at once (thousands of numbers: a JsonArray boxed each).
+        StringBuilder v = new StringBuilder(n * 64);
+        v.append('[');
         for (int i = 0; i < n; i++) {
             float[] x = recorder.vertices.get(i);
-            for (int k = 0; k < 8; k++) v.add(Math.round(x[k] * 10000.0F) / 10000.0F);
-            v.add((long) Float.floatToRawIntBits(x[8]) & 0xFFFFFFFFL);
+            for (int k = 0; k < 8; k++) {
+                if (i > 0 || k > 0) v.append(',');
+                HorizonJson.tenThousandths(x[k], v);
+            }
+            v.append(',').append((long) Float.floatToRawIntBits(x[8]) & 0xFFFFFFFFL);
         }
-        o.add("v", v);
+        v.append(']');
+        o.add("v", new HorizonJson.Raw(v.toString()));
         out.add(o);
     }
 

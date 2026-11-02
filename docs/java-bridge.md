@@ -1614,3 +1614,7 @@ Sample it with gdb (`gdb -p $(pgrep -x horizon-client) -batch -ex bt`, every 2 s
   mirrored level lists. Horizon's own mobs near players are shadows there (same id as
   Horizon's), refreshed each tick. A hurt to a shadow goes to Horizon. Shadows are not ticked:
   never `tick()` one, and don't add them to `HorizonEntities` (it would save and tick them).
+
+- **Far mods' mobs are drawn less often.** `HorizonEntityRender.drawEvery`: past 24 blocks from
+  every player an entity's look is made every 2nd tick, past 48 every 4th (its position each
+  tick; the game keeps the look). Animations far away run at 10 or 5 Hz.

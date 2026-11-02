@@ -375,3 +375,21 @@ tests pass; fmt and clippy `-D warnings` clean (horizon-client, horizon-jvm).
   `regress.py --jars … neighbours` (Horizon's sheep at 8, then killed by the hunter). Not done:
   the other way. Horizon's mobs don't see mods' mobs (its AI targets and flees only its own
   mobs and players), and a Horizon mob a mod's mob hurt doesn't strike back.
+- **entities 7 (round 5, task 3: a bigger mob pack)**, `bridge-entities-7` (on
+  `bridge-entities-6`). Agent: Claude (iaxivers' chats). The 134-jar pack plus 10 mob mods
+  (Alex's Mobs, Wilder Wild, The Graveyard, Mo' Animals, Ender Zoology, Eternal Nether, Fish of
+  Thieves, Variants and Ventures, Cosy Critters, Snuffles; 147 jars) loads and runs. Measured
+  (`HORIZON_JAVA_PROFILE=1`, ~50 mod mobs near): entity ticks 11-17 ms a tick, the snapshot
+  6.5-10 ms. Top three: (1) the snapshot of animated mobs (GeckoLib: Graveyard's magpie and
+  nightmare, Alex's bison and cockroach, 0.5-1.5 ms each), (2) Naturalist's whale ticks
+  (0.55-0.9 ms each, its body parts' collisions, as entities 1 found), (3) Graveyard's skeleton
+  creepers (10-12 of them at 0.1-0.3 ms each; JFR shows only vanilla movement and collisions,
+  nothing of the mod's own). Cut: the snapshot. A GeckoLib mesh's vertices are written as text
+  at once (`HorizonJson.Raw`, `tenThousandths`) instead of a boxed Gson number each, and mobs
+  far from every player are drawn again every 2nd tick past 24 blocks and every 4th past 48
+  (`HorizonEntityRender.drawEvery`: their position still each tick, a hurt one each tick).
+  Same 40 s scene (bison, cockroaches, magpies, nightmares at 10 and 40 blocks), JFR samples
+  in the snapshot: 497 before, 286 after (-42%). Not cut: the whale's and skeleton creepers'
+  ticks (vanilla's own movement code; the bridge's block reads are a part of it). Test:
+  `regress.py --jars … entity gecko hostile mount carry ber`; to measure, a mobs pack and
+  `HORIZON_JAVA_PROFILE=1` ("entity snapshot" lines).
