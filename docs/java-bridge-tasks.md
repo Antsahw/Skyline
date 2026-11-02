@@ -558,3 +558,14 @@ tests pass; fmt and clippy `-D warnings` clean (horizon-client, horizon-jvm).
   tooltips, a scene in `screen_test.sh`. Regress `pot terminal reiscreen` pass with it. Test:
   CC: Tweaked in `~/hz-test/mods-java`, place `computercraft:computer_advanced`, right-click,
   type `ls`.
+
+- **gpu 8, map mods on a dedicated server** (`bridge-gpu-8`, on top of `bridge-gpu-7`; round 6
+  gpu 2, client 3's map half), by Claude for iaxivers. Works (server_test.sh, headless): a
+  dedicated server's player gets JourneyMap (minimap, its About screen, then the full-screen
+  map), VoxelMap, Xaero's minimap and World Map, XaeroPlus, Diorama and MiniHUD. Fixed:
+  JourneyMap's server side failed each tick (`LoadedChunkOverlayPlugin` walks
+  `ChunkMap.visibleChunkMap`, null in the mirror: now the chunk map's fastutil maps are made
+  empty). Not ours: JourneyMap + VoxelMap in one game fail as in the real game (both register
+  `worldinfo:world_id`). Small change outside gpu: `HorizonServer.chunkMap` (pack/mixins).
+  Regress `maps-server` (new), `journeymap` pass. Test: JourneyMap, Xaero's Minimap and World
+  Map in the server's `mods-java/` and the player's, join, M; J twice (About, then the map).

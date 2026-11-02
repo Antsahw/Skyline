@@ -1322,6 +1322,12 @@ Map mods (2026-11-01, `bridge-gpu2`, headless, llvmpipe):
   and read through its stream codec as the network would; before, their screens got the
   server's menu (CC's: "Cannot update terminal on the server"). Scene `computer`, regress
   case `computer`.
+- Dedicated servers (`bridge-gpu-8`, `server_test.sh`): their players get the map mods as a
+  LAN host's do: JourneyMap (minimap; J's About screen, then its full-screen map), VoxelMap,
+  Xaero's minimap and World Map, XaeroPlus, Diorama, MiniHUD. The mirror's `ChunkMap` now has
+  its (empty) chunk holder maps: JourneyMap's `LoadedChunkOverlayPlugin` failed each server tick
+  on them. JourneyMap and VoxelMap together fail the same way as in the real game (both
+  register `worldinfo:world_id`: VoxelMap's client code stops). Regress case `maps-server`.
 - Tooltips of Java screens draw through vanilla's path (deferred, `GuiGraphicsExtractor.tooltip`,
   captured like the rest) when mods merged handlers into the tooltip's drawing
   (`HorizonGraphics.vanillaTooltips`: Legendary Tooltips, Iceberg); else as one Horizon op as

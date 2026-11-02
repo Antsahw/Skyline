@@ -586,6 +586,16 @@ CASES = {
         forbid=[r"waited two minutes for the Java mods"],
         look="Xaero's minimap top left, Jade's box at the top, AppleSkin's hunger outline",
     ),
+    "maps-server": dict(
+        about="Map mods for a dedicated server's player: JourneyMap's minimap and full-screen map, Xaero's minimap and World Map (M), no JourneyMap server-tick failure",
+        mods=["journeymap", "xaero", "xaeroworldmap"], scene="none", server=True, env={"HORIZON_JAVA_DEBUG": "gpu"},
+        steps=['sleep 70', '$G key m tap; sleep 15; $G key escape tap; sleep 2; $G state > $S/player.json'],
+        checks=[check_log(r"Done \(", "the server starts"),
+                check_file("player.json", r'"screen":"playing"', "the player plays"),
+                check_log(r"gpu: horizon:dynamic/gpu\d+ 427x240, \d+ pixels not transparent, [1-9]\d{4,} not black", "the World Map's target has the map")],
+        forbid=[r"journeymap.common.event.FabricServerEvents\]: java", r"handler\$\w+\$xaero\w*\$\w+\): java"],
+        look="server-1.png: JourneyMap's minimap top right, Xaero's top left; server-2.png: Xaero's World Map",
+    ),
     "rei-lan": dict(
         about="REI's settings per player: a LAN guest turns on its craftable-only filter, the host's stays off and its list full",
         mods=["rei", "architectury", "cloth", "fd"], scene="none", lan=True,
