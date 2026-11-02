@@ -200,6 +200,21 @@ impl Game<'_> {
         }
     }
 
+    /// The Java mod's mob it rides: its health and max health when it shows hearts.
+    pub(super) fn java_mount_health(&self) -> Option<[f32; 2]> {
+        #[cfg(feature = "java-mods")]
+        {
+            self.java_entities
+                .ride
+                .filter(|_| self.riding.is_none())
+                .and_then(|r| r.hp)
+        }
+        #[cfg(not(feature = "java-mods"))]
+        {
+            None
+        }
+    }
+
     pub(super) fn riding_java_mob(&self) -> bool {
         #[cfg(feature = "java-mods")]
         {

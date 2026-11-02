@@ -604,6 +604,14 @@ public final class HorizonServer {
         HorizonServer.seed = seed;
     }
 
+    /** Horizon's mob `attacker` hit the mods' entity `id` (HorizonNeighbours.hurtByHorizon). */
+    public static boolean hurtByHorizon(int id, int attacker, float amount) {
+        boolean hurt = HorizonNeighbours.hurtByHorizon(id, attacker, amount);
+        runTasks();
+        afterCall();
+        return hurt;
+    }
+
     /** Horizon's mobs near its players this tick, for the mods' mobs (HorizonNeighbours.update). */
     public static void horizonMobs(String json) {
         HorizonNeighbours.update(json);
@@ -1205,12 +1213,21 @@ public final class HorizonServer {
                 String dimension = dimensionOf(levelWrites.getKey());
                 levelWrites.getValue().entrySet().removeIf(w -> {
                     BlockPos pos = BlockPos.of(w.getKey());
-                    BlockState now = parseState(Natives.blockState(dimension, pos.getX(), pos.getY(), pos.getZ()));
-                    return now == w.getValue() || WRITTEN_AT.getOrDefault(w.getKey(), 0L) < tick - 3;
+                    String name = Natives.blockState(dimension, pos.getX(), pos.getY(), pos.getZ());
+                    // Not loaded in Horizon yet: the write waits for its chunk there (as
+                    // vanilla's setBlock loads it), so mods keep reading it (~20 s at most);
+                    // once loaded, Horizon gets its few ticks to make it from then.
+                    if (name == null) {
+                        WAITING_CHUNK.add(w.getKey());
+                        return WRITTEN_AT.getOrDefault(w.getKey(), 0L) < tick - 400;
+                    }
+                    if (WAITING_CHUNK.remove(w.getKey())) WRITTEN_AT.put(w.getKey(), tick);
+                    return parseState(name) == w.getValue() || WRITTEN_AT.getOrDefault(w.getKey(), 0L) < tick - 3;
                 });
             }
             WRITTEN.values().removeIf(Map::isEmpty);
             WRITTEN_AT.keySet().removeIf(k -> WRITTEN.values().stream().noneMatch(m -> m.containsKey(k)));
+            WAITING_CHUNK.retainAll(WRITTEN_AT.keySet());
             anyWritten = !WRITTEN.isEmpty();
         }
 
@@ -1888,6 +1905,8 @@ public final class HorizonServer {
     private static volatile boolean anyWritten;
     /** The tick each pending write was made in (writes Horizon refuses go after a few). */
     private static final Map<Long, Long> WRITTEN_AT = new java.util.HashMap<>();
+    /** Pending writes whose chunk Horizon hasn't loaded yet (their few ticks start at its load). */
+    private static final java.util.Set<Long> WAITING_CHUNK = new java.util.HashSet<>();
     private static volatile long currentTick;
 
     /** The mirror's tick count (each server tick), for what is kept a tick. */

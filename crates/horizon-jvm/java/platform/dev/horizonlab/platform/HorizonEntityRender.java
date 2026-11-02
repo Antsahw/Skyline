@@ -366,6 +366,9 @@ public final class HorizonEntityRender {
             out.append(':').append(h.getValue());
         }
         HANDS.clear();
+        // What Horizon's own mobs see of the mods' living ones (HorizonNeighbours.seen).
+        out.append("},\"seen\":{");
+        HorizonNeighbours.seen(out);
         // Players riding a mod's mob: its id and the seat (positionRider's place this tick),
         // by UUID: their games sit them there.
         out.append("},\"rides\":{");
@@ -380,6 +383,10 @@ public final class HorizonEntityRender {
                     .append(p.getX()).append(',').append(p.getY()).append(',').append(p.getZ()).append(']');
             // A horse-style jump its game charges a bar for (PlayerRideableJumping).
             if (vehicle instanceof net.minecraft.world.entity.PlayerRideableJumping j && j.canJump()) out.append(",\"jump\":true");
+            // Its hearts on the rider's HUD (Gui's vehicle health: a living one that shows them).
+            if (vehicle instanceof net.minecraft.world.entity.LivingEntity l && l.showVehicleHealth()) {
+                out.append(",\"hp\":[").append(l.getHealth()).append(',').append(l.getMaxHealth()).append(']');
+            }
             out.append('}');
         }
         out.append("},\"models\":{");

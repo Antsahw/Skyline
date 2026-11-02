@@ -537,3 +537,33 @@ tests pass; fmt and clippy `-D warnings` clean (horizon-client, horizon-jvm).
   players, so a filtered search can briefly come out with another player's switch; the
   craftable search is very slow here (30+ s, 2 cores), so the guest's filtered list may lag.
   Test: regress `rei-lan` (new, LAN), `rei reiscreen modsettings` pass.
+- **entities 8 (round 6: Horizon's mobs see mod mobs; the rider's hearts; `preset`)**,
+  `bridge-entities-8`. Agent: Claude (iaxivers' chats).
+  1. Horizon's own mobs see the mods' living entities: the snapshot's `seen` lists each (id,
+     box, place, health, Enemy or not) with the vanilla type it is taken for
+     (`HorizonNeighbours.like`: its nearest vanilla class among zombie, skeleton, creeper,
+     spider, villager, illager, wolf, sheep, chicken, rabbit, fish; else a spider for an Enemy,
+     a pig for the rest), and Horizon's mob tick adds them to what its mobs see
+     (`java_neighbours_seen`, one line in creatures.rs). So they target (an iron golem hunts a
+     mod's Enemy), flee (by the type they're taken for) and strike back (HurtByTarget: the
+     hurt's attacker is the mod mob's id). A Horizon mob's hit on one goes to the mirror
+     (`mob_hits_mob` → `java_mob_hits_entity` → `HorizonNeighbours.hurtByHorizon`: a mob attack
+     by the attacker's shadow, so the mod mob strikes back too). Regress `golem` (Horizon's
+     golem kills crittermod's biter, now an Enemy) and `strikeback` (the hunter, no Enemy,
+     bites the golem, which kills it). Not done: Horizon's projectiles (a skeleton's arrow)
+     don't hit mod mobs; a mod mob that is no vanilla kind is seen as a pig or a spider.
+  2. The rider's HUD shows the mod mob's hearts where the food bar was (the ride's `hp`,
+     `draw_mount_hud`). horizon-ctl `status` gives `riding_java: [riding, [health, max]]`.
+     Regress `mounthud` (status, and the mount's orange hearts in the screenshot).
+  3. `preset`'s oak log: One Block's join sets grass at 0 64 0 while Horizon may not have
+     loaded that chunk yet (a slow, busy run). Horizon refused the write and the mirror forgot it
+     after 3 ticks; One Block's safety check (every 10 ticks: loaded and air → a random block)
+     then put a random block (an oak log) there. Now a write into a chunk Horizon hasn't loaded
+     waits for it on both sides (`apply_java_level_writes` keeps it ~20 s; the mirror keeps
+     reading it and starts its 3 ticks at the load), as vanilla's setBlock loads the chunk.
+     Couldn't make the flake show here (2 of 2 runs pass with two cores kept busy); the
+     mechanism is from One Block's `OneBlockSafety.ensureOneBlock`.
+  Outside the area: `creatures.rs` (2 hooks), `java_server.rs`, `HorizonServer` (writes,
+  1 delegate), `mounts.rs`, `control.rs`, `events.rs`. Test: `regress.py --jars … golem
+  strikeback mounthud preset`. Full regress: all pass but `mixins1` once (its wheat didn't grow
+  in 6 s of a busy run; passes alone 3 of 3): its step now waits up to 20 s for the growth.

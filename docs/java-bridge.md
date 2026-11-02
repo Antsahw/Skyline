@@ -1762,3 +1762,10 @@ for the 3×3 spawn chunks.
 - **Far mods' mobs are drawn less often.** `HorizonEntityRender.drawEvery`: past 24 blocks from
   every player an entity's look is made every 2nd tick, past 48 every 4th (its position each
   tick; the game keeps the look). Animations far away run at 10 or 5 Hz.
+
+- **Horizon's mobs see mod mobs as vanilla kinds.** Horizon's AI knows only vanilla species, so
+  each mod living entity is listed as the vanilla type it is taken for
+  (`HorizonNeighbours.like`) with its own id, box and health. A hit on one goes to the mirror
+  (`java_mob_hits_entity`).
+- **Writes into unloaded chunks wait.** Vanilla's `setBlock` loads the chunk; Horizon's refused
+  it. A mod's write into a chunk Horizon hasn't loaded now waits (both sides) until it loads.

@@ -1686,6 +1686,25 @@ pub fn horizon_mobs(json: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Horizon's mob `attacker` hit the mods' entity `id` for `amount` (a golem's swing, a wolf's
+/// bite): a mob attack by its shadow, so the entity strikes back. False when it took nothing.
+pub fn hurt_by_horizon(id: i32, attacker: i32, amount: f32) -> Result<bool, String> {
+    let hurt = with_server(|env, class| {
+        env.call_static_method(
+            class,
+            "hurtByHorizon",
+            "(IIF)Z",
+            &[
+                JValue::Int(id),
+                JValue::Int(attacker),
+                JValue::Float(amount),
+            ],
+        )?
+        .z()
+    })?;
+    Ok(hurt.unwrap_or(false))
+}
+
 /// A player hit the mod entity with this id (`Player.attack` on the mods' server). False when
 /// no mod entity has it.
 pub fn attack_entity(uuid: &str, id: i32) -> Result<bool, String> {

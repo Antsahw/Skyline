@@ -1275,6 +1275,8 @@ impl Game<'_> {
         status["stopped_sounds"] = json!(self.audio.stopped);
         // Boats, minecarts, armor stands, item frames and paintings.
         status["objects"] = json!(self.objects_status());
+        // Whether it rides a Java mod's mob, and that mob's [health, max health] for the HUD.
+        status["riding_java"] = json!([self.riding_java_mob(), self.java_mount_health()]);
         status["lightning"] = json!({"bolts": self.bolts.len(), "struck": self.lightning_seen[0],
             "flashes": self.lightning_seen[1], "flash": self.flash});
         // Primed TNT, falling blocks, projectiles, tridents and end crystals.

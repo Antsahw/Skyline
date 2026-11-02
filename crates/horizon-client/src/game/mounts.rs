@@ -659,12 +659,19 @@ impl Game<'_> {
         jump_bar: bool,
     ) -> i32 {
         let Some(i) = self.mount_index() else {
-            // A Java mod's horse-style mob: its jump bar (its hearts are the mod's).
+            // A Java mod's mob: its hearts, as a vanilla mount's (the server's snapshot gives
+            // them), and a horse-style one's jump bar.
+            let mut hearts = 0;
+            if let Some([health, max]) = self.java_mount_health() {
+                hearts = horizon_client::hud_layout::vehicle_max_hearts(max);
+                let draws = horizon_client::hud_layout::vehicle_health(w, h, hearts, health);
+                horizon_client::hud_layout::paint(batch, &self.gui.atlas, &draws);
+            }
             if jump_bar && self.java_mount_jumps() {
                 let draws = horizon_client::hud_overlays::jump_bar(w, h, 0, self.mount.jump_scale);
                 horizon_client::hud_layout::paint(batch, &self.gui.atlas, &draws);
             }
-            return 0;
+            return hearts;
         };
         let m = &self.mobs[i];
         let atlas = &self.gui.atlas;

@@ -9,8 +9,8 @@ import net.minecraft.world.entity.ai.goal.target.NearestAttackableTargetGoal;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
 
-/** A critter that hunts the nearest player in sight and bites (3 damage). */
-public class Biter extends Critter {
+/** A critter that hunts the nearest player in sight and bites (3 damage); an Enemy (iron golems hunt it). */
+public class Biter extends Critter implements net.minecraft.world.entity.monster.Enemy {
     public Biter(EntityType<? extends Biter> type, Level level) {
         super(type, level);
     }

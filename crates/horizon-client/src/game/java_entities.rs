@@ -174,6 +174,9 @@ pub(super) struct Ride {
     /// It jumps as a horse (PlayerRideableJumping): the game charges the jump bar.
     #[serde(default)]
     pub(super) jump: bool,
+    /// Its health and max health, for the rider's HUD (none: it shows no hearts).
+    #[serde(default)]
+    pub(super) hp: Option<[f32; 2]>,
 }
 
 #[derive(serde::Deserialize)]
@@ -699,5 +702,82 @@ impl Game<'_> {
             let v: [f64; 3] = std::array::from_fn(|i| r.next_gaussian() * p.s[i]);
             self.particles.add_mod(&p.t, at, v, p.f);
         }
+    }
+}
+
+/// One of the mods' living entities as Horizon's mobs see it (`HorizonNeighbours.seen`): its id,
+/// the vanilla type they take it for, where it stands, its box, health and facing, and whether it
+/// is an `Enemy` (what golems attack).
+#[derive(serde::Deserialize, Clone)]
+pub(super) struct Neighbour(
+    pub(super) u32,
+    pub(super) String,
+    pub(super) f64,
+    pub(super) f64,
+    pub(super) f64,
+    pub(super) f32,
+    pub(super) f32,
+    pub(super) f32,
+    pub(super) f32,
+    pub(super) u8,
+);
+
+/// The mods' living entities by dimension, from the last snapshot (game/java_server.rs's
+/// `send_java_entities`), for Horizon's mobs' ticks.
+pub(super) static NEIGHBOURS: std::sync::Mutex<Option<HashMap<String, Vec<Neighbour>>>> =
+    std::sync::Mutex::new(None);
+
+impl Game<'_> {
+    /// What Horizon's mobs see of the mods' living entities in this level: each as the vanilla
+    /// type it is taken for (`HorizonNeighbours.like`), with its own box, place and health. Its
+    /// id is the bridge's, so a target or a hurt-by of one names it; a hit goes to Java
+    /// (`java_mob_hits_entity`).
+    pub(super) fn java_neighbours_seen(&self) -> Vec<horizon_client::mobs::Seen> {
+        let neighbours = NEIGHBOURS.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(list) = neighbours.as_ref().and_then(|n| n.get(self.dim.id())) else {
+            return Vec::new();
+        };
+        let uuid = self.level.player_uuid;
+        list.iter()
+            .filter_map(|n| {
+                let kind = self.res.mob_types().get(&n.1).cloned()?;
+                let at = Vec3::new(n.2, n.3, n.4);
+                let mut m = horizon_client::mobs::Mob::new(n.0, kind, at, n.8);
+                m.health = n.7;
+                let mut seen = m.seen(uuid);
+                let half = f64::from(n.5) / 2.0;
+                seen.bounds = Aabb::new(
+                    Vec3::new(at.x - half, at.y, at.z - half),
+                    Vec3::new(at.x + half, at.y + f64::from(n.6), at.z + half),
+                );
+                seen.eye_y = at.y + f64::from(n.6) * 0.85;
+                seen.hostile = n.9 != 0;
+                Some(seen)
+            })
+            .collect()
+    }
+
+    /// Horizon's mob hit `target` (`MobEvent::AttackMob`): one of the mods' entities takes it
+    /// on the mirror (`HorizonNeighbours.hurtByHorizon`). None when `target` isn't theirs.
+    pub(super) fn java_mob_hits_entity(
+        &mut self,
+        target: u32,
+        amount: f32,
+        source: horizon_client::mobs::Damage,
+    ) -> Option<bool> {
+        if target < FIRST_ID as u32 {
+            return None;
+        }
+        let attacker = match source.attacker {
+            Some(horizon_client::mobs::Who::Mob(id)) => id as i32,
+            _ => -1,
+        };
+        let hurt = self.with_java_world(|| {
+            horizon_jvm::events::hurt_by_horizon(target as i32, attacker, amount)
+        });
+        Some(hurt.unwrap_or_else(|e| {
+            log::warn!("Java mods: a mob's hit on a mod entity failed: {e}");
+            false
+        }))
     }
 }
