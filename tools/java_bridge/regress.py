@@ -372,7 +372,7 @@ CASES = {
                '$C state | python3 -c "import json,sys;print(sorted(e[\'id\'] for e in json.load(sys.stdin)[\'player\'][\'effects\']))" > $S/haste.txt',
                '$C command "setblock $(cat $S/beacon.pos) minecraft:beacon{primary_effect:\\"minecraft:speed\\"}" >/dev/null; sleep 6; '
                '$C state | python3 -c "import json,sys;print(sorted(e[\'id\'] for e in json.load(sys.stdin)[\'player\'][\'effects\']))" > $S/speed.txt',
-               '$C command "item replace entity @s weapon.mainhand with minecraft:ominous_bottle" >/dev/null; sleep 0.5; '
+               '$C command "item replace entity @s weapon.mainhand with minecraft:ominous_bottle" >/dev/null; $C look 0 -90 >/dev/null; sleep 0.5; '
                '$C mouse right down >/dev/null; sleep 2.5; $C mouse right up >/dev/null; sleep 1; '
                '$C state | python3 -c "import json,sys;print(sorted(e[\'id\'] for e in json.load(sys.stdin)[\'player\'][\'effects\']))" > $S/omen.txt; $C inventory > $S/bottle.json'],
         checks=[check_file("haste.txt", r"^\[\]$", "no haste from the beacon"),
