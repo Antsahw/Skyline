@@ -1009,6 +1009,10 @@ public final class HorizonGraphics extends GuiGraphicsExtractor {
 
     @Override
     public void setTooltipForNextFrame(Font font, ItemStack stack, int x, int y) {
+        if (vanillaTooltips()) {
+            super.setTooltipForNextFrame(font, stack, x, y);
+            return;
+        }
         JsonObject o = op("item_tooltip");
         o.addProperty("item", HorizonServer.snbt(stack));
         o.addProperty("x", x);
@@ -1017,17 +1021,29 @@ public final class HorizonGraphics extends GuiGraphicsExtractor {
 
     @Override
     public void setTooltipForNextFrame(Component text, int x, int y) {
+        if (vanillaTooltips()) {
+            super.setTooltipForNextFrame(text, x, y);
+            return;
+        }
         tooltip(java.util.List.of(text), x, y);
     }
 
     @Override
     public void setTooltipForNextFrame(java.util.List<FormattedCharSequence> lines, int x, int y) {
+        if (vanillaTooltips()) {
+            super.setTooltipForNextFrame(lines, x, y);
+            return;
+        }
         tooltip(components(lines), x, y);
     }
 
     @Override
     public void setTooltipForNextFrame(Font font, java.util.List<Component> lines,
                                        java.util.Optional<net.minecraft.world.inventory.tooltip.TooltipComponent> image, int x, int y) {
+        if (vanillaTooltips()) {
+            super.setTooltipForNextFrame(font, lines, image, x, y);
+            return;
+        }
         tooltip(lines, x, y);
     }
 
@@ -1035,6 +1051,10 @@ public final class HorizonGraphics extends GuiGraphicsExtractor {
     public void setTooltipForNextFrame(Font font, java.util.List<Component> lines,
                                        java.util.Optional<net.minecraft.world.inventory.tooltip.TooltipComponent> image, int x, int y,
                                        Identifier style) {
+        if (vanillaTooltips()) {
+            super.setTooltipForNextFrame(font, lines, image, x, y, style);
+            return;
+        }
         tooltip(lines, x, y);
     }
 
@@ -1042,6 +1062,10 @@ public final class HorizonGraphics extends GuiGraphicsExtractor {
     public void setTooltipForNextFrame(Font font, java.util.List<Component> lines,
                                        java.util.Optional<net.minecraft.world.inventory.tooltip.TooltipComponent> image, int x, int y,
                                        Identifier style, boolean focused) {
+        if (vanillaTooltips()) {
+            super.setTooltipForNextFrame(font, lines, image, x, y, style, focused);
+            return;
+        }
         tooltip(lines, x, y);
     }
 
@@ -1050,37 +1074,65 @@ public final class HorizonGraphics extends GuiGraphicsExtractor {
                                        java.util.Optional<net.minecraft.world.inventory.tooltip.TooltipComponent> image,
                                        net.minecraft.client.gui.screens.inventory.tooltip.ClientTooltipPositioner positioner,
                                        int x, int y, boolean focused, Identifier style) {
+        if (vanillaTooltips()) {
+            super.setTooltipForNextFrame(font, lines, image, positioner, x, y, focused, style);
+            return;
+        }
         tooltip(components(lines), x, y);
     }
 
     @Override
     public void setTooltipForNextFrame(Font font, Component text, int x, int y) {
+        if (vanillaTooltips()) {
+            super.setTooltipForNextFrame(font, text, x, y);
+            return;
+        }
         tooltip(java.util.List.of(text), x, y);
     }
 
     @Override
     public void setTooltipForNextFrame(Font font, Component text, int x, int y, Identifier style) {
+        if (vanillaTooltips()) {
+            super.setTooltipForNextFrame(font, text, x, y, style);
+            return;
+        }
         tooltip(java.util.List.of(text), x, y);
     }
 
     @Override
     public void setComponentTooltipForNextFrame(Font font, java.util.List<Component> lines, int x, int y) {
+        if (vanillaTooltips()) {
+            super.setComponentTooltipForNextFrame(font, lines, x, y);
+            return;
+        }
         tooltip(lines, x, y);
     }
 
     @Override
     public void setComponentTooltipForNextFrame(Font font, java.util.List<Component> lines, int x, int y, Identifier style) {
+        if (vanillaTooltips()) {
+            super.setComponentTooltipForNextFrame(font, lines, x, y, style);
+            return;
+        }
         tooltip(lines, x, y);
     }
 
     @Override
     public void setTooltipForNextFrame(Font font, java.util.List<? extends FormattedCharSequence> lines, int x, int y) {
+        if (vanillaTooltips()) {
+            super.setTooltipForNextFrame(font, lines, x, y);
+            return;
+        }
         tooltip(components(lines), x, y);
     }
 
     @Override
     public void setTooltipForNextFrame(Font font, java.util.List<? extends FormattedCharSequence> lines, int x, int y,
                                        Identifier style) {
+        if (vanillaTooltips()) {
+            super.setTooltipForNextFrame(font, lines, x, y, style);
+            return;
+        }
         tooltip(components(lines), x, y);
     }
 
@@ -1088,13 +1140,46 @@ public final class HorizonGraphics extends GuiGraphicsExtractor {
     public void setTooltipForNextFrame(Font font, java.util.List<FormattedCharSequence> lines,
                                        net.minecraft.client.gui.screens.inventory.tooltip.ClientTooltipPositioner positioner,
                                        int x, int y, boolean focused) {
+        if (vanillaTooltips()) {
+            super.setTooltipForNextFrame(font, lines, positioner, x, y, focused);
+            return;
+        }
         tooltip(components(lines), x, y);
     }
 
-    /** A tooltip drawn at once: Horizon draws tooltips (the deferred ones above). */
+    /**
+     * A tooltip drawn at once: Horizon draws tooltips (the deferred ones above), unless mods
+     * change how tooltips draw (vanillaTooltips).
+     */
     @Override
     public void tooltip(Font font, java.util.List<net.minecraft.client.gui.screens.inventory.tooltip.ClientTooltipComponent> lines,
                         int x, int y, net.minecraft.client.gui.screens.inventory.tooltip.ClientTooltipPositioner positioner,
                         Identifier style, boolean focused) {
+        if (vanillaTooltips()) super.tooltip(font, lines, x, y, positioner, style, focused);
+    }
+
+    private static Boolean vanillaTooltips;
+
+    /**
+     * Whether tooltips draw as vanilla's do, here (deferred, then GuiGraphicsExtractor.tooltip:
+     * its sprites, text and images, captured like the rest), instead of as one Horizon op: when
+     * mods' mixins merged handlers into the tooltip's drawing (Legendary Tooltips' frames and
+     * item, Iceberg's), which only run on vanilla's path.
+     */
+    static boolean vanillaTooltips() {
+        if (vanillaTooltips != null) return vanillaTooltips;
+        boolean hooked = false;
+        for (Class<?> c : new Class<?>[]{GuiGraphicsExtractor.class,
+                net.minecraft.client.gui.screens.inventory.tooltip.TooltipRenderUtil.class}) {
+            for (var m : c.getDeclaredMethods()) {
+                String n = m.getName();
+                if (n.contains("$") && !n.startsWith("lambda$") && !n.startsWith("access$")) {
+                    hooked = true;
+                    break;
+                }
+            }
+        }
+        if (hooked) Natives.log("Horizon's client: mods change how tooltips draw: Java screens' tooltips draw as vanilla's");
+        return vanillaTooltips = hooked;
     }
 }

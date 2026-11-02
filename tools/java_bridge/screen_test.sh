@@ -181,6 +181,10 @@ case "$SCENE" in
     'q "gamemode survival"' 'q "fill $((X+2)) $Y $((Z-1)) $((X+4)) $Y $((Z+1)) minecraft:iron_block"' \
     'q "fill $((X+3)) $((Y+1)) $Z $((X+3)) 319 $Z minecraft:air"' \
     'echo "$((X+3)) $((Y+1)) $Z" > "$S/beacon.pos"' '$C look-at $(p $X+3.5) $(p $Y+1.5) $(p $Z+0.5) >/dev/null' ;;
+  # CC: Tweaked: an advanced computer two blocks east, opened (its terminal screen).
+  computer) "$R/tools/java_bridge/around.sh" \
+    'q "setblock $((X+2)) $Y $Z computercraft:computer_advanced[facing=west]"' \
+    '$C look-at-block $((X+2)) $Y $Z >/dev/null' '$C mouse right click >/dev/null' 'sleep 6' ;;
   none) ;;
 esac
 # For steps: aim FILE looks at the block whose "x y z" FILE holds (a small one too: a flower),

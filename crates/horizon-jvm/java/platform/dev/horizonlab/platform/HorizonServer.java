@@ -1691,6 +1691,8 @@ public final class HorizonServer {
                 Object type = c.getMethod("identifier").invoke(payload);
                 int containerId = (int) c.getMethod("containerId").invoke(payload);
                 Object title = c.getMethod("title").invoke(payload);
+                // Its opening data, for the client's own menu (HorizonClient.clientMenu).
+                HorizonClient.openingData(player, containerId, c.getMethod("innerCodec").invoke(payload), c.getMethod("data").invoke(payload));
                 menuOpened(player, containerId, String.valueOf(type),
                         json((net.minecraft.network.chat.Component) title), (net.minecraft.network.chat.Component) title);
                 return;

@@ -537,3 +537,24 @@ tests pass; fmt and clippy `-D warnings` clean (horizon-client, horizon-jvm).
   players, so a filtered search can briefly come out with another player's switch; the
   craftable search is very slow here (30+ s, 2 cores), so the guest's filtered list may lag.
   Test: regress `rei-lan` (new, LAN), `rei reiscreen modsettings` pass.
+
+- **gpu 7, more GPU mods** (`bridge-gpu-7`, round 6 gpu 1), by Claude for iaxivers. Scanned the
+  300 most downloaded client-required 26.3 Fabric mods' jars (nested jars too) for their own
+  render passes, pipelines, pictures in picture and targets; tried five that draw on screens:
+  - CC: Tweaked: works. Its computer's terminal draws and typing runs commands
+    (`mkdir typed` lands on the computer's disk). Fix useful beyond it: Fabric's extended menus
+    get their client menu from the opening data. Regress `computer` (scene `computer`).
+  - Legendary Tooltips (Iceberg, Prism): partly. Java screens' tooltips take vanilla's path
+    when mods hook it: centred title, rarity border. Its 3D model for equipment doesn't draw
+    yet. Regress `tooltips`.
+  - Item Collectors (SuperMartijn's core lib): its screen works; the lib's picture in picture
+    isn't used there.
+  - Gnetum: loads, nothing to see: it caches vanilla's HUD, which Horizon draws itself.
+  - Advanced Loot Info (with REI): doesn't. Its REI plugin asks the server for its data from
+    REI's reload thread, where no player's client runs: the request is dropped, and it waits
+    (3 x 30 s).
+  Small changes outside gpu: `HorizonClient`/`HorizonServer` (extended menus: client area),
+  `game/control.rs` + `game/java_screen.rs` (`type` into mod screens), `HorizonGraphics`'
+  tooltips, a scene in `screen_test.sh`. Regress `pot terminal reiscreen` pass with it. Test:
+  CC: Tweaked in `~/hz-test/mods-java`, place `computercraft:computer_advanced`, right-click,
+  type `ls`.

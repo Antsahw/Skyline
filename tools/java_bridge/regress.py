@@ -70,6 +70,10 @@ MODS = {
     "xaeroplus": ["xaeroplus*"],
     "malilib": ["malilib*"],
     "minihud": ["minihud*"],
+    "cc": ["cc-tweaked*"],
+    "legendarytooltips": ["legendarytooltips*"],
+    "iceberg": ["iceberg*"],
+    "prism-lib": ["prism-*"],
 }
 
 
@@ -539,6 +543,24 @@ CASES = {
                 check_log(r"run each client <start at its end>", "MaLiLib's hooks at the end of the client's start are found")],
         forbid=[r"A mod failed in the GUI's frame", r"A mod failed in the client's"],
         look="MiniHUD's lines at the top left: the date, coordinates, facing",
+    ),
+    "computer": dict(
+        about="CC: Tweaked: a computer's screen (its client menu made from Fabric's opening data) draws its terminal, and typing reaches the computer",
+        mods=["cc"], scene="computer",
+        steps=['$C type "mkdir typed"; sleep 1; $C key enter tap; sleep 3; '
+               'find $S -path "*computercraft/computer*" -name typed > $S/typed.txt; $C state > $S/state.json'],
+        checks=[check_json("state.json", ["screen"], "container", "the computer's screen is open"),
+                check_file("typed.txt", r"computer/0/typed", "the typed command ran on the computer")],
+        forbid=[r"Cannot update terminal", r"client's menu of \S+ couldn't be made", r"screen of computercraft:\S+ could not open"],
+        look="the advanced computer's terminal: CraftOS 1.9, '> mkdir typed', a new prompt",
+    ),
+    "tooltips": dict(
+        about="Legendary Tooltips (Iceberg, Prism) over a mod screen: tooltips draw through vanilla's path, where its mixins run (centred title, the border in the item's rarity colour)",
+        mods=["legendarytooltips", "iceberg", "prism-lib", "fd"], scene="pot",
+        steps=['$C click-at 141 187; sleep 1; $C click-at 141 187; sleep 3'],
+        checks=[check_log(r"Java screens' tooltips draw as vanilla's", "tooltips take vanilla's path")],
+        forbid=[r"A mod failed in", r"iceberg\S*: java"],
+        look="the pot's screen, Raw Beef's tooltip: title centred, a white border (common rarity), not vanilla's purple",
     ),
     "maps-lan": dict(
         about="JourneyMap and VoxelMap per player: a host and a LAN guest 40 blocks east, each map their own",

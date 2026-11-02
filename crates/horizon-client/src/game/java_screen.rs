@@ -905,6 +905,18 @@ impl Game<'_> {
         true
     }
 
+    /// Characters typed into a mod screen (`charTyped`): the control socket's `type`. False
+    /// when no mod screen is open.
+    pub(super) fn java_screen_chars(&mut self, text: &str) -> bool {
+        let Some(window) = self.java_screen_window() else {
+            return false;
+        };
+        for ch in text.chars().filter(|c| !c.is_control()) {
+            self.send_java_screen_input(window, json!({"kind": "char", "char": ch as u32}));
+        }
+        true
+    }
+
     // ---- The server -----------------------------------------------------------------------
 
     /// What Java mods draw on a player's HUD, from Java: to their game.
