@@ -24,6 +24,7 @@ mod instance_icons;
 mod instance_mods;
 mod instances_page;
 mod internet;
+mod java_mods_page;
 mod language_page;
 mod launch_page;
 mod line_edit;
@@ -359,6 +360,7 @@ struct Launcher {
     worlds: worlds_page::Worlds,
     multiplayer: multiplayer_page::Multiplayer,
     screenshots: screenshots_page::Screenshots,
+    java_mods: java_mods_page::JavaModsTab,
     game_packs: packs_page::Packs,
     world_packs: datapacks_page::WorldPacks,
     export: Option<export_page::ExportPanel>,
@@ -579,6 +581,7 @@ impl Launcher {
             worlds: worlds_page::Worlds::default(),
             multiplayer: multiplayer_page::Multiplayer::default(),
             screenshots: screenshots_page::Screenshots::default(),
+            java_mods: java_mods_page::JavaModsTab::default(),
             game_packs: packs_page::Packs::default(),
             world_packs: datapacks_page::WorldPacks::default(),
             export: None,
@@ -1168,6 +1171,8 @@ impl Launcher {
                             self.worlds.stale();
                             self.multiplayer.stale();
                             self.screenshots.stale();
+                            // Its log says which Java mods failed.
+                            self.java_mods.stale();
                             self.game_packs.stale();
                             let vars = std::mem::take(&mut self.client_vars);
                             if let Some((id, started)) = self.client_run.take() {

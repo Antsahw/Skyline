@@ -221,6 +221,33 @@ enum ModpackCmd {
 }
 
 #[derive(Subcommand)]
+enum JavaModsCmd {
+    /// The jars, with their Fabric names and versions
+    List {
+        /// The instance (default: the one Play starts)
+        #[arg(long)]
+        instance: Option<String>,
+    },
+    /// Copy a Fabric mod's jar into mods-java/
+    Add {
+        jar: PathBuf,
+        #[arg(long)]
+        instance: Option<String>,
+    },
+    /// Send a jar to the trash (its file name, Fabric id or name)
+    Remove {
+        name: String,
+        #[arg(long)]
+        instance: Option<String>,
+    },
+    /// What failed with the Java mods in the instance's last game (its log)
+    Failed {
+        #[arg(long)]
+        instance: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
 enum InstanceCmd {
     /// The instances, each with its game folder (* = the one Play starts)
     List,
@@ -935,6 +962,13 @@ enum Cmd {
         #[command(subcommand)]
         action: Option<ModsCmd>,
     },
+    /// The Fabric Java mods a game built with Java mods runs (mods-java/ in an instance's game
+    /// folder, docs/java-bridge.md): list them, add a jar, send one to the trash, and see which
+    /// failed in the last game
+    JavaMods {
+        #[command(subcommand)]
+        action: Option<JavaModsCmd>,
+    },
     /// The portable Rust toolchain native mods compile with (docs/native-mods.md): the launcher's
     /// own, in its data folder, never installed on the system
     Rust {
@@ -1167,6 +1201,74 @@ fn attached(mut cmd: Command) -> Result<(), String> {
     } else {
         Err(format!("Exited with {status}"))
     }
+}
+
+/// `java-mods`: an instance's mods-java/.
+fn java_mods(action: JavaModsCmd, as_json: bool) -> Result<(), String> {
+    use horizon_launcher::java_mods;
+    let home = |instance: &Option<String>| -> Result<PathBuf, String> {
+        Ok(match instance {
+            Some(name) => instances::find(name)?,
+            None => instances::selected(),
+        }
+        .home)
+    };
+    let mod_json = |m: &java_mods::JavaMod| {
+        serde_json::json!({
+            "file": m.file, "id": m.id, "name": m.name, "version": m.version, "size": m.size,
+        })
+    };
+    match action {
+        JavaModsCmd::List { instance } => {
+            let home = home(&instance)?;
+            let mods = java_mods::list(&home);
+            if as_json {
+                json(serde_json::json!({
+                    "folder": java_mods::dir(&home),
+                    "mods": mods.iter().map(mod_json).collect::<Vec<_>>(),
+                }));
+            } else if mods.is_empty() {
+                println!("No Java mods in {}.", java_mods::dir(&home).display());
+            } else {
+                for m in &mods {
+                    let version = m.version.as_deref().unwrap_or("");
+                    println!("{}  {version}  ({})", m.title(), m.file);
+                }
+            }
+        }
+        JavaModsCmd::Add { jar, instance } => {
+            let added = java_mods::add(&home(&instance)?, &jar)?;
+            if as_json {
+                json(mod_json(&added));
+            } else {
+                println!("Added {} ({}).", added.title(), added.file);
+            }
+        }
+        JavaModsCmd::Remove { name, instance } => {
+            let removed = java_mods::remove(&home(&instance)?, &name)?;
+            if as_json {
+                json(mod_json(&removed));
+            } else {
+                println!("Moved {} to the trash.", removed.file);
+            }
+        }
+        JavaModsCmd::Failed { instance } => {
+            let failures = java_mods::failures(&home(&instance)?);
+            if as_json {
+                json(serde_json::json!(failures
+                    .iter()
+                    .map(|f| serde_json::json!({ "mod": f.name, "text": f.text }))
+                    .collect::<Vec<_>>()));
+            } else if failures.is_empty() {
+                println!("Nothing failed in the last game's log.");
+            } else {
+                for f in &failures {
+                    println!("{}", f.text);
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 fn release_json(r: &Release) -> serde_json::Value {
@@ -1709,6 +1811,10 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
         Cmd::Modpack { action } => modpack(action.unwrap_or(ModpackCmd::List), as_json)?,
         Cmd::Mods { action } => mods(action.unwrap_or(ModsCmd::List { instance: None }), as_json)?,
         Cmd::Servers { action } => servers(action.unwrap_or(ServersCmd::List), as_json)?,
+        Cmd::JavaMods { action } => java_mods(
+            action.unwrap_or(JavaModsCmd::List { instance: None }),
+            as_json,
+        )?,
         Cmd::Rust { action } => rust(action.unwrap_or(RustCmd::Status), as_json)?,
         Cmd::Java { action } => java(action.unwrap_or(JavaCmd::List), as_json)?,
         Cmd::Mcp => unreachable!(),
