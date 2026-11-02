@@ -357,3 +357,7 @@ tests pass; fmt and clippy `-D warnings` clean (horizon-client, horizon-jvm).
   cached between runs". Also fixed: java_worldgen's test didn't compile (upstream's `Spans`).
   Regress: all pass but `preset` once (an oak log at the One Block's spot, 1 of 3 runs; passes
   alone twice). Test: start a pack twice; the log says "classes mapped from …" the second time.
+
+- **worldgen 5.2, lost blocks** (bridge-worldgen-5): still none. `lost` passed in the full
+  regress run and 3 more times (0 of 33–36 lost), and the repro on the 110-jar pack
+  (`lost_blocks.sh`, 40 s wait): 0 of 27, no "generated again while loaded". No change.
