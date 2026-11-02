@@ -848,6 +848,14 @@ Found in the upstream sync (2026-11-01):
   catching-up server runs the 40 ticks Skyblock Infinite schedules within a second). Anything
   that holds a player "until N ticks passed" must also wait for the chunks it needs: a new
   player waits for every chunk a function forced (`HorizonFunctions.WAITING_CHUNKS`).
+  Then it also waits until the run that a forced chunk stopped has gone through: no
+  `horizon-retry-` event scheduled and two ticks with no run stopped (pack-6).
+- **Some datapacks wait for a player on purpose.** Skyblock Infinite's island function checks
+  `data get entity @p` and reschedules itself each tick until someone is online, so its island
+  lands ~1 s after the first join, in vanilla too. Holding the join longer can't fix that.
+- **Loot tables are parsed on first use** (`horizon_world::loot::LootTables`): the
+  `native_loot_table_load` hook runs then, not at world load. Code that changes a table's file
+  after reading it keeps the parsed copy.
 
 ## Build and test
 
@@ -1356,18 +1364,22 @@ trees: `J::Raw` in `mod_content.rs`).
 Where the memory goes (2026-11-01, bridge-pack-5; `HORIZON_MEM_LOG=1` logs it after each load
 stage, `examples/state_memory_probe` measures a content root's tables; RSS kept, the heap
 trimmed first). Vanilla / the 577k-state pack: the block registry and before it 181 / 888 MB,
-the state models +28 / +665 MB (the baked models of every variant: Rechiseled's connected
-textures, Macaw's shapes), block textures +30 / +175, block facts +39 / +512 (the parsed
-`block-behaviours.json` stays until the world rest uses it), pack tables +28 / +176, items +22
-/ +243, the renderer +458 / +1044 (llvmpipe: GPU memory is system memory here; on a GPU most
-of it is VRAM), loot +9 / +216, worldgen data +33 / +418, the generator and streaming +25 /
-+326. The world opens at 5.2 GB, and the JVM's start (heap, metaspace for 155 jars) passes
-this sandbox's ~6.2 GB limit. Next: baked models without per-variant copies, block facts
-without the behaviour JSON kept, a leaner `BlockState` (a `String` and a `BTreeMap` per
-state: ~1 KB). Fixed: `level::Behaviours` parsed `gameplay-facts.json` (314 MB for 208k
-states) as a JSON tree, 3.4 GB at its peak (now streamed: 453 MB); loot tables are read when
-used; the heap is trimmed after the big loads. Dead ends: heaptrack's interpreter runs out of
-memory on this game (tens of millions of live allocations), recording raw or not.
+the state models +28 / +665 MB, block textures +30 / +175, block facts +39 / +512, pack tables
++28 / +176, items +22 / +243, the renderer +458 / +1044 (llvmpipe: GPU memory is system memory
+here; on a GPU most of it is VRAM), loot +9 / +216, worldgen data +33 / +418, the generator
+and streaming +25 / +326. Fixed since: `level::Behaviours` streams `gameplay-facts.json` (was a
+3.4 GB peak); upstream's `BlockProperties` (interned, ~350 B a state now); loot tables parsed
+on first use (pack-6: the loot stage +1 MB at 208k states); `block-behaviours.json`'s tree
+(~380 MB at 577k) dropped after the facts load and read again only when the behaviours'
+snapshot misses; baked faces keep a `BakedQuad`, not the `ModelQuad` with its sprite name
+(model catalog at 577k: 579 → 385 MB; `examples/texture_memory_probe` prints what each part of
+the render assets keeps). State of 2026-11-02 (pack-6): the 155-jar pack with no JVM
+(`HORIZON_JAVA_HOME=/nonexistent`) opens its world at 3.76 GB and the player joins; with the
+JVM (~2.5 GB for 155 jars) it still passes this sandbox's ~6.2 GB cgroup limit, of which
+llvmpipe's textures are ~1.2 GB: a real GPU should fit in 8 GB, untested. Left: render assets
+683 MB (texture array 8043 layers at 64 px: 256 MiB budget; sprite pixels 125 MB), the
+remaining catalog (~165 MB beyond faces: choices and allocation slack). Dead ends: heaptrack's
+interpreter runs out of memory on this game (tens of millions of live allocations).
 
 Mods' sounds and particles (2026-10-31): a mod's sound event plays by name (its
 `sounds.json` and `.ogg` files are carried into the content mod, which Horizon's sound

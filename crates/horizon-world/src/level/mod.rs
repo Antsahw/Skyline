@@ -721,6 +721,15 @@ impl Behaviours {
         data::load_with_gameplay(registry, resources_dir, behaviour, gameplay)
     }
 
+    /// [`Self::load_with_gameplay`], `block-behaviours.json` read only when the snapshot misses.
+    pub fn load_with_gameplay_from_file<G: GameplayStateSource>(
+        registry: &BlockRegistry,
+        resources_dir: &Path,
+        gameplay: &[G],
+    ) -> io::Result<Self> {
+        data::load_with_gameplay_from_file(registry, resources_dir, gameplay)
+    }
+
     pub fn load_with_behaviour_json(
         registry: &BlockRegistry,
         resources_dir: &Path,

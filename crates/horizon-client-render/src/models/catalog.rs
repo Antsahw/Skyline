@@ -25,8 +25,34 @@ use std::{
     path::Path,
 };
 
+/// A baked quad: [`ModelQuad`] without its material, whose sprite is the face's `layer` once
+/// baked (a modded pack's 2.3 million faces carried the name: 32 bytes and a heap string each).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BakedQuad {
+    pub positions: [[f32; 3]; 4],
+    pub uv: [[f32; 2]; 4],
+    pub facing: horizon_assets::model::Direction,
+    pub cull: Option<horizon_assets::model::Direction>,
+    pub tint_index: i32,
+    pub shade_direction_override: Option<horizon_assets::model::Direction>,
+    pub light_emission: u8,
+}
+impl From<ModelQuad> for BakedQuad {
+    fn from(q: ModelQuad) -> Self {
+        Self {
+            positions: q.positions,
+            uv: q.uv,
+            facing: q.facing,
+            cull: q.cull,
+            tint_index: q.tint_index,
+            shade_direction_override: q.shade_direction_override,
+            light_emission: q.light_emission,
+        }
+    }
+}
+
 pub struct BakedFace {
-    pub quad: ModelQuad,
+    pub quad: BakedQuad,
     pub layer: u32,
     /// The texels under the quad's UVs are all opaque (`SpriteContents.computeTransparency`):
     /// drawn in the solid layer without an alpha test.
@@ -232,11 +258,13 @@ impl StateModels {
                     .into_iter()
                     .map(|quad| {
                         let layer = sprites.insert(root, &quad.material.sprite)?;
+                        let translucent =
+                            quad.material.force_translucent || sprites.translucent[layer as usize];
+                        let opaque = sprites.region_opaque(layer, &quad.uv);
                         Ok(BakedFace {
-                            translucent: quad.material.force_translucent
-                                || sprites.translucent[layer as usize],
-                            opaque: sprites.region_opaque(layer, &quad.uv),
-                            quad,
+                            translucent,
+                            opaque,
+                            quad: quad.into(),
                             layer,
                         })
                     })
@@ -257,7 +285,19 @@ impl StateModels {
             baked.push((variant, model));
         }
         // Every variant of every definition was baked above.
-        let choices = choices.iter().map(|c| c.map(|v| index[&key(v)])).collect();
+        let choices: Vec<CompiledChoices<u32>> =
+            choices.iter().map(|c| c.map(|v| index[&key(v)])).collect();
+        let faces: usize = baked.iter().map(|(_, m)| m.faces.len()).sum();
+        let multipart: usize = states
+            .iter()
+            .filter(|s| matches!(s, Some((_, SelectedModels::Multipart(_)))))
+            .count();
+        log::info!(
+            "Horizon: {} baked block models, {faces} faces, {} definitions; {multipart} multipart states of {}",
+            baked.len(),
+            choices.len(),
+            states.len()
+        );
         Ok(Self {
             choices,
             states,

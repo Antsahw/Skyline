@@ -98,7 +98,26 @@ public final class HorizonFunctions {
         }
         // A function waiting for a chunk it forced (Skyblock Infinite's island at 0 0) holds
         // the player too: the server can run the settle ticks faster than Horizon loads it.
-        return settleAt >= 0 && gameTime >= settleAt && WAITING_CHUNKS.isEmpty();
+        // And once it is loaded, until the run it stopped has gone through (Skyblock
+        // Infinite's island landed ~1 s after the join: the chunk was there, the retried
+        // function not yet run): no retry queued, and two ticks with no run stopped.
+        return settleAt >= 0 && gameTime >= settleAt && WAITING_CHUNKS.isEmpty()
+                && quietTicks >= 2 && !retryPending();
+    }
+
+    /** Ticks since a function run was last stopped for a chunk (or one was waited for). */
+    private static volatile int quietTicks;
+
+    /** Whether a scheduled function stopped for a chunk waits to run again (TimerCallbackMixin). */
+    private static boolean retryPending() {
+        if (scheduled == null) return false;
+        try {
+            for (String id : scheduled.getEventsIds()) if (id.startsWith("horizon-retry-")) return true;
+        } catch (RuntimeException e) {
+            // A queue being changed: ask again next time.
+            return true;
+        }
+        return false;
     }
 
     /** {@link #settleAt}, once the load functions have finished. */
@@ -126,13 +145,16 @@ public final class HorizonFunctions {
         try {
             if (manager == null) start(server);
             manager.tick();
+            boolean stopped = abort;
             // The load functions, stopped for a chunk: they run again next tick.
             if (takeAborted()) {
                 java.lang.reflect.Field again = ServerFunctionManager.class.getDeclaredField("postReload");
                 again.setAccessible(true);
                 again.set(manager, true);
             }
+            int retriesBefore = WAITING.size();
             scheduled.tick(server, gameTime);
+            stopped |= WAITING.size() > retriesBefore || retryPending();
             // The chunks waited for that Horizon has loaded now (the run that asked goes again).
             WAITING_CHUNKS.entrySet().removeIf(e -> {
                 var w = e.getValue();
@@ -142,6 +164,7 @@ public final class HorizonFunctions {
                 return true;
             });
             HorizonFunctions.gameTime = gameTime;
+            quietTicks = stopped || !WAITING_CHUNKS.isEmpty() ? 0 : quietTicks + 1;
             if (settleAt < 0) {
                 java.lang.reflect.Field done = ServerFunctionManager.class.getDeclaredField("postReload");
                 done.setAccessible(true);
