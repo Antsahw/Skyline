@@ -554,3 +554,14 @@ tests pass; fmt and clippy `-D warnings` clean (horizon-client, horizon-jvm).
   owner's UUID). Unit test `a_refused_trial_omen_still_takes_the_bad_omen`. Outside the
   area: `trial_spawner.rs`, `potions.rs` (a few lines). Test: `regress.py --jars <jars>
   effects3 effects2 effects`.
+
+- **mixins 6-3** (`bridge-mixins-6-3`, on top of `bridge-mixins-6-1`), by Claude for
+  iaxivers: the next "Rust does" lines by count. Works: a player's jump
+  (`jumpFromGround`, 4 mods) and teleport in its level (`ServerPlayer.teleport`, 5) fire their
+  heads and ends on the mirror (`jump`: mixinmod hears two jumps; `teleport`: it hears `/tp`
+  at the new place). All 24 mixin cases pass in one run. Doesn't: `PlayerAdvancements.award`
+  (mostly mid-method; the mirror has no advancements), `tickEffects`, `openMenu`, teleports
+  across dimensions; a head's cancel doesn't undo Horizon's jump or teleport. Fabric API
+  hooks `ServerPlayer.teleport` itself, so `teleports` is on in every Java run (one call per
+  teleport). Outside the area: `lan_actions.rs` (a few lines). Test: `regress.py --jars
+  <jars> jump teleport`.
