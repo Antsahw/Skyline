@@ -985,6 +985,7 @@ impl Game<'_> {
         self.pitch = pitch;
         self.eye = eye.1;
         std::mem::swap(&mut self.player, &mut player);
+        let mut java_teleport = None;
         if let Some(mut m) = player {
             g.health = m.health.health();
             g.food = m.health.food.food;
@@ -1025,9 +1026,17 @@ impl Game<'_> {
                     passengers: Vec::new(),
                 }));
             }
+            // What moves the guest during an action is a teleport (commands set the position).
+            if g.vehicle.is_none() && (moved > 0.0001 || teleported) {
+                java_teleport = Some((g.uuid, at, [g.yaw, g.pitch]));
+            }
             if g.vehicle.is_none() && (moved > 0.0001 || turned || teleported) {
                 host.hub.teleport(i, Some(at));
             }
+        }
+        // Java mods hear the teleport (ServerPlayer.teleport; java_server.rs).
+        if let Some((uuid, at, look)) = java_teleport {
+            self.java_teleported(uuid, at, look);
         }
         let g = &mut host.hub.guests[i];
         if let Some(head) = g.bed.filter(|_| fell_asleep) {
@@ -3809,13 +3818,6 @@ impl Game<'_> {
     /// message, the loot and experience, the death screen.
     fn guest_die(&mut self, host: &mut LanHost, gi: usize, conn: u32) {
         if host.hub.guests[gi].health <= 0.0 && !host.hub.guests[gi].dead {
-            // What killed the guest (its tracker's last hit), for Java mods' death hooks.
-            let cause = self
-                .guest_combat
-                .get(&conn)
-                .and_then(|t| t.last_damage_type())
-                .map(str::to_owned);
-            self.note_java_death_cause(&format!("conn:{conn}"), cause);
             self.guest_forget_digging(host, conn);
             // FishingHook.shouldStopFishing: its owner is dead.
             if let Some(play) = host.play.get_mut(&conn) {
@@ -3839,22 +3841,8 @@ impl Game<'_> {
             let drops =
                 (g.game_mode != SPECTATOR).then(|| [at[0], at[1] + g.eye_height() - 0.3, at[2]]);
             let cause = host.play.get_mut(&conn).and_then(|p| p.death_cause.take());
-            // The damage type a death message names (`death.attack.<message_id>...`), for Java
-            // mods' death hooks: surer than the tracker, which may not have the blow yet.
-            if let Some(id) = cause
-                .as_deref()
-                .and_then(|k| k.strip_prefix("death.attack."))
-            {
-                let id = id.split('.').next().unwrap_or(id);
-                let named = self
-                    .motion
-                    .health
-                    .damage
-                    .entries()
-                    .find(|(_, d)| d.message_id == id)
-                    .map(|(_, d)| d.name.clone());
-                self.note_java_death_cause(&format!("conn:{conn}"), named);
-            }
+            // Java mods first (java_server.rs), then native ones.
+            self.java_player_died(uuid, cause.as_deref(), Some(conn));
             self.native_player_died(uuid, cause.as_deref());
             // ServerPlayer.die: the neutral mobs near a guest in this level
             // forget their anger at them.
@@ -4197,6 +4185,7 @@ impl Game<'_> {
             let tick_movement = travelled.iter().fold(Vec3::ZERO, |sum, d| {
                 sum.add_vector(Vec3::new(d[0], d[1], d[2]))
             });
+            let mut jumped = false;
             // Entity.move's movementThisTick: each move, from where the
             // tick's first one started.
             let end = w.player.position;
@@ -4225,6 +4214,7 @@ impl Game<'_> {
                     // it sends them keeps the jump.
                     jumps += 1;
                     let _ = w.jump_from_ground();
+                    jumped = true;
                 }
                 let landed = (|| -> horizon_client::Result<()> {
                     w.set_on_ground_with_movement(on_ground, false, movement)?;
@@ -4280,6 +4270,10 @@ impl Game<'_> {
                 }
             }
             // Entity.baseTick: rain puts out a burning player.
+            // Java mods hear the jump (java_server.rs).
+            if jumped {
+                game.java_jumped();
+            }
             game.rain_extinguish_player();
             // WitherRoseBlock.entityInside along those moves.
             for event in &events {

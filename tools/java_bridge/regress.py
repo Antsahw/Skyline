@@ -338,7 +338,7 @@ CASES = {
         steps=['$C command "gamemode survival" >/dev/null; for i in 1 2 3 4 5 6; do '
                '$C command "summon experience_orb ~ ~0.5 ~ {Value:7}" >/dev/null; done; sleep 2; $C state > $S/state.json'],
         checks=[check_json("state.json", ["player", "xp", "total"], 42, "all six orbs' points (42)"),
-                check_log(r"experience_orbs go to the mods", "orb pickup goes to the mods")],
+                check_log(r"experience_orbs(, \w+)* go to the mods", "orb pickup goes to the mods")],
     ),
     "preset": dict(
         about="A mod's world type (One Block) picked in Create New World: its block, its gameplay",
@@ -457,6 +457,30 @@ CASES = {
                 check_json("landed.json", ["player", "health"], 20.0, "no damage on landing"),
                 check_log(r"entities: \S+ falls ", "the landing went to the mods")],
     ),
+    "effects3": dict(
+        about="The turtle helmet's water breathing and Bad Omen turning into Trial Omen ask addEffect's head (mixinmod refuses both)",
+        fixtures=["mixinmod"], scene="omen",
+        steps=['$C command "item replace entity @s armor.head with minecraft:turtle_helmet" >/dev/null; sleep 2; $C state | python3 -c "import json,sys;print(sorted(e[\'id\'] for e in json.load(sys.stdin)[\'player\'][\'effects\']))" > $S/turtle.txt',
+               '$C command "effect give @s minecraft:bad_omen 600 1" >/dev/null; sleep 1; $C state | python3 -c "import json,sys;print(sorted(e[\'id\'] for e in json.load(sys.stdin)[\'player\'][\'effects\']))" > $S/omen.txt; '
+               '$C command "setblock $(cat $S/spawner.pos) minecraft:trial_spawner{spawn_data:{entity:{id:\\"minecraft:zombie\\"}}}" >/dev/null; '
+               'sleep 5; $C state | python3 -c "import json,sys;print(sorted(e[\'id\'] for e in json.load(sys.stdin)[\'player\'][\'effects\']))" > $S/trial.txt; $C block $(cat $S/spawner.pos) > $S/spawner.json'],
+        checks=[check_file("turtle.txt", r"\A(?!.*water_breathing)", "no water breathing from the helmet"),
+                check_file("omen.txt", r"'bad_omen'", "Bad Omen II taken (the control)"),
+                check_file("spawner.json", r"ominous=true", "the spawner saw the Bad Omen"),
+                check_file("trial.txt", r"\A\[\]$", "the Bad Omen is gone; no Trial Omen")],
+    ),
+    "jump": dict(
+        about="A player's jump reaches LivingEntity.jumpFromGround's end on the server (mixinmod counts jumps)",
+        fixtures=["mixinmod"], scene="omen",
+        steps=['$C key space down >/dev/null; sleep 0.3; $C key space up >/dev/null; sleep 1.5; $C key space down >/dev/null; sleep 0.3; $C key space up >/dev/null; sleep 1.5'],
+        checks=[check_log(r"\[mixinmod\] jump 2", "two jumps heard")],
+    ),
+    "teleport": dict(
+        about="A player's teleport (/tp) reaches ServerPlayer.teleport's end, at the new place (mixinmod tells where)",
+        fixtures=["mixinmod"], scene="none",
+        steps=['$C command "tp @s 100 120 200" >/dev/null; sleep 2'],
+        checks=[check_log(r"\[mixinmod\] teleported to 100, 120, 200", "the mod heard the teleport, at its end")],
+    ),
     "slot": dict(
         about="Inventory.setSelectedSlot's head (mixinmod: not the ninth): the slot stays",
         fixtures=["mixinmod"], scene="none",
@@ -490,6 +514,15 @@ CASES = {
                '$C command "damage @s 4 minecraft:generic" >/dev/null; sleep 1; $C status > $S/generic.json'],
         checks=[check_json("magma.json", ["player", "health"], 20.0, "no harm standing on magma"),
                 check_json("generic.json", ["player", "health"], 16.0, "4 from /damage")],
+    ),
+    "death": dict(
+        about="A player's death reaches LivingEntity.die's head with its cause, asked where native mods hear deaths (eventsmod's DeathMixin)",
+        fixtures=["eventsmod"], scene="none",
+        steps=['$C command "gamemode survival" >/dev/null; sleep 0.5; $C command "damage @s 40 minecraft:lava" >/dev/null; sleep 2; '
+               '$C respawn >/dev/null; sleep 3',
+               '$C command "tp @s ~ ~40 ~" >/dev/null; sleep 5'],
+        checks=[check_log(r"a mixin saw \S+ die of minecraft:lava", "the lava death, by its message"),
+                check_log(r"a mixin saw \S+ die of minecraft:fall", "the fall death, by the combat tracker")],
     ),
     "mixins1": dict(
         about="Round one's actions (mixinmod): a broken block also drops a diamond, dirt isn't picked up, wheat grows in dim light, cows can't be milked",

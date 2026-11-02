@@ -645,3 +645,31 @@ out (the bridge adds them since round 2; it failed on java-bridge too). Not run 
   declarations pass the 16 MiB fence; needs a compact own-states form, see java-bridge.md);
   More Barrel Variants' barrels, Heater's heater and Chunk Loaders' loader open no screen on
   use; one of the 12 blocks draws the missing texture. Test: regress `xnet` (new).
+
+- **mixins 6-1** (`bridge-mixins-6-1`), by Claude for iaxivers: the rest of our hooks onto
+  upstream's hook points. Works: deaths (`java_player_died` right before `native_player_died`,
+  one call instead of three notes; `death`: eventsmod's DeathMixin hears a lava death by its
+  message and a fall death by the tracker), placing (`java_block_event` right before
+  `native_place_block`). Commands and `java_attack_mob` were already beside the native
+  decision. Entity attack/use at the packet (Java's own entities) has no fit: a proposed hook
+  point `native_unknown_entity_interact` is written up in java-bridge.md for Ludovic. Test:
+  `regress.py --jars <jars> death punch hurt`; all 18 older mixin cases still pass.
+- **mixins 6-2** (same branch, same commit), by Claude for iaxivers: the turtle helmet's
+  water breathing and Bad Omen → Trial Omen ask the mods. Works: `effects3` (new scene
+  `omen`): mixinmod refuses the helmet's water breathing and the Trial Omen; the spawner
+  still turns ominous and takes the Bad Omen. Found and fixed on the way: on a server thread
+  the swap never reached the guest (it changed the serving game's own effects, by the world
+  owner's UUID). Unit test `a_refused_trial_omen_still_takes_the_bad_omen`. Outside the
+  area: `trial_spawner.rs`, `potions.rs` (a few lines). Test: `regress.py --jars <jars>
+  effects3 effects2 effects`.
+
+- **mixins 6-3** (`bridge-mixins-6-3`, on top of `bridge-mixins-6-1`), by Claude for
+  iaxivers: the next "Rust does" lines by count. Works: a player's jump
+  (`jumpFromGround`, 4 mods) and teleport in its level (`ServerPlayer.teleport`, 5) fire their
+  heads and ends on the mirror (`jump`: mixinmod hears two jumps; `teleport`: it hears `/tp`
+  at the new place). All 24 mixin cases pass in one run. Doesn't: `PlayerAdvancements.award`
+  (mostly mid-method; the mirror has no advancements), `tickEffects`, `openMenu`, teleports
+  across dimensions; a head's cancel doesn't undo Horizon's jump or teleport. Fabric API
+  hooks `ServerPlayer.teleport` itself, so `teleports` is on in every Java run (one call per
+  teleport). Outside the area: `lan_actions.rs` (a few lines). Test: `regress.py --jars
+  <jars> jump teleport`.

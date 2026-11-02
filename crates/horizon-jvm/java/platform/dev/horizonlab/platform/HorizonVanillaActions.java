@@ -294,6 +294,65 @@ public final class HorizonVanillaActions {
         }
     }
 
+    /** Whether a mod hooks a player's jump (LivingEntity/Player.jumpFromGround). */
+    public static boolean jumpsHooked() {
+        return HorizonHooks.hooked("net/minecraft/world/entity/LivingEntity", "jumpFromGround")
+                || HorizonHooks.hooked("net/minecraft/world/entity/player/Player", "jumpFromGround");
+    }
+
+    /**
+     * A player jumped (ServerGamePacketListenerImpl.handleMovePlayer calls jumpFromGround on the
+     * server's copy; Horizon made the jump): the mods' injections at the heads of
+     * Player/LivingEntity.jumpFromGround, then at their ends. Hearing only: a cancel at a head
+     * doesn't undo Horizon's jump.
+     */
+    public static void jumped(String uuid) {
+        Thread.currentThread().setContextClassLoader(HorizonVanillaActions.class.getClassLoader());
+        ServerPlayer player = HorizonServer.player(UUID.fromString(uuid));
+        if (player == null || !jumpsHooked()) return;
+        Object[] none = {};
+        Class<?>[] chain = {Player.class, LivingEntity.class};
+        for (Class<?> owner : chain) {
+            if (HorizonHooks.hooked(owner.getName().replace('.', '/'), "jumpFromGround")) {
+                HorizonHooks.fire(player, owner, "jumpFromGround", "()V", "HEAD", none, null, true);
+            }
+        }
+        for (int i = chain.length - 1; i >= 0; i--) {
+            String owner = chain[i].getName().replace('.', '/');
+            if (!HorizonHooks.hooked(owner, "jumpFromGround")) continue;
+            for (String at : new String[] {"RETURN", "TAIL"}) HorizonHooks.fire(player, chain[i], "jumpFromGround", "()V", at, none, null, true);
+        }
+        HorizonServer.afterCall();
+        if (DEBUG) Natives.log("entities: " + player.getName().getString() + " jumped");
+    }
+
+    private static final String TELEPORT = "(Lnet/minecraft/world/level/portal/TeleportTransition;)Lnet/minecraft/server/level/ServerPlayer;";
+
+    /** Whether a mod hooks a player's teleport (ServerPlayer.teleport). */
+    public static boolean teleportsHooked() {
+        return HorizonHooks.hooked("net/minecraft/server/level/ServerPlayer", "teleport");
+    }
+
+    /**
+     * Horizon teleported a player in its level (commands, a pearl, chorus fruit): the mods'
+     * injections at the head of ServerPlayer.teleport (the player where it was), then at its
+     * ends (the player moved there). Hearing only.
+     */
+    public static void teleported(String uuid, String dimension, double x, double y, double z, float yaw, float pitch) {
+        Thread.currentThread().setContextClassLoader(HorizonVanillaActions.class.getClassLoader());
+        ServerPlayer player = HorizonServer.player(UUID.fromString(uuid));
+        if (player == null || !teleportsHooked()) return;
+        ServerLevel level = HorizonServer.level(dimension);
+        var transition = new net.minecraft.world.level.portal.TeleportTransition(level, new Vec3(x, y, z), Vec3.ZERO, yaw, pitch,
+                net.minecraft.world.level.portal.TeleportTransition.DO_NOTHING);
+        Object[] args = {transition};
+        HorizonHooks.fire(player, ServerPlayer.class, "teleport", TELEPORT, "HEAD", args, null, true);
+        player.snapTo(x, y, z, yaw, pitch);
+        for (String at : new String[] {"RETURN", "TAIL"}) HorizonHooks.fire(player, ServerPlayer.class, "teleport", TELEPORT, at, args, player, true);
+        HorizonServer.afterCall();
+        if (DEBUG) Natives.log("entities: " + player.getName().getString() + " teleported to " + x + " " + y + " " + z);
+    }
+
     /**
      * A player gets off Horizon's vehicle (sneaking: Player.rideTick's stopRiding, which calls
      * removeVehicle). Before Horizon does ({@code after} false): the mods' injections at the

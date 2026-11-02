@@ -10,13 +10,18 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
-/** Players are immune to poison, haste and Bad Omen (the head of LivingEntity.addEffect). */
+/**
+ * Players are immune to poison, haste, water breathing, Trial Omen and level-1 Bad Omen (a
+ * higher level still takes): the head of LivingEntity.addEffect.
+ */
 @Mixin(LivingEntity.class)
 public abstract class EffectMixin {
     @Inject(method = "addEffect(Lnet/minecraft/world/effect/MobEffectInstance;Lnet/minecraft/world/entity/Entity;)Z", at = @At("HEAD"),
             cancellable = true)
     private void horizonMixins$noPoison(MobEffectInstance effect, Entity source, CallbackInfoReturnable<Boolean> cir) {
-        if ((Object) this instanceof Player && (effect.is(MobEffects.POISON) || effect.is(MobEffects.HASTE) || effect.is(MobEffects.BAD_OMEN))) {
+        if ((Object) this instanceof Player && (effect.is(MobEffects.POISON) || effect.is(MobEffects.HASTE)
+                || effect.is(MobEffects.WATER_BREATHING) || effect.is(MobEffects.TRIAL_OMEN)
+                || effect.is(MobEffects.BAD_OMEN) && effect.getAmplifier() == 0)) {
             cir.setReturnValue(false);
         }
     }

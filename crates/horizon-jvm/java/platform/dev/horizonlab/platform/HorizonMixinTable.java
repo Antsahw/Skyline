@@ -263,7 +263,11 @@ public final class HorizonMixinTable {
             // Getting off, a player's new effect (HorizonVanillaActions).
             "net/minecraft/world/entity/Entity.stopRiding", "net/minecraft/world/entity/LivingEntity.stopRiding",
             "net/minecraft/world/entity/Entity.removeVehicle", "net/minecraft/world/entity/player/Player.removeVehicle",
-            "net/minecraft/world/entity/LivingEntity.addEffect");
+            "net/minecraft/world/entity/LivingEntity.addEffect",
+            // A player's jump (HorizonVanillaActions.jumped).
+            "net/minecraft/world/entity/LivingEntity.jumpFromGround", "net/minecraft/world/entity/player/Player.jumpFromGround",
+            // A player's teleport in its level (HorizonVanillaActions.teleported).
+            "net/minecraft/server/level/ServerPlayer.teleport");
 
     public static Where where(String owner, String method) {
         String key = owner + "." + method;

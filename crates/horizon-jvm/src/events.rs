@@ -989,6 +989,47 @@ pub fn add_effect(
     Ok(r.unwrap_or(false))
 }
 
+/// A player jumped (`HorizonVanillaActions.jumped`): the mods' heads and ends of
+/// `jumpFromGround`, heard only.
+pub fn jumped(uuid: &str) -> Result<(), String> {
+    with_server(|env, _| {
+        let uuid = env.new_string(uuid)?;
+        call_vanilla(
+            env,
+            "jumped",
+            "(Ljava/lang/String;)V",
+            &[JValue::Object(&uuid)],
+        )?;
+        Ok(())
+    })?;
+    Ok(())
+}
+
+/// A player was teleported in `dimension` to `at` facing `look` (`HorizonVanillaActions.teleported`):
+/// the mods' heads and ends of `ServerPlayer.teleport`, heard only.
+pub fn teleported(uuid: &str, dimension: &str, at: [f64; 3], look: [f32; 2]) -> Result<(), String> {
+    with_server(|env, _| {
+        let uuid = env.new_string(uuid)?;
+        let dimension = env.new_string(dimension)?;
+        call_vanilla(
+            env,
+            "teleported",
+            "(Ljava/lang/String;Ljava/lang/String;DDDFF)V",
+            &[
+                JValue::Object(&uuid),
+                JValue::Object(&dimension),
+                JValue::Double(at[0]),
+                JValue::Double(at[1]),
+                JValue::Double(at[2]),
+                JValue::Float(look[0]),
+                JValue::Float(look[1]),
+            ],
+        )?;
+        Ok(())
+    })?;
+    Ok(())
+}
+
 /// Precipitation ticks of `dimension` at columns topped by `tops` (x, y, z each): the
 /// biome's answers on the Java side with the mods' patches (Serene Seasons): per column
 /// {freezes below the top, snows at it, precipitation below it: 0 none, 1 rain, 2 snow}.
