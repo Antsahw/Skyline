@@ -2016,7 +2016,7 @@ mod run {
         fn java_neighbours_json(&self, players: &[horizon_jvm::events::Player]) -> String {
             use std::fmt::Write;
             let mut out = String::from("{");
-            let mut level = |out: &mut String, dim: &str, mobs: &[horizon_client::mobs::Mob]| {
+            let level = |out: &mut String, dim: &str, mobs: &[horizon_client::mobs::Mob]| {
                 let near: Vec<[f64; 3]> = players
                     .iter()
                     .filter(|p| p.dimension == dim)
