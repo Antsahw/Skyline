@@ -12,7 +12,7 @@
 # worlds, so each instance has its own), whose `mods-java/` holds links to the instance's mod
 # jars, Fabric API left out (the bridge brings its own, made for it). Prism's signed-in account
 # goes to the game in a private file it reads once and deletes. Then the game starts from this
-# checkout: built with `cargo build --profile fast -p horizon-client --features
+# checkout: built with `cargo build --profile fast -p horizon-client -p horizon-client-lib --features
 # horizon-client/java-mods`, with the Minecraft files prepared in `.local/` (CONTRIBUTING.md).
 #
 # HORIZON_PRISM_ARGS: more arguments for the game (e.g. "--world Test --creative").
@@ -49,7 +49,7 @@ unset args
 # This checkout's game and its prepared files.
 CLIENT="$ROOT/target/fast/horizon-client"
 RESOURCES="$ROOT/.local/horizon-client/26.3"
-[ -x "$CLIENT" ] || { say "no game built at $CLIENT: run cargo build --profile fast -p horizon-client --features horizon-client/java-mods in $ROOT"; exit 1; }
+[ -x "$CLIENT" ] || { say "no game built at $CLIENT: run cargo build --profile fast -p horizon-client -p horizon-client-lib --features horizon-client/java-mods in $ROOT"; exit 1; }
 [ -d "$RESOURCES" ] || { say "no prepared Minecraft files at $RESOURCES: see $ROOT/CONTRIBUTING.md"; exit 1; }
 
 # Java 25 for the mods: Prism's own Java for the instance if it is 25 or newer, else the

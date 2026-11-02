@@ -9,6 +9,8 @@ import sys
 PRIVATE_ROOTS = {".local", "decompiled", "minecraft", "assets", "run", "logs"}
 PRIVATE_EXTENSIONS = {".jar", ".class", ".jfr", ".hprof", ".java"}
 ORIGINAL_JDK_TOOLS = {"tools/JfrSummary.java", "tests/java/JfrFixture.java"}
+# The prepared folder's files in one file (crates/horizon-core/src/prepared_files.rs): Mojang's data.
+PRIVATE_NAMES = {"horizon-data.bin"}
 
 
 def prohibited(path):
@@ -22,7 +24,11 @@ def prohibited(path):
         ("mods/horizon/src/", "mods/horizon-lab/src/", "crates/horizon-jvm/java/")
     ):
         return not ("/dev/horizonlab/" in path)
-    return bool(parsed.parts and parsed.parts[0] in PRIVATE_ROOTS) or parsed.suffix.lower() in PRIVATE_EXTENSIONS
+    return (
+        bool(parsed.parts and parsed.parts[0] in PRIVATE_ROOTS)
+        or parsed.suffix.lower() in PRIVATE_EXTENSIONS
+        or parsed.name in PRIVATE_NAMES
+    )
 
 
 def paths_in_repository(history=False, revisions=None):

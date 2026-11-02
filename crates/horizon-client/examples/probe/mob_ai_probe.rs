@@ -1171,6 +1171,7 @@ pub fn main() -> horizon_client::Result<()> {
                     player: player.clone(),
                     nearest_player: player.as_ref().filter(|p| !p.spectator).map(|p| p.position),
                     others: $snapshot,
+                    dragon: None,
                     leash_boats: &[],
                     others_grid: $grid,
                     others_index: None,
@@ -1182,6 +1183,7 @@ pub fn main() -> horizon_client::Result<()> {
                     thundering: s.thunder,
                     nether: false,
                     block_tags: &items.block_tags,
+                    landing: &motion.landing,
                     biomes: &biomes,
                     mob_griefing: true,
                     universal_anger: false,
@@ -1195,6 +1197,7 @@ pub fn main() -> horizon_client::Result<()> {
                     items: Some(&items),
                     lid_openers: &lid_openers,
                     mod_effects: None,
+                    border: None,
                 }
             };
         }
