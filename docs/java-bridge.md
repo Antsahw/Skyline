@@ -920,6 +920,9 @@ cargo test -p horizon-jvm                                                       
 cargo clippy --profile fast -p horizon-client --features java-mods --bins --lib -- -D warnings -A clippy::manual_range_contains
 ```
 
+A build made before `.local/` was prepared has no Fabric API modules (the fixture mods then
+fail to build): prepare, then `touch crates/horizon-jvm/build.rs` and build again.
+
 The Java sources compile in `horizon-jvm`'s build script: a Java error shows as a failed build
 script. Always look at the build's output: a failed build leaves the old binary running.
 
