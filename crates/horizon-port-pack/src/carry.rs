@@ -1211,7 +1211,12 @@ pub fn carry(
                 };
                 let mut v = json!({"template": choice.template, "properties": choice.properties});
                 if let Some(states) = own {
-                    v["states"] = states;
+                    let key = if states.is_array() {
+                        "states"
+                    } else {
+                        "state_table"
+                    };
+                    v[key] = states;
                 }
                 let template_item = facts.blocks.get(&choice.template).map(|t| t.item.as_str());
                 if block.item == "minecraft:air" || template_item == Some("minecraft:air") {

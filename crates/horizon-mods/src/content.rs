@@ -181,6 +181,76 @@ struct BlockFile {
     components: BTreeMap<String, serde_json::Value>,
     #[serde(default)]
     states: Vec<State>,
+    #[serde(default)]
+    state_table: Option<StateTable>,
+}
+
+/// A block's own states in a compact form, for blocks with many (a pipe's 76k): each
+/// property's values and the distinct shapes once, then a row per state, in order:
+/// `[shape, value of the 1st property, of the 2nd, ...]` as indices. `light` maps a row to
+/// its light, `random_ticks` lists the rows that get them, `default` is the default row.
+/// Read as the [`State`]s it stands for; a file has `states` or this, not both.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StateTable {
+    properties: Vec<(String, Vec<String>)>,
+    shapes: Vec<Option<String>>,
+    rows: Vec<Vec<u32>>,
+    #[serde(default)]
+    light: BTreeMap<usize, u8>,
+    #[serde(default)]
+    random_ticks: Vec<usize>,
+    #[serde(default)]
+    default: Option<usize>,
+}
+
+impl StateTable {
+    fn states(self) -> Result<Vec<State>, String> {
+        let width = self.properties.len() + 1;
+        let mut out = Vec::with_capacity(self.rows.len());
+        for row in &self.rows {
+            if row.len() != width {
+                return Err(format!(
+                    "state_table: a row has {width} indices (shape, then one per property)"
+                ));
+            }
+            let shape = self
+                .shapes
+                .get(row[0] as usize)
+                .ok_or("state_table: a row's shape is past shapes")?
+                .clone();
+            let mut properties = BTreeMap::new();
+            for ((name, values), &i) in self.properties.iter().zip(&row[1..]) {
+                let v = values
+                    .get(i as usize)
+                    .ok_or("state_table: a row's value is past its property's values")?;
+                properties.insert(name.clone(), v.clone());
+            }
+            out.push(State {
+                properties,
+                shape,
+                light: None,
+                random_ticks: None,
+                default: false,
+            });
+        }
+        let len = out.len();
+        let row = |i: usize| -> Result<usize, String> {
+            (i < len)
+                .then_some(i)
+                .ok_or_else(|| "state_table: names a row past rows".to_owned())
+        };
+        for (&i, &l) in &self.light {
+            out[row(i)?].light = Some(l);
+        }
+        for &i in &self.random_ticks {
+            out[row(i)?].random_ticks = Some(true);
+        }
+        if let Some(d) = self.default {
+            out[row(d)?].default = true;
+        }
+        Ok(out)
+    }
 }
 
 /// One of a block's own states, for a block whose properties no vanilla block has (a
@@ -696,6 +766,13 @@ impl Content {
                     "{name}: connects_to is a block tag, #namespace:path"
                 ));
             }
+            let states = match file.state_table {
+                Some(_) if !file.states.is_empty() => {
+                    return Err(format!("{name}: states or state_table, not both"));
+                }
+                Some(t) => t.states().map_err(|e| format!("{name}: {e}"))?,
+                None => file.states,
+            };
             let block = Block {
                 id: block,
                 template: file.template,
@@ -704,7 +781,7 @@ impl Content {
                 state_properties: file.state_properties,
                 default_state: file.default_state,
                 item: file.item,
-                states: file.states,
+                states,
                 components: file.components,
                 connects_to: file
                     .connects_to
@@ -1554,6 +1631,41 @@ capabilities = ["registries"]
             assert!(e.contains("random_ticks"), "{bad}: {e}");
         }
         assert!(block("3").is_err());
+    }
+
+    #[test]
+    fn a_state_table_reads_as_its_states() {
+        let array = br#"{"template": "minecraft:stone", "states": [
+            {"properties": {"east": "none", "lit": "false"}, "shape": "minecraft:cake[bites=1]", "default": true},
+            {"properties": {"east": "pipe", "lit": "false"}},
+            {"properties": {"east": "none", "lit": "true"}, "shape": "minecraft:cake[bites=1]", "light": 12},
+            {"properties": {"east": "pipe", "lit": "true"}, "random_ticks": true}]}"#;
+        let table = br#"{"template": "minecraft:stone", "state_table": {
+            "properties": [["east", ["none", "pipe"]], ["lit", ["false", "true"]]],
+            "shapes": ["minecraft:cake[bites=1]", null],
+            "rows": [[0, 0, 0], [1, 1, 0], [0, 0, 1], [1, 1, 1]],
+            "light": {"2": 12}, "random_ticks": [3], "default": 0}}"#;
+        let read = |name: &str, text: &[u8]| {
+            let files: &[(&str, &[u8])] = &[("data/ruby/horizon/block/pipe.json", text)];
+            hmod(name, MANIFEST_TEXT, files).map(|c| c.blocks[0].states.clone())
+        };
+        let states = read("states-array", array).unwrap();
+        assert_eq!(states.len(), 4);
+        assert_eq!(read("states-table", table).unwrap(), states);
+        for (name, bad) in [
+            ("table-shape", r#"[[2, 0, 0]]"#),
+            ("table-value", r#"[[0, 2, 0]]"#),
+            ("table-width", r#"[[0, 0]]"#),
+        ] {
+            let text = format!(
+                r#"{{"template": "minecraft:stone", "state_table": {{"properties": [["east", ["none", "pipe"]], ["lit", ["false", "true"]]], "shapes": [null], "rows": {bad}}}}}"#
+            );
+            let e = read(name, text.as_bytes()).unwrap_err();
+            assert!(e.contains("state_table"), "{name}: {e}");
+        }
+        let both = br#"{"template": "minecraft:stone", "states": [{"properties": {"a": "b"}}],
+            "state_table": {"properties": [], "shapes": [null], "rows": [[0]]}}"#;
+        assert!(read("table-both", both).unwrap_err().contains("not both"));
     }
 
     #[test]

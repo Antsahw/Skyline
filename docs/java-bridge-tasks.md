@@ -739,3 +739,16 @@ out (the bridge adds them since round 2; it failed on java-bridge too). Not run 
   per-player state errors). Xaero's Minimap already works there (regress `server`). Test on
   the PC: `python3 tools/java_bridge/regress.py --jars ~/hz-test/mods-java maps-server`, then
   look at /tmp/hz-regress/maps-server/server-*.png.
+
+### Pack (2026-11-02, round 7 task 1, branch `bridge-pack-8`)
+
+ALA Industrial past the 16 MiB fence. A block with 1,024+ own states is declared as a compact
+`state_table` (properties' values and distinct shapes once, one index row per state) and read
+back into the same `State`s, so nothing downstream changed. Tests: `horizon-mods`
+`a_state_table_reads_as_its_states`, `horizon-port-pack`
+`many_own_states_fit_the_content_fence_and_read_back` (16k-state pipe, < 1/4 the bytes,
+identical states after a real `.hmod` round trip). Content `FORMAT` 13 → 14 (rebuilds once).
+Not run in-game: this sandbox had no JDK 25 / `.local` and fetching a JDK was refused, so no
+regress or screenshot. To test: ALA Industrial in the mod set, check the log has no "over 16
+MiB" and its pipes place. Tasks 2 and 3 not started (2 needs the game, 3 the user's PC run).
+

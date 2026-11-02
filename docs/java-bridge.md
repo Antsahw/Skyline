@@ -1508,9 +1508,13 @@ nodes: 290k, ~25 MB with names).
 - **A block declaration over 16 MiB drops the whole mod's content.** `horizon-mods`' fence
   (`MAX_FILE`) is per file; a block with its own states lists each state's properties and
   shape (`horizon-port-pack` carry). ALA Industrial's pipes have 76,832 states each (26.7 MB
-  pretty, 18.8 MB compact, 49 distinct shapes), so its 234 blocks were unknown. The way out is a
-  compact own-states form (the shapes once, an index per state, in registry order), not a bigger
-  fence: those pipes add ~400k states.
+  pretty, 18.8 MB compact, 49 distinct shapes), so its 234 blocks were unknown. Fixed
+  (bridge-pack-8): from 1,024 own states the declaration has a `state_table` instead of
+  `states` (`oracle::compact_states`: each property's values and the distinct shapes once, a
+  row of indices `[shape, value, ...]` per state, `light`/`random_ticks`/`default` by row;
+  `horizon_mods::content::StateTable` reads it back as the same `State`s). A 16k-state pipe
+  takes under a quarter of the array's bytes; ALA's should be ~1.7 MB a block. Content
+  `FORMAT` 14. Not a bigger fence: those pipes still add ~400k states (memory, below).
 
 Mods' sounds and particles (2026-10-31): a mod's sound event plays by name (its
 `sounds.json` and `.ogg` files are carried into the content mod, which Horizon's sound
