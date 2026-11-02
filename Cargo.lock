@@ -1516,9 +1516,13 @@ dependencies = [
  "log",
  "naga",
  "pollster",
+ "rustls",
+ "rustls-pki-types",
  "serde_json",
+ "sha1",
  "sha2",
  "ureq",
+ "webpki-roots 0.26.11",
  "wgpu",
  "zip 2.6.1",
 ]

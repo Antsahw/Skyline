@@ -1404,6 +1404,32 @@ configs), and checks that Java starts, the registries load, no Java worldgen chu
 player joins within `--join-within` seconds (default 900; the first run of a set of jars also
 makes its content, minutes; it is kept in `/tmp/hz-regress/pack-cache`).
 
+### From a normal install (no checkout)
+
+A launcher-installed version runs the Java mods as it is, when built with `java-mods`: the
+bridge's jars are in the game binary; the install is found above `--resources`
+(`<version>/.local/horizon-client/<v>` → `<version>`, with research-lock.json; `HORIZON_ROOT`,
+then a working folder holding research-lock.json, come first), and its preparation left the
+game jar and libraries in `<version>/.local/minecraft/<v>/` (jars/, libraries/, manifest.json);
+the bridge's work folder is `<version>/.local/bridge` (Fabric Loader, its libraries and Fabric
+API, downloaded once, SHA-256 checked). Java: `HORIZON_JAVA_HOME`, `JAVA_HOME`, the PATH,
+installed JDKs, Minecraft's and the Horizon launcher's runtimes (`<launcher data>/minecraft/
+runtime`), else Mojang's runtime for the version (`javaVersion.component`: 26.3's is
+`java-runtime-epsilon`) is downloaded there (`runtime.rs`, ~ files checked by SHA-1), where the
+launcher finds it too. `HORIZON_JAVA_NO_DOWNLOAD=1` only looks. The downloads trust the public
+roots and the system's CA bundle (`SSL_CERT_FILE` or the distribution's file: a TLS-inspecting
+proxy or antivirus the system trusts) and use `HTTPS_PROXY`.
+
+`tools/java_bridge/install_test.sh` checks it: a scratch install laid out like a launcher
+version (binary, research-lock.json, the preparation's folders linked from the checkout), the
+game started as the launcher starts it (in its game folder, `--resources` only; no
+`HORIZON_ROOT`, Java variables or Java on the PATH, `HORIZON_JAVA_NO_SYSTEM=1` so installed
+JDKs aren't looked at), so Fabric's jars and Mojang's Java are downloaded into the scratch
+folders. The launcher needs no change: it starts the game that way already (`client_command`:
+the game folder, `--resources`); `mods-java/` goes in the game folder (HORIZON_HOME). What is
+left: release builds with `java-mods` (the build needs a prepared game for the platform mod),
+and a Mods page in the launcher for `mods-java/`.
+
 ### Play a Prism instance
 
 `tools/java_bridge/prism.sh` lets Prism Launcher install and update the mods while Horizon plays

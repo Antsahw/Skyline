@@ -81,8 +81,52 @@ fn ensure_list(dir: &Path, list: Vec<Lib>) -> Result<Vec<PathBuf>, String> {
     Ok(paths)
 }
 
+/// The HTTPS agent the bridge downloads with (Fabric's jars, Mojang's Java): the public roots
+/// ureq trusts, plus the system's own bundle (`SSL_CERT_FILE`, else the distribution's file), so
+/// a machine whose traffic goes through a TLS-inspecting proxy or antivirus, whose authority the
+/// system trusts, downloads too; the proxy of `HTTPS_PROXY` is used.
+pub fn agent() -> &'static ureq::Agent {
+    static AGENT: std::sync::OnceLock<ureq::Agent> = std::sync::OnceLock::new();
+    AGENT.get_or_init(|| {
+        use rustls_pki_types::pem::PemObject;
+        let mut roots = rustls::RootCertStore {
+            roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
+        };
+        let bundles = std::env::var_os("SSL_CERT_FILE")
+            .map(PathBuf::from)
+            .into_iter()
+            .chain(
+                [
+                    "/etc/ssl/certs/ca-certificates.crt",
+                    "/etc/pki/tls/certs/ca-bundle.crt",
+                    "/etc/ssl/cert.pem",
+                ]
+                .map(PathBuf::from),
+            );
+        for bundle in bundles {
+            if let Ok(certs) = rustls_pki_types::CertificateDer::pem_file_iter(&bundle) {
+                roots.add_parsable_certificates(certs.flatten());
+                break;
+            }
+        }
+        let provider = std::sync::Arc::new(rustls::crypto::ring::default_provider());
+        let builder = ureq::AgentBuilder::new().try_proxy_from_env(true);
+        match rustls::ClientConfig::builder_with_provider(provider)
+            .with_safe_default_protocol_versions()
+        {
+            Ok(config) => builder
+                .tls_config(std::sync::Arc::new(
+                    config.with_root_certificates(roots).with_no_client_auth(),
+                ))
+                .build(),
+            Err(_) => builder.build(),
+        }
+    })
+}
+
 fn download(url: &str) -> Result<Vec<u8>, String> {
-    let response = ureq::get(url)
+    let response = agent()
+        .get(url)
         .call()
         .map_err(|e| format!("downloading {url}: {e}"))?;
     let mut bytes = Vec::new();

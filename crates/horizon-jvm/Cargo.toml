@@ -21,7 +21,13 @@ log = "0.4"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 # Fabric Loader's pinned jars (libs.rs): downloaded once, checked by SHA-256.
 ureq = { version = "2", default-features = false, features = ["tls"] }
+# Its TLS (libs.rs's agent): the public roots and the system's bundle; the versions ureq uses.
+rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
+rustls-pki-types = { version = "1", features = ["std"] }
+webpki-roots = "0.26"
 sha2 = "0.10"
+# Mojang's Java runtime (runtime.rs), for a player with no Java 25: its files are checked by SHA-1.
+sha1 = "0.10"
 # Java discovery, shared with horizon-prepare: JAVA_HOME, the PATH, Minecraft's runtimes.
 horizon-prepare = { path = "../horizon-prepare" }
 # The headless client's GPU (src/gpu/): renderpearl's device carried out on wgpu, the
@@ -39,6 +45,10 @@ wgpu = { version = "30.0.1", default-features = false, features = ["dx12"] }
 [build-dependencies]
 # build.rs compiles the bridge's Java against Fabric Loader (src/libs.rs, shared) and packs it.
 ureq = { version = "2", default-features = false, features = ["tls"] }
+# Its TLS (libs.rs's agent): the public roots and the system's bundle; the versions ureq uses.
+rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
+rustls-pki-types = { version = "1", features = ["std"] }
+webpki-roots = "0.26"
 sha2 = "0.10"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 

@@ -22,6 +22,7 @@ pub mod events;
 pub mod facade;
 pub mod gpu;
 pub mod libs;
+pub mod runtime;
 pub mod world;
 
 use jni::objects::{JClass, JObject, JObjectArray, JString, JValue};
@@ -189,19 +190,54 @@ pub fn jars(dir: &Path) -> Vec<PathBuf> {
 }
 
 /// The Java home to run mods with: `HORIZON_JAVA_HOME`, else a Java [`JAVA_MAJOR`] or newer
-/// from `JAVA_HOME`, the PATH or Minecraft's own runtimes (`horizon_prepare::java`).
+/// from `JAVA_HOME`, the PATH, Minecraft's own runtimes (`horizon_prepare::java`) or the ones
+/// Horizon's launcher downloaded ([`runtime::runtime_dir`]).
 pub fn find_java_home() -> Result<PathBuf, String> {
     if let Some(home) = std::env::var_os(JAVA_HOME_VAR).filter(|h| !h.is_empty()) {
         return Ok(PathBuf::from(home));
     }
     let minecraft = horizon_prepare::artifacts::minecraft_dir(None);
-    let runtimes = horizon_prepare::java::minecraft_runtimes(&minecraft.join("runtime"));
+    let mut runtimes = horizon_prepare::java::minecraft_runtimes(&minecraft.join("runtime"));
+    if let Some(dir) = runtime::runtime_dir() {
+        runtimes.extend(horizon_prepare::java::minecraft_runtimes(&dir));
+    }
+    // Only Minecraft's and the launcher's runtimes, none installed on the system: how a player
+    // with no Java sees it (tools/java_bridge/install_test.sh).
+    if std::env::var("HORIZON_JAVA_NO_SYSTEM").is_ok_and(|v| v == "1") {
+        return runtimes
+            .into_iter()
+            .find(|home| runtime::release_major(home).is_some_and(|m| m >= JAVA_MAJOR))
+            .ok_or_else(|| {
+                format!("no Java {JAVA_MAJOR} among Minecraft's runtimes (HORIZON_JAVA_NO_SYSTEM)")
+            });
+    }
     let jdk = horizon_prepare::java::find_runtime(JAVA_MAJOR, &runtimes)?;
     let java = std::fs::canonicalize(&jdk.java).unwrap_or(jdk.java);
     java.parent()
         .and_then(Path::parent)
         .map(Path::to_path_buf)
         .ok_or_else(|| format!("{} is not inside a Java home", java.display()))
+}
+
+/// [`find_java_home`], else Mojang's `component` runtime (the game version's, from its version
+/// JSON) downloaded into the launcher's runtime folder ([`runtime::ensure`]): a player with no
+/// Java 25 still gets their mods. `HORIZON_JAVA_NO_DOWNLOAD=1` only looks.
+pub fn find_or_fetch_java_home(
+    component: Option<&str>,
+    log: &dyn Fn(String),
+) -> Result<PathBuf, String> {
+    let missing = match find_java_home() {
+        Ok(home) => return Ok(home),
+        Err(e) => e,
+    };
+    let no_download = std::env::var("HORIZON_JAVA_NO_DOWNLOAD").is_ok_and(|v| v == "1");
+    let (Some(component), Some(dir), false) = (component, runtime::runtime_dir(), no_download)
+    else {
+        return Err(missing);
+    };
+    runtime::ensure(component, &dir, log)
+        .map_err(|e| format!("{missing}; Mojang's Java could not be downloaded either: {e}"))?;
+    find_java_home()
 }
 
 /// The JVM library inside a Java home.

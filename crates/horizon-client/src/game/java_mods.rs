@@ -78,11 +78,54 @@ fn bridge_side() -> horizon_jvm::Side {
     }
 }
 
-/// The checkout (or install) holding research-lock.json and the prepared jars.
+/// The checkout (or install) holding research-lock.json and the prepared jars: `HORIZON_ROOT`,
+/// else the folder the game runs in when it has research-lock.json (a checkout), else the
+/// install above `--resources` (`<install>/.local/horizon-client/<version>`: the launcher
+/// starts the game in the player's game folder with its version's resources).
 fn checkout() -> PathBuf {
-    std::env::var_os("HORIZON_ROOT")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_default())
+    if let Some(root) = std::env::var_os("HORIZON_ROOT").filter(|r| !r.is_empty()) {
+        return PathBuf::from(root);
+    }
+    let here = std::env::current_dir().unwrap_or_default();
+    if here.join("research-lock.json").is_file() {
+        return here;
+    }
+    install_root(std::env::args()).unwrap_or(here)
+}
+
+/// The install above `--resources` in `args`, if it holds research-lock.json.
+fn install_root(args: impl Iterator<Item = String>) -> Option<PathBuf> {
+    let mut args = args.peekable();
+    let mut resources = None;
+    while let Some(arg) = args.next() {
+        if let Some(value) = arg.strip_prefix("--resources=") {
+            resources = Some(PathBuf::from(value));
+        } else if arg == "--resources" {
+            resources = args.next().map(PathBuf::from);
+        }
+    }
+    // Absolute, its links kept (an install may link its resources from elsewhere).
+    let resources = std::path::absolute(resources?).ok()?;
+    resources
+        .ancestors()
+        .nth(3)
+        .filter(|root| root.join("research-lock.json").is_file())
+        .map(Path::to_path_buf)
+}
+
+/// The Java runtime Mojang names for the pinned version (`javaVersion.component` of the version
+/// JSON the preparation imported), downloaded when the player has no Java 25.
+fn java_component(root: &Path) -> Option<String> {
+    let version = game_version(root).ok()?;
+    let manifest = root
+        .join(".local/minecraft")
+        .join(version)
+        .join("manifest.json");
+    let json: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(manifest).ok()?).ok()?;
+    json.pointer("/javaVersion/component")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string)
 }
 
 /// The content mods made from the Java mods in `mods-java/` (their blocks, items and assets,
@@ -210,14 +253,17 @@ fn start_once(root: &Path, dir: &Path, jars: Vec<PathBuf>, side: horizon_jvm::Si
         class_path: Vec::new(),
         fabric,
     };
-    let bridge =
-        match horizon_jvm::find_java_home().and_then(|home| horizon_jvm::start(&config(home))) {
-            Ok(bridge) => bridge,
-            Err(e) => {
-                log::warn!("Java mods: not started: {e}");
-                return false;
-            }
-        };
+    let component = java_component(root);
+    let log = |line: String| log::info!("{line}");
+    let bridge = match horizon_jvm::find_or_fetch_java_home(component.as_deref(), &log)
+        .and_then(|home| horizon_jvm::start(&config(home)))
+    {
+        Ok(bridge) => bridge,
+        Err(e) => {
+            log::warn!("Java mods: not started: {e}");
+            return false;
+        }
+    };
     log::info!(
         "Java mods: JVM {} from {} and {} started in {} ms, {} jar(s) in {}",
         bridge.java_version(),
