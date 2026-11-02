@@ -728,3 +728,11 @@ out (the bridge adds them since round 2; it failed on java-bridge too). Not run 
   the server thread inside the player's turn, so a craftable search is a ~0.3 s hitch for
   everyone (single player: REI's threads as before). Test: regress `rei-lan` (stronger now),
   `rei reiscreen` pass.
+
+- **client r6-3, map mods on a dedicated server** (`bridge-client-9`). Not done: JourneyMap,
+  VoxelMap and Xaero's World Map aren't in this sandbox (downloaded mod jars aren't run here),
+  so only a regress case was added: `maps-server` (server=True: the four map mods for a
+  dedicated server's player, the World Map opened with M; checks the player plays and no
+  per-player state errors). Xaero's Minimap already works there (regress `server`). Test on
+  the PC: `python3 tools/java_bridge/regress.py --jars ~/hz-test/mods-java maps-server`, then
+  look at /tmp/hz-regress/maps-server/server-*.png.
