@@ -21,9 +21,6 @@ impl Game<'_> {
         if jars.is_empty() {
             return;
         }
-        // The head of the players' hurtServer asks the Java mods.
-        let _ = horizon_client::health::HURT_HOOK.set(super::java_server::java_hurt);
-        let _ = horizon_world::level::RANDOM_TICK_HOOK.set(super::java_server::java_random_tick);
         let _ = horizon_client::world::SET_HOOK.set(super::java_server::java_block_set);
         // Started already while the resources loaded (`java_content`), as a rule.
         spawn_start(dir, jars);

@@ -392,3 +392,35 @@ tests pass; fmt and clippy `-D warnings` clean (horizon-client, horizon-jvm).
   function waits for a player on purpose (`data get entity @p`, rescheduled each tick), as
   in vanilla. Not a bridge bug. Test: regress `skyblock oneblock` (pass, screenshot shows
   the island).
+
+- **mixins 5-1** (`bridge-mixins-5-1`), by Claude for iaxivers: our hooks onto upstream's
+  native hook points. Works: random ticks (`java_random_tick` in `before_random_tick`, before
+  `native_random_tick`; horizon-world's `RANDOM_TICK_HOOK` removed), hurts (`java_hurt` first in
+  native_hooks' `hurt_server`, past hurtServer's guards, as Fabric's `ALLOW_DAMAGE`; health.rs's
+  `HURT_HOOK` removed), left clicks (`java_attack_block` beside `native_left_click_block`). New
+  cases `punch` (eventsmod: poppies can't be punched) and `hurt` (magma doesn't hurt, `/damage`
+  does); `seasons`, `mixins1` and the other 16 mixin cases still pass. Doesn't: entity
+  attack/use (ours answer the packet, for Java's own entities too), deaths (two notes with the
+  hub's tracker), commands and placing stay where they were. Outside the area: one line each in
+  game.rs, lan_actions.rs, native_hooks.rs; horizon-world and health.rs lose our hooks. Test:
+  `regress.py --jars <jars> punch hurt seasons mixins1`.
+
+- **mixins 5-2** (`bridge-mixins-5-2`, on top of `bridge-mixins-5-1`), by Claude for
+  iaxivers: effects from beacons, conduits, raids and the Warden ask the mods. Works: they go
+  through `Game::add_effect_asking_mods` (the heads of `LivingEntity.addEffect`, only when a
+  mod hooks it); `effects2`: mixinmod refuses a beacon's haste (its speed still comes) and the
+  ominous bottle's Bad Omen (the bottle is still drunk). Doesn't: the turtle helmet's water
+  breathing (asked each tick) and the trial omen swap don't ask. Outside the area: one line
+  per site in beacon.rs, block_entity_anims.rs (conduit), raids.rs, sculk.rs. Test:
+  `regress.py --jars <jars> effects2 effects`.
+
+- **mixins 5-3** (`bridge-mixins-5-3`, on top of `bridge-mixins-5-2`), by Claude for
+  iaxivers: falls. Works: a routed fall after a mace hit or wind charge burst cuts its
+  distance at the impact point first (it stayed Rust's before); `FallEvent::Routed` carries
+  the mod block landed on, and `routed_fall_damage` runs upstream's `mod_block_fall` on the
+  mods' damage. `windfall`: a wind charge lifts the player ~6 blocks, the landing goes to the
+  mods and does no damage. Also: around.sh's scenes kill the items their fills dropped (plants
+  picked up into slot 0 made `veinminer`/`dismount` flaky). All 20 mixin cases pass in one run.
+  Doesn't: `mod_block_fall` on the routed path isn't tested at runtime (it needs a native mod
+  block). Outside the area: the client lib's `landing.rs`, `lan_actions.rs` (a few lines).
+  Test: `regress.py --jars <jars> windfall fall`.

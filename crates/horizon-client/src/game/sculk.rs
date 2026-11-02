@@ -1286,7 +1286,7 @@ impl Game<'_> {
         let mut effect =
             horizon_client::effects::EffectInstance::new("darkness", warden::DARKNESS_DURATION, 0);
         effect.visible = false;
-        self.potions.effects.add(effect);
+        self.add_effect_asking_mods(effect);
     }
 
     // ---- catalysts ----

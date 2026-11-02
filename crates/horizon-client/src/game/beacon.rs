@@ -300,9 +300,10 @@ impl Game<'_> {
             ambient: true,
             ..EffectInstance::new(id, duration, amp)
         };
-        self.potions.effects.add(ambient(primary, amplifier));
+        // Java mods' heads of LivingEntity.addEffect may refuse each (java_server.rs).
+        self.add_effect_asking_mods(ambient(primary, amplifier));
         if let Some(s) = secondary.filter(|&s| b.levels >= 4 && s != primary) {
-            self.potions.effects.add(ambient(s, 0));
+            self.add_effect_asking_mods(ambient(s, 0));
         }
     }
     /// Opening the menu shows the beacon's current powers.

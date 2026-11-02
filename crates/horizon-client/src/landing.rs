@@ -123,6 +123,8 @@ pub enum FallEvent {
         source: LandingDamage,
         safe: f64,
         damage_multiplier: f64,
+        /// The mod block landed on, its position and the fall's distance (its fallOn).
+        contact: Option<(BlockStateId, BlockPos, f64)>,
     },
     Broadcast(u8),
     Write {
@@ -292,9 +294,27 @@ impl MotionWorld<'_, '_, '_> {
             }) as i64;
             self.fall_event(FallEvent::Statistic(rounded as i32));
         }
-        // Java mods patch it: they judge the damage (the game asks them after the moves).
-        // A mace's or wind charge's impulse stays Horizon's.
-        if self.player.route_fall && self.player.impulse.impact_position.is_none() {
+        // Java mods patch it: they judge the damage (the game asks them after the moves). A
+        // mace's or wind charge's impulse cuts the distance first, as
+        // `cause_living_fall_damage` does; a mod block's own fallOn gets the damage after.
+        if self.player.route_fall {
+            let distance = match self.player.impulse.impact_position {
+                Some(impact) => {
+                    let below = impact.y - self.player.position.y;
+                    let distance = if distance.is_nan() || below.is_nan() {
+                        f64::NAN
+                    } else {
+                        distance.min(below)
+                    };
+                    if distance <= 0.0 {
+                        self.player.impulse.reset();
+                    } else {
+                        self.player.impulse.try_reset();
+                    }
+                    distance
+                }
+                None => distance,
+            };
             let safe = self.player.attribute("minecraft:safe_fall_distance")?;
             let damage_multiplier = self.player.attribute("minecraft:fall_damage_multiplier")?;
             self.fall_event(FallEvent::Routed {
@@ -303,6 +323,7 @@ impl MotionWorld<'_, '_, '_> {
                 source,
                 safe,
                 damage_multiplier,
+                contact,
             });
             return Ok(false);
         }
@@ -580,7 +601,16 @@ impl BlockLandingWorld for MotionWorld<'_, '_, '_> {
 impl MotionWorld<'_, '_, '_> {
     /// The damage Java mods settled on for a [`FallEvent::Routed`] landing, dealt as
     /// `LivingEntity.causeFallDamage` deals it: the fall sounds, then the hurt.
-    pub fn routed_fall_damage(&mut self, damage: f32, source: LandingDamage) -> Result<()> {
+    pub fn routed_fall_damage(
+        &mut self,
+        damage: f32,
+        source: LandingDamage,
+        contact: Option<(BlockStateId, BlockPos, f64)>,
+    ) -> Result<()> {
+        // A mod block's fallOn (native mods) changes what the Java mods settled on.
+        let damage = contact.map_or(damage, |(state, position, distance)| {
+            self.mod_block_fall(state, position, distance, damage)
+        });
         if damage <= 0.0 {
             return Ok(());
         }
