@@ -748,6 +748,14 @@ gets SPIR-V, vertex layouts and uniform lists.
   ("minecraft:model") until `ClientBootstrap.bootstrap()` has run.
 - `DynamicGpuDataStorageMapped` grows its ring every frame unless `getDynamicUniforms().reset()`
   runs at the frame's end.
+- `RenderSystem.bindDefaultUniforms` binds `Lighting`, `Globals` and `Fog` only when set:
+  vanilla's frame sets them (`Lighting.setupFor`, `GlobalSettingsUniform.update`); a pass of a
+  pipeline that reads an unset one draws nothing here ("uniform N unbound", N the pipeline's
+  uniform index: `HORIZON_JAVA_DEBUG=gpu` logs each pipeline's uniform names).
+- Mods hook `Minecraft.renderFrame` for per-frame work (Iceberg's render tick), not only
+  `runTick`; `getDeltaTracker()` is `DeltaTracker.ONE` here (whole ticks).
+- A mod's payload class can be one record for both ways with fields only one side fills
+  (Pufferfish's Skills' `InOutPayload`): handing the object over drops the other side's data.
 - Each player's client has its own `ClientPacketListener` (`LocalPlayer.connection`,
   `Minecraft.getConnection()`): mods keep per-client state on it. Its join fires the mods'
   injections into `handleLogin` (no packet) and `handleSetSpawn` (the level's spawn) on it.
@@ -1348,8 +1356,34 @@ Map mods (2026-11-01, `bridge-gpu2`, headless, llvmpipe):
 - Tooltips of Java screens draw through vanilla's path (deferred, `GuiGraphicsExtractor.tooltip`,
   captured like the rest) when mods merged handlers into the tooltip's drawing
   (`HorizonGraphics.vanillaTooltips`: Legendary Tooltips, Iceberg); else as one Horizon op as
-  before. Legendary Tooltips 1.6.3: centred titles and rarity borders show; its 3D item model
-  for equipment doesn't yet. Regress case `tooltips`.
+  before. Legendary Tooltips 1.6.3: centred titles and rarity borders show, and (`bridge-gpu-9`)
+  its turning 3D model of tools and weapons (Iceberg's `CustomItemRenderer` draws the item
+  into its own target with the feature dispatcher; the blit is a GPU image). It took the
+  client's item model resolver over the mirror's models (`Minecraft.itemModelResolver`, set
+  when they load), the GUI's lights from the start (`Lighting.setupFor(ITEMS_3D)`: pipelines
+  reading `Lighting` skipped every draw, "uniform N unbound"), and mods' injections into
+  `Minecraft.renderFrame` run once a client tick (Iceberg's render tick turns the model and
+  gives back its target pool). Armour's model doesn't draw: Iceberg puts it on an armour stand
+  drawn by the entity renderers, whose context has no equipment renderer (entities area).
+  Regress case `tooltips` (an iron sword's tooltip).
+- Models when a pack's don't fit (`bridge-gpu-9`): the mirror's baked models are baked on
+  first use instead of skipped (`HorizonLazyModels`; `ModelBakeryMixin` turns `bakeModels`'
+  two parallel bakes into lazy maps, `ModelManagerMixin` keeps the lazy map as the model
+  set). Skipped, there was no `ModelManager` and Xaero's World Map's frame hook failed each
+  frame (its minimap drew no colours). Xaero's maps bake ~1k of 36k states; the log says how
+  many at each power of two. `HORIZON_JAVA_MODELS=off` forces it. Regress `worldmap-lazy`.
+- Pufferfish's Skills 0.19.2 (`bridge-gpu-9`): K opens its skill tree, item icons drawn as
+  oversized items on the headless GPU (`GuiRenderer`'s `oversizedItemRenderers`, GUI scale
+  and feature dispatcher are now set). Four fixes useful beyond it: mods' messages between
+  the halves are written and read back with their codecs (`HorizonLoop.carried`: Skills'
+  payload is one class both ways, filled on one side); a player's client joins before the
+  first message reaches it (Skills clears its data at the client join, after the server had
+  sent it); quads at an angle (its lines between skills) are cut into rows of fills
+  (`HorizonGraphics.slanted`: their bounding boxes filled black and white squares); repeated
+  textures (UVs past 0..1) are drawn one blit per repeat. Mods' toasts don't fail (a
+  `ToastManager`) but aren't drawn. Its category backgrounds don't show. The Default Skill
+  Trees data pack needs Pufferfish's Attributes, which has no 26.3 build. Regress `skills`
+  (a small tree written as config).
 - Per player (host and LAN guest): Xaero's minimap is each player's own (`bridge-gpu3`);
   JourneyMap's and VoxelMap's too since `bridge-gpu-2` (`HorizonClientState`): JourneyMap's
   minimap and full-screen `MapState`/`MapRenderer` per player (static finals, made non-final as

@@ -147,6 +147,14 @@ public final class HorizonClient {
         // Its client (mods' injections into its frame read gui's minecraft: Xaero's).
         set(net.minecraft.client.gui.Gui.class, gui, "minecraft", mc);
         set(Minecraft.class, mc, "gui", gui);
+        // A toast manager, so mods adding toasts don't fail (Pufferfish's Skills' message handler
+        // threw on null); their toasts aren't drawn yet.
+        try {
+            set(net.minecraft.client.gui.Gui.class, gui, "toastManager",
+                    new net.minecraft.client.gui.components.toasts.ToastManager(mc, mc.options));
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            Natives.log("Horizon's client: no toast manager: " + e);
+        }
         // Screens click through the game mode (handleContainerInput): GameModeClientMixin.
         set(Minecraft.class, mc, "gameMode", Natives.allocate(net.minecraft.client.multiplayer.MultiPlayerGameMode.class));
         // Text boxes' typing area, for a window it has none of (TextInputManagerMixin).
@@ -1637,8 +1645,12 @@ public final class HorizonClient {
             Class<?> owner = net.minecraft.client.renderer.GameRenderer.class;
             var buffers = new net.minecraft.client.renderer.RenderBuffers(1);
             set(owner, gameRenderer, "renderBuffers", buffers);
-            set(owner, gameRenderer, "featureRenderDispatcher", new net.minecraft.client.renderer.feature.FeatureRenderDispatcher(
-                    buffers, models, atlases, minecraft.font, gameRenderer.gameRenderState()));
+            var dispatcher = new net.minecraft.client.renderer.feature.FeatureRenderDispatcher(
+                    buffers, models, atlases, minecraft.font, gameRenderer.gameRenderState());
+            set(owner, gameRenderer, "featureRenderDispatcher", dispatcher);
+            // The GUI renderer's too (mods drawing oversized items read it there).
+            Object gui = field(owner, gameRenderer, "guiRenderer");
+            if (gui != null) set(net.minecraft.client.gui.render.GuiRenderer.class, gui, "featureRenderDispatcher", dispatcher);
         } catch (Throwable t) {
             Natives.log("Horizon's client: no feature render dispatcher: " + t);
             for (var f : t.getStackTrace()) Natives.log("    at " + f);
@@ -1659,6 +1671,13 @@ public final class HorizonClient {
             set(net.minecraft.client.gui.render.GuiRenderer.class, gui, "guiProjection", projection);
             set(net.minecraft.client.gui.render.GuiRenderer.class, gui, "guiProjectionMatrixBuffer",
                     new net.minecraft.client.renderer.ProjectionMatrixBuffer("gui"));
+            // Its oversized items' renderers and GUI scale (Pufferfish's Skills draws its icons
+            // through them: OversizedItemRenderer.prepare, a picture in picture each).
+            set(net.minecraft.client.gui.render.GuiRenderer.class, gui, "oversizedItemRenderers", new java.util.HashMap<>());
+            int scale = Math.max(1, minecraft.getWindow().getGuiScale());
+            var window = ((net.minecraft.client.renderer.GameRenderer) gameRenderer).gameRenderState().windowRenderState;
+            if (window.guiScale == 0) window.guiScale = scale;
+            set(net.minecraft.client.gui.render.GuiRenderer.class, gui, "cachedGuiScale", window.guiScale);
             set(net.minecraft.client.renderer.GameRenderer.class, gameRenderer, "guiRenderer", gui);
         } catch (Throwable t) {
             Natives.log("Horizon's client: no GUI renderer: " + t);
@@ -1756,6 +1775,16 @@ public final class HorizonClient {
      * methods run on its connection, wherever in them they inject (Xaero's minimap starts its
      * session at the login and names the world by the spawn).
      */
+    /**
+     * The player's client joins before its first message from the server is read, as a vanilla
+     * client handles its login before the packets after it (HorizonLoop's deliveries): a mod
+     * clearing its client data at the join (Pufferfish's Skills' categories) cleared what the
+     * server had sent at its own join, delivered the tick before.
+     */
+    static void joinBeforeMessages(net.minecraft.server.level.ServerPlayer player) {
+        joined(player);
+    }
+
     private static void joined(net.minecraft.server.level.ServerPlayer player) {
         if (minecraft.level == null || !JOINED.add(player.getUUID())) return;
         // Mods that failed before a player was there: told now (HorizonFailures).

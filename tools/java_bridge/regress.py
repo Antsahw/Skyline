@@ -76,6 +76,7 @@ MODS = {
     "rftoolsbase": ["rftoolsbase*"],
     "fcap": ["forgeconfigapiport*"],
     "cc": ["cc-tweaked*"],
+    "skills": ["puffish_skills*"],
     "legendarytooltips": ["legendarytooltips*"],
     "iceberg": ["iceberg*"],
     "prism-lib": ["prism-*"],
@@ -638,6 +639,27 @@ CASES = {
                 check_file("typed.txt", r"computer/0/typed", "the typed command ran on the computer")],
         forbid=[r"Cannot update terminal", r"client's menu of \S+ couldn't be made", r"screen of computercraft:\S+ could not open"],
         look="the advanced computer's terminal: CraftOS 1.9, '> mkdir typed', a new prompt",
+    ),
+    "skills": dict(
+        about="Pufferfish's Skills: K opens its skill tree (a client-only screen): item icons drawn as oversized items on the headless GPU, lines between skills at their angle; its messages carried by their codecs (one class both ways), the client joined before them",
+        mods=["skills"], scene="none", env={"HORIZON_JAVA_DEBUG": "gpu"},
+        config={
+            "puffish_skills/config.json": '{"version": 3, "categories": ["test"]}',
+            "puffish_skills/categories/test/category.json":
+                '{"unlocked_by_default": true, "title": "Test", "icon": {"type": "item", "data": {"item": "diamond_sword"}}, "background": "textures/block/stone.png"}',
+            "puffish_skills/categories/test/definitions.json":
+                '{"sword": {"title": "Sword", "icon": {"type": "item", "data": {"item": "iron_sword"}}, "rewards": []},'
+                ' "heart": {"title": "Heart", "icon": {"type": "effect", "data": {"effect": "health_boost"}}, "rewards": []}}',
+            "puffish_skills/categories/test/skills.json":
+                '{"a": {"x": 0, "y": 0, "definition": "sword", "root": true}, "b": {"x": 64, "y": 48, "definition": "heart"},'
+                ' "c": {"x": -64, "y": 48, "definition": "sword"}}',
+            "puffish_skills/categories/test/connections.json": '{"normal": {"bidirectional": [["a", "b"], ["a", "c"]]}}',
+            "puffish_skills/categories/test/experience.json": '{"experience_per_level": {"type": "expression", "data": {"expression": "10"}}, "sources": []}',
+        },
+        steps=['sleep 20', '$C key k tap; sleep 30'],
+        checks=[check_log(r"gpu: a blit of horizon:dynamic/gpu\d+ 48x48", "the skills' item icons draw (oversized items on the GPU)")],
+        forbid=[r"A mod failed in", r"the client of puffish_skills:\S+ failed", r"puffish_skills\S*: java"],
+        look="none-0: the skill tree: an iron sword skill in the middle, slanted white lines to a heart and another sword, the Test tab with a diamond sword (the background stays black: not drawn yet)",
     ),
     "tooltips": dict(
         about="Legendary Tooltips (Iceberg, Prism) over a mod screen: tooltips draw through vanilla's path, where its mixins run (centred title, the border in the item's rarity colour)",
