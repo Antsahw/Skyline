@@ -537,3 +537,12 @@ tests pass; fmt and clippy `-D warnings` clean (horizon-client, horizon-jvm).
   players, so a filtered search can briefly come out with another player's switch; the
   craftable search is very slow here (30+ s, 2 cores), so the guest's filtered list may lag.
   Test: regress `rei-lan` (new, LAN), `rei reiscreen modsettings` pass.
+
+- **client r6-2, REI's search for all players** (`bridge-client-8`). Works (LAN, screenshots,
+  regress): each player's filter applies to their own list (the guest with 4 oak logs sees 2
+  craftable entries, the host its full list). Speed: REI's display lookup index was off (its
+  default), so the craftable filter scanned all displays (30+ s on 2 cores); it is turned on
+  and rebuilt after each sync: a craftable search is ~0.3 s. With 2+ players searches run on
+  the server thread inside the player's turn, so a craftable search is a ~0.3 s hitch for
+  everyone (single player: REI's threads as before). Test: regress `rei-lan` (stronger now),
+  `rei reiscreen` pass.
