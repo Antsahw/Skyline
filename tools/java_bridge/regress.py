@@ -229,6 +229,40 @@ CASES = {
                 check_log(r"Summoned new Hunter", "the hunter is summoned")],
         look="the hunter at the sheep",
     ),
+    "golem": dict(
+        about="Horizon's mobs see mods' mobs (HorizonNeighbours.seen): Horizon's iron golem hunts crittermod's biter (an Enemy) and kills it on the mirror",
+        fixtures=["crittermod"], scene="golem",
+        steps=['$C command "summon horizon_critters:biter $(cat $S/critter.pos)" >/dev/null; sleep 1; $C entities 16 > $S/before.json; '
+               'sleep 2; $C screenshot $S/fight.png >/dev/null; sleep 10; $C entities 16 > $S/after.json; '
+               'python3 "$R/tools/java_bridge/gone_check.py" horizon_critters:biter $S/before.json $S/after.json minecraft:iron_golem > $S/gone.txt'],
+        checks=[check_file("gone.txt", r"(?m)^there", "the biter stood in the pen"),
+                check_file("gone.txt", r"(?m)^gone", "Horizon's golem killed it"),
+                check_file("gone.txt", r"(?m)^kept", "the golem is still there")],
+        look="the golem at the biter",
+    ),
+    "strikeback": dict(
+        about="Horizon's mob strikes back at a mod's mob that hurts it: crittermod's hunter (no Enemy: golems leave it be) bites Horizon's iron golem, which kills it",
+        fixtures=["crittermod"], scene="golem",
+        steps=['$C command "summon horizon_critters:hunter $(cat $S/critter.pos)" >/dev/null; sleep 1; $C entities 16 > $S/before.json; '
+               'sleep 2; $C screenshot $S/fight.png >/dev/null; sleep 12; $C entities 16 > $S/after.json; '
+               'python3 "$R/tools/java_bridge/gone_check.py" horizon_critters:hunter $S/before.json $S/after.json minecraft:iron_golem > $S/gone.txt'],
+        checks=[check_file("gone.txt", r"(?m)^there", "the hunter stood in the pen"),
+                check_file("gone.txt", r"(?m)^gone", "the golem it bit killed it"),
+                check_file("gone.txt", r"(?m)^kept", "the golem is still there")],
+        look="the golem at the hunter",
+    ),
+    "mounthud": dict(
+        about="Riding a mod's mob in survival: its hearts on the HUD where the food bar was (as a vanilla mount's)",
+        fixtures=["crittermod"], scene="mount",
+        steps=['$C command "gamemode survival" >/dev/null; sleep 1; $C screenshot $S/walk.png >/dev/null; '
+               '$C look-at $(cat $S/mount.pos) >/dev/null; sleep 0.3; $C mouse right click >/dev/null; sleep 2; '
+               '$C screenshot $S/ride.png >/dev/null; $C status > $S/status.json; '
+               'python3 "$R/tools/java_bridge/mount_hearts.py" $S/walk.png $S/ride.png > $S/hearts.txt; '
+               'python3 -c "import sys; a,b=[int(l.split()[-1]) for l in open(sys.argv[1])]; print(\'hearts\' if b > a + 100 else \'none\', a, b)" $S/hearts.txt >> $S/hearts.txt'],
+        checks=[check_file("status.json", r'"riding_java":\[true,\[20\.0,20\.0\]\]', "the game knows its mount's health (20 of 20)"),
+                check_file("hearts.txt", r"(?m)^hearts", "its hearts drawn on the right, where the food bar was")],
+        look="ten orange mount hearts right of the hotbar (ride.png in the scratch folder)",
+    ),
     "gecko": dict(
         about="GeckoLib (geckomod fixture, built against the GeckoLib jar): a mob's GeckoLib model drawn, its looping animation moving it",
         fixtures=["geckomod"], mods=["geckolib"], scene="entity", env={"ENTITY": "horizon_gecko:bobber"},
@@ -457,8 +491,10 @@ CASES = {
         fixtures=["mixinmod"], scene="mixins1",
         steps=['$C mouse left down >/dev/null; sleep 2; $C mouse left up >/dev/null; sleep 1; '
                '$C command "tp @s ~2 ~ ~" >/dev/null; sleep 3; $C inventory > $S/inv.json; $C entities 4 minecraft:item > $S/ground.json',
-               '$C command "gamerule random_tick_speed 1000" >/dev/null; sleep 6; $C command "gamerule random_tick_speed 3" >/dev/null; '
-               '$C block $(cat $S/crop.pos) > $S/crop.json',
+               # Up to 20 s for a growth (a busy full run ticks slower than one case alone).
+               '$C command "gamerule random_tick_speed 1000" >/dev/null; '
+               'for i in $(seq 20); do sleep 1; $C block $(cat $S/crop.pos) > $S/crop.json; grep -q "age=[1-7]" $S/crop.json && break; done; '
+               '$C command "gamerule random_tick_speed 3" >/dev/null',
                '$C command "item replace entity @s weapon.mainhand with minecraft:bucket" >/dev/null; '
                '$C command "summon minecraft:cow ~2 ~ ~ {NoAI:1b}" >/dev/null; sleep 1; '
                '$C look-at-entity $($C entities 6 minecraft:cow | python3 -c "import json,sys;print(json.load(sys.stdin)[\'entities\'][0][\'id\'])") >/dev/null; '

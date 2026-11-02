@@ -742,7 +742,15 @@ impl Game<'_> {
     /// (`getVehicleMaxHearts`).
     pub(super) fn draw_mount_hud(&mut self, batch: &mut HudBatch, w: i32, h: i32) -> i32 {
         let Some(i) = self.mount_index() else {
-            return 0;
+            // A Java mod's mob: its hearts, as a vanilla mount's (the server's snapshot gives
+            // them). Its jump bar is in `draw_jump_bar`.
+            let mut hearts = 0;
+            if let Some([health, max]) = self.java_mount_health() {
+                hearts = horizon_client::hud_layout::vehicle_max_hearts(max);
+                let draws = horizon_client::hud_layout::vehicle_health(w, h, hearts, health);
+                horizon_client::hud_layout::paint(batch, &self.gui.atlas, &draws);
+            }
+            return hearts;
         };
         let m = &self.mobs[i];
         let hearts = horizon_client::hud_layout::vehicle_max_hearts(m.attrs.max_health);

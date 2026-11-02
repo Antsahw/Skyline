@@ -82,6 +82,16 @@ case "$SCENE" in
     'q "summon horizon_critters:mount $(p $X+2.5) $Y $(p $Z+0.5)"' \
     'echo "$(p $X+2.5) $(p $Y+0.5) $(p $Z+0.5)" > "$S/mount.pos"' 'echo "$Y" > "$S/floor.y"' \
     'q "tp @s $(p $X+0.5) $Y $(p $Z+0.5) -90 20"' 'sleep 2' ;;
+  # Horizon's iron golem ahead of the player in a 9x9 pen (2-high walls: it stays), with the
+  # critter a case summons ($S/critter.pos, four blocks from it).
+  golem) "$R/tools/java_bridge/around.sh" \
+    'q "fill $((X-4)) $Y $((Z-4)) $((X+4)) $((Y+1)) $((Z-4)) stone_bricks"' \
+    'q "fill $((X-4)) $Y $((Z+4)) $((X+4)) $((Y+1)) $((Z+4)) stone_bricks"' \
+    'q "fill $((X-4)) $Y $((Z-4)) $((X-4)) $((Y+1)) $((Z+4)) stone_bricks"' \
+    'q "fill $((X+4)) $Y $((Z-4)) $((X+4)) $((Y+1)) $((Z+4)) stone_bricks"' \
+    'q "summon minecraft:iron_golem $(p $X+2.5) $Y $(p $Z-1.5)"' \
+    'echo "$(p $X+2.5) $Y $(p $Z+2.5)" > "$S/critter.pos"' \
+    'q "tp @s $(p $X-2.5) $Y $(p $Z+0.5) -90 20"' 'sleep 1' ;;
   # Mods' mobs and Horizon's: one of Horizon's sheep (no AI: it stays) ahead of the player;
   # where a hunter (the critter fixture's, it hunts sheep) goes, four blocks from it, in
   # $S/hunter.pos (the case summons it).

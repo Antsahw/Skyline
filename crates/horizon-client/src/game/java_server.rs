@@ -1182,12 +1182,15 @@ mod run {
                 /// Players riding a mod's mob, by UUID: `{"id", "p": the seat}`.
                 #[serde(default, borrow)]
                 rides: HashMap<&'a str, &'a RawValue>,
+                /// The mods' living entities as Horizon's mobs see them, per dimension.
+                #[serde(default)]
+                seen: HashMap<String, Vec<crate::game::java_entities::Neighbour>>,
             }
             static SENT: std::sync::Mutex<Option<Sent>> = std::sync::Mutex::new(None);
             let _timed =
                 super::super::java_profile::Timed::named("(Rust) entities: parse and send");
             super::super::java_profile::bytes("entities: snapshot from Java", json.len());
-            let Ok(snapshot) = serde_json::from_str::<Snapshot>(json) else {
+            let Ok(mut snapshot) = serde_json::from_str::<Snapshot>(json) else {
                 return;
             };
             let mut sent = SENT.lock().unwrap_or_else(|e| e.into_inner());
@@ -1199,6 +1202,9 @@ mod run {
                 has: HashMap::new(),
             });
             sent.trees.extend(snapshot.models);
+            *crate::game::java_entities::NEIGHBOURS
+                .lock()
+                .unwrap_or_else(|e| e.into_inner()) = Some(std::mem::take(&mut snapshot.seen));
             // Whole entries kept for players that haven't had an entity's look; entities gone
             // go with theirs.
             let present: HashSet<i64> = snapshot
@@ -2236,7 +2242,7 @@ mod run {
 
         /// Runs `f`, a call into Java, with the levels as what Java mods read of the world.
         #[track_caller]
-        fn with_java_world<R>(&mut self, f: impl FnOnce() -> R) -> R {
+        pub(in crate::game) fn with_java_world<R>(&mut self, f: impl FnOnce() -> R) -> R {
             let _timed = super::super::java_profile::Timed::here();
             let registry = self.pack.assets.registry;
             let mut dims: Vec<(&'static str, &ChunkMap)> =
@@ -3333,7 +3339,28 @@ mod run {
                 .partition(|(d, _, _)| d == dim);
             self.mods.java.block_writes = later;
             let registry = self.pack.assets.registry;
-            for (_, pos, state) in now {
+            // Writes into chunks Horizon hasn't loaded yet wait for them, as vanilla's setBlock
+            // loads the chunk (One Block's join sets its grass at 0 64 0 before the spawn's
+            // chunks are in; dropped, its safety check found air and put a random block there).
+            // At most ~20 s each.
+            static WAITING: std::sync::Mutex<
+                Option<std::collections::HashMap<(String, [i32; 3]), u32>>,
+            > = std::sync::Mutex::new(None);
+            let mut waiting = WAITING.lock().unwrap_or_else(|e| e.into_inner());
+            let waiting = waiting.get_or_insert_with(Default::default);
+            for (d, pos, state) in now {
+                if !self.world.loaded(pos[0], pos[2]) {
+                    let key = (d.clone(), pos);
+                    let waited = waiting.entry(key).or_insert(0);
+                    *waited += 1;
+                    if *waited < 400 {
+                        self.mods.java.block_writes.push((d, pos, state));
+                    } else {
+                        log::debug!("Java mods: a mod's block at {pos:?} never loaded");
+                    }
+                    continue;
+                }
+                waiting.remove(&(d.clone(), pos));
                 let parsed = match crate::game::render_control::parse_state(registry, &state) {
                     Ok(parsed) => parsed,
                     Err(e) => {
@@ -3345,6 +3372,7 @@ mod run {
                     log::debug!("Java mods: a mod's block at {pos:?}: {e:?}");
                 }
             }
+            waiting.retain(|_, w| *w < 400);
         }
 
         /// The items Java mods dropped and the level events they made in the level in place: Horizon's item entities, with

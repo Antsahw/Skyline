@@ -131,4 +131,84 @@ public final class HorizonNeighbours {
                 from == null ? Double.NaN : from.x, from == null ? Double.NaN : from.y, from == null ? Double.NaN : from.z,
                 by == null ? -1 : by.getId());
     }
+
+    /**
+     * The vanilla type Horizon's mobs take a mod's mob for (they know only vanilla's): its nearest
+     * vanilla class among those their goals look for (a zombie, a skeleton, a wolf, a villager...),
+     * else a spider for a monster (an Enemy iron golems attack, that villagers don't flee), a
+     * cod for a fish or squid, a pig for the rest.
+     */
+    static String like(Entity e) {
+        return LIKE.computeIfAbsent(e.getClass(), c -> {
+            for (var pair : LIKES) if (pair.getKey().isAssignableFrom(c)) return pair.getValue();
+            return "minecraft:pig";
+        });
+    }
+
+    private static final Map<Class<?>, String> LIKE = new java.util.concurrent.ConcurrentHashMap<>();
+    /** Most specific first. */
+    private static final List<Map.Entry<Class<?>, String>> LIKES = List.of(
+            Map.entry(net.minecraft.world.entity.monster.zombie.Zombie.class, "minecraft:zombie"),
+            Map.entry(net.minecraft.world.entity.monster.skeleton.AbstractSkeleton.class, "minecraft:skeleton"),
+            Map.entry(net.minecraft.world.entity.monster.Creeper.class, "minecraft:creeper"),
+            Map.entry(net.minecraft.world.entity.monster.spider.Spider.class, "minecraft:spider"),
+            Map.entry(net.minecraft.world.entity.npc.villager.AbstractVillager.class, "minecraft:villager"),
+            Map.entry(net.minecraft.world.entity.monster.illager.AbstractIllager.class, "minecraft:pillager"),
+            Map.entry(net.minecraft.world.entity.animal.wolf.Wolf.class, "minecraft:wolf"),
+            Map.entry(net.minecraft.world.entity.animal.sheep.Sheep.class, "minecraft:sheep"),
+            Map.entry(net.minecraft.world.entity.animal.chicken.Chicken.class, "minecraft:chicken"),
+            Map.entry(net.minecraft.world.entity.animal.rabbit.Rabbit.class, "minecraft:rabbit"),
+            Map.entry(net.minecraft.world.entity.animal.fish.AbstractFish.class, "minecraft:cod"),
+            Map.entry(net.minecraft.world.entity.animal.squid.Squid.class, "minecraft:cod"),
+            Map.entry(net.minecraft.world.entity.monster.Enemy.class, "minecraft:spider"));
+
+    /**
+     * The mods' living entities as Horizon's mobs see them, per dimension:
+     * `"<dimension>": [[id, "like", x, y, z, width, height, health, yaw, hostile], ...],` without
+     * the outer braces (HorizonEntityRender's snapshot writes them).
+     */
+    static void seen(StringBuilder out) {
+        boolean firstDim = true;
+        for (var level : HorizonEntities.all().entrySet()) {
+            boolean first = true;
+            for (Entity e : level.getValue()) {
+                if (!(e instanceof LivingEntity l) || e.isRemoved() || !l.isAlive()) continue;
+                if (first) {
+                    if (!firstDim) out.append(',');
+                    firstDim = false;
+                    HorizonJson.string(level.getKey().dimension().identifier().toString(), out);
+                    out.append(":[");
+                } else {
+                    out.append(',');
+                }
+                first = false;
+                out.append('[').append(e.getId()).append(',');
+                HorizonJson.string(like(e), out);
+                out.append(',').append(e.getX()).append(',').append(e.getY()).append(',').append(e.getZ())
+                        .append(',').append(e.getBbWidth()).append(',').append(e.getBbHeight())
+                        .append(',').append(l.getHealth()).append(',').append(e.getYRot())
+                        .append(',').append(e instanceof net.minecraft.world.entity.monster.Enemy ? 1 : 0).append(']');
+            }
+            if (!first) out.append(']');
+        }
+    }
+
+    /**
+     * Horizon's mob `attacker` hit the mods' entity `id` for `amount` (Horizon's own melee: a
+     * golem's swing, a wolf's bite). A mob attack by the attacker's shadow, so the entity strikes
+     * back at it (HurtByTargetGoal). False when there is no such entity or it took nothing.
+     */
+    public static boolean hurtByHorizon(int id, int attacker, float amount) {
+        Entity target = HorizonEntities.byId(id);
+        if (!(target instanceof LivingEntity living) || !(target.level() instanceof ServerLevel level)) return false;
+        LivingEntity shadow;
+        synchronized (HorizonNeighbours.class) {
+            shadow = SHADOWS.getOrDefault(level, Map.of()).get(attacker);
+        }
+        DamageSource source = shadow != null ? level.damageSources().mobAttack(shadow) : level.damageSources().generic();
+        boolean[] hurt = {false};
+        HorizonEntities.fire(target, "LivingEntity.hurtServer (Horizon's mob)", () -> hurt[0] = living.hurtServer(level, source, amount));
+        // hurtServer's own knockback pushes it away from the shadow.
+        return hurt[0];
+    }
 }

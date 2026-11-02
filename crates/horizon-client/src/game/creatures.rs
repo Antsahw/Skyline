@@ -920,6 +920,9 @@ impl Game<'_> {
         }
         let uuid = self.level.player_uuid;
         let mut snapshot: Vec<Seen> = self.mobs.iter().map(|m| seen(m, uuid)).collect();
+        // The Java mods' living entities, as the vanilla types they are taken for.
+        #[cfg(feature = "java-mods")]
+        snapshot.extend(self.java_neighbours_seen());
         let mut events = Vec::new();
         let mut mobs = std::mem::take(&mut self.mobs);
         let mut dead = Vec::new();
@@ -1552,6 +1555,11 @@ impl Game<'_> {
     }
     /// Melee or ranged damage to another mob; whether the hit landed.
     fn mob_hits_mob(&mut self, target: u32, amount: f32, source: Damage) -> bool {
+        // One of the Java mods' entities: the mirror takes the hit.
+        #[cfg(feature = "java-mods")]
+        if let Some(hurt) = self.java_mob_hits_entity(target, amount, source) {
+            return hurt;
+        }
         let mut killed = false;
         let mut hurt = false;
         let mut infested = false;
