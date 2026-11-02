@@ -346,3 +346,15 @@ tests pass; fmt and clippy `-D warnings` clean (horizon-client, horizon-jvm).
   per player, unlike client 1 said): its copied config stopped the overlay. Test:
   `MODS=<REI+TR+Jade...> tools/java_bridge/server_test.sh '$G key e tap; sleep 6'` (new);
   regress `reiscreen` (new), `rei hud join modsettings failmsg` pass.
+
+- **mixins 5-1** (`bridge-mixins-5-1`), by Claude for iaxivers: our hooks onto upstream's
+  native hook points. Works: random ticks (`java_random_tick` in `before_random_tick`, before
+  `native_random_tick`; horizon-world's `RANDOM_TICK_HOOK` removed), hurts (`java_hurt` first in
+  native_hooks' `hurt_server`, past hurtServer's guards, as Fabric's `ALLOW_DAMAGE`; health.rs's
+  `HURT_HOOK` removed), left clicks (`java_attack_block` beside `native_left_click_block`). New
+  cases `punch` (eventsmod: poppies can't be punched) and `hurt` (magma doesn't hurt, `/damage`
+  does); `seasons`, `mixins1` and the other 16 mixin cases still pass. Doesn't: entity
+  attack/use (ours answer the packet, for Java's own entities too), deaths (two notes with the
+  hub's tracker), commands and placing stay where they were. Outside the area: one line each in
+  game.rs, lan_actions.rs, native_hooks.rs; horizon-world and health.rs lose our hooks. Test:
+  `regress.py --jars <jars> punch hurt seasons mixins1`.
