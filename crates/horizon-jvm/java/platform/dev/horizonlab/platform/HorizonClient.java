@@ -1021,8 +1021,14 @@ public final class HorizonClient {
         var screen = SCREENS.get(player.getUUID());
         if (screen == null) screen = OVERLAYS.get(player.getUUID());
         if (screen != null) set(net.minecraft.client.gui.Gui.class, minecraft.gui, "screen", screen);
+        // REI's searches started in this call run at its end, with this player's settings.
+        var searches = HorizonRecipeViewer.queueSearches();
         try {
-            run.run();
+            try {
+                run.run();
+            } finally {
+                HorizonRecipeViewer.runQueued(searches);
+            }
         } finally {
             // Back to the outer run's player's state (as() within another player's as()).
             if (before != null) HorizonClientState.load(before.getUUID());

@@ -211,11 +211,18 @@ saying something works.
   favourites and filtering rules (its registries know them by identity) while the lists
   holding them are copied. Regress `rei-lan`: the guest's craftable filter on, the host's off
   with its list. (The earlier "a copy stopped the overlay drawing" was REI's own reload, fixed
-  by `afterOwnReload`.) Left: REI's search manager is one for all players and runs on its
-  threads, reading the craftable switch as it is when it runs; a filtered search started
-  while another player's settings are in can come out with theirs until the next search.
-  Running the searches inside `as()` was tried: the craftable search took over 30 s on a
-  2-core machine and stalled the server thread.
+  by `afterOwnReload`.) REI's search for several players (`bridge-client-8`): REI's one search manager ran on its own
+  threads and read the craftable switch when it ran, often another player's. Once the client
+  serves a second player, a search started inside a player's `as()` is queued and run at that
+  call's end, their settings still in (`HorizonRecipeViewer.searchPerPlayer`: REI's
+  `AsyncSearchManager.EXECUTOR_SERVICE` made non-final by `ModsPlugin` and wrapped; searches
+  started elsewhere still go to REI's threads; one player: as before). That became possible
+  once lookups got fast: REI's "cache display lookup" option is off by default, so every
+  lookup by input or output scanned every display, and the craftable filter took over 30 s on
+  2 cores. The headless client turns it on and indexes all displays after each sync
+  (`reindex`, ~0.4–0.6 s for 11,721 displays); a craftable search is now ~0.3 s.
+  `HORIZON_JAVA_DEBUG=rei` logs each player's list size after a search. Regress `rei-lan`: the
+  guest with 4 oak logs sees 2 entries with its filter on, the host its full list.
 - `HorizonClientState` gives a player new to the client a fresh empty collection for a
   collection field (null before): REI's own reload cleared `lastDisplayScreen` and threw on
   null.

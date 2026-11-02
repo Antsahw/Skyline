@@ -719,3 +719,12 @@ out (the bridge adds them since round 2; it failed on java-bridge too). Not run 
   signed assets exist); the tab only shows when `mods-java/` exists. Test:
   `HORIZON_BRIDGE_PLATFORM=source cargo build ... --features java-mods` then
   `tools/java_bridge/install_test.sh`; regress `pot join rei hud` pass.
+
+- **client r6-2, REI's search for all players** (`bridge-client-8`). Works (LAN, screenshots,
+  regress): each player's filter applies to their own list (the guest with 4 oak logs sees 2
+  craftable entries, the host its full list). Speed: REI's display lookup index was off (its
+  default), so the craftable filter scanned all displays (30+ s on 2 cores); it is turned on
+  and rebuilt after each sync: a craftable search is ~0.3 s. With 2+ players searches run on
+  the server thread inside the player's turn, so a craftable search is a ~0.3 s hitch for
+  everyone (single player: REI's threads as before). Test: regress `rei-lan` (stronger now),
+  `rei reiscreen` pass.
