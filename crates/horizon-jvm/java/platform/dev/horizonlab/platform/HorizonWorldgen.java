@@ -185,10 +185,14 @@ public final class HorizonWorldgen {
         // Handlers that take only the CallbackInfo, then those that take the constructor's
         // arguments (WorldWeaver's: its registry-ready and server-ready events).
         Object[] args = serverArguments(server, seed, structures);
+        long hooks = System.nanoTime();
         for (String at : new String[] {"RETURN", "TAIL"}) {
             HorizonHooks.fire(server, MinecraftServer.class, "<init>", "()V", at, new Object[0], null, false);
             if (args != null) HorizonHooks.fire(server, MinecraftServer.class, "<init>", SERVER_CONSTRUCTOR, at, args, null, false);
         }
+        // Fabric's biome modifications and TerraBlender's server start run here.
+        Natives.log("Java mods: the server's start hooks (biome modifications) ran in "
+                + (System.nanoTime() - hooks) / 1_000_000 + " ms");
     }
 
     private static final String SERVER_CONSTRUCTOR = "(Ljava/lang/Thread;"

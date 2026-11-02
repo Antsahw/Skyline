@@ -29,6 +29,7 @@ fn client_entrypoints_run_headless() {
         work: work.clone(),
         jars: horizon_jvm::jars(&mods),
         class_path: Vec::new(),
+        class_archive: None,
         fabric: Some(horizon_jvm::Fabric {
             game_jar: horizon_jvm::facade::game_jar(&root).unwrap(),
             libraries: horizon_jvm::facade::game_libraries(&root).unwrap(),

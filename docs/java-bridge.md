@@ -1592,6 +1592,39 @@ oracle's sampled drop counts differ, run to run). What's left, in order: the Jav
 (class loading, ~65 s), `mod_content::tables` (~15 s), the facts JSON read (~10 s).
 Sample it with gdb (`gdb -p $(pgrep -x horizon-client) -batch -ex bt`, every 2 s).
 
+### Java's start, cached between runs (2026-11-02, bridge-worldgen-5)
+
+The "class loading" above is Fabric's start (the same in a content build and a normal
+start): JFR of the 110-jar pack's main thread, 2 cores: ~29% Knot making class bytes (mixin
+transforms 18%, finding each class's bytes across 260 jars 10%), ~27% `initCache` of every
+block state's shape cache (Fabric registry sync's `initShapeCache`, then EnergizedPower's and
+BetterEnd's blocks), the rest mods' entrypoints; plus HotSpot parsing, verifying and linking
+~30k classes, which JFR doesn't see. Turning verification off changed nothing.
+
+- **Class archive (CDS)**: the JVM starts with `-XX:+AutoCreateSharedArchive
+  -XX:SharedArchiveFile=.horizon-cache/java-classes-<stamp of the jars>.jsa`
+  (`java_mods::class_archive`; other sets' archives are removed; `HORIZON_JAVA_CLASS_ARCHIVE=0`:
+  none). The JVM writes it at its exit, so the game now ends through Java's
+  `System.exit` (`horizon_jvm::exit`, last thing in `main`, a 90 s watchdog). Mods' classes
+  go in too (Knot's: an archived class is used when the bytes Knot makes have the same CRC,
+  so a changed jar or mixin just loads normally). 110 jars: Fabric started in 89–92 s →
+  79–81 s here, join 166 s → ~150 s; the first quit of a set takes ~25 s more (a ~250 MB
+  file; logged). With one small mod it changes nothing measurable. A dump while the game
+  runs (`jcmd … VM.cds dynamic_dump`) crashed a worldgen thread in libjvm: only at exit.
+- **TerraBlender's `possibleBiomes`** (`BiomeSourceMixin`, `HorizonBiomeMemo`): its
+  `appendDeferredBiomesList` replaces vanilla's memoized supplier with one that builds a new
+  set on every call, and Fabric's biome modifications call it per (modifier, biome). Memoized
+  again: the server's start hooks 3.3 s → 2.2 s (logged: "the server's start hooks …";
+  `HORIZON_JAVA_BIOME_MEMO=0` to compare). Smaller than the ~10 s guessed in worldgen 1.
+- `has_java_mods` listed and resolved every jar each call, every 2 ms while the spawn was
+  searched; it is cached now.
+
+Left on the path to the join (cached run, 2 cores): Fabric's start ~80 s (mods' entrypoints
+and Knot; a cache of mixed class bytes would skip the transforms, but Mixin's plugins,
+synthetic classes and our census watch transforms happen: not tried), then ~30 s of the
+spawn's worldgen (`settle_spawn`, Java's protos with the models' reload beside), ~25 s more
+for the 3×3 spawn chunks.
+
 ## Working on it
 
 - **The task queue is [java-bridge-tasks.md](java-bridge-tasks.md)**: take your area's next task, follow its loop, add a report there.

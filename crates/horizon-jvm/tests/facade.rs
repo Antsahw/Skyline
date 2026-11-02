@@ -91,6 +91,7 @@ fn facade_classes_load_and_return_defaults() {
         work: dir.join("work"),
         jars: Vec::new(),
         class_path: vec![facade],
+        class_archive: None,
         fabric: None,
     })
     .expect("JVM starts");

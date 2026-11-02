@@ -346,3 +346,14 @@ tests pass; fmt and clippy `-D warnings` clean (horizon-client, horizon-jvm).
   per player, unlike client 1 said): its copied config stopped the overlay. Test:
   `MODS=<REI+TR+Jade...> tools/java_bridge/server_test.sh '$G key e tap; sleep 6'` (new);
   regress `reiscreen` (new), `rei hud join modsettings failmsg` pass.
+
+- **worldgen 5.1, startup** (bridge-worldgen-5): Java's classes are kept between runs in a
+  class archive (CDS, `.horizon-cache/java-classes-<stamp>.jsa`, written as the game quits
+  through Java's exit): 110 jars, Fabric start 89–92 s → ~80 s, join ~166 → ~150 s (2 cores);
+  the first quit of a mod set takes ~25 s more. TerraBlender's unmemoized `possibleBiomes`
+  memoized (server start hooks 3.3 → 2.2 s; the "10 s" was mostly elsewhere). `has_java_mods`
+  cached (it listed every jar every 2 ms during the spawn search). Not done: the mixin
+  transforms (~18% of Fabric's start) and shape caches (~27%); see java-bridge.md "Java's start,
+  cached between runs". Also fixed: java_worldgen's test didn't compile (upstream's `Spans`).
+  Regress: all pass but `preset` once (an oak log at the One Block's spot, 1 of 3 runs; passes
+  alone twice). Test: start a pack twice; the log says "classes mapped from …" the second time.

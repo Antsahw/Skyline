@@ -52,6 +52,7 @@ fn jvm_starts_and_both_directions_work() {
         work: dir.join("work"),
         jars: jars.clone(),
         class_path: Vec::new(),
+        class_archive: None,
         fabric: None,
     };
     let bridge = horizon_jvm::start(&config).expect("JVM starts");

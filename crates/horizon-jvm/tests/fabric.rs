@@ -149,6 +149,7 @@ fn fabric_loads_a_mod_runs_its_entrypoints_and_applies_its_mixin() {
         work,
         jars: horizon_jvm::jars(&mods),
         class_path: Vec::new(),
+        class_archive: None,
         fabric: Some(horizon_jvm::Fabric {
             game_jar: facade,
             libraries: Vec::new(),

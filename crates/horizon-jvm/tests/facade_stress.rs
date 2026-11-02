@@ -89,6 +89,7 @@ fn every_class_of_a_jar_loads() {
         work: dir.join("work"),
         jars: Vec::new(),
         class_path: std::iter::once(facade).chain(libraries()).collect(),
+        class_archive: None,
         fabric: None,
     })
     .expect("JVM starts");
