@@ -386,8 +386,9 @@ it does nothing unless Horizon fires it or hands the action to the mirror.
     mirrored player, `calculateFallDamage` answered with Horizon's safe distance and damage
     multiplier attributes (`FallCaptureMixin`: the mirror has no effects or attributes), the
     damage reaching `hurtServer` caught. Horizon deals it with vanilla's sounds
-    (`MotionWorld::routed_fall_damage`). A mace's or wind charge's impulse stays Rust's;
-    in-frame single player isn't routed.
+    (`MotionWorld::routed_fall_damage`). A mace's or wind charge's impulse cuts the
+    distance first (as `cause_living_fall_damage` does), and a native mod block's fallOn
+    (`mod_block_fall`, `FallEvent::Routed`'s `contact`) changes the damage after the mods.
   - A player's new effect (`Game::add_player_effect`: potions, food, totems, `/effect`): the
     heads of `LivingEntity.addEffect` with the instance; a cancel drops it. Beacons,
     conduits, raids' Hero of the Village, the ominous bottle's Bad Omen and the Warden's

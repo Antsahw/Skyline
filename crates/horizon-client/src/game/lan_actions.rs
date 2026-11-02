@@ -3955,11 +3955,19 @@ impl Game<'_> {
                         source,
                         safe,
                         damage_multiplier,
-                    }) => Some((*distance, *multiplier, *source, *safe, *damage_multiplier)),
+                        contact,
+                    }) => Some((
+                        *distance,
+                        *multiplier,
+                        *source,
+                        *safe,
+                        *damage_multiplier,
+                        *contact,
+                    )),
                     _ => None,
                 })
                 .collect();
-            for (distance, multiplier, source, safe, damage_multiplier) in routed {
+            for (distance, multiplier, source, safe, damage_multiplier, contact) in routed {
                 let stalagmite = source == horizon_world::block_landing::LandingDamage::Stalagmite;
                 let damage = game
                     .java_fall(distance, multiplier, stalagmite, safe, damage_multiplier)
@@ -3979,7 +3987,7 @@ impl Game<'_> {
                     collision_binding: game.collision,
                     resources: game.motion,
                 }
-                .routed_fall_damage(damage, source);
+                .routed_fall_damage(damage, source, contact);
                 events.append(&mut player.events);
             }
             if let Some(player) = game.player.as_mut() {

@@ -380,6 +380,16 @@ CASES = {
                 check_file("omen.txt", r"\A(?!.*bad_omen)", "no Bad Omen from the bottle"),
                 check_file("bottle.json", r'"held":null|"held":\{"count":0', "the bottle drunk")],
     ),
+    "windfall": dict(
+        about="A routed fall after a wind charge's burst (mixinmod routes falls): the burst's height doesn't count, no damage",
+        fixtures=["mixinmod"], scene="none", env={"HORIZON_JAVA_DEBUG": "entities"},
+        steps=['$C command "gamemode survival" >/dev/null; $C command "gamerule natural_health_regeneration false" >/dev/null; '
+               '$C command "item replace entity @s weapon.mainhand with minecraft:wind_charge 4" >/dev/null; $C look 0 90 >/dev/null; sleep 1; '
+               '$C mouse right click >/dev/null; sleep 0.4; $C status > $S/up.json; sleep 4; $C status > $S/landed.json'],
+        checks=[check_file("up.json", r'"on_ground":false', "the burst lifted the player"),
+                check_json("landed.json", ["player", "health"], 20.0, "no damage on landing"),
+                check_log(r"entities: \S+ falls ", "the landing went to the mods")],
+    ),
     "slot": dict(
         about="Inventory.setSelectedSlot's head (mixinmod: not the ninth): the slot stays",
         fixtures=["mixinmod"], scene="none",
