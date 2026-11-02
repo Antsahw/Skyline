@@ -893,7 +893,7 @@ Found in the upstream sync (2026-11-01):
 ```sh
 # Java 25 (JAVA_HOME may point at 21 on these machines; the scripts pick 25)
 export JAVA_HOME=/usr/lib/jvm/java-25-openjdk-amd64 PATH=/usr/lib/jvm/java-25-openjdk-amd64/bin:$PATH
-cargo build --profile fast -p horizon-client --features horizon-client/java-mods   # ~5 min after a Rust change
+cargo build --profile fast -p horizon-client -p horizon-client-lib --features horizon-client/java-mods   # ~5 min after a Rust change; horizon-ctl is horizon-client-lib's
 cargo test -p horizon-jvm                                                           # bridge tests
 cargo clippy --profile fast -p horizon-client --features java-mods --bins --lib -- -D warnings -A clippy::manual_range_contains
 ```
@@ -1504,6 +1504,35 @@ It runs this checkout's `target/fast` build with `.local/` prepared. `HORIZON_PR
 up and prints the command; `HORIZON_PRISM_ARGS` adds game arguments. (Idea from the NeuHorizon
 fork's NeoForge wrapper.)
 
+### Windows
+
+The bridge builds for Windows (`cargo check --target x86_64-pc-windows-gnu`, horizon-client and
+horizon-client-lib with `java-mods`: clean), and the JVM part runs there: `horizon-jvm`'s `boot`
+test (a Windows JDK 25's `jvm.dll`, natives both ways) passes under Wine. Two Windows fixes:
+- `jvm.dll` needs `vcruntime140.dll`, which sits in the Java home's `bin`, not beside the DLL:
+  `create_vm` puts that `bin` first on the PATH before loading (`dll_search_path`).
+- build.rs runs javac with an argument file (`@javac-*.args`): the platform mod's class path and
+  sources are ~28,000 characters on Linux with short paths, past Windows' 32,767-character command
+  line with `C:\Users\…` ones.
+
+Not tested: Fabric past Mixin's start under Wine (Wine lacks a network call
+`NetworkInterface.getAll` makes; real Windows has it), the game window, the launcher. To try it on
+Windows (MSVC Rust, a JDK 25 as `JAVA_HOME`, Git for Windows):
+
+```powershell
+git checkout bridge-windows-1   # or java-bridge once merged
+cargo run --release -p horizon-prepare -- --prepare --server-jar <server-26.3.jar>
+cargo build --profile fast -p horizon-client -p horizon-client-lib --features horizon-client/java-mods
+$env:HORIZON_JAVA_HOME = "C:\Program Files\Eclipse Adoptium\jdk-25…"   # if JAVA_HOME isn't 25
+$env:HORIZON_ROOT = (Get-Location).Path      # where .local\bridge and .local\minecraft are
+# mods-java\ goes beside options.txt (the game's folder: HORIZON_HOME, else the default)
+target\fast\horizon-client.exe --resources .local\horizon-client\26.3 --world W
+```
+
+The `tools/java_bridge/*.sh` scripts are Linux-only (Xvfb, mktemp). A class path with
+non-ASCII characters (a user name like `Ivér`) may not reach the JVM right: JNI option
+strings are read in the system code page, not UTF-8.
+
 ### Profiling
 
 `HORIZON_JAVA_PROFILE=1` logs every 200 server ticks where the time goes: the game's calls into
@@ -1654,7 +1683,7 @@ need the hook's exact place checked against what the mirror expects.
 | `java_use_block`, `java_use_item` (lan_actions) | `native_right_click_block` (API 21), `native_use_item_on` / `native_use_item` (API 13) |
 | `java_attack_mob`, `java_entity_interact` | `native_attack_entity` (API 22), `native_interact_entity` (API 29); not a fit yet: ours answer the packet (Java's own entities and copies of Horizon's, with the hub), the native ones a hand on Horizon's entities |
 | `java_item_touch` (item pickup) | `native_item_picked_up` (API 40, cancel only; Clumps' take-part has none) |
-| `note_java_death*` | `native_player_died` (API 40) |
+| `note_java_death_cause` (lan_actions, a player's death on the server) | `native_player_died` (API 40) |
 | `local_java_command`, `guest_java_command`, `send_java_commands` | `native_register_commands` / `native_perform_command` (API 8): usage strings, not Brigadier trees; the Java tree is merged after the native one (hub `mod_commands`) |
 | `java_player_chat` (chat.rs, lan.rs) | none (native has no server chat hook) |
 | `java_select_slot`, `java_ride`, `java_orb_touch`, `java_crafted`, `java_tickets` (chunk tickets in streaming), precipitation | none |
@@ -1666,6 +1695,13 @@ need the hook's exact place checked against what the mirror expects.
 Upstream also moved the client's world, rendering and screens into `crates/horizon-client-render`
 (`hud.rs`, `particles.rs`, `mesher.rs`, `streaming.rs`, `options_ui.rs`, `chunk.rs`, `biome.rs`,
 `world.rs`): our changes there moved with them.
+
+Since sync 3 (2026-11-02): the process's `main` is `entry.rs` (`main.rs` only calls it), so
+Java's exit is there; a window never ticks its own player (upstream deleted the in-frame
+tick), so deaths reach the mods only through the server's (`note_java_death_cause`); a Java
+horse-style mob's jump bar draws in `draw_jump_bar`. pack-6's small `BakedQuad` keeps no
+sprite name: Fusion's connecting textures find their sheet by the face's layer, and
+`BakedFace::force_translucent` keeps a model's forced translucency for OptiFine tiles.
 
 ### Content preparation time (2026-11-01, bridge-worldgen-3)
 
@@ -1694,7 +1730,7 @@ BetterEnd's blocks), the rest mods' entrypoints; plus HotSpot parsing, verifying
   -XX:SharedArchiveFile=.horizon-cache/java-classes-<stamp of the jars>.jsa`
   (`java_mods::class_archive`; other sets' archives are removed; `HORIZON_JAVA_CLASS_ARCHIVE=0`:
   none). The JVM writes it at its exit, so the game now ends through Java's
-  `System.exit` (`horizon_jvm::exit`, last thing in `main`, a 90 s watchdog). Mods' classes
+  `System.exit` (`horizon_jvm::exit`, last thing in `entry::main` since upstream's lib split, a 90 s watchdog). Mods' classes
   go in too (Knot's: an archived class is used when the bytes Knot makes have the same CRC,
   so a changed jar or mixin just loads normally). 110 jars: Fabric started in 89–92 s →
   79–81 s here, join 166 s → ~150 s; the first quit of a set takes ~25 s more (a ~250 MB

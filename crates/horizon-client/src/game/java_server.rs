@@ -358,7 +358,6 @@ impl Game<'_> {
     ) -> Option<u32> {
         None
     }
-    pub(super) fn note_java_death(&mut self) {}
     pub(super) fn note_java_death_cause(&mut self, _key: &str, _cause: Option<String>) {}
     pub(super) fn java_use_block(
         &mut self,
@@ -792,6 +791,20 @@ mod run {
     }
 
     impl Game<'_> {
+        /// The player's profile id: the saved id, else the offline id of the player's name
+        /// (upstream dropped its `player_uuid`; the mirror's ids were made with it).
+        fn player_uuid(&self) -> u128 {
+            self.level.player_uuid.map_or_else(
+                || horizon_protocol::crypto::offline_uuid(crate::game::chat::PLAYER_NAME),
+                |[a, b, c, d]| {
+                    (u128::from(a as u32) << 96)
+                        | (u128::from(b as u32) << 64)
+                        | (u128::from(c as u32) << 32)
+                        | u128::from(d as u32)
+                },
+            )
+        }
+
         /// The window's own player's id as `UUID.toString()`.
         fn java_local_id(&self) -> String {
             uuid_string(self.player_uuid())
@@ -2029,7 +2042,7 @@ mod run {
                 if m.damage(amount, damage) {
                     // LivingEntity.hurtServer's knockback: 0.4 away from the attacker.
                     if let Some(f) = from {
-                        m.knockback(0.4, f[0] - m.position.x, f[2] - m.position.z);
+                        m.knockback(0.4, f[0] - m.position.x, f[2] - m.position.z, &damage);
                     }
                     m.needs_sync = true;
                 }
@@ -2309,21 +2322,6 @@ mod run {
             }
         }
 
-        /// The player acting now is dying: what killed it (its tracker's last hit), for the
-        /// Java mods' death hooks at the next tick.
-        pub(in crate::game) fn note_java_death(&mut self) {
-            {
-                if !java_mods_on() {
-                    return;
-                }
-                let uuid = self
-                    .lan_acting_uuid
-                    .map(uuid_string)
-                    .unwrap_or_else(|| self.java_local_id());
-                self.note_java_death_of(&uuid);
-            }
-        }
-
         /// What killed the player named by `key` (its UUID, or `conn:N`), when known.
         pub(in crate::game) fn note_java_death_cause(&mut self, key: &str, cause: Option<String>) {
             if java_mods_on()
@@ -2334,23 +2332,6 @@ mod run {
                     .unwrap_or_else(|e| e.into_inner())
                     .get_or_insert_with(Default::default)
                     .insert(key.to_string(), cause);
-            }
-        }
-
-        /// [`Game::note_java_death`] for a player named by `key` (its UUID, or `conn:N`).
-        pub(in crate::game) fn note_java_death_of(&mut self, key: &str) {
-            {
-                if !java_mods_on() {
-                    return;
-                }
-                let uuid = key.to_string();
-                if let Some(cause) = self.combat.last_damage_type() {
-                    JAVA_DEATH_CAUSES
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .get_or_insert_with(Default::default)
-                        .insert(uuid, cause.to_string());
-                }
             }
         }
 

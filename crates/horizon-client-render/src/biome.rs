@@ -171,7 +171,10 @@ fn color(v: &Value) -> Option<u32> {
 }
 fn colormap(root: &Path, name: &str) -> Result<Vec<u32>> {
     let path = root.join(format!("assets/minecraft/textures/colormap/{name}.png"));
-    let mut decoder = png::Decoder::new(std::io::BufReader::new(fs::File::open(path)?));
+    let mut decoder = png::Decoder::new(std::io::Cursor::new(horizon_core::prepared_files::read(
+        &path,
+    )?));
+    decoder.ignore_checksums(true);
     decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
     let mut reader = decoder.read_info()?;
     let mut bytes = vec![0; reader.output_buffer_size().ok_or("colormap too large")?];
@@ -304,17 +307,26 @@ impl Biomes {
             dry: colormap(root, "dry_foliage")?,
         };
         let mut list = Vec::new();
-        let mut names: Vec<_> = fs::read_dir(root.join("data/minecraft/worldgen/biome"))?
-            .filter_map(|e| e.ok())
-            .map(|e| e.path())
-            .filter(|p| p.extension().is_some_and(|e| e == "json"))
-            .map(|p| ("minecraft".to_owned(), p))
+        // The folder's own files (not its subfolders'), by file name: through `json_folder`,
+        // from the prepared data file when there is one.
+        let folder = horizon_world::json_folder::read(&root.join("data/minecraft/worldgen/biome"))?;
+        let mut files: Vec<_> = folder
+            .files
+            .iter()
+            .filter(|f| !f.name.contains('/'))
             .collect();
-        names.sort();
+        files.sort_by_cached_key(|f| format!("{}.json", f.name));
+        for file in files {
+            let v: Value = serde_json::from_slice(file.bytes()?)?;
+            list.push(BiomeInfo::from_json(
+                format!("minecraft:{}", file.name),
+                &v,
+                &maps,
+            ));
+        }
         // Mods' biomes (a content mod's data/<ns>/worldgen/biome, as Java mods' carry them)
         // after vanilla's, so vanilla's keep their ids.
-        names.extend(mod_biomes(root));
-        for (namespace, path) in names {
+        for (namespace, path) in mod_biomes(root) {
             let name = format!(
                 "{namespace}:{}",
                 path.file_stem()

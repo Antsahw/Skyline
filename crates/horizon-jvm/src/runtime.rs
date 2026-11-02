@@ -176,6 +176,7 @@ pub fn ensure(component: &str, runtime: &Path, log: &dyn Fn(String)) -> Result<P
 
 /// How deep inside the runtime a link in `from` (relative to its home) pointing at `target`
 /// ends: negative when it leaves it (or is absolute).
+#[cfg(any(unix, test))]
 fn link_depth(from: &Path, target: &str) -> i64 {
     let mut depth = 0i64;
     for c in from.components().chain(Path::new(target).components()) {

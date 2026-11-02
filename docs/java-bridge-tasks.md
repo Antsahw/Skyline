@@ -537,3 +537,54 @@ tests pass; fmt and clippy `-D warnings` clean (horizon-client, horizon-jvm).
   players, so a filtered search can briefly come out with another player's switch; the
   craftable search is very slow here (30+ s, 2 cores), so the guest's filtered list may lag.
   Test: regress `rei-lan` (new, LAN), `rei reiscreen modsettings` pass.
+
+### Upstream sync 3 (2026-11-02, branch `bridge-upstream-sync-3`)
+
+`origin/java-bridge` (fd41885b9, round 5) with upstream main fdd290b99 merged; replaces
+`bridge-upstream-sync-2` (not merged: its changes are redone here). 34 files conflicted.
+What upstream changed under us (sync 2's included):
+- **The client lib is its own crate**, `horizon-client-lib` (root `client_lib.rs`, same
+  folder); `horizon-client`'s lib is `game`, `entry`, `mod_api`, and `main()` lives in
+  `entry.rs`: worldgen's quit through Java (`horizon_jvm::exit`) moved there. `horizon-ctl` is
+  `horizon-client-lib`'s: build `-p horizon-client -p horizon-client-lib --features
+  horizon-client/java-mods` (scripts, `regress.py` and java-bridge.md do now).
+- pack-6: upstream's **lazy loot tables** (`LootTables(HashMap<String, LazyJson>)`) replace
+  ours, `loot.rs` is upstream's. Our small `BakedQuad` stays; upstream's new users of the
+  model's material adapted (Fusion's connecting textures by layer, `force_translucent` on
+  `BakedFace` for OptiFine tiles, `baked_model_vertices`). The behaviours' second read from
+  the file stays ours, inside upstream's startup timing.
+- game.rs: the window's in-frame player tick is gone upstream (single player is on its
+  server thread): `tick_java_server` stays after `native_tick`; the local-only
+  `note_java_death` went with it (deaths come through the server's `note_java_death_cause`).
+  Java's HUD draws before upstream's `gui_layer`s; the Java mount's jump bar moved to
+  `draw_jump_bar`. `player_uuid` (dropped upstream) is java_server.rs's own now.
+- Smaller: `Mob::knockback` takes the damage; world-gen settings take a single-biome preset;
+  content blocks lay states out in property order (own-state blocks keep one row); menus
+  report `item_crafted` beside `crafted_takes`; streaming's `priority` lost its loading arg;
+  `lan_process_events` lost its state arg; the local chat and death message went upstream.
+
+Tests: `regress.py --jars` all cases: **42 pass** (pot, terminal, ber, hud, rei, reiscreen,
+join, modsettings, failmsg, keys, entity, hostile, mount, mountjump, neighbours, worldgen,
+veinminer, harvest, carry, seasons, orbs, preset, skyblock, oneblock, attack, bettercombat,
+ride, dismount, sweep, fall, effects, effects2, windfall, slot, snow, punch, hurt, mixins1,
+mixins2, lost, rei-lan, prism) and **server** (with Xaero's minimap fetched for it). Skipped
+(no jars here): gecko, maps, journeymap, voxelmap, diorama, xaeroplus, minihud, maps-lan,
+bigpack, tech, gridlod. Clippy `-D warnings` clean with `java-mods`.
+`horizon-client-render` lib tests: all pass, after two fixes of ours: a test still calling
+`priority` with the loading arg, and the HUD atlas test that said mods' block textures stay
+out (the bridge adds them since round 2; it failed on java-bridge too). Not run here (disk):
+`horizon-client`'s gameplay tests.
+
+- **one-off, Windows** (`bridge-windows-2`, off `bridge-upstream-sync-3`; first done as
+  `bridge-windows-1`; Claude for iaxivers).
+  Works: the bridge cross-checks for Windows (`x86_64-pc-windows-gnu`, horizon-client +
+  horizon-client-lib with `java-mods`, clippy clean on horizon-jvm); `horizon-jvm`'s `boot` test
+  built for Windows passes under Wine with Temurin 25 for Windows (`jvm.dll` loads, natives both
+  ways). Fixed: `jvm.dll`'s C runtime found through the Java home's `bin` on the PATH; build.rs's
+  javac takes an argument file (the platform mod's command line is ~28k characters with short
+  Linux paths, past Windows' limit with real ones). Doesn't (not tested here): Fabric past
+  Mixin's start (Wine lacks a network call the JVM's random seeding makes), the window, the
+  launcher; non-ASCII paths into JNI options. Test on a Windows PC: java-bridge.md, "Windows".
+  Redone on sync 3: round 5's Java download (`runtime.rs`) left `link_depth` unused on Windows
+  (dead code, clippy failed): it's for Unix links only now. Clippy for Windows clean on
+  horizon-client, horizon-client-lib and horizon-jvm; the `boot` test passes under Wine again.

@@ -118,6 +118,8 @@ mod tests {
                 layer: 0,
                 opaque: true,
                 translucent: false,
+                force_translucent: false,
+                fusion: None,
                 quad: BakedQuad {
                     positions: [
                         [0.0, 0.5, 0.0],
