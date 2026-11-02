@@ -878,7 +878,7 @@ impl Game<'_> {
         {
             let mut effect = EffectInstance::new("water_breathing", 200, 0);
             effect.visible = false;
-            self.potions.effects.add(effect);
+            self.add_effect_asking_mods(effect);
         }
     }
     /// A client's own effects (`LivingEntity.tickEffects` on the client,

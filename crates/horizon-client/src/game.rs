@@ -6146,7 +6146,6 @@ impl Game<'_> {
         };
         let target = [pos.x, pos.y, pos.z];
         let state = self.apply_item_block_state(target, state, &stack)?;
-        self.java_block_event(target, state, true);
         let name = self.res.facts().get(state).name.clone();
         if let Some(entity) = self.new_block_entity(&name) {
             let key = (target[0], target[1], target[2]);
@@ -6186,6 +6185,8 @@ impl Game<'_> {
         // BlockItem.place: the used statistic and the placed_block trigger.
         self.stats.add("used", &stack.item, 1);
         self.trigger_block("minecraft:placed_block", target, &stack);
+        // Java mods (java_server.rs), then native ones.
+        self.java_block_event(target, state, true);
         self.native_place_block(&stack, target, state);
         self.check_wither_spawn(target)?;
         self.check_golem_spawn(target)?;

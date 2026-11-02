@@ -410,9 +410,11 @@ it does nothing unless Horizon fires it or hands the action to the mirror.
     (`mod_block_fall`, `FallEvent::Routed`'s `contact`) changes the damage after the mods.
   - A player's new effect (`Game::add_player_effect`: potions, food, totems, `/effect`): the
     heads of `LivingEntity.addEffect` with the instance; a cancel drops it. Beacons,
-    conduits, raids' Hero of the Village, the ominous bottle's Bad Omen and the Warden's
-    darkness ask too (`Game::add_effect_asking_mods`), only when a mod hooks `addEffect`
-    (routed action `effects`). The turtle helmet's water breathing (each tick) doesn't ask.
+    conduits, raids' Hero of the Village, the ominous bottle's Bad Omen, the Warden's
+    darkness and the turtle helmet's water breathing (each tick) ask too
+    (`Game::add_effect_asking_mods`), only when a mod hooks `addEffect` (routed action
+    `effects`). A trial spawner's Bad Omen → Trial Omen asks for the Trial Omen
+    (`java_add_effect_to`, the guest's UUID); a refusal still takes the Bad Omen.
   - Precipitation (`ServerLevel.tickPrecipitation`), when a mod patches the biomes' weather
     (`Biome.shouldSnow`, `shouldFreeze`, `getPrecipitationAt`...: Serene Seasons): the game
     keeps each column's top (`GameLevel::precipitation` → `java_precipitation`) and, at the
@@ -1649,19 +1651,41 @@ need the hook's exact place checked against what the mirror expects.
 | ~~`RANDOM_TICK_HOOK`~~ | **switched**: `java_random_tick` in `GameLevel::before_random_tick` (game.rs), before `native_random_tick`; horizon-world is upstream's again (`seasons`, `mixins1`) |
 | `SET_HOOK` (render `world.rs` `set`) | `native_block_changed` (only `Level.setBlock` writes; ours sees every write) |
 | ~~`HURT_HOOK`~~ | **switched**: `java_hurt` first in native_hooks.rs `hurt_server` (`health::HURT_SERVER`, past hurtServer's guards, where Fabric's `ALLOW_DAMAGE` fires); `health.rs` is upstream's again (`hurt`) |
-| `java_break` / `java_block_event` (game.rs `break_block`, placing) | `native_destroy_block` / `native_place_block` (API 14); a vein miner's whole-break-in-Java has no equivalent |
+| `java_break` / `java_block_event` | `java_break` already sits just before `native_destroy_block`; placing: **switched**, `java_block_event(.., true)` right before `native_place_block` (round 6; the Java side doesn't use placements yet: event kind 4). A vein miner's whole-break-in-Java has no native equivalent |
 | `java_attack_block` | **switched**: in the closure that asks `native_left_click_block` (lan_actions, after reach, spawn protection and the border); a cancel leaves the block to the ack (`punch`) |
 | `java_use_block`, `java_use_item` (lan_actions) | `native_right_click_block` (API 21), `native_use_item_on` / `native_use_item` (API 13) |
-| `java_attack_mob`, `java_entity_interact` | `native_attack_entity` (API 22), `native_interact_entity` (API 29); not a fit yet: ours answer the packet (Java's own entities and copies of Horizon's, with the hub), the native ones a hand on Horizon's entities |
+| `java_attack_mob`, `java_entity_attack`, `java_entity_interact` | `java_attack_mob` already follows `native_attack_entity`'s cancel. The packet-level two have no fit: see "A proposed hook point" below |
 | `java_item_touch` (item pickup) | `native_item_picked_up` (API 40, cancel only; Clumps' take-part has none) |
-| `note_java_death*` | `native_player_died` (API 40) |
-| `local_java_command`, `guest_java_command`, `send_java_commands` | `native_register_commands` / `native_perform_command` (API 8): usage strings, not Brigadier trees; the Java tree is merged after the native one (hub `mod_commands`) |
+| ~~`note_java_death*`~~ | **switched** (round 6): `java_player_died(uuid, message key, conn)` right before `native_player_died`, in `guest_die` and `death_message`: the message's damage type, else the tracker's last hit (`death`) |
+| `local_java_command`, `guest_java_command`, `send_java_commands` | already beside the native decision: `guest_command` asks native mods' `native_command_level`, then ours; the window asks `client_mod_command`, then ours. `native_perform_command` runs later in the guest's swap with usage strings, not Brigadier trees, so ours stays where the command is taken |
 | `java_player_chat` (chat.rs, lan.rs) | none (native has no server chat hook) |
 | `java_select_slot`, `java_ride`, `java_orb_touch`, `java_crafted`, `java_tickets` (chunk tickets in streaming), precipitation | none |
 | Screens (`Screen::JavaMod`), REI's overlay, HUD mods | `native_mod_screen*`/`native_screen_*` (API 19/20), `native_panel_*` (API 2), `native_hud`/`native_health_hud` (API 27): layouts of their own, not our drawn-op frames |
 | Mod particles (`ParticleEngine::add_mod`) | upstream's `ParticleOptions::mod_particle` (native particle types): `add_mod` now uses its sprite sets |
 | Mod mobs drawn (`java_entity_geometry`, shadows) | `native_mob_submit` (draws Horizon's own mobs only) |
 | Creative tab pages, item components of content mods | upstream's own now (NeoForge-style pages, `component_patch`): ours dropped |
+
+### A proposed hook point: an entity the level doesn't hold
+
+`ServerGamePacketListenerImpl.handleInteract` finds the entity by id; when the level has none,
+vanilla does nothing. The bridge's entities (a Java mod's own mobs, ids from
+`java_entities::FIRST_ID`) are such ids, so `lan_actions` asks `java_entity_attack` /
+`java_entity_interact` before Horizon's own handling (`S::Attack(p) if ...`). A native-style
+hook point there would let any server mod own entities Horizon doesn't simulate, and the
+bridge would hook it instead of keeping its own match guards:
+
+```rust
+/// A player's attack (`hand` None) or use of entity `id`, which no level of this server
+/// holds (`handleInteract` finds nothing): a server mod's own entity. Set `claimed` to take
+/// it; nothing else runs then. Server-side, the helpers read the acting player. Proposal.
+pub(super) fn native_unknown_entity_interact(&mut self, id: i32, hand: Option<u8>, location: Option<[f32; 3]>, claimed: &mut bool) {}
+```
+
+Called in `guest_packet` before `S::Attack`/`S::Interact`'s own handling, for ids the level
+doesn't hold. The bridge's copies of Horizon's mobs (`java_vanilla_entity`, when mods patch
+`Player.attack`/`interactOn`) are Horizon's entities, so they'd go through
+`native_attack_entity`/`native_interact_entity` with a "take the whole action" answer instead
+of a cancel: a second, smaller proposal (a `routed: &mut bool` beside `canceled`).
 
 Upstream also moved the client's world, rendering and screens into `crates/horizon-client-render`
 (`hud.rs`, `particles.rs`, `mesher.rs`, `streaming.rs`, `options_ui.rs`, `chunk.rs`, `biome.rs`,

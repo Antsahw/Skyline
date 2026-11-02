@@ -181,6 +181,11 @@ case "$SCENE" in
     'q "gamemode survival"' 'q "fill $((X+2)) $Y $((Z-1)) $((X+4)) $Y $((Z+1)) minecraft:iron_block"' \
     'q "fill $((X+3)) $((Y+1)) $Z $((X+3)) 319 $Z minecraft:air"' \
     'echo "$((X+3)) $((Y+1)) $Z" > "$S/beacon.pos"' '$C look-at $(p $X+3.5) $(p $Y+1.5) $(p $Z+0.5) >/dev/null' ;;
+  # A flat floor (around.sh's), survival, the player at its middle looking east; a trial
+  # spawner (a zombie's) goes three blocks east in the steps: its position in $S/spawner.pos.
+  omen) "$R/tools/java_bridge/around.sh" \
+    'q "tp @s $(p $X+0.5) $Y $(p $Z+0.5) -90 0"' 'q "gamemode survival"' \
+    'echo "$((X+3)) $Y $Z" > "$S/spawner.pos"' ;;
   none) ;;
 esac
 # For steps: aim FILE looks at the block whose "x y z" FILE holds (a small one too: a flower),

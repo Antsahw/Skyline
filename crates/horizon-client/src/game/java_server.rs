@@ -336,6 +336,13 @@ impl Game<'_> {
     ) -> bool {
         false
     }
+    pub(super) fn java_add_effect_to(
+        &mut self,
+        _player: Option<u128>,
+        _effect: &horizon_client::effects::EffectInstance,
+    ) -> bool {
+        false
+    }
     pub(super) fn java_fall(
         &mut self,
         _distance: f64,
@@ -358,8 +365,13 @@ impl Game<'_> {
     ) -> Option<u32> {
         None
     }
-    pub(super) fn note_java_death(&mut self) {}
-    pub(super) fn note_java_death_cause(&mut self, _key: &str, _cause: Option<String>) {}
+    pub(super) fn java_player_died(
+        &mut self,
+        _player: u128,
+        _message: Option<&str>,
+        _conn: Option<u32>,
+    ) {
+    }
     pub(super) fn java_use_block(
         &mut self,
         _pos: [i32; 3],
@@ -2309,48 +2321,45 @@ mod run {
             }
         }
 
-        /// The player acting now is dying: what killed it (its tracker's last hit), for the
-        /// Java mods' death hooks at the next tick.
-        pub(in crate::game) fn note_java_death(&mut self) {
-            {
-                if !java_mods_on() {
-                    return;
-                }
-                let uuid = self
-                    .lan_acting_uuid
-                    .map(uuid_string)
-                    .unwrap_or_else(|| self.java_local_id());
-                self.note_java_death_of(&uuid);
+        /// `player` died (where native mods hear it: `native_player_died`, with the death
+        /// message's key): what killed it, for the Java mods' death hooks at the next tick. The
+        /// damage type the message names, else the last hit of its tracker (the guest's of
+        /// `conn`, or the window player's); the tracker is cleared after.
+        pub(in crate::game) fn java_player_died(
+            &mut self,
+            player: u128,
+            message: Option<&str>,
+            conn: Option<u32>,
+        ) {
+            if !java_mods_on() {
+                return;
             }
-        }
-
-        /// What killed the player named by `key` (its UUID, or `conn:N`), when known.
-        pub(in crate::game) fn note_java_death_cause(&mut self, key: &str, cause: Option<String>) {
-            if java_mods_on()
-                && let Some(cause) = cause
-            {
+            let named = message
+                .and_then(|k| k.strip_prefix("death.attack."))
+                .and_then(|id| {
+                    let id = id.split('.').next().unwrap_or(id);
+                    self.motion
+                        .health
+                        .damage
+                        .entries()
+                        .find(|(_, d)| d.message_id == id)
+                        .map(|(_, d)| d.name.clone())
+                });
+            let tracker = match conn {
+                Some(conn) => self.guest_combat.get(&conn),
+                None => Some(&self.combat),
+            };
+            let cause = named.or_else(|| {
+                tracker
+                    .and_then(|t| t.last_damage_type())
+                    .map(str::to_owned)
+            });
+            if let Some(cause) = cause {
                 JAVA_DEATH_CAUSES
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
                     .get_or_insert_with(Default::default)
-                    .insert(key.to_string(), cause);
-            }
-        }
-
-        /// [`Game::note_java_death`] for a player named by `key` (its UUID, or `conn:N`).
-        pub(in crate::game) fn note_java_death_of(&mut self, key: &str) {
-            {
-                if !java_mods_on() {
-                    return;
-                }
-                let uuid = key.to_string();
-                if let Some(cause) = self.combat.last_damage_type() {
-                    JAVA_DEATH_CAUSES
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .get_or_insert_with(Default::default)
-                        .insert(uuid, cause.to_string());
-                }
+                    .insert(uuid_string(player), cause);
             }
         }
 
@@ -3134,14 +3143,24 @@ mod run {
             &mut self,
             effect: &horizon_client::effects::EffectInstance,
         ) -> bool {
+            self.java_add_effect_to(None, effect)
+        }
+
+        /// [`Game::java_add_effect`] for `player` (None: the player acting now).
+        pub(in crate::game) fn java_add_effect_to(
+            &mut self,
+            player: Option<u128>,
+            effect: &horizon_client::effects::EffectInstance,
+        ) -> bool {
             #[cfg(feature = "java-mods")]
             {
-                // Only when a mod hooks addEffect (beacons and conduits ask every few seconds).
+                // Only when a mod hooks addEffect (beacons and conduits ask every few seconds,
+                // the turtle helmet every tick).
                 if !java_mods_on() || !self.hears_players() || !super::java_routed("effects") {
                     return false;
                 }
-                let uuid = self
-                    .lan_acting_uuid
+                let uuid = player
+                    .or(self.lan_acting_uuid)
                     .map(uuid_string)
                     .unwrap_or_else(|| uuid_string(self.player_uuid()));
                 let id = format!("minecraft:{}", effect.id);
@@ -3156,7 +3175,7 @@ mod run {
             }
             #[cfg(not(feature = "java-mods"))]
             {
-                let _ = effect;
+                let _ = (player, effect);
                 false
             }
         }
