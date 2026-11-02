@@ -1283,6 +1283,13 @@ Map mods (2026-11-01, `bridge-gpu2`, headless, llvmpipe):
   each switch, computed on the client's thread when there are several players). JourneyMap's
   `MiniMap` object stays shared (a new one recurses through `UIManager`). Regress case
   `maps-lan` (regress.py runs `lan=True` cases with lan_test.sh).
+- JourneyMap's settings and waypoints per player (`bridge-gpu-5`): its eight properties objects
+  (`JourneymapClient`'s fields) are swapped with the other mods' settings
+  (`HorizonClientConfig`; a guest's aren't saved to disk: `mixin/mods/JourneyMapPropertiesMixin`);
+  its waypoint handler and stores (`WaypointHandler.instance`, `WaypointStore.INSTANCE`,
+  `WaypointGroupStore.INSTANCE`) are per player (`HorizonClientState`), a guest's read from and
+  saved to `waypoints/horizon-players/<uuid>/` (`mixin/mods/JourneyMapFilesMixin`). A player
+  who leaves: their VoxelMap `Map`'s thread is stopped (`Map.shutdown`).
 
 Left: the client tick is ~35 ms with the minimap on llvmpipe (the frame's start ~25: Xaero's
 writer, the HUD ~10: the picture drawn and read back at 10 Hz).

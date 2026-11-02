@@ -5,7 +5,9 @@
   "compatibilityLevel": "JAVA_21",
   "mixins": [
     "JourneyMapMiniMapMixin",
-    "JourneyMapFullscreenMixin"
+    "JourneyMapFullscreenMixin",
+    "JourneyMapFilesMixin",
+    "JourneyMapPropertiesMixin"
   ],
   "injectors": {
     "defaultRequire": 0

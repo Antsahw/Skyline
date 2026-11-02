@@ -360,3 +360,17 @@ tests pass; fmt and clippy `-D warnings` clean (horizon-client, horizon-jvm).
   cases `xaeroplus`, `minihud` (new); `maps diorama journeymap voxelmap` pass. Test: XaeroPlus +
   Xaero's Minimap + World Map in `~/hz-test/mods-java`, join, M; or MiniHUD + MaLiLib: the lines
   top left.
+
+- **gpu 5, JourneyMap per player, VoxelMap's leaving thread** (`bridge-gpu-5`, on top of
+  `bridge-gpu-4`; round 5 gpu 2), by Claude for iaxivers. Works (LAN, headless): a guest's
+  JourneyMap settings are theirs in memory (its properties objects join `HorizonClientConfig`;
+  a guest's never overwrite the host's files) and their waypoints are their own, in
+  `waypoints/horizon-players/<uuid>/` of the world's JourneyMap folder (two new optional
+  mixins in `horizon-platform-mods.mixins.json`); a guest who leaves has their VoxelMap thread
+  stopped. Doesn't: a guest's JourneyMap settings last their session only (as other mods'); the
+  shared `MiniMap` object may keep the host's minimap properties for its shape; JourneyMap's
+  server-side `START_SERVER_TICK` NPE and VoxelMap's `sendWorldIDPacket` NPE (seen before) are
+  still there. Small change outside gpu: `HorizonClientConfig` is public (the mixins read it).
+  Regress `maps-lan` now also quits the guest and checks both (pass). Test: JourneyMap +
+  VoxelMap, `tools/java_bridge/lan_test.sh '$G quit'`: "VoxelMap's map of a player who left
+  stopped its thread" in the log.

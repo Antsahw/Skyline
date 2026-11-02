@@ -476,11 +476,14 @@ CASES = {
     "maps-lan": dict(
         about="JourneyMap and VoxelMap per player: a host and a LAN guest 40 blocks east, each map their own",
         mods=["journeymap", "voxelmap"], scene="none", lan=True,
-        steps=['$H command "tp Guest ~40 ~ ~" >/dev/null; sleep 100; $G state > $S/guest.json'],
+        steps=['$H command "tp Guest ~40 ~ ~" >/dev/null; sleep 100; $G state > $S/guest.json',
+               '$G quit >/dev/null; sleep 10'],
         checks=[check_file("guest.json", r'"screen":"playing"', "the guest plays"),
-                check_log(r"Guest\S* joined the game", "the guest joined")],
+                check_log(r"Guest\S* joined the game", "the guest joined"),
+                check_log(r"a new player's JourneyMap waypoints, from their own folder", "the guest's JourneyMap waypoints are theirs"),
+                check_log(r"VoxelMap's map of a player who left stopped its thread", "the guest's VoxelMap thread stops as they leave")],
         forbid=[r"per-player state couldn't be swapped", r"couldn't change player", r"StackOverflowError",
-                r"couldn't be read again"],
+                r"couldn't be read again", r"JourneyMap waypoints couldn't load", r"JourneyMap's settings can't be kept"],
         look="lan-1-host.png and lan-1-guest.png: each minimap centred on its own player "
              "(the guest's coordinates 40 more in x), JourneyMap's and VoxelMap's full",
     ),
