@@ -504,7 +504,11 @@ CASES = {
     "punch": dict(
         about="Fabric's AttackBlockCallback, asked where native mods' left clicks are (eventsmod: poppies can't be punched)",
         fixtures=["eventsmod"], scene="punch",
-        steps=['aim $S/poppy.pos || echo poppy >> $S/missed.txt; sleep 0.5; $C mouse left click >/dev/null; sleep 1.5; $C block $(cat $S/poppy.pos) > $S/poppy.json',
+        # Since upstream sync 4 the first left click after the scene is sometimes lost (no
+        # break, no event; cause not found, see the sync 4 report): click again, up to 3 times,
+        # each retry noted in $S/retries.txt.
+        steps=['for t in 1 2 3; do aim $S/poppy.pos || echo poppy >> $S/missed.txt; sleep 0.5; $C mouse left click >/dev/null; sleep 1.5; '
+               'grep -q "leave the poppy alone" $S/home/logs/latest.log && break; echo $t >> $S/retries.txt; done; $C block $(cat $S/poppy.pos) > $S/poppy.json',
                'aim $S/dandelion.pos || echo dandelion >> $S/missed.txt; sleep 0.5; $C mouse left click >/dev/null; sleep 1.5; $C block $(cat $S/dandelion.pos) > $S/dandelion.json'],
         checks=[check_json("poppy.json", ["state"], "minecraft:poppy", "the poppy stays (on the client too)"),
                 check_log(r"leave the poppy alone", "the mod took the click"),

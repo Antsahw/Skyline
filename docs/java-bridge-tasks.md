@@ -752,3 +752,34 @@ Not run in-game: this sandbox had no JDK 25 / `.local` and fetching a JDK was re
 regress or screenshot. To test: ALA Industrial in the mod set, check the log has no "over 16
 MiB" and its pipes place. Tasks 2 and 3 not started (2 needs the game, 3 the user's PC run).
 
+### Upstream sync 4 (2026-11-02, branch `bridge-upstream-sync-4`; Claude for iaxivers)
+
+`origin/java-bridge` (bcd6589d9, round 7 queue) with upstream main 97937bcf8 merged (327
+commits). No conflicts, and nothing in the bridge needed changing: it builds (`-p
+horizon-client -p horizon-client-lib --features horizon-client/java-mods`), clippy `-D
+warnings` clean, and cross-checks for Windows (`x86_64-pc-windows-gnu`: horizon-client +
+horizon-client-lib with `java-mods`, horizon-jvm), clippy clean there too.
+What upstream changed near the bridge (all additive): native-mod hooks for screen lifecycle,
+camera, hand pose, movement input and FOV; entity joins/leaves for native mods now flushed
+once per tick phase (`native_joins_flush`/`native_leaves_flush`) instead of id diffs; fence
+knots answer a guest's Interact by id; a client's ContainerClose also closes dialogs; the
+options and graphics menus rewritten (`graphics_ui.rs`); streaming forgets columns in a batch.
+Tests: regress, the 25 cases that need only the repo's fixture mods: **25 pass** (keys,
+entity, hostile, mount, mountjump, neighbours, golem, strikeback, mounthud, attack, ride,
+dismount, fall, effects, effects2, windfall, effects3, jump, teleport, slot, punch, hurt,
+death, mixins1, mixins2). Not run: every case with Modrinth jars, the sandbox here refused
+to run downloaded mod jars; run them on a PC (`regress.py --jars <jars>`).
+- `punch` failed 3 of 4 runs after the merge: the first left click after the scene was lost
+  (the poppy stayed, but AttackBlockCallback never ran; a second click works, a 4 s wait
+  once did, 3 s didn't). Nothing upstream in the dig path changed; cause not found. The case
+  now clicks up to 3 times (`retries.txt` in its scratch says how many it took). If a player
+  sees a first click after `/gamemode` or a teleport do nothing, this is it.
+- Windows (task 2): only the cross-check above; Wine wasn't set up here, so the `boot` test
+  and Fabric past Mixin's start weren't tried. The steps for a Windows PC are unchanged
+  (java-bridge.md, "Windows").
+- Setup on a fresh container, for the next sync: Java 25 (`openjdk-25-jdk-headless`),
+  `libasound2-dev libudev-dev libxkbcommon-dev xvfb mesa-vulkan-drivers`; the vanilla files
+  from Mojang's manifest laid out as a launcher folder (`versions/26.3/`, `libraries/`,
+  `assets/`) for `horizon-prepare --prepare --minecraft-dir <it> --server-jar <it>`; then
+  build again (`touch crates/horizon-jvm/build.rs`): a build before `.local/` exists skips
+  the Fabric API modules and every fixture fails with "no Fabric API modules".
