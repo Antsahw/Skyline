@@ -1389,6 +1389,7 @@ public final class HorizonServer {
         phase = HorizonProfile.add("block entities", phase);
         HorizonTickets.tick(new ArrayList<>(LEVELS.values()));
         HorizonSavedData.tick();
+        HorizonDataFixer.check();
         phase = HorizonProfile.add("tickets, saved data", phase);
         // Mods' entities, as ServerLevel.tick's entity loop runs them.
         HorizonEntities.tick();

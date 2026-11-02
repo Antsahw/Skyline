@@ -394,6 +394,16 @@ fn create_vm(
         "-Dfile.encoding=UTF-8".into(),
         "-Dhorizon.bridge=1".into(),
         format!("-Djava.class.path={}", joined.to_string_lossy()),
+        // The heap gives back what it doesn't use: G1 keeps all it ever grew to otherwise (a
+        // 107-jar pack: 555 MB live in 1.2-1.5 GB committed), and the game's own memory is
+        // in the same process. Shrinks after full GCs and concurrent cycles; the periodic cycle
+        // lets an idle heap shrink too.
+        "-XX:+UseG1GC".into(),
+        "-XX:MinHeapFreeRatio=10".into(),
+        "-XX:MaxHeapFreeRatio=30".into(),
+        "-XX:G1PeriodicGCInterval=30000".into(),
+        // Mods' identifiers and the mirror's names repeat: ~1.3M strings in a big pack.
+        "-XX:+UseStringDeduplication".into(),
     ];
     if let Some(archive) = archive {
         options.push("-XX:+AutoCreateSharedArchive".into());
@@ -401,6 +411,10 @@ fn create_vm(
         // Classes from signed jars (Fabric's own sat4j) can't be archived: said once each.
         options.push("-Xlog:cds=off".into());
         options.push("-Xlog:cds+dynamic=off".into());
+    }
+    // A player's own options last, so they win over ours (`HORIZON_JVM_OPTIONS="-Xmx3g"`).
+    if let Ok(extra) = std::env::var("HORIZON_JVM_OPTIONS") {
+        options.extend(extra.split_whitespace().map(str::to_string));
     }
     let options: Vec<CString> = options
         .into_iter()

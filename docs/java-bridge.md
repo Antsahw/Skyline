@@ -1431,6 +1431,36 @@ llvmpipe's textures are ~1.2 GB: a real GPU should fit in 8 GB, untested. Left: 
 remaining catalog (~165 MB beyond faces: choices and allocation slack). Dead ends: heaptrack's
 interpreter runs out of memory on this game (tens of millions of live allocations).
 
+The JVM's share (2026-11-02, bridge-pack-7; measured with `HORIZON_JVM_OPTIONS=
+"-XX:NativeMemoryTracking=summary -XX:+StartAttachListener"` and `jcmd <pid> VM.native_memory
+summary` / `GC.class_histogram`: `-Xrs` turns off the attach signal, `StartAttachListener`
+opens it at start). 107 jars: heap 1.5 GB committed with 555 MB live, metaspace 233 MB, GC
+structures 75 MB, code 68 MB, symbols 49 MB. 148 jars (577k states): ~1.05 GB live by the
+join, of which the mirror's block states with their shapes ~180 MB; two things grew it past
+the default max heap (a quarter of RAM: 1.5 GB here), `OutOfMemoryError` in mods' worldgen:
+- **DataFixerUpper's rule chains.** Mods' structure templates carry ~100 DataVersions (10k
+  templates in this pack, mostly Dungeons and Taverns and Repurposed Structures); DFU builds a
+  chain per old version and keeps it with its rewritten types (`DataFixerUpper.rules`,
+  `Type.REWRITE_CACHE`, `Fold`'s two maps): 250 MB a few minutes into worldgen.
+  `HorizonDataFixer.check` (server tick and Java worldgen's proto and decorate, every 5 s at
+  most) clears them all once more than 6 are kept; the structure manager keeps fixed
+  templates, so a chain is rarely needed again. Regress `fixer`.
+- **The mirror's baked models** (`HorizonClient.models`, with a GPU): ~700 MB at 577k states
+  (vanilla `BakedQuad`s, their `float[]`s, Fusion's connected-texture quads for Rechiseled).
+  Horizon draws with its own; this copy is for the mods that read models (map mods' colours).
+  It's skipped when it wouldn't fit: block states × 1.2 KB beyond 85% of the max heap, counting
+  the old generation and survivors as live; the log says so. `HORIZON_JAVA_MODELS=on|off`
+  forces it.
+The JVM now starts with G1 giving back what it doesn't use (`MinHeapFreeRatio=10`,
+`MaxHeapFreeRatio=30`, a periodic cycle every 30 s) and string deduplication;
+`HORIZON_JVM_OPTIONS` (space-separated) comes last and wins (`-Xmx3g` for more heap). Result
+here: the 148-jar pack with Java loads, joins (peak ~5.9 GB at the join, was killed before it)
+and plays ~3 minutes, then passes this sandbox's ~6.2 GB as chunks load (RSS 5.7 → 6.0 GB; the
+heap stays at 1.5 GB). llvmpipe's ~1.2 GB of textures are in that, so on a GPU it should hold
+in 8 GB (untested). Next: what grows in-world (chunks, meshes, LOD on the Rust side; Java's
+metaspace as mods' features first run), and Fabric's open mod jars (`ZipFileSystem` index
+nodes: 290k, ~25 MB with names).
+
 Mods' sounds and particles (2026-10-31): a mod's sound event plays by name (its
 `sounds.json` and `.ogg` files are carried into the content mod, which Horizon's sound
 registry reads). A mod's own particle type goes as `horizon:java_particles` (JSON: the type's

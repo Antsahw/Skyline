@@ -70,6 +70,7 @@ MODS = {
     "xaeroplus": ["xaeroplus*"],
     "malilib": ["malilib*"],
     "minihud": ["minihud*"],
+    "dungeons": ["dungeons-and-taverns*", "dungeons_and_taverns*"],
 }
 
 
@@ -588,8 +589,19 @@ CASES = {
                 check_file("state.json", r'"block_pos":\[', "the player is in the world")],
         forbid=[r"Java mods: not started", r"Registry loading errors", r"their content was not made",
                 r"Java mods' worldgen: chunk -?\d+ -?\d+ failed", r"control socket did not open",
-                r"fell out of the world"],
+                r"fell out of the world", r"OutOfMemoryError", r"exceeding packet rate limit"],
         look="the pack's world, its HUD (minimap) drawn",
+    ),
+    "fixer": dict(
+        about="Dungeons and Taverns' structures (templates of ~80 old DataVersions): the data fixer's "
+              "rule chains are let go, structures still generate after (a teleport to new land)",
+        mods=["dungeons"], scene="none",
+        steps=['sleep 30; $C command "tp @s 2000 120 2000" > /dev/null; sleep 30; '
+               '$C command "time query gametime" > $S/after.json'],
+        checks=[check_log(r"the data fixer's \d+ rule chains .* let go", "the fixer's chains are let go"),
+                check_file("after.json", r"game time is", "the server still answers after new land generates")],
+        forbid=[r"data fixer's caches can't be bounded", r"Java mods' worldgen: chunk -?\d+ -?\d+ failed",
+                r"worldgen: proto failed", r"OutOfMemoryError"],
     ),
     "tech": dict(
         about="BuildCraft's module blocks (buildcraftbuilders:quarry) and two Large Fluid Tanks placed; the game still answers",

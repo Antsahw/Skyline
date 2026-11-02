@@ -537,3 +537,16 @@ tests pass; fmt and clippy `-D warnings` clean (horizon-client, horizon-jvm).
   players, so a filtered search can briefly come out with another player's switch; the
   craftable search is very slow here (30+ s, 2 cores), so the guest's filtered list may lag.
   Test: regress `rei-lan` (new, LAN), `rei reiscreen modsettings` pass.
+
+- **pack round 6, task 1: the full pack with Java in 8 GB** (`bridge-pack-7`; Claude for
+  iaxivers). Works: the 148-jar pack (577k states) with Java now loads and joins here (it was
+  killed before the join): Java's heap ran out in mods' worldgen, from DataFixerUpper keeping
+  a rule chain per old structure DataVersion (250 MB; now cleared past 6 chains) and the
+  mirror's baked models (~700 MB at 577k; skipped when the heap can't hold them, logged,
+  `HORIZON_JAVA_MODELS=on|off`). G1 now gives unused heap back; `HORIZON_JVM_OPTIONS` passes
+  options (`-Xmx3g`). Xaero's minimap draws (screenshot). Doesn't: it lives ~3 min in this
+  sandbox, then passes its ~6.2 GB as chunks load (5.7 → 6.0 GB, ~1.2 GB of it llvmpipe's
+  textures: should hold on a GPU, untested); with the models skipped, Xaero's World Map's
+  frame hook fails (no ModelManager). Test: regress `fixer` (new: D&T, chains let go, new land
+  still generates) and `bigpack` (now forbids `OutOfMemoryError` and the packet-rate kick);
+  `pot worldgen lost skyblock tech` pass.

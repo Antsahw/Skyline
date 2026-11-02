@@ -1434,6 +1434,7 @@ public final class HorizonClient {
      * GUI atlas stays (screens' sprites are Horizon's): the others join its atlas manager.
      */
     private static void models() {
+        if (!modelsFit()) return;
         long started = System.nanoTime();
         // The client's codecs' types (ClientBootstrap, Minecraft's main runs it): without
         // SpriteSources' an atlas's sources parse to nothing and every atlas held only the
@@ -1494,6 +1495,40 @@ public final class HorizonClient {
             Natives.log("Horizon's client: the models couldn't be loaded: " + root);
             for (var f : root.getStackTrace()) Natives.log("    at " + f);
         }
+    }
+
+    /** Heap a block state's baked models take in the mirror (the 148-jar pack: ~700 MB at 577k). */
+    private static final long MODEL_BYTES_PER_STATE = 1200;
+
+    /**
+     * Whether the mirror bakes the models: Horizon draws with its own, so this copy is only for
+     * the mods that read them, and a big pack's (connected textures on every state) doesn't fit
+     * beside the rest in a default heap: the heap ran out mid-bake and worldgen with it.
+     * HORIZON_JAVA_MODELS=on bakes anyway, off never.
+     */
+    private static boolean modelsFit() {
+        String mode = System.getenv("HORIZON_JAVA_MODELS");
+        if ("on".equals(mode)) return true;
+        if ("off".equals(mode)) {
+            Natives.log("Horizon's client: no baked models for the mods (HORIZON_JAVA_MODELS=off)");
+            return false;
+        }
+        long states = net.minecraft.world.level.block.Block.BLOCK_STATE_REGISTRY.size();
+        long need = states * MODEL_BYTES_PER_STATE;
+        long live = 0;
+        for (var pool : java.lang.management.ManagementFactory.getMemoryPoolMXBeans()) {
+            // The old generation and survivors (Eden is mostly garbage): a little over what lives.
+            if (pool.getType() != java.lang.management.MemoryType.HEAP || pool.getName().contains("Eden")) continue;
+            var usage = pool.getUsage();
+            if (usage != null) live += usage.getUsed();
+        }
+        long max = Runtime.getRuntime().maxMemory();
+        if (live + need <= max * 85 / 100) return true;
+        Natives.log("Horizon's client: no baked models for the mods: " + states + " block states need ~"
+                + need / 1_000_000 + " MB of Java heap, " + (max - live) / 1_000_000 + " MB is free of "
+                + max / 1_000_000 + " (map mods' block colours and other model readers go without; "
+                + "HORIZON_JVM_OPTIONS=-Xmx<size> gives Java more, HORIZON_JAVA_MODELS=on bakes anyway)");
+        return false;
     }
 
     /** The mods' client reload listeners that come after the models (reloadClientResources). */
