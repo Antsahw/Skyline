@@ -79,6 +79,9 @@ MODS = {
     "legendarytooltips": ["legendarytooltips*"],
     "iceberg": ["iceberg*"],
     "prism-lib": ["prism-*"],
+    "ali": ["advancedlootinfo*"],
+    "aci": ["advancedcoreinfo*"],
+    "compressedblocks": ["compressedblocks*"],
 }
 
 
@@ -686,6 +689,56 @@ CASES = {
                 check_log(r"REI's list of Player\S*: [0-9]{3,} entries", "the host's list: everything")],
         forbid=[r"settings can't be kept per player", r"search failed"],
         look="lan-2-guest.png: the filter green, planks; lan-3-host.png: red, the whole list",
+    ),
+    "lootinfo": dict(
+        about="Advanced Loot Info's REI plugin asks the server for its loot data from REI's reload threads: the request is queued for the loop and answered while Horizon's REI reload waits",
+        mods=["ali", "aci", "rei", "architectury", "cloth"], scene="none", env={"HORIZON_JAVA_DEBUG": "loop"},
+        steps=['$C command "recipes minecraft:diamond_ore" >/dev/null; sleep 20'],
+        checks=[check_log(r"client to server ali:\S+ from \S+ \(off the loop's thread: queued\)", "the plugin's request from REI's thread is queued, not dropped"),
+                check_log(r"server to client ali:\S+ for ", "the server answers it"),
+                # Unanswered, the plugin waits 3 x 30 s and REI's reload with it.
+                check_log(r"REI's plugins reloaded in \d{1,4} ms", "REI's reload doesn't wait for the plugin's timeouts"),
+                check_log(r"recipes of 1 minecraft:diamond_ore: opened", "the recipe view opens")],
+        forbid=[r"was sent with no player's client running", r"Incomplete data", r"Missing chunk with index", r"recipe viewer failed"],
+        look="diamond ore's recipes: Advanced Loot Info's block loot page among them",
+    ),
+    "modsettings2": dict(
+        about="Options > Mods: a mod's own settings screen and one it gives another mod (getProvidedConfigScreenFactories, as Forge Config API Port does) open with a parent and go back to the Mods page on Done; a broken \"modmenu\" entrypoint (Compressed Blocks') is skipped, as Mod Menu does",
+        fixtures=["configmod"], scene="none",
+        steps=['$C options mods >/dev/null; sleep 1; $C ui > $S/ui.json',
+               '$C click horizon-config-extra >/dev/null; sleep 3; $C state > $S/provided.json',
+               '$C click-at 213 120 >/dev/null; sleep 2; $C state > $S/back.json',
+               '$C click horizon-config >/dev/null; sleep 3; $C messages > $S/messages.json'],
+        checks=[check_file("ui.json", r'"id":"horizon-config"', "the Mods page lists the mod's own screen"),
+                check_file("ui.json", r'"id":"horizon-config-extra"', "and the one given to another mod"),
+                check_file("provided.json", r'"screen":"java-screen"', "the given screen opens"),
+                check_file("back.json", r'"screen":"options"', "Done goes back to the Mods page"),
+                check_file("messages.json", r"horizon_config: provided screen, parent HorizonModsPage", "the given screen has a parent"),
+                check_file("messages.json", r"horizon_config: own screen, parent HorizonModsPage", "the own screen has a parent"),
+                check_log(r"horizon_config's \"modmenu\" entrypoint isn't a ModMenuApi", "the broken entrypoint is skipped")],
+        forbid=[r"settings screen failed", r"settings screen can't be made"],
+        look="the fixture's own settings screen (a Done button)",
+    ),
+    "config-rejoin": dict(
+        about="A LAN guest's kept mod settings (config/horizon-players/<uuid>/) are theirs at their next join: REI's item list on the left for the guest, on the right for the host",
+        mods=["rei", "architectury", "cloth"], scene="none", lan=True,
+        steps=[# The guest's kept REI config, as their saved settings left it (only the panel's side).
+               'K=$S/config/horizon-players/404198aa-cc64-3021-9fdf-8766c0d0096c/roughlyenoughitems; mkdir -p $K; '
+               'echo \'{"advanced": {"accessibility": {"displayPanelLocation": "LEFT"}}}\' > $K/config.json5; '
+               '$G disconnect >/dev/null; sleep 4; $G connect "localhost:$PORT" Guest >/dev/null; $G wait-ready >/dev/null 2>&1; sleep 5',
+               '$H command "gamemode survival @a" >/dev/null; sleep 1; '
+               '$G key e tap; sleep 20; $G key escape tap; sleep 2; $G key e tap; sleep 5; $G screenshot $S/g.png >/dev/null; '
+               '$H key e tap; sleep 8; $H screenshot $S/h.png >/dev/null; '
+               # Item icons are sharp over the blurred world: which side has more edges.
+               'python3 -c "import sys; from PIL import Image, ImageFilter; '
+               'e=lambda p, x0: sum(Image.open(p).convert(\'L\').filter(ImageFilter.FIND_EDGES).crop((x0, 100, x0 + 300, 600)).getdata()); '
+               'side=lambda p: \'left\' if e(p, 0) > e(p, 980) else \'right\'; '
+               'print(\'guest\', side(sys.argv[1]), \'host\', side(sys.argv[2]))" $S/g.png $S/h.png > $S/sides.txt'],
+        checks=[check_log(r"404198aa-cc64-3021-9fdf-8766c0d0096c's kept settings read \(1 file\(s\), [1-9]", "the guest's kept file is read at their join"),
+                check_file("sides.txt", r"guest left", "the guest's REI list is on the left (their setting)"),
+                check_file("sides.txt", r"host right", "the host's stays on the right")],
+        forbid=[r"settings can't be kept per player", r"kept config files"],
+        look="lan-2-guest.png: REI's list left of the inventory; lan-2-host.png: right",
     ),
     # client r6-3's case, VoxelMap alone (with JourneyMap it breaks VoxelMap: the two register the same packet).
     "voxelmap-server": dict(

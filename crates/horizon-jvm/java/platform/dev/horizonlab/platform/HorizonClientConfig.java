@@ -33,7 +33,8 @@ import java.util.stream.Stream;
  *       under config/ go to config/horizon-players/&lt;uuid&gt;/ and the owner's are put back.
  * </ul>
  *
- * A guest's saved settings last their session (in memory); their files are kept, not loaded.
+ * A guest's saved settings last their session in memory; at their next join (a new session)
+ * the files kept for them are read back ({@link #loadKept}).
  */
 public final class HorizonClientConfig {
     private HorizonClientConfig() {}
@@ -171,6 +172,8 @@ public final class HorizonClientConfig {
             // The first player keeps the settings as they are (nobody's were put away before).
             if (from == null && !SAVED.containsKey(to)) return;
             Map<String, Object> theirs = SAVED.get(to);
+            // New to this session, with files kept from an earlier one: those are theirs.
+            if (theirs == null && !to.equals(owner)) theirs = loadKept(to, all);
             // One copy for an object two holders hold (REI's config: its manager's and AutoConfig's).
             IdentityHashMap<Object, Object> done = new IdentityHashMap<>();
             for (Holder h : all) {
@@ -181,6 +184,90 @@ public final class HorizonClientConfig {
         } catch (ReflectiveOperationException | RuntimeException e) {
             fail("swap", e);
         }
+    }
+
+    /**
+     * A guest's settings from the files kept for them (config/horizon-players/&lt;uuid&gt;/):
+     * their files are laid over config/, the mods read them (AutoConfig's holders: load()),
+     * and config/ is put back as it was. Null when nothing is kept for them. The holders end
+     * up holding the guest's objects; the caller's swap keeps them.
+     */
+    private static synchronized Map<String, Object> loadKept(UUID player, List<Holder> all) {
+        Path dir = dir();
+        Path mine = dir.resolve(PLAYERS).resolve(player.toString());
+        if (!Files.isDirectory(mine)) return null;
+        List<Path> kept;
+        try (var walk = Files.walk(mine)) {
+            kept = walk.filter(Files::isRegularFile).toList();
+        } catch (IOException e) {
+            fail("kept config files", e);
+            return null;
+        }
+        if (kept.isEmpty()) return null;
+        Map<Path, byte[]> before = new HashMap<>();
+        Map<Path, FileTime> beforeTimes = new HashMap<>();
+        Map<String, Object> theirs = new HashMap<>();
+        int read = 0;
+        try {
+            for (Path k : kept) {
+                Path p = dir.resolve(mine.relativize(k).toString());
+                if (Files.isRegularFile(p)) {
+                    before.put(p, Files.readAllBytes(p));
+                    beforeTimes.put(p, Files.getLastModifiedTime(p));
+                } else {
+                    before.put(p, null);
+                }
+                Files.createDirectories(p.getParent());
+                Files.copy(k, p, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            }
+            ClassLoader loader = HorizonClientConfig.class.getClassLoader();
+            Class<?> manager = null;
+            try {
+                manager = Class.forName("me.shedaniel.autoconfig.ConfigManager", true, loader);
+            } catch (ClassNotFoundException e) {
+                // No cloth-config: nothing reads them back yet.
+            }
+            IdentityHashMap<Object, Object> loaded = new IdentityHashMap<>();
+            for (Holder h : all) {
+                if (manager == null || !manager.isInstance(h.target()) || loaded.containsKey(h.target())) continue;
+                try {
+                    manager.getMethod("load").invoke(h.target());
+                    loaded.put(h.target(), h.field().get(h.target()));
+                    read++;
+                } catch (ReflectiveOperationException | RuntimeException e) {
+                    fail("AutoConfig load", e);
+                }
+            }
+            for (Holder h : all) {
+                Object value = h.field().get(h.target());
+                if (loaded.containsKey(h.target())) theirs.put(h.key(), value);
+            }
+            // REI's manager holds AutoConfig's object too: the guest's, as AutoConfig loaded it.
+            for (Holder h : all) {
+                if (!h.key().equals("rei:object")) continue;
+                for (Object v : loaded.values()) {
+                    if (h.field().getType().isInstance(v)) theirs.put(h.key(), v);
+                }
+            }
+        } catch (IOException | ReflectiveOperationException | RuntimeException e) {
+            fail("kept config files", e);
+        } finally {
+            // config/ is the owner's again, as it was (its times too: no change to divert).
+            for (var e : before.entrySet()) {
+                try {
+                    if (e.getValue() == null) {
+                        Files.deleteIfExists(e.getKey());
+                    } else {
+                        Files.write(e.getKey(), e.getValue());
+                        Files.setLastModifiedTime(e.getKey(), beforeTimes.get(e.getKey()));
+                    }
+                } catch (IOException ex) {
+                    fail("config files put back", ex);
+                }
+            }
+        }
+        Natives.log("Horizon's client: " + player + "'s kept settings read (" + kept.size() + " file(s), " + read + " config(s))");
+        return theirs.isEmpty() ? null : theirs;
     }
 
     static void forget(UUID player) {

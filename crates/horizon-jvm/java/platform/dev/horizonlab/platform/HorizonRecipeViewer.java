@@ -178,6 +178,9 @@ public final class HorizonRecipeViewer {
             Method running = manager.getMethod("countRunningReloadTasks");
             long deadline = System.currentTimeMillis() + 60_000;
             while ((int) running.invoke(null) > 0 && System.currentTimeMillis() < deadline) {
+                // Plugins that ask the server from REI's threads (Advanced Loot Info) get
+                // their answer while this thread waits.
+                HorizonLoop.pump();
                 try {
                     Thread.sleep(20);
                 } catch (InterruptedException e) {

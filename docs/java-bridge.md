@@ -194,7 +194,15 @@ saying something works.
   mods' "modmenu" entrypoints: without Mod Menu, `HorizonModMenuApi` makes its API's
   interfaces (ModMenuApi, ConfigScreenFactory, UpdateChecker, default methods answering
   "none") with ASM and puts them on the class path first, so those entrypoints load (tested:
-  Jade, AppleSkin, Farmer's Delight, Cloth Config, REI via Architectury).
+  Jade, AppleSkin, Farmer's Delight, Cloth Config, REI via Architectury). As Mod Menu: the
+  screens one mod gives others (`getProvidedConfigScreenFactories`: Forge Config API Port's)
+  are listed under those mods' ids, a mod's own screen winning; the methods are called through
+  the interface (an implementation class may not be public); an entrypoint that isn't a
+  `ModMenuApi` (Compressed Blocks 3.1.0's is an empty class: it has no settings) is skipped
+  with one line. A screen's parent is `HorizonModsPage` (some screens read it; none was
+  given before): shown again on Done, it closes the screen and the window goes back to
+  Options → Mods (`JavaOverlay.mods_page`). Regress `modsettings2` (fixture `configmod`;
+  `fixture_mod.sh` compiles a fixture's `compile-only/` APIs beside the jar, not into it).
 - Settings per player (`HorizonClientConfig`): the objects holding mods' settings (every
   cloth-config AutoConfig holder, Jade's JsonConfig values, AppleSkin's `ModConfig.INSTANCE`) are
   swapped with the rest of a player's client state; a player new to
@@ -203,8 +211,12 @@ saying something works.
   after another player's screen input, files changed under `config/` move to
   `config/horizon-players/<uuid>/` and the owner's are put back. Tested on LAN: the guest turns
   AppleSkin's tooltip off and saves; the host's screen and file still say on, the guest's say
-  off. Not yet: a guest's saved files aren't loaded at their next join (their session's
-  settings start from the host's); mods holding settings elsewhere (Farmer's Delight's
+  off. At a guest's next join (`swap` with no settings of theirs in memory) their kept files are
+  laid over `config/`, every AutoConfig holder `load()`s, and `config/` is put back with its
+  times (`loadKept`): their settings start from their files, not the host's. Regress
+  `config-rejoin` (REI's list on the guest's left, the host's right). Only AutoConfig's
+  holders read files back so far (Jade's and AppleSkin's own holders start from a copy of the
+  host's, as before). Not yet: mods holding settings elsewhere (Farmer's Delight's
   ConfigValues) are still shared. Add a mod's holder in `holders()`. REI's settings are per
   player too (its config object, which AutoConfig also holds: one copy for both holders,
   made in one pass; and its craftable-only switch); the copy shares REI's entry stacks,
@@ -250,6 +262,14 @@ saying something works.
   queues the overlay's reload and the list's search). Regress `reiscreen`.
 
 ## Mods' overlay on Horizon's inventory (REI)
+
+- **A client message sent off the loop's thread is queued** (`HorizonLoop.toServer`): REI runs
+  its plugins on threads of its own, and Advanced Loot Info's asks the server for its loot
+  data there (no player's client runs on that thread: it was dropped, and the plugin waited 3
+  x 30 s). It goes to `INBOX` as the player whose client ran last (`HorizonClient.lastPlayer`)
+  and runs at the next `flush`, on the loop's thread; Horizon's own REI reload waits on that
+  thread, so it `pump()`s the messages while it waits. ALI's block drops show; REI's reload
+  ~3 s. Regress `lootinfo`.
 
 - Mod container screens open in vanilla's order (`openScreen`: REI prepared, the GUI's screen
   set, `added`, `init`, the search refreshed), so REI makes its overlay for them too: its list
@@ -509,6 +529,12 @@ gets SPIR-V, vertex layouts and uniform lists.
   pipeline's SPIR-V, which `HORIZON_SPV_DIR=dir cargo test -p horizon-jvm gpu` reads back.
 
 ## 26.3 facts that cost time
+
+- **Screens are opened with `Minecraft.gui.setScreen`, not `Minecraft.setScreen`** (gone in
+  26.3; `gui.screen()` reads it). A fixture written from older examples doesn't compile.
+- **Mods' own threads send client messages too** (REI's plugin reload threads: Advanced Loot
+  Info). Nothing that answers them may assume the loop's thread or a running player's client:
+  `HorizonLoop` queues them (see "Mods' overlay on Horizon's inventory").
 
 - Fabric's extended menus (`ExtendedMenuType`) open with `Networking$OpenScreenPayload`
   (identifier, containerId, title, innerCodec, data); their client menu is

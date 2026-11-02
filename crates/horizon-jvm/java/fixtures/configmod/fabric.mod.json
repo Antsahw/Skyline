@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "horizon_config",
+  "version": "1.0.0",
+  "name": "Horizon Config",
+  "description": "Settings screens as Mod Menu finds them: the mod's own (getModConfigScreenFactory), one it gives another mod (getProvidedConfigScreenFactories, as Forge Config API Port does), and a broken \"modmenu\" entrypoint (a class that isn't a ModMenuApi, as Compressed Blocks has). Each screen logs its parent and goes back to it on Done. A check of the Java mod bridge's Mods page.",
+  "environment": "*",
+  "entrypoints": {
+    "modmenu": ["dev.horizonlab.configmod.ConfigMenu", "dev.horizonlab.configmod.NotAnApi"]
+  },
+  "depends": {
+    "fabricloader": ">=0.20",
+    "minecraft": "26.3",
+    "fabric-api": "*"
+  }
+}
