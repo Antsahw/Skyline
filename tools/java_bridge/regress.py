@@ -609,6 +609,17 @@ CASES = {
         forbid=[r"handler\$\w+\$xaero\w*\$\w+\): java", r"Failed to get data directory"],
         look="the World Map: the explored land in its colours, the red arrow, X/Y/Z at the top",
     ),
+    "worldmap-lazy": dict(
+        about="Xaero's Minimap and World Map with the mirror's models baked on first use (a big pack's don't fit: HORIZON_JAVA_MODELS=off): both draw, no frame hook fails on a missing ModelManager",
+        mods=["xaero", "xaeroworldmap"], scene="none", env={"HORIZON_JAVA_DEBUG": "gpu", "HORIZON_JAVA_MODELS": "off"},
+        steps=['sleep 40', '$C key m tap; sleep 25'],
+        checks=[check_log(r"models are baked on first use", "the models are lazy"),
+                check_log(r"models baked on first use \(BlockState\)", "map mods baked the states they read"),
+                check_log(r"gpu: horizon:dynamic/gpu\d+ 447x267, \d+ pixels not transparent, [1-9]\d{3,} not black", "the minimap draws"),
+                check_log(r"gpu: horizon:dynamic/gpu\d+ 427x240, \d+ pixels not transparent, [1-9]\d{4,} not black", "the World Map's target (shrunk) has the map")],
+        forbid=[r"handler\$\w+\$xaero\w*\$\w+\): java", r"ModelManager\.getBlockStateModelSet\(\)", r"model baked on first use failed"],
+        look="the World Map in its colours (plains, forest, water), the red arrow, X/Y/Z at the top",
+    ),
     "minihud": dict(
         about="MiniHUD (MaLiLib): its info lines draw at the end of the GUI's frame (Gui.extractRenderState TAIL)",
         mods=["malilib", "minihud"], scene="none",

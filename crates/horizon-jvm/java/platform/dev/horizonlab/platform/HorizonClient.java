@@ -1440,7 +1440,10 @@ public final class HorizonClient {
      * GUI atlas stays (screens' sprites are Horizon's): the others join its atlas manager.
      */
     private static void models() {
-        if (!modelsFit()) return;
+        // A pack whose baked models don't fit still gets a model manager: its models are baked
+        // as mods first ask for them (Xaero's World Map's frame hook read getModelManager() and
+        // failed on null when the models were skipped).
+        HorizonLazyModels.on = !modelsFit();
         long started = System.nanoTime();
         // The client's codecs' types (ClientBootstrap, Minecraft's main runs it): without
         // SpriteSources' an atlas's sources parse to nothing and every atlas held only the
@@ -1507,16 +1510,17 @@ public final class HorizonClient {
     private static final long MODEL_BYTES_PER_STATE = 1200;
 
     /**
-     * Whether the mirror bakes the models: Horizon draws with its own, so this copy is only for
-     * the mods that read them, and a big pack's (connected textures on every state) doesn't fit
-     * beside the rest in a default heap: the heap ran out mid-bake and worldgen with it.
-     * HORIZON_JAVA_MODELS=on bakes anyway, off never.
+     * Whether the mirror bakes every model at once: Horizon draws with its own, so this copy is
+     * only for the mods that read them, and a big pack's (connected textures on every state)
+     * doesn't fit beside the rest in a default heap: the heap ran out mid-bake and worldgen with
+     * it. When not, they're baked on first use (HorizonLazyModels). HORIZON_JAVA_MODELS=on bakes
+     * all at once anyway, off always on first use.
      */
     private static boolean modelsFit() {
         String mode = System.getenv("HORIZON_JAVA_MODELS");
         if ("on".equals(mode)) return true;
         if ("off".equals(mode)) {
-            Natives.log("Horizon's client: no baked models for the mods (HORIZON_JAVA_MODELS=off)");
+            Natives.log("Horizon's client: the mods' models are baked on first use (HORIZON_JAVA_MODELS=off)");
             return false;
         }
         long states = net.minecraft.world.level.block.Block.BLOCK_STATE_REGISTRY.size();
@@ -1530,10 +1534,10 @@ public final class HorizonClient {
         }
         long max = Runtime.getRuntime().maxMemory();
         if (live + need <= max * 85 / 100) return true;
-        Natives.log("Horizon's client: no baked models for the mods: " + states + " block states need ~"
+        Natives.log("Horizon's client: the mods' models are baked on first use: " + states + " block states need ~"
                 + need / 1_000_000 + " MB of Java heap, " + (max - live) / 1_000_000 + " MB is free of "
-                + max / 1_000_000 + " (map mods' block colours and other model readers go without; "
-                + "HORIZON_JVM_OPTIONS=-Xmx<size> gives Java more, HORIZON_JAVA_MODELS=on bakes anyway)");
+                + max / 1_000_000 + " (only the states mods read are baked; "
+                + "HORIZON_JVM_OPTIONS=-Xmx<size> gives Java more, HORIZON_JAVA_MODELS=on bakes them all at once)");
         return false;
     }
 
@@ -1600,7 +1604,8 @@ public final class HorizonClient {
             set(owner, minecraft.getAtlasManager(), "spriteLookup", field(owner, atlases, "spriteLookup"));
             fonts(atlases, skins);
             featureRenderer(models, atlases);
-            Natives.log("Horizon's client: block and item models loaded in " + (System.nanoTime() - started) / 1_000_000 + " ms");
+            Natives.log("Horizon's client: block and item models loaded in " + (System.nanoTime() - started) / 1_000_000 + " ms"
+                    + (HorizonLazyModels.on ? " (baked on first use)" : ""));
         } catch (Throwable t) {
             Throwable root = t;
             while (root.getCause() != null && root.getCause() != root) root = root.getCause();
