@@ -358,3 +358,12 @@ tests pass; fmt and clippy `-D warnings` clean (horizon-client, horizon-jvm).
   hub's tracker), commands and placing stay where they were. Outside the area: one line each in
   game.rs, lan_actions.rs, native_hooks.rs; horizon-world and health.rs lose our hooks. Test:
   `regress.py --jars <jars> punch hurt seasons mixins1`.
+
+- **mixins 5-2** (`bridge-mixins-5-2`, on top of `bridge-mixins-5-1`), by Claude for
+  iaxivers: effects from beacons, conduits, raids and the Warden ask the mods. Works: they go
+  through `Game::add_effect_asking_mods` (the heads of `LivingEntity.addEffect`, only when a
+  mod hooks it); `effects2`: mixinmod refuses a beacon's haste (its speed still comes) and the
+  ominous bottle's Bad Omen (the bottle is still drunk). Doesn't: the turtle helmet's water
+  breathing (asked each tick) and the trial omen swap don't ask. Outside the area: one line
+  per site in beacon.rs, block_entity_anims.rs (conduit), raids.rs, sculk.rs. Test:
+  `regress.py --jars <jars> effects2 effects`.
