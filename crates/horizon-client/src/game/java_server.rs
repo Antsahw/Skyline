@@ -343,6 +343,8 @@ impl Game<'_> {
     ) -> bool {
         false
     }
+    pub(super) fn java_jumped(&mut self) {}
+    pub(super) fn java_teleported(&mut self, _player: u128, _at: [f64; 3], _look: [f32; 2]) {}
     pub(super) fn java_fall(
         &mut self,
         _distance: f64,
@@ -3144,6 +3146,52 @@ mod run {
             effect: &horizon_client::effects::EffectInstance,
         ) -> bool {
             self.java_add_effect_to(None, effect)
+        }
+
+        /// The player acting now jumped (the server's `jumpFromGround`): the Java mods'
+        /// injections there, heard only, when a mod hooks it (routed action `jumps`).
+        pub(in crate::game) fn java_jumped(&mut self) {
+            #[cfg(feature = "java-mods")]
+            {
+                if !java_mods_on() || !self.hears_players() || !super::java_routed("jumps") {
+                    return;
+                }
+                let uuid = self
+                    .lan_acting_uuid
+                    .map(uuid_string)
+                    .unwrap_or_else(|| uuid_string(self.player_uuid()));
+                if let Err(e) = self.with_java_world(|| horizon_jvm::events::jumped(&uuid)) {
+                    log::warn!("Java mods: a jump failed: {e}");
+                }
+            }
+        }
+
+        /// `player` was teleported in its level (commands, a pearl, chorus fruit) to `at`
+        /// facing `look`: the Java mods' injections at `ServerPlayer.teleport`'s head and ends
+        /// (Serene Seasons' GlitchCore, Balm's events), heard only, when a mod hooks it.
+        pub(in crate::game) fn java_teleported(
+            &mut self,
+            player: u128,
+            at: [f64; 3],
+            look: [f32; 2],
+        ) {
+            #[cfg(feature = "java-mods")]
+            {
+                if !java_mods_on() || !super::java_routed("teleports") {
+                    return;
+                }
+                let uuid = uuid_string(player);
+                let dim = self.dim.id();
+                let r =
+                    self.with_java_world(|| horizon_jvm::events::teleported(&uuid, dim, at, look));
+                if let Err(e) = r {
+                    log::warn!("Java mods: a teleport failed: {e}");
+                }
+            }
+            #[cfg(not(feature = "java-mods"))]
+            {
+                let _ = (player, at, look);
+            }
         }
 
         /// [`Game::java_add_effect`] for `player` (None: the player acting now).

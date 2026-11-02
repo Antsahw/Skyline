@@ -15,7 +15,9 @@
     "DismountMixin",
     "FallMixin",
     "EffectMixin",
-    "MilkMixin"
+    "MilkMixin",
+    "JumpMixin",
+    "TeleportMixin"
   ],
   "injectors": {
     "defaultRequire": 1

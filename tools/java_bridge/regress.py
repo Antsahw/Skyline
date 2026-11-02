@@ -299,7 +299,7 @@ CASES = {
         steps=['$C command "gamemode survival" >/dev/null; for i in 1 2 3 4 5 6; do '
                '$C command "summon experience_orb ~ ~0.5 ~ {Value:7}" >/dev/null; done; sleep 2; $C state > $S/state.json'],
         checks=[check_json("state.json", ["player", "xp", "total"], 42, "all six orbs' points (42)"),
-                check_log(r"experience_orbs go to the mods", "orb pickup goes to the mods")],
+                check_log(r"experience_orbs(, \w+)* go to the mods", "orb pickup goes to the mods")],
     ),
     "preset": dict(
         about="A mod's world type (One Block) picked in Create New World: its block, its gameplay",
@@ -429,6 +429,18 @@ CASES = {
                 check_file("omen.txt", r"'bad_omen'", "Bad Omen II taken (the control)"),
                 check_file("spawner.json", r"ominous=true", "the spawner saw the Bad Omen"),
                 check_file("trial.txt", r"\A\[\]$", "the Bad Omen is gone; no Trial Omen")],
+    ),
+    "jump": dict(
+        about="A player's jump reaches LivingEntity.jumpFromGround's end on the server (mixinmod counts jumps)",
+        fixtures=["mixinmod"], scene="omen",
+        steps=['$C key space down >/dev/null; sleep 0.3; $C key space up >/dev/null; sleep 1.5; $C key space down >/dev/null; sleep 0.3; $C key space up >/dev/null; sleep 1.5'],
+        checks=[check_log(r"\[mixinmod\] jump 2", "two jumps heard")],
+    ),
+    "teleport": dict(
+        about="A player's teleport (/tp) reaches ServerPlayer.teleport's end, at the new place (mixinmod tells where)",
+        fixtures=["mixinmod"], scene="none",
+        steps=['$C command "tp @s 100 120 200" >/dev/null; sleep 2'],
+        checks=[check_log(r"\[mixinmod\] teleported to 100, 120, 200", "the mod heard the teleport, at its end")],
     ),
     "slot": dict(
         about="Inventory.setSelectedSlot's head (mixinmod: not the ninth): the slot stays",

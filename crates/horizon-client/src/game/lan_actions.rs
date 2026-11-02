@@ -875,6 +875,7 @@ impl Game<'_> {
         self.pitch = pitch;
         self.eye = eye.1;
         std::mem::swap(&mut self.player, &mut player);
+        let mut java_teleport = None;
         if let Some(mut m) = player {
             g.health = m.health.health();
             g.food = m.health.food.food;
@@ -915,9 +916,17 @@ impl Game<'_> {
                     passengers: Vec::new(),
                 }));
             }
+            // What moves the guest during an action is a teleport (commands set the position).
+            if g.vehicle.is_none() && (moved > 0.0001 || teleported) {
+                java_teleport = Some((g.uuid, at, [g.yaw, g.pitch]));
+            }
             if g.vehicle.is_none() && (moved > 0.0001 || turned || teleported) {
                 host.hub.teleport(i, Some(at));
             }
+        }
+        // Java mods hear the teleport (ServerPlayer.teleport; java_server.rs).
+        if let Some((uuid, at, look)) = java_teleport {
+            self.java_teleported(uuid, at, look);
         }
         let g = &mut host.hub.guests[i];
         if let Some(head) = g.bed.filter(|_| fell_asleep) {
@@ -3791,6 +3800,7 @@ impl Game<'_> {
                 w.player.fall_distance = 0.0;
             }
             let travelled: Vec<[f64; 3]> = moves.iter().map(|m| m.0).collect();
+            let mut jumped = false;
             // Entity.move's movementThisTick: each move, from where the
             // tick's first one started.
             let end = w.player.position;
@@ -3818,6 +3828,7 @@ impl Game<'_> {
                     // the server's copy jumps with the player, so the velocity
                     // it sends them keeps the jump.
                     let _ = w.jump_from_ground();
+                    jumped = true;
                 }
                 let landed = (|| -> horizon_client::Result<()> {
                     w.set_on_ground_with_movement(on_ground, false, movement)?;
@@ -3873,6 +3884,10 @@ impl Game<'_> {
                 }
             }
             // Entity.baseTick: rain puts out a burning player.
+            // Java mods hear the jump (java_server.rs).
+            if jumped {
+                game.java_jumped();
+            }
             game.rain_extinguish_player();
             // WitherRoseBlock.entityInside along those moves.
             for event in &events {

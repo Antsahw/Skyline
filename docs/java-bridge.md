@@ -415,6 +415,14 @@ it does nothing unless Horizon fires it or hands the action to the mirror.
     (`Game::add_effect_asking_mods`), only when a mod hooks `addEffect` (routed action
     `effects`). A trial spawner's Bad Omen → Trial Omen asks for the Trial Omen
     (`java_add_effect_to`, the guest's UUID); a refusal still takes the Bad Omen.
+  - Round 6, the next "Rust does" lines by count: a player's jump (`LivingEntity` /
+    `Player.jumpFromGround`, 4 mods: Puzzles Lib's jump event, Mythic Upgrades, Spell Engine,
+    Wizards) and a teleport in its level (`ServerPlayer.teleport`, 5: Balm, GlitchCore, Polymer,
+    FrozenLib) fire their heads and ends on the mirror, heard only (routed actions `jumps`,
+    `teleports`: `lan_actions`' jump detection and `leave_guest` when an action moved the
+    guest). Not done: `PlayerAdvancements.award` (5, mostly inside the method; the mirror has
+    no advancements), `tickEffects`, `openMenu` (Horizon's own menus have no Java
+    `MenuProvider`), teleports across dimensions (`server_travel.rs`).
   - Precipitation (`ServerLevel.tickPrecipitation`), when a mod patches the biomes' weather
     (`Biome.shouldSnow`, `shouldFreeze`, `getPrecipitationAt`...: Serene Seasons): the game
     keeps each column's top (`GameLevel::precipitation` → `java_precipitation`) and, at the
