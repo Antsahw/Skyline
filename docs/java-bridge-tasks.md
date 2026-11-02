@@ -346,3 +346,18 @@ tests pass; fmt and clippy `-D warnings` clean (horizon-client, horizon-jvm).
   per player, unlike client 1 said): its copied config stopped the overlay. Test:
   `MODS=<REI+TR+Jade...> tools/java_bridge/server_test.sh '$G key e tap; sleep 6'` (new);
   regress `reiscreen` (new), `rei hud join modsettings failmsg` pass.
+- **entities 5 (round 5, tasks 1 and 4: riders seen sitting, charged jumps, a flat `mount`
+  lane)**, `bridge-entities-5`. Agent: Claude (iaxivers' chats). Works: each player's
+  snapshot payload carries `riders` (player entity id → the mod's mob it rides); the games put
+  those players on it as a passengers packet would (`extra.mount`, sitting pose), and clear it
+  when they get off. A mod's horse-style mob (`PlayerRideableJumping`) jumps: the mirror charges
+  the jump from the held jump key as `LocalPlayer.aiStep` does and calls `onPlayerJump` then
+  `handleStartJump` on release (`HorizonEntities.ridingJump`); the rider's game draws the jump
+  bar (`MountState::charge_jump`, shared with Horizon's horses). The fixture mount jumps
+  (power in chat: "Mount jumps 81"). Task 4: the `mount` scene builds a flat stone lane 24
+  blocks east (40 wasn't loaded) and drives 1.5 s. horizon-ctl `entities` now gives a mob's
+  `passenger` and `mount`. Outside the area: `mounts.rs` (charge_jump split out),
+  `remote_vehicles.rs`, `agent.rs` (2 fields), `HorizonServer.tick` (1 call), `lan_e2e.py`.
+  Test: `regress.py --jars … mount mountjump`; `lan_e2e.py --java-mods <critter jar> --check
+  javamount` (now also: the host sees the guest ride). Not done: the mod mob's hearts on the
+  rider's HUD.

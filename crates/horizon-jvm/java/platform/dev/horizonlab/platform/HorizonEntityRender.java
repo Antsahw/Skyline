@@ -369,7 +369,10 @@ public final class HorizonEntityRender {
             firstRide = false;
             HorizonJson.string(p.getStringUUID(), out);
             out.append(":{\"id\":").append(vehicle.getId()).append(",\"p\":[")
-                    .append(p.getX()).append(',').append(p.getY()).append(',').append(p.getZ()).append("]}");
+                    .append(p.getX()).append(',').append(p.getY()).append(',').append(p.getZ()).append(']');
+            // A horse-style jump its game charges a bar for (PlayerRideableJumping).
+            if (vehicle instanceof net.minecraft.world.entity.PlayerRideableJumping j && j.canJump()) out.append(",\"jump\":true");
+            out.append('}');
         }
         out.append("},\"models\":{");
         boolean first = true;

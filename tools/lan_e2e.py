@@ -11170,6 +11170,11 @@ def check_javamount(host, guest, out):
     guest.raw('mouse', 'right', 'click')
     on = guest.until(lambda: pos_of(guest), lambda p: p[1] - my > 0.3, ticks=60)
     seen['seated'] = round(on[1] - my, 2)
+    # The host's game sees the guest sitting on the mount (the snapshot's riders).
+    def guest_on_host():
+        return [e for e in host.raw('entities', 16).get('entities', []) if 'player' in str(e.get('type'))]
+    others = host.until(guest_on_host, lambda l: any(e.get('passenger') for e in l), ticks=40)
+    seen['host sees it ride'] = any(e.get('passenger') and e.get('mount') == mount[0]['id'] for e in others)
     guest.raw('key', 'w', 'down')
     guest.wait(50)
     guest.raw('key', 'w', 'up')
@@ -11189,6 +11194,7 @@ def check_javamount(host, guest, out):
     host('command', command=f'kill @e[type={kind}]')
     assert seen['guest sees'] == 1 and seen['seated'] > 0.3, seen
     assert seen['drove'] > 1.5, seen
+    assert seen['host sees it ride'], seen
     assert seen['off']['y over the mount'] < 0.3, seen
     return seen
 

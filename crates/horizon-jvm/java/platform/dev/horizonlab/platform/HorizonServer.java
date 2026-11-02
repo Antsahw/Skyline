@@ -1267,6 +1267,7 @@ public final class HorizonServer {
                     player.zza = ((keys & 1) != 0 ? 1.0F : 0.0F) - ((keys & 2) != 0 ? 1.0F : 0.0F);
                     player.xxa = ((keys & 4) != 0 ? 1.0F : 0.0F) - ((keys & 8) != 0 ? 1.0F : 0.0F);
                     player.setJumping((keys & 16) != 0);
+                    HorizonEntities.ridingJump(player, (keys & 16) != 0);
                 } else {
                     player.xxa = 0.0F;
                     player.zza = 0.0F;

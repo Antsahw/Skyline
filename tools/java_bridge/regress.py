@@ -193,13 +193,26 @@ CASES = {
         about="Riding a mod's mob (crittermod's mount): a use gets on, the movement keys steer it on the mirror, sneaking gets off",
         fixtures=["crittermod"], scene="mount",
         steps=['$C look-at $(cat $S/mount.pos) >/dev/null; sleep 0.3; $C mouse right click >/dev/null; sleep 1.5; $C state > $S/on.json',
-               '$C key w down >/dev/null; sleep 2.5; $C key w up >/dev/null; sleep 0.5; $C state > $S/drove.json; $C key f5 tap >/dev/null',
+               '$C key w down >/dev/null; sleep 1.5; $C key w up >/dev/null; sleep 0.5; $C state > $S/drove.json; $C key f5 tap >/dev/null',
                '$C key f5 tap >/dev/null; $C key f5 tap >/dev/null; $C key shift down >/dev/null; sleep 1; $C key shift up >/dev/null; sleep 1; $C state > $S/off.json; '
                'python3 $R/tools/java_bridge/ride_check.py $S/floor.y $S/on.json $S/drove.json $S/off.json > $S/ride.txt'],
         checks=[check_file("ride.txt", r"(?m)^seated", "a use put the player on the mount"),
                 check_file("ride.txt", r"(?m)^drove", "holding forward drove it (the player on it)"),
                 check_file("ride.txt", r"(?m)^off", "sneaking got the player off")],
         look="the player on the mount, further east (mount-2.png: third person)",
+    ),
+    "mountjump": dict(
+        about="A mod's horse-style mob (PlayerRideableJumping): the jump key held charges, its release jumps it (the mirror charges as LocalPlayer does)",
+        fixtures=["crittermod"], scene="mount",
+        steps=['$C look-at $(cat $S/mount.pos) >/dev/null; sleep 0.3; $C mouse right click >/dev/null; sleep 1.5; '
+               '$C key space down >/dev/null; sleep 0.4; $C screenshot $S/bar.png >/dev/null; sleep 0.4; $C key space up >/dev/null; '
+               'for i in $(seq 15); do $C state; echo; sleep 0.07; done > $S/jump.jsonl; '
+               'python3 -c "import json,sys; f=float(open(sys.argv[1]).read()); '
+               'ys=[json.loads(l)[\'player\'][\'position\'][1] for l in open(sys.argv[2]) if l.strip()]; '
+               'print(\'rose\', round(max(ys)-f,2))" $S/floor.y $S/jump.jsonl > $S/rose.txt'],
+        checks=[check_log(r"Mount jumps ([6-9][0-9]|100)\b", "released after ~0.8 s: a strong jump (power 60-100)"),
+                check_file("rose.txt", r"rose (1\.[2-9]|[2-9])", "the player went up with the mount (over 1.2 above the floor)")],
+        look="the jump bar over the hotbar (bar.png in the scratch folder)",
     ),
     "gecko": dict(
         about="GeckoLib (geckomod fixture, built against the GeckoLib jar): a mob's GeckoLib model drawn, its looping animation moving it",

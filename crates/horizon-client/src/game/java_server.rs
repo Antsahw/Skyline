@@ -1172,71 +1172,81 @@ mod run {
             };
             let hands = &snapshot.hands;
             let rides = &snapshot.rides;
-            let payload =
-                |sent: &mut Sent, who: u32, uuid: Option<&str>, entries: &[&Entry]| -> Vec<u8> {
-                    let had = sent.has.remove(&who).unwrap_or_default();
-                    let mut has = HashSet::with_capacity(entries.len());
-                    let mut out = String::with_capacity(
-                        entries.iter().map(|e| e.e.get().len() + 1).sum::<usize>() + 64,
-                    );
-                    out.push_str("{\"entities\":[");
-                    let mut first = true;
-                    let mut own = Vec::new();
-                    for e in entries {
-                        if e.owner.is_some() && e.owner == uuid {
-                            own.push(e.e.get());
-                            continue;
-                        }
-                        // A "keep" its game can't keep (it hasn't had the look): the last whole one.
-                        let entry = match e.id {
-                            Some(id) if e.keep && !had.contains(&id) => match sent.looks.get(&id) {
-                                Some(whole) => whole.as_str(),
-                                None => continue,
-                            },
-                            _ => e.e.get(),
-                        };
-                        if let Some(id) = e.id {
-                            has.insert(id);
-                        }
-                        if !first {
-                            out.push(',');
-                        }
-                        first = false;
-                        out.push_str(entry);
+            let payload = |sent: &mut Sent,
+                           who: u32,
+                           uuid: Option<&str>,
+                           riders: &str,
+                           entries: &[&Entry]|
+             -> Vec<u8> {
+                let had = sent.has.remove(&who).unwrap_or_default();
+                let mut has = HashSet::with_capacity(entries.len());
+                let mut out = String::with_capacity(
+                    entries.iter().map(|e| e.e.get().len() + 1).sum::<usize>() + 64,
+                );
+                out.push_str("{\"entities\":[");
+                let mut first = true;
+                let mut own = Vec::new();
+                for e in entries {
+                    if e.owner.is_some() && e.owner == uuid {
+                        own.push(e.e.get());
+                        continue;
                     }
-                    sent.has.insert(who, has);
-                    out.push_str("],\"own\":[");
-                    out.push_str(&own.join(","));
-                    out.push(']');
-                    if let Some(r) = uuid.and_then(|u| rides.get(u)) {
-                        out.push_str(",\"ride\":");
-                        out.push_str(r.get());
+                    // A "keep" its game can't keep (it hasn't had the look): the last whole one.
+                    let entry = match e.id {
+                        Some(id) if e.keep && !had.contains(&id) => match sent.looks.get(&id) {
+                            Some(whole) => whole.as_str(),
+                            None => continue,
+                        },
+                        _ => e.e.get(),
+                    };
+                    if let Some(id) = e.id {
+                        has.insert(id);
                     }
-                    if let Some(h) = uuid.and_then(|u| hands.get(u)) {
-                        out.push_str(",\"hands\":");
-                        out.push_str(h.get());
+                    if !first {
+                        out.push(',');
                     }
-                    out.push_str(",\"models\":{");
-                    let have = sent.to.entry(who).or_default();
-                    let mut first = true;
-                    for e in entries {
-                        for key in &e.keys {
-                            if have.insert((*key).to_owned())
-                                && let Some(tree) = sent.trees.get(*key)
-                            {
-                                if !first {
-                                    out.push(',');
-                                }
-                                first = false;
-                                out.push_str(&serde_json::to_string(key).unwrap_or_default());
-                                out.push(':');
-                                out.push_str(tree.get());
+                    first = false;
+                    out.push_str(entry);
+                }
+                sent.has.insert(who, has);
+                out.push_str("],\"own\":[");
+                out.push_str(&own.join(","));
+                out.push(']');
+                if let Some(r) = uuid.and_then(|u| rides.get(u)) {
+                    out.push_str(",\"ride\":");
+                    out.push_str(r.get());
+                }
+                // Who rides which mod's mob, by player entity id: their games seat
+                // them (the sitting pose) as on a vehicle of their own.
+                if riders.len() > 2 {
+                    out.push_str(",\"riders\":");
+                    out.push_str(riders);
+                }
+                if let Some(h) = uuid.and_then(|u| hands.get(u)) {
+                    out.push_str(",\"hands\":");
+                    out.push_str(h.get());
+                }
+                out.push_str(",\"models\":{");
+                let have = sent.to.entry(who).or_default();
+                let mut first = true;
+                for e in entries {
+                    for key in &e.keys {
+                        if have.insert((*key).to_owned())
+                            && let Some(tree) = sent.trees.get(*key)
+                        {
+                            if !first {
+                                out.push(',');
                             }
+                            first = false;
+                            out.push_str(&serde_json::to_string(key).unwrap_or_default());
+                            out.push(':');
+                            out.push_str(tree.get());
                         }
                     }
-                    out.push_str("}}");
-                    out.into_bytes()
-                };
+                }
+                out.push_str("}}");
+                out.into_bytes()
+            };
             let Some(host) = self.lan.as_mut() else {
                 // In-frame: the window's own player.
                 if self.serving.is_none() && self.remote.is_none() {
@@ -1245,7 +1255,7 @@ mod run {
                         .as_ref()
                         .map_or([0.0; 3], |p| [p.position.x, p.position.y, p.position.z]);
                     let entities = near(self.dim.id(), at);
-                    let data = payload(sent, u32::MAX, None, &entities);
+                    let data = payload(sent, u32::MAX, None, "{}", &entities);
                     self.remote_java_entities(&data);
                 }
                 return;
@@ -1255,6 +1265,25 @@ mod run {
             sent.to.retain(|c, _| conns.contains(c) || *c == u32::MAX);
             sent.has.retain(|c, _| conns.contains(c) || *c == u32::MAX);
             sent.showing.retain(|c| conns.contains(c));
+            // The players riding mods' mobs: `{"<player entity id>": <mob id>}`.
+            #[derive(serde::Deserialize)]
+            struct RideId {
+                id: i64,
+            }
+            let mut riders = String::from("{");
+            for g in &host.hub.guests {
+                let Some(r) = rides.get(uuid_string(g.uuid).as_str()) else {
+                    continue;
+                };
+                let Ok(r) = serde_json::from_str::<RideId>(r.get()) else {
+                    continue;
+                };
+                if riders.len() > 1 {
+                    riders.push(',');
+                }
+                riders.push_str(&format!("\"{}\":{}", g.entity_id, r.id));
+            }
+            riders.push('}');
             for g in &host.hub.guests {
                 let entities = near(&g.dimension, g.position);
                 if entities.is_empty() && !sent.showing.contains(&g.conn) {
@@ -1266,7 +1295,7 @@ mod run {
                     sent.showing.insert(g.conn);
                 }
                 let uuid = uuid_string(g.uuid);
-                let data = payload(sent, g.conn, Some(&uuid), &entities);
+                let data = payload(sent, g.conn, Some(&uuid), &riders, &entities);
                 super::super::java_profile::bytes("entities: payload to players", data.len());
                 host.hub.send_to(
                     g.conn,

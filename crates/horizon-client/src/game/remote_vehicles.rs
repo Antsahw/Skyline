@@ -188,6 +188,18 @@ impl Game<'_> {
     }
 
     /// This game's player sits on a Java mod's mob (the server says so each tick).
+    /// The Java mod's mob it rides jumps as a horse (the bar charges with the jump key).
+    pub(super) fn java_mount_jumps(&self) -> bool {
+        #[cfg(feature = "java-mods")]
+        {
+            self.riding_java_mob() && self.java_entities.ride.is_some_and(|r| r.jump)
+        }
+        #[cfg(not(feature = "java-mods"))]
+        {
+            false
+        }
+    }
+
     pub(super) fn riding_java_mob(&self) -> bool {
         #[cfg(feature = "java-mods")]
         {
@@ -209,6 +221,10 @@ impl Game<'_> {
         if self.riding.is_none()
             && let Some(ride) = self.java_entities.ride
         {
+            // The jump bar (the server's mirror charges the jump itself from the keys).
+            if ride.jump {
+                self.mount.charge_jump(keys.jump);
+            }
             if let Some(p) = self.player.as_mut() {
                 self.previous_position = p.position;
                 p.position = Vec3::new(ride.p[0], ride.p[1], ride.p[2]);

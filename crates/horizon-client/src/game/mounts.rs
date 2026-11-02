@@ -49,6 +49,40 @@ pub(super) struct MountState {
     was_jumping: bool,
 }
 impl MountState {
+    /// `LocalPlayer.aiStep`'s riding jump: the jump key charges `jump_scale`, its release
+    /// jumps (`getPlayerJumpPendingScale` returned, 0 otherwise) and ten ticks cool down.
+    pub(super) fn charge_jump(&mut self, jump_key: bool) -> f32 {
+        let mut jump = 0.0;
+        let st = self;
+        if st.jump_ticks < 0 {
+            st.jump_ticks += 1;
+            if st.jump_ticks == 0 {
+                st.jump_scale = 0.0;
+            }
+        }
+        if st.was_jumping && !jump_key {
+            st.jump_ticks = -10;
+            let amount = (st.jump_scale * 100.0).floor() as i32;
+            // PlayerRideableJumping.getPlayerJumpPendingScale
+            jump = if amount >= 90 {
+                1.0
+            } else {
+                0.4 + 0.4 * amount as f32 / 90.0
+            };
+        } else if !st.was_jumping && jump_key {
+            st.jump_ticks = 0;
+            st.jump_scale = 0.0;
+        } else if st.was_jumping {
+            st.jump_ticks += 1;
+            st.jump_scale = if st.jump_ticks < 10 {
+                st.jump_ticks as f32 * 0.1
+            } else {
+                0.8 + 2.0 / (st.jump_ticks - 9) as f32 * 0.1
+            };
+        }
+        st.was_jumping = jump_key;
+        jump
+    }
     pub(super) fn reset_jump(&mut self) {
         self.jump_ticks = 0;
         self.jump_scale = 0.0;
@@ -333,34 +367,7 @@ impl Game<'_> {
         let saddled = self.mobs[i].extra.saddled && Self::jumps(self.mobs[i].species());
         let mut jump = 0.0;
         if saddled {
-            let st = &mut self.mount;
-            if st.jump_ticks < 0 {
-                st.jump_ticks += 1;
-                if st.jump_ticks == 0 {
-                    st.jump_scale = 0.0;
-                }
-            }
-            if st.was_jumping && !keys.jump {
-                st.jump_ticks = -10;
-                let amount = (st.jump_scale * 100.0).floor() as i32;
-                // PlayerRideableJumping.getPlayerJumpPendingScale
-                jump = if amount >= 90 {
-                    1.0
-                } else {
-                    0.4 + 0.4 * amount as f32 / 90.0
-                };
-            } else if !st.was_jumping && keys.jump {
-                st.jump_ticks = 0;
-                st.jump_scale = 0.0;
-            } else if st.was_jumping {
-                st.jump_ticks += 1;
-                st.jump_scale = if st.jump_ticks < 10 {
-                    st.jump_ticks as f32 * 0.1
-                } else {
-                    0.8 + 2.0 / (st.jump_ticks - 9) as f32 * 0.1
-                };
-            }
-            st.was_jumping = keys.jump;
+            jump = self.mount.charge_jump(keys.jump);
         }
         jump
     }
@@ -635,6 +642,7 @@ impl Game<'_> {
     pub(super) fn jumpable_mount(&self) -> bool {
         self.mount_index()
             .is_some_and(|i| self.mobs[i].extra.saddled && Self::jumps(self.mobs[i].species()))
+            || self.java_mount_jumps()
     }
     /// `willPrioritizeJumpInfo`: charging a jump or recharging.
     pub(super) fn mount_jumping(&self) -> bool {
@@ -651,6 +659,11 @@ impl Game<'_> {
         jump_bar: bool,
     ) -> i32 {
         let Some(i) = self.mount_index() else {
+            // A Java mod's horse-style mob: its jump bar (its hearts are the mod's).
+            if jump_bar && self.java_mount_jumps() {
+                let draws = horizon_client::hud_overlays::jump_bar(w, h, 0, self.mount.jump_scale);
+                horizon_client::hud_layout::paint(batch, &self.gui.atlas, &draws);
+            }
             return 0;
         };
         let m = &self.mobs[i];
