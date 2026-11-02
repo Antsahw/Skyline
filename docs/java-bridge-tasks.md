@@ -346,3 +346,12 @@ tests pass; fmt and clippy `-D warnings` clean (horizon-client, horizon-jvm).
   per player, unlike client 1 said): its copied config stopped the overlay. Test:
   `MODS=<REI+TR+Jade...> tools/java_bridge/server_test.sh '$G key e tap; sleep 6'` (new);
   regress `reiscreen` (new), `rei hud join modsettings failmsg` pass.
+
+- **client r5-3, REI's settings per player** (`bridge-client-6`). Works (LAN, screenshots):
+  REI's config and craftable-only switch are each player's; the guest turns its filter on,
+  the host's stays off with its full list. The copy no longer breaks drawing: REI's entry
+  stacks, favourites and filtering rules are shared, and its config (held by REI's manager
+  and AutoConfig) is copied once. Doesn't: REI's search runs on its own threads for all
+  players, so a filtered search can briefly come out with another player's switch; the
+  craftable search is very slow here (30+ s, 2 cores), so the guest's filtered list may lag.
+  Test: regress `rei-lan` (new, LAN), `rei reiscreen modsettings` pass.
