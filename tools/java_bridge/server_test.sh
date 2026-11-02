@@ -3,7 +3,7 @@
 # and a game that joins it as a player (made operator), each in its own scratch folder. Then runs
 # each argument as a step, a screenshot of the player's game after each in OUT (default /tmp):
 # server-N.png. Steps see G (horizon-ctl of the player's game), sv (a server console command)
-# and X Y Z (the player's block). Prints the logs' failures.
+# and X Y Z (the player's block), S (the server's folder). Prints the logs' failures.
 #   MODS=~/mp tools/java_bridge/server_test.sh '$G key e tap; sleep 6'
 #   JAVA_ONLY=1 ... : after a Java-only change (no game rebuild; see java.sh)
 R=$(cd "$(dirname "$0")/../.." && pwd)
@@ -12,7 +12,10 @@ if ! "${JAVA_HOME:-/nonexistent}/bin/java" -version 2>&1 | grep -q '"25'; then
   JAVA_HOME=$(ls -d /usr/lib/jvm/*25* 2>/dev/null | head -1)
 fi
 export JAVA_HOME HORIZON_JAVA_HOME=$JAVA_HOME PATH=$JAVA_HOME/bin:$PATH
-if [ -n "$JAVA_ONLY" ]; then
+# NO_BUILD=1: the caller built already (regress.py).
+if [ -n "$NO_BUILD" ]; then
+  :
+elif [ -n "$JAVA_ONLY" ]; then
   export HORIZON_JAVA_JARS=$("$R/tools/java_bridge/java.sh") || exit 1
 else
   cd "$R" && cargo build -q --profile fast -p horizon-client --features horizon-client/java-mods 2>&1 \
@@ -57,6 +60,8 @@ GS=$(scratch player); echo "$GS" > /tmp/hz-bridge-player
   "$CTL" --socket "$GS/ctl.sock" launch --offscreen \
   --game "$R/target/fast/horizon-client" --resources "$R/.local/horizon-client/26.3" > "$GS/ctl.out" 2>&1)
 G="$CTL --socket $GS/ctl.sock"
+# Steps write files a check reads into S (the server's folder; its log: logs/latest.log).
+S=$SD
 $G connect "localhost:$PORT" Player >/dev/null
 $G wait-ready >/dev/null 2>&1
 sv "op Player"

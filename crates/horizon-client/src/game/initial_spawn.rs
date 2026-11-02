@@ -108,7 +108,14 @@ impl Game<'_> {
             None => {
                 // Java mods may generate the overworld with a generator of their own (a mod's
                 // world type: One Block's spawn is its block): wait until that is known.
-                if self.end.locator().is_some_and(|t| !t.oracle_decided()) {
+                if let Some(terrain) = self.end.locator().filter(|t| !t.oracle_decided()) {
+                    // The first chunk made decides it: a dedicated server with nobody online
+                    // makes none on its own, so it asks for the origin's (else it waited forever).
+                    if self.standalone_server()
+                        && let Ok(((cx, cz), _)) = terrain.spawn_origin()
+                    {
+                        self.request_spawn_chunk(cx, cz);
+                    }
                     return Ok(None);
                 }
                 *self.spawn_origin.insert(self.spawn_origin()?)
@@ -119,7 +126,15 @@ impl Game<'_> {
         // there). Asked once the first chunk is made: that chunk starts the mods' generation.
         #[cfg(feature = "java-mods")]
         if !self.spawn_origin_asked && super::java_mods::has_java_mods() {
-            if !self.streaming.is_lit(ox, oz) {
+            // A dedicated server with nobody online streams nothing around a center: the chunk
+            // is asked for alone, as the spiral below asks for its chunks (else it waited
+            // forever: "Preparing level" and no more).
+            if self.standalone_server() {
+                if !self.world.chunks.contains_key(&(ox, oz)) {
+                    self.request_spawn_chunk(ox, oz);
+                    return Ok(None);
+                }
+            } else if !self.streaming.is_lit(ox, oz) {
                 self.streaming.center = (ox, oz);
                 return Ok(None);
             }
@@ -144,11 +159,7 @@ impl Game<'_> {
                 if self.standalone_server() {
                     // getChunk(FULL) of the tested chunk alone: its 3x3 is decorated.
                     if !self.world.chunks.contains_key(&(cx, cz)) {
-                        let area = [((cx, cz), -1)];
-                        if self.streaming.extra != area {
-                            self.streaming.extra = area.to_vec();
-                            self.streaming.rank_full_task(cx, cz);
-                        }
+                        self.request_spawn_chunk(cx, cz);
                         return Ok(None);
                     }
                 } else if !self.streaming.is_lit(cx, cz) {
@@ -162,6 +173,15 @@ impl Game<'_> {
             self.spawn_spiral.advance();
         }
         Ok(Some([ox * 16 + 8, height, oz * 16 + 8]))
+    }
+    /// A dedicated server's spawn search asks for one chunk alone (getChunk(FULL)): with
+    /// nobody online it streams nothing around a center.
+    fn request_spawn_chunk(&mut self, cx: i32, cz: i32) {
+        let area = [((cx, cz), -1)];
+        if self.streaming.extra != area {
+            self.streaming.extra = area.to_vec();
+            self.streaming.rank_full_task(cx, cz);
+        }
     }
     /// MinecraftServer.setInitialSpawn's bonus chest: BonusChestFeature.place
     /// in the spawn chunk, a chest with the spawn bonus loot and a torch on

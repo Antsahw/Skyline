@@ -462,6 +462,16 @@ CASES = {
         look="lan-1-host.png and lan-1-guest.png: each minimap centred on its own player "
              "(the guest's coordinates 40 more in x), JourneyMap's and VoxelMap's full",
     ),
+    "server": dict(
+        about="A dedicated server with Java mods starts, its player joins at once and gets the HUD mods (Jade, AppleSkin) and Xaero's minimap",
+        mods=["jade", "appleskin", "xaero"], scene="none", server=True,
+        steps=['sv "gamemode survival Player"; sv "give Player minecraft:bread"; $G look 0 80 >/dev/null; sleep 6; $G state > $S/player.json'],
+        checks=[check_log(r"Done \(", "the server starts"),
+                check_file("player.json", r'"screen":"playing"', "the player plays"),
+                check_log(r"Gave 1 \[Bread\] to Player", "the player was in the world for the console's commands")],
+        forbid=[r"waited two minutes for the Java mods"],
+        look="Xaero's minimap top left, Jade's box at the top, AppleSkin's hunger outline",
+    ),
     "bigpack": dict(
         about="A whole pack (--pack): Java starts, the registries load, a player joins in time, the mods' worldgen runs",
         pack=True, scene="none", timeout=2700,
@@ -598,12 +608,18 @@ def run_game(case, name, jars, out, extra_env, pack=None, join_within=None):
                        HORIZON_CTL_LAUNCH_TIMEOUT=str(case.get("timeout", 600)))
         started = time.time()
         # A LAN case (lan=True): a host and a guest that joins it (lan_test.sh; steps see $H, $G).
-        script = "lan_test.sh" if case.get("lan") else "screen_test.sh"
+        # A dedicated server case (server=True): a server and a player joining it (server_test.sh;
+        # steps see $G, sv and $S, the server's folder; the log checked is the server's).
+        script = "server_test.sh" if case.get("server") else "lan_test.sh" if case.get("lan") else "screen_test.sh"
         r = subprocess.run([str(TOOLS / script), *case["steps"]], env=env, capture_output=True,
                            text=True, timeout=case.get("timeout", 600) + 300)
         (out / "screen_test.txt").write_text(r.stdout + r.stderr)
-        scratch = Path(Path("/tmp/hz-bridge-scratch").read_text().strip())
-        log_path = scratch / "home" / "logs" / "latest.log"
+        if case.get("server"):
+            scratch = Path(Path("/tmp/hz-bridge-server").read_text().strip())
+            log_path = scratch / "logs" / "latest.log"
+        else:
+            scratch = Path(Path("/tmp/hz-bridge-scratch").read_text().strip())
+            log_path = scratch / "home" / "logs" / "latest.log"
         log = log_path.read_text(errors="replace") if log_path.exists() else ""
         shutil.copy(log_path, out / "latest.log") if log_path.exists() else None
         results = []
@@ -713,7 +729,8 @@ def main():
         for ok, what in results:
             print(f"  {'ok  ' if ok else 'FAIL'} {what}")
         if case.get("look"):
-            print(f"  look {case['look']}: {out}/{case['scene']}-0.png")
+            shot = "server-1.png" if case.get("server") else f"{case['scene']}-0.png"
+            print(f"  look {case['look']}: {out}/{shot}")
         if errors:
             print(f"  ({len(errors)} failure lines in the log: {out}/latest.log)")
         summary.append((name, all(ok for ok, _ in results)))
