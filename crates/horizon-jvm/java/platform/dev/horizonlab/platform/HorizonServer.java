@@ -2035,6 +2035,21 @@ public final class HorizonServer {
         final Map<Level, it.unimi.dsi.fastutil.longs.Long2LongOpenHashMap> revisions = new IdentityHashMap<>();
         /** This thread has no view of Horizon's world (a mod's own thread). */
         boolean noView;
+        /** This thread's view counter, read in place (Natives.threadEpochBuffer); null: ask. */
+        final java.nio.ByteBuffer epochBuffer = epochBuffer();
+
+        long epoch() {
+            return epochBuffer != null ? epochBuffer.getLong(0) : Natives.threadEpoch();
+        }
+
+        private static java.nio.ByteBuffer epochBuffer() {
+            try {
+                java.nio.ByteBuffer b = Natives.threadEpochBuffer();
+                return b == null ? null : b.order(java.nio.ByteOrder.nativeOrder());
+            } catch (Throwable t) {
+                return null;
+            }
+        }
     }
 
     private static final Section NONE = new Section(new int[0], new BlockState[0]);
@@ -2065,7 +2080,7 @@ public final class HorizonServer {
             sections = SECTIONS.get();
             lastOwned = new Owned(thread, sections);
         }
-        long epoch = Natives.threadEpoch();
+        long epoch = sections.epoch();
         if (epoch != sections.epoch) {
             sections.levels.clear();
             sections.revisions.clear();

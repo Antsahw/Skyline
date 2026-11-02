@@ -1931,3 +1931,26 @@ for the 3×3 spawn chunks.
   (`java_mob_hits_entity`).
 - **Writes into unloaded chunks wait.** Vanilla's `setBlock` loads the chunk; Horizon's refused
   it. A mod's write into a chunk Horizon hasn't loaded now waits (both sides) until it loads.
+- **Horizon's projectiles on mod mobs.** Arrows, tridents, snowballs, fireballs meet the mods'
+  living entities (`java_projectile_targets`, from the snapshot's `seen`; one a player rides is
+  left out) and the hit goes to the mirror (`HorizonNeighbours.hurtByProjectile`): a
+  projectile of the same entity type, never added to the level, stands where Horizon's is, flies
+  as it flies and is owned by the shooter (the mirrored player, or the Horizon mob's shadow), so
+  the source is vanilla's own (`arrow`, `trident`, `thrown`, `fireball`), knockback follows the
+  flight and the mob strikes back. Not done: Punch, tipped arrows' effects, piercing through.
+- **A right-click on a mod mob ends the click (the client has no copy to ask).** Except with an
+  item aimed past entities (`used_past_entities`: bow, crossbow, trident, throwables, shield,
+  spyglass...): the Interact is sent and the item is used too, as vanilla's PASS goes on to
+  `useItem`. Before, a bow drawn at a mod mob did nothing.
+- **A mod's projectile already hits players and Horizon's mobs**: it is a Java entity in the
+  mirror, its `ProjectileUtil` search finds the mirrored players and the shadows, and their
+  hurts go to Horizon (regress `spit`, `spitsheep`: crittermod's spitter and its Pebble).
+- **Block reads don't call JNI to check the view.** `HorizonServer.section` asked
+  `Natives.threadEpoch` on every read (a mob's collisions read thousands a tick); the counter
+  is now read in place from a direct buffer over Rust's thread-local
+  (`Natives.threadEpochBuffer`). It was ~13% of all mod entity ticks in jcmd samples (whales,
+  skeleton creepers).
+- **No JFR in the bridge's JVM here**: `-XX:StartFlightRecording` in `HORIZON_JVM_OPTIONS` is
+  accepted but `jcmd <pid> JFR.*` is unknown. Sample instead: `jcmd $(pgrep -x horizon-client)
+  Thread.print` in a loop (the server thread is a `Thread-N` attached from Rust; `pgrep -f`
+  matches your own shell too).

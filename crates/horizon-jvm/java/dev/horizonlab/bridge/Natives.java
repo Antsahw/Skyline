@@ -104,6 +104,13 @@ public final class Natives {
     public static native long threadEpoch();
 
     /**
+     * This thread's view counter itself (the 8 bytes threadEpoch reads, native order), for a
+     * read without a JNI call: a mob's collisions read thousands of blocks a tick and each asks
+     * whether the view changed. Good for the calling thread only, while it lives.
+     */
+    public static native java.nio.ByteBuffer threadEpochBuffer();
+
+    /**
      * Horizon's state ids of the 16x16x16 section cx sy cz into out[(y * 16 + z) * 16 + x]
      * (named by stateName): 1, 0 where its chunk isn't loaded, -1 when this call's view can't
      * give them (read chunkBlocks then).
