@@ -705,6 +705,30 @@ impl Game<'_> {
     }
 }
 
+/// Items whose use is aimed past an entity, never taken by one (vanilla's `Mob.interact` passes
+/// on them): a right-click on a mod's entity with one also uses it (a bow drawn at a mod mob).
+pub(super) fn used_past_entities(item: &str) -> bool {
+    matches!(
+        item,
+        "minecraft:bow"
+            | "minecraft:crossbow"
+            | "minecraft:trident"
+            | "minecraft:snowball"
+            | "minecraft:egg"
+            | "minecraft:blue_egg"
+            | "minecraft:brown_egg"
+            | "minecraft:ender_pearl"
+            | "minecraft:splash_potion"
+            | "minecraft:lingering_potion"
+            | "minecraft:wind_charge"
+            | "minecraft:fishing_rod"
+            | "minecraft:shield"
+            | "minecraft:spyglass"
+            | "minecraft:goat_horn"
+            | "minecraft:experience_bottle"
+    )
+}
+
 /// One of the mods' living entities as Horizon's mobs see it (`HorizonNeighbours.seen`): its id,
 /// the vanilla type they take it for, where it stands, its box, health and facing, and whether it
 /// is an `Enemy` (what golems attack).
@@ -720,6 +744,10 @@ pub(super) struct Neighbour(
     pub(super) f32,
     pub(super) f32,
     pub(super) u8,
+    /// The UUID of the player riding it, empty when none: a player's own shots pass their
+    /// mount (`Projectile.canHitEntity`: not the owner's vehicle).
+    #[serde(default)]
+    pub(super) String,
 );
 
 /// The mods' living entities by dimension, from the last snapshot (game/java_server.rs's
@@ -779,5 +807,94 @@ impl Game<'_> {
             log::warn!("Java mods: a mob's hit on a mod entity failed: {e}");
             false
         }))
+    }
+
+    /// The mods' living entities in this level as Horizon's projectiles meet them (an arrow's,
+    /// a trident's, a snowball's targets): id and box. Those a player rides are left out (a
+    /// rider's shots pass their own mount; the rider is hit instead).
+    pub(super) fn java_projectile_targets(&self) -> Vec<(horizon_client::mobs::Who, Aabb)> {
+        let neighbours = NEIGHBOURS.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(list) = neighbours.as_ref().and_then(|n| n.get(self.dim.id())) else {
+            return Vec::new();
+        };
+        list.iter()
+            .filter(|n| n.10.is_empty())
+            .map(|n| {
+                let (at, half) = (Vec3::new(n.2, n.3, n.4), f64::from(n.5) / 2.0);
+                let b = Aabb::new(
+                    Vec3::new(at.x - half, at.y, at.z - half),
+                    Vec3::new(at.x + half, at.y + f64::from(n.6), at.z + half),
+                );
+                (horizon_client::mobs::Who::Mob(n.0), b)
+            })
+            .collect()
+    }
+
+    /// Whether `id` is one of the mods' living entities in this level.
+    pub(super) fn is_java_neighbour(&self, id: u32) -> bool {
+        if id < FIRST_ID as u32 {
+            return false;
+        }
+        let neighbours = NEIGHBOURS.lock().unwrap_or_else(|e| e.into_inner());
+        neighbours
+            .as_ref()
+            .and_then(|n| n.get(self.dim.id()))
+            .is_some_and(|l| l.iter().any(|n| n.0 == id))
+    }
+
+    /// Horizon's projectile `p` hit the mods' entity `id` for `amount`
+    /// (`Projectile.onHitEntity`): the mirror hurts it with the projectile's damage type, by a
+    /// projectile of the same type standing where this one is (its knockback follows the
+    /// flight) and owned by the shooter (a mirrored player, or a Horizon mob's shadow), so the
+    /// entity strikes back at the shooter. False when it took nothing.
+    pub(super) fn java_projectile_hits_entity(
+        &mut self,
+        p: &horizon_client::projectiles::Projectile,
+        id: u32,
+        amount: f32,
+    ) -> bool {
+        use horizon_client::mobs::Who;
+        use horizon_client::projectiles::ProjectileKind as K;
+        let kind = match p.kind {
+            K::Arrow { .. }
+                if p.arrow
+                    .as_ref()
+                    .is_some_and(|a| &*a.pickup_item.item == "minecraft:spectral_arrow") =>
+            {
+                "minecraft:spectral_arrow"
+            }
+            _ => p.kind.id(),
+        };
+        let (player, mob) = match p.owner {
+            Some(Who::Player) => {
+                let u = horizon_client::lan::playerdata::ints_uuid(
+                    p.owner_uuid.unwrap_or_else(|| self.acting_player_uuid()),
+                );
+                let h = format!("{u:032x}");
+                let uuid = format!(
+                    "{}-{}-{}-{}-{}",
+                    &h[..8],
+                    &h[8..12],
+                    &h[12..16],
+                    &h[16..20],
+                    &h[20..]
+                );
+                (uuid, -1)
+            }
+            Some(Who::Mob(m)) => (String::new(), m as i32),
+            None => (String::new(), -1),
+        };
+        let fire = p.arrow.as_ref().is_some_and(|a| a.on_fire());
+        let at = [p.position.x, p.position.y, p.position.z];
+        let v = [p.velocity.x, p.velocity.y, p.velocity.z];
+        let hurt = self.with_java_world(|| {
+            horizon_jvm::events::hurt_by_projectile(
+                id as i32, kind, &player, mob, amount, at, v, fire,
+            )
+        });
+        hurt.unwrap_or_else(|e| {
+            log::warn!("Java mods: a projectile's hit on a mod entity failed: {e}");
+            false
+        })
     }
 }

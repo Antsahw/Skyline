@@ -3626,7 +3626,11 @@ impl Game<'_> {
         let hear = self.native_hears_impacts();
         let mut impacts: Vec<Impact> = Vec::new();
         {
-            let targets = self.projectile_targets();
+            #[cfg_attr(not(feature = "java-mods"), allow(unused_mut))]
+            let mut targets = self.projectile_targets();
+            // The mods' living entities: Horizon's arrows and snowballs meet them too.
+            #[cfg(feature = "java-mods")]
+            targets.extend(self.java_projectile_targets());
             let breezes: Vec<u32> = self
                 .mobs
                 .iter()
@@ -4247,6 +4251,40 @@ impl Game<'_> {
             ProjectileKind::WindCharge | ProjectileKind::BreezeWindCharge
         ) {
             return self.wind_charge_hit(p, hit);
+        }
+        // Projectile.onHitEntity on one of the mods' entities: the mirror takes the hurt.
+        #[cfg(feature = "java-mods")]
+        if let Hit::Entity {
+            who: Who::Mob(id), ..
+        } = hit
+            && self.is_java_neighbour(id)
+        {
+            let mut shot = p.clone();
+            let amount = match p.kind {
+                ProjectileKind::Arrow { .. } | ProjectileKind::Trident => {
+                    self.shot_damage(&mut shot, None)
+                }
+                ProjectileKind::SmallFireball => 5.0,
+                ProjectileKind::LargeFireball { .. } => 6.0,
+                ProjectileKind::WitherSkull { .. } => 8.0,
+                ProjectileKind::ShulkerBullet { .. } => 4.0,
+                ProjectileKind::LlamaSpit => 1.0,
+                ProjectileKind::Thrown(t) => t.damage,
+                _ => 0.0,
+            };
+            let hurt = self.java_projectile_hits_entity(p, id, amount);
+            if p.arrow.is_some() {
+                // AbstractArrow.onHitEntity: spent (or on through, piercing) when it hurt,
+                // else turned back.
+                let outcome = if hurt {
+                    EntityHit::Hurt
+                } else {
+                    EntityHit::Refused
+                };
+                self.finish_arrow_hit(shot, outcome);
+                return Ok(());
+            }
+            // The rest goes on as on any entity: a snowball breaks, a fireball explodes.
         }
         // A wither skull's hit on a part or crystal goes through
         // `wither_skull_hit` below, as on any entity, and then explodes.

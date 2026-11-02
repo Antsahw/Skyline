@@ -29,6 +29,8 @@ public final class CritterClient implements ClientModInitializer {
         EntityRendererRegistry.register(CritterMod.BITER, Renderer::new);
         EntityRendererRegistry.register(CritterMod.MOUNT, Renderer::new);
         EntityRendererRegistry.register(CritterMod.HUNTER, Renderer::new);
+        EntityRendererRegistry.register(CritterMod.SPITTER, Renderer::new);
+        EntityRendererRegistry.register(CritterMod.PEBBLE, net.minecraft.client.renderer.entity.NoopRenderer::new);
     }
 
     /** A body, a head that looks around and four legs that walk. */

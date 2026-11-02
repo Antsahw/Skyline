@@ -187,6 +187,12 @@ pub(crate) fn thread_epoch() -> i64 {
     THREAD_EPOCH.get()
 }
 
+/// Where this thread's view counter lives (`Natives.threadEpochBuffer`: Java reads it in
+/// place). A `Cell<i64>` has `i64`'s layout.
+pub(crate) fn thread_epoch_cell() -> *mut i64 {
+    THREAD_EPOCH.with(|c| c.as_ptr())
+}
+
 /// Runs `f` (a call into Java) with `blocks` as what mods read of the world.
 pub fn with_blocks<R>(blocks: &dyn Blocks, f: impl FnOnce() -> R) -> R {
     struct Reset(Option<View>);

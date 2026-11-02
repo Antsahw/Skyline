@@ -783,3 +783,32 @@ to run downloaded mod jars; run them on a PC (`regress.py --jars <jars>`).
   `assets/`) for `horizon-prepare --prepare --minecraft-dir <it> --server-jar <it>`; then
   build again (`touch crates/horizon-jvm/build.rs`): a build before `.local/` exists skips
   the Fabric API modules and every fixture fails with "no Fabric API modules".
+- **entities 9 (round 7: projectiles both ways; mob tick cost)**, `bridge-entities-9`. Agent:
+  Claude (iaxivers' chats).
+  1. Horizon's projectiles hit mod mobs: arrows, tridents, snowballs, eggs, fireballs meet the
+     mods' living entities (`java_projectile_targets`; a mob a player rides is left out) and hurt
+     them on the mirror (`HorizonNeighbours.hurtByProjectile`) by a transient projectile of the
+     same type owned by the shooter: vanilla's own damage source, knockback along the flight, a
+     burning arrow ignites, the mob strikes back at the shooter. Also fixed on the way: a
+     right-click on a mod mob ended the click, so a bow drawn at one did nothing; with an item
+     aimed past entities (bow, crossbow, trident, throwables, shield...) the item is used too.
+     Regress `arrows` (the player's bow kills crittermod's biter). Not done: Punch, tipped
+     arrows' effects, piercing on.
+  2. A mod's projectile on players and Horizon's mobs: worked already (the projectile is a
+     Java entity; its search finds mirrored players and shadows, whose hurts go to Horizon).
+     crittermod gets a `spitter` throwing its own `Pebble` (ThrowableProjectile, 2 damage).
+     Regress `spit` (player in survival loses health) and `spitsheep` (Horizon's sheep dies).
+  3. Whale and skeleton creeper ticks: jcmd samples of the server thread (no JFR in the
+     bridge's JVM here) put ~40% of a whale's tick in the bridge's block reads, and a JNI call
+     per read (`Natives.threadEpoch`) was 5-13% of all mod entity ticks. The view counter is
+     now read in place (`Natives.threadEpochBuffer`: a direct buffer over Rust's thread-local).
+     Same scene (4 whales, 10 skeleton creepers), 400 samples each: block reads 21% → 18% of
+     entity-tick samples, threadEpoch 5% → 0%. Wall-clock medians here swing ±30% run to run
+     (2 shared cores), so no ms claim. Left: vanilla movement and collisions, Naturalist's
+     `resolveBodyCollisions`, the mixin's handler (~9% self), `Natives.chunkRevision` (JNI +
+     a dimension string per chunk per view).
+  Outside the area: `creatures.rs` (targets + one hit branch), `remote.rs` (the right-click),
+  `HorizonServer` (delegate, `Sections.epoch`), `Natives`, `horizon-jvm` `lib.rs`/`world.rs`,
+  scene `range` in `screen_test.sh`. Test: `regress.py --jars … arrows spit spitsheep golem
+  strikeback mounthud`. Full set here (16 cases) passes but `lost`: 0 of 28 lost, only 28 set
+  in time on this 2-core box (30 needed; same with the old jars).

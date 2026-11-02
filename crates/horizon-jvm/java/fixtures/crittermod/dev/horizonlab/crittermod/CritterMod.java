@@ -39,6 +39,17 @@ public final class CritterMod implements ModInitializer {
     public static final EntityType<Mount> MOUNT = Registry.register(BuiltInRegistries.ENTITY_TYPE, MOUNT_KEY,
             EntityType.Builder.of(Mount::new, MobCategory.CREATURE).sized(1.2F, 1.0F).build(MOUNT_KEY));
 
+    /** A critter that spits Pebbles (Spitter), the mod's own projectile. */
+    public static final ResourceKey<EntityType<?>> SPITTER_KEY = ResourceKey.create(Registries.ENTITY_TYPE,
+            Identifier.fromNamespaceAndPath("horizon_critters", "spitter"));
+    public static final EntityType<Spitter> SPITTER = Registry.register(BuiltInRegistries.ENTITY_TYPE, SPITTER_KEY,
+            EntityType.Builder.of(Spitter::new, MobCategory.MONSTER).sized(0.8F, 0.9F).build(SPITTER_KEY));
+    public static final ResourceKey<EntityType<?>> PEBBLE_KEY = ResourceKey.create(Registries.ENTITY_TYPE,
+            Identifier.fromNamespaceAndPath("horizon_critters", "pebble"));
+    public static final EntityType<Pebble> PEBBLE = Registry.register(BuiltInRegistries.ENTITY_TYPE, PEBBLE_KEY,
+            EntityType.Builder.<Pebble>of(Pebble::new, MobCategory.MISC).sized(0.25F, 0.25F)
+                    .clientTrackingRange(4).updateInterval(10).build(PEBBLE_KEY));
+
     /** Its own sound (assets/horizon_critters/sounds.json) and particle type (particles/sparkle.json). */
     public static final net.minecraft.sounds.SoundEvent SQUEAK = Registry.register(BuiltInRegistries.SOUND_EVENT,
             Identifier.fromNamespaceAndPath("horizon_critters", "critter.squeak"),
@@ -64,6 +75,10 @@ public final class CritterMod implements ModInitializer {
                 .add(Attributes.MAX_HEALTH, 10.0)
                 .add(Attributes.MOVEMENT_SPEED, 0.3)
                 .add(Attributes.ATTACK_DAMAGE, 3.0)
+                .add(Attributes.FOLLOW_RANGE, 16.0));
+        FabricDefaultAttributeRegistry.register(SPITTER, Mob.createMobAttributes()
+                .add(Attributes.MAX_HEALTH, 10.0)
+                .add(Attributes.MOVEMENT_SPEED, 0.25)
                 .add(Attributes.FOLLOW_RANGE, 16.0));
         ResourceKey<Item> egg = ResourceKey.create(Registries.ITEM,
                 Identifier.fromNamespaceAndPath("horizon_critters", "critter_spawn_egg"));

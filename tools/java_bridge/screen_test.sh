@@ -92,6 +92,15 @@ case "$SCENE" in
     'q "summon minecraft:iron_golem $(p $X+2.5) $Y $(p $Z-1.5)"' \
     'echo "$(p $X+2.5) $Y $(p $Z+2.5)" > "$S/critter.pos"' \
     'q "tp @s $(p $X-2.5) $Y $(p $Z+0.5) -90 20"' 'sleep 1' ;;
+  # A pen with no golem (Horizon's projectiles on mods' mobs): where a mod's mob goes, four
+  # blocks ahead of the player, in $S/critter.pos (the case summons it).
+  range) "$R/tools/java_bridge/around.sh" \
+    'q "fill $((X-4)) $Y $((Z-4)) $((X+4)) $((Y+1)) $((Z-4)) stone_bricks"' \
+    'q "fill $((X-4)) $Y $((Z+4)) $((X+4)) $((Y+1)) $((Z+4)) stone_bricks"' \
+    'q "fill $((X-4)) $Y $((Z-4)) $((X-4)) $((Y+1)) $((Z+4)) stone_bricks"' \
+    'q "fill $((X+4)) $Y $((Z-4)) $((X+4)) $((Y+1)) $((Z+4)) stone_bricks"' \
+    'echo "$(p $X+1.5) $Y $(p $Z+0.5)" > "$S/critter.pos"' \
+    'q "tp @s $(p $X-2.5) $Y $(p $Z+0.5) -90 20"' 'sleep 1' ;;
   # Mods' mobs and Horizon's: one of Horizon's sheep (no AI: it stays) ahead of the player;
   # where a hunter (the critter fixture's, it hunts sheep) goes, four blocks from it, in
   # $S/hunter.pos (the case summons it).

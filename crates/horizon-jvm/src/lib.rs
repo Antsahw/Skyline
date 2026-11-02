@@ -662,6 +662,11 @@ fn boot(env: &mut JNIEnv, jars: &[PathBuf]) -> jni::errors::Result<String> {
                 fn_ptr: native_thread_epoch as *mut c_void,
             },
             NativeMethod {
+                name: "threadEpochBuffer".into(),
+                sig: "()Ljava/nio/ByteBuffer;".into(),
+                fn_ptr: native_thread_epoch_buffer as *mut c_void,
+            },
+            NativeMethod {
                 name: "viewEpoch".into(),
                 sig: "()J".into(),
                 fn_ptr: native_view_epoch as *mut c_void,
@@ -1535,6 +1540,18 @@ extern "system" fn native_state_name<'local>(
 /// `Natives.threadEpoch()`: this thread's view changes so far (`world::thread_epoch`).
 extern "system" fn native_thread_epoch(_env: JNIEnv, _class: JClass) -> sys::jlong {
     world::thread_epoch()
+}
+
+/// `Natives.threadEpochBuffer()`: this thread's view counter as a direct buffer
+/// (`world::thread_epoch_cell`), so Java reads it without a call. Null if JNI refuses one.
+extern "system" fn native_thread_epoch_buffer(mut env: JNIEnv, _class: JClass) -> sys::jobject {
+    let cell = world::thread_epoch_cell();
+    // SAFETY: the cell is this thread's thread-local, alive as long as the thread; the buffer is
+    // read on this thread only (HorizonServer.Sections is per thread) and never written by Java.
+    match unsafe { env.new_direct_byte_buffer(cell.cast::<u8>(), 8) } {
+        Ok(b) => b.into_raw(),
+        Err(_) => std::ptr::null_mut(),
+    }
 }
 
 /// `Natives.viewEpoch()`: the number of the world view lent last (`world::epoch`).

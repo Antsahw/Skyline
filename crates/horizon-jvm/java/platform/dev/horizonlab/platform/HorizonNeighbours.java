@@ -164,7 +164,7 @@ public final class HorizonNeighbours {
 
     /**
      * The mods' living entities as Horizon's mobs see them, per dimension:
-     * `"<dimension>": [[id, "like", x, y, z, width, height, health, yaw, hostile], ...],` without
+     * `"<dimension>": [[id, "like", x, y, z, width, height, health, yaw, hostile, rider], ...],` without
      * the outer braces (HorizonEntityRender's snapshot writes them).
      */
     static void seen(StringBuilder out) {
@@ -187,7 +187,9 @@ public final class HorizonNeighbours {
                 out.append(',').append(e.getX()).append(',').append(e.getY()).append(',').append(e.getZ())
                         .append(',').append(e.getBbWidth()).append(',').append(e.getBbHeight())
                         .append(',').append(l.getHealth()).append(',').append(e.getYRot())
-                        .append(',').append(e instanceof net.minecraft.world.entity.monster.Enemy ? 1 : 0).append(']');
+                        .append(',').append(e instanceof net.minecraft.world.entity.monster.Enemy ? 1 : 0).append(',');
+                HorizonJson.string(rider(e), out);
+                out.append(']');
             }
             if (!first) out.append(']');
         }
@@ -210,5 +212,88 @@ public final class HorizonNeighbours {
         HorizonEntities.fire(target, "LivingEntity.hurtServer (Horizon's mob)", () -> hurt[0] = living.hurtServer(level, source, amount));
         // hurtServer's own knockback pushes it away from the shadow.
         return hurt[0];
+    }
+
+    /**
+     * Horizon's projectile hit the mods' entity `id` (Projectile.onHitEntity): a projectile of
+     * its type (`kind`, an entity type id) stands where Horizon's is, flying as it flies, owned
+     * by the shooter (the mirrored player `player`, else the shadow of Horizon's mob `mob`), and
+     * the entity is hurt by it with the projectile's own damage source (arrow, trident, thrown,
+     * fireball...), so its knockback follows the flight, mods see the projectile they expect
+     * (`getDirectEntity() instanceof AbstractArrow`) and the entity strikes back at the shooter.
+     * The projectile is never added to the level. A burning arrow sets it alight first
+     * (AbstractArrow.onHitEntity). False when there is no such entity or it took nothing.
+     */
+    public static boolean hurtByProjectile(int id, String kind, String player, int mob, float amount,
+            double x, double y, double z, double vx, double vy, double vz, boolean burning) {
+        Entity target = HorizonEntities.byId(id);
+        if (!(target instanceof LivingEntity living) || !(target.level() instanceof ServerLevel level)) return false;
+        Entity owner = null;
+        if (!player.isEmpty()) {
+            try {
+                owner = HorizonServer.player(java.util.UUID.fromString(player));
+            } catch (IllegalArgumentException ignored) {
+                // not a UUID: no owner
+            }
+        } else if (mob >= 0) {
+            synchronized (HorizonNeighbours.class) {
+                owner = SHADOWS.getOrDefault(level, Map.of()).get(mob);
+            }
+        }
+        Entity direct = projectile(level, kind, owner, x, y, z, vx, vy, vz);
+        var sources = level.damageSources();
+        DamageSource source;
+        if (direct instanceof net.minecraft.world.entity.projectile.arrow.ThrownTrident) {
+            source = sources.trident(direct, owner == null ? direct : owner);
+        } else if (direct instanceof net.minecraft.world.entity.projectile.arrow.AbstractArrow arrow) {
+            source = sources.arrow(arrow, owner == null ? arrow : owner);
+        } else if (direct instanceof net.minecraft.world.entity.projectile.hurtingprojectile.WitherSkull skull) {
+            source = sources.witherSkull(skull, owner);
+        } else if (direct instanceof net.minecraft.world.entity.projectile.hurtingprojectile.Fireball ball) {
+            source = sources.fireball(ball, owner);
+        } else if (direct instanceof net.minecraft.world.entity.projectile.LlamaSpit spit && owner instanceof LivingEntity l) {
+            source = sources.spit(spit, l);
+        } else if (direct != null) {
+            source = sources.thrown(direct, owner);
+        } else if (owner instanceof LivingEntity l) {
+            source = sources.mobProjectile(l, l);
+        } else {
+            source = sources.generic();
+        }
+        if (burning && !living.getType().fireImmune()) living.igniteForSeconds(5.0F);
+        boolean[] hurt = {false};
+        HorizonEntities.fire(target, "LivingEntity.hurtServer (Horizon's " + kind + ")",
+                () -> hurt[0] = living.hurtServer(level, source, amount));
+        return hurt[0];
+    }
+
+    /** A projectile of type `kind` for a damage source only: placed and aimed, not in the level. */
+    private static Entity projectile(ServerLevel level, String kind, Entity owner,
+            double x, double y, double z, double vx, double vy, double vz) {
+        if (REFUSED.containsKey(kind)) return null;
+        try {
+            var key = net.minecraft.resources.Identifier.tryParse(kind);
+            var type = key == null ? null : net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE.getOptional(key).orElse(null);
+            Entity e = type == null ? null : type.create(level, EntitySpawnReason.TRIGGERED);
+            if (e == null) {
+                REFUSED.put(kind, true);
+                return null;
+            }
+            e.setPos(x, y, z);
+            e.setDeltaMovement(vx, vy, vz);
+            if (owner != null && e instanceof net.minecraft.world.entity.projectile.Projectile p) p.setOwner(owner);
+            return e;
+        } catch (Throwable t) {
+            if (REFUSED.put(kind, true) == null) Natives.log("Java mods: no " + kind + " for a projectile's hit: " + t);
+            return null;
+        }
+    }
+
+    /** The UUID of the player riding `e`, or "" (Horizon's shots pass the shooter's mount). */
+    static String rider(Entity e) {
+        for (Entity p : e.getPassengers()) {
+            if (p instanceof net.minecraft.world.entity.player.Player) return p.getStringUUID();
+        }
+        return "";
     }
 }
