@@ -346,3 +346,25 @@ tests pass; fmt and clippy `-D warnings` clean (horizon-client, horizon-jvm).
   per player, unlike client 1 said): its copied config stopped the overlay. Test:
   `MODS=<REI+TR+Jade...> tools/java_bridge/server_test.sh '$G key e tap; sleep 6'` (new);
   regress `reiscreen` (new), `rei hud join modsettings failmsg` pass.
+
+- **pack round 5, task 1: memory** (`bridge-pack-6`, 4f287e0cc, ff8506aca; Claude for
+  iaxivers). Works: the behaviour JSON's tree (~380 MB at 577k states) is freed after the facts
+  load; baked faces drop the sprite name and the rest of the `ModelQuad` (model catalog at 577k:
+  579 → 385 MB); the registry was already done upstream (~350 B a state). The 155-jar pack
+  with no JVM opens its world at 3.76 GB (was 5.2) and the player joins. Doesn't: with the JVM
+  (~2.5 GB) it's still killed by this sandbox's ~6.2 GB limit; ~1.2 GB of that is llvmpipe's
+  textures, so on a real GPU it may fit in 8 GB (untested). Left: render assets 683 MB. Test:
+  `HORIZON_MEM_LOG=1` with the pack, read `memory after` lines; `cargo run --profile fast -p
+  horizon-client-render --example texture_memory_probe -- <resources>`; regress `pot hud tech`
+  pass.
+- **pack round 5, task 2: lazy loot tables** (`bridge-pack-6`, 6d9e98480). Works: upstream's
+  shared tables, overlays and key stay; tables are listed, then parsed (and the
+  `native_loot_table_load` hook run) on first use. 208k-state pack: the loot stage +1 MB.
+  Doesn't: nothing known. Test: horizon-world's loot tests; regress `pot` (Farmer's Delight
+  loot), `skyblock` and `oneblock` pass.
+- **pack round 5, task 3: skyblock join** (`bridge-pack-6`, 9ba115a97). Works: a new player
+  also waits until the run a forced chunk stopped has gone through (no retry queued, two quiet
+  ticks). Doesn't: the island still lands ~1 s after the join, because Skyblock Infinite's
+  function waits for a player on purpose (`data get entity @p`, rescheduled each tick), as
+  in vanilla. Not a bridge bug. Test: regress `skyblock oneblock` (pass, screenshot shows
+  the island).
