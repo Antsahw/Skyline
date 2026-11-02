@@ -537,3 +537,17 @@ tests pass; fmt and clippy `-D warnings` clean (horizon-client, horizon-jvm).
   players, so a filtered search can briefly come out with another player's switch; the
   craftable search is very slow here (30+ s, 2 cores), so the guest's filtered list may lag.
   Test: regress `rei-lan` (new, LAN), `rei reiscreen modsettings` pass.
+
+- **client r6-1, release builds with Java mods, the launcher's Java mods page** (`bridge-client-7`).
+  Works: a game built with no Minecraft jar on the machine (any CI) carries the platform mod's
+  sources and builds them on the player's first start with Mojang's Java, against their own
+  game (~11 s once); tested headless with no Java installed (Java downloaded, platform built,
+  Farmer's Delight's pot opens). `game-build.yml` has an opt-in `java_mods` input that adds
+  Linux and Windows `-java` assets; nothing calls it yet (release/nightly signing is the
+  maintainer's call). Launcher (screenshots): a Java mods tab on Home for an instance with
+  `mods-java/` (jars with Fabric names, Add/drop, Open folder, Remove to the trash, the last
+  game's failures on their rows) and `horizon-launcher java-mods list|add|remove|failed`;
+  clippy and its tests pass. Doesn't: the launcher can't yet install a `-java` build (no
+  signed assets exist); the tab only shows when `mods-java/` exists. Test:
+  `HORIZON_BRIDGE_PLATFORM=source cargo build ... --features java-mods` then
+  `tools/java_bridge/install_test.sh`; regress `pot join rei hud` pass.
