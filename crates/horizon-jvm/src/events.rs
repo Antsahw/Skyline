@@ -228,6 +228,16 @@ pub enum Action {
         /// The attacker's name (the death message's killer).
         by: Option<String>,
     },
+    /// A mod's mob hurt one of Horizon's (its shadow, HorizonNeighbours): Horizon's mob `id` of
+    /// `dimension`, the damage type, the amount, where it came from, the mods' attacker's id.
+    HurtMob {
+        dimension: String,
+        id: i32,
+        damage_type: String,
+        amount: f32,
+        from: Option<[f64; 3]>,
+        by: Option<i32>,
+    },
 }
 
 static ACTIONS: Mutex<Vec<Action>> = Mutex::new(Vec::new());
@@ -1658,6 +1668,22 @@ pub fn entities() -> Result<String, String> {
         ))
     })?;
     Ok(json.unwrap_or_else(|| "{}".into()))
+}
+
+/// Horizon's mobs near its players this tick, for the mods' mobs (`HorizonNeighbours.update`):
+/// `{"<dimension>": [[id, "type", x, y, z, yaw, health], ...]}`.
+pub fn horizon_mobs(json: &str) -> Result<(), String> {
+    with_server(|env, class| {
+        let json = env.new_string(json)?;
+        env.call_static_method(
+            class,
+            "horizonMobs",
+            "(Ljava/lang/String;)V",
+            &[JValue::Object(&json)],
+        )?;
+        Ok(())
+    })?;
+    Ok(())
 }
 
 /// A player hit the mod entity with this id (`Player.attack` on the mods' server). False when

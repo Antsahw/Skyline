@@ -361,3 +361,17 @@ tests pass; fmt and clippy `-D warnings` clean (horizon-client, horizon-jvm).
   Test: `regress.py --jars … mount mountjump`; `lan_e2e.py --java-mods <critter jar> --check
   javamount` (now also: the host sees the guest ride). Not done: the mod mob's hearts on the
   rider's HUD.
+- **entities 6 (round 5, task 2: mod mobs and Horizon's mobs)**, `bridge-entities-6` (on
+  `bridge-entities-5`). Agent: Claude (iaxivers' chats). Works, one way: Horizon's mobs within
+  32 blocks of a player (128 a level, every level) stand in the mirror as shadows of their
+  type (`HorizonNeighbours`: no AI, not ticked, moved and given their health each tick), so
+  mods' mobs see them as any entity (`HorizonServer.entities` lists them): a mod's predator
+  hunts Horizon's sheep, a mod's prey flees Horizon's fox. What a mod's mob does to one goes to
+  Horizon (`CombatCaptureMixin` → `Natives.hurtMob` → `Action::HurtMob` → `java_hurt_mob`):
+  Horizon's mob takes it as a mob attack, knocked back from the attacker, in its own level.
+  During a routed player attack the shadows step aside for HorizonCombat's copies. New fixture
+  mob `horizon_critters:hunter` (hunts sheep). Outside the area: `HorizonServer` (2 lines
+  and a delegate), `CombatCaptureMixin` (mixins), `Natives`, `events.rs`, `lib.rs`. Test:
+  `regress.py --jars … neighbours` (Horizon's sheep at 8, then killed by the hunter). Not done:
+  the other way. Horizon's mobs don't see mods' mobs (its AI targets and flees only its own
+  mobs and players), and a Horizon mob a mod's mob hurt doesn't strike back.

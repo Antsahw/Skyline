@@ -1050,11 +1050,16 @@ mod run {
             };
             // The entities' snapshot in the same view as the tick: what the tick read of the
             // world (whole sections, HorizonServer.section) serves it too.
+            let neighbours = self.java_neighbours_json(&players);
             let (ticked, entities) = self.with_java_world(|| {
                 if let Some(rules) = &rules
                     && let Err(e) = horizon_jvm::events::game_rules(rules)
                 {
                     log::warn!("Java mods: game rules not passed: {e}");
+                }
+                // Horizon's mobs near players, for the mods' mobs to see (HorizonNeighbours).
+                if let Err(e) = horizon_jvm::events::horizon_mobs(&neighbours) {
+                    log::warn!("Java mods: Horizon's mobs not passed: {e}");
                 }
                 let ticked = horizon_jvm::events::game_time(game_time, seed).and_then(|()| {
                     horizon_jvm::events::server_tick(ticks, dedicated, &root, &players, &events)
@@ -1697,7 +1702,8 @@ mod run {
                             drops.push((dimension.clone(), drop));
                         }
                     }
-                    hurt @ horizon_jvm::events::Action::HurtPlayer { .. } => {
+                    hurt @ (horizon_jvm::events::Action::HurtPlayer { .. }
+                    | horizon_jvm::events::Action::HurtMob { .. }) => {
                         PENDING_HURTS
                             .lock()
                             .unwrap_or_else(|e| e.into_inner())
@@ -1895,6 +1901,18 @@ mod run {
         /// player in-frame. A type Horizon doesn't know (a mod's)
         /// counts as a mob's attack, or generic damage when it came from nowhere.
         fn java_hurt(&mut self, action: horizon_jvm::events::Action) {
+            if let horizon_jvm::events::Action::HurtMob {
+                dimension,
+                id,
+                damage_type,
+                amount,
+                from,
+                by,
+            } = action
+            {
+                self.java_hurt_mob(&dimension, id, &damage_type, amount, from, by);
+                return;
+            }
             let horizon_jvm::events::Action::HurtPlayer {
                 uuid,
                 damage_type,
@@ -1936,6 +1954,119 @@ mod run {
                 self.hurt_player_from(amount, from, &kind, Some(None));
                 self.combat.projectile_direct = None;
             }
+        }
+
+        /// A mod's mob hurt one of Horizon's (`Natives.hurtMob`, its shadow in the mirror): the
+        /// mob takes it as a mob's attack (its armour, invulnerable ticks, death) and is knocked
+        /// back from where it came, in its own level (in place or parked).
+        #[cfg(feature = "java-mods")]
+        fn java_hurt_mob(
+            &mut self,
+            dimension: &str,
+            id: i32,
+            damage_type: &str,
+            amount: f32,
+            from: Option<[f64; 3]>,
+            by: Option<i32>,
+        ) {
+            use horizon_client::mobs::{Damage, DamageKind, Who};
+            let Ok(id) = u32::try_from(id) else {
+                return;
+            };
+            let kind = match damage_type {
+                "minecraft:mob_attack" | "minecraft:mob_attack_no_aggro" => DamageKind::MobAttack,
+                _ if from.is_some() => DamageKind::MobAttack,
+                _ => DamageKind::Generic,
+            };
+            let damage = Damage {
+                kind,
+                attacker: by.and_then(|b| u32::try_from(b).ok()).map(Who::Mob),
+                from,
+            };
+            let hurt = |m: &mut horizon_client::mobs::Mob| {
+                if !m.alive() || m.removed {
+                    return;
+                }
+                if m.damage(amount, damage) {
+                    // LivingEntity.hurtServer's knockback: 0.4 away from the attacker.
+                    if let Some(f) = from {
+                        m.knockback(0.4, f[0] - m.position.x, f[2] - m.position.z);
+                    }
+                    m.needs_sync = true;
+                }
+            };
+            if self.dim.id() == dimension {
+                if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
+                    hurt(m);
+                }
+                return;
+            }
+            let dim = super::super::Dim::from_id(dimension);
+            if let Some(level) = self.levels.parked_mut(dim)
+                && let Some(m) = level.mobs.iter_mut().find(|m| m.id == id)
+            {
+                hurt(m);
+            }
+        }
+
+        /// Horizon's mobs within 32 blocks of a player, per dimension, for the mods' mobs to
+        /// see (`HorizonNeighbours`): `{"<dimension>": [[id, "type", x, y, z, yaw, health]]}`,
+        /// at most 128 a level.
+        #[cfg(feature = "java-mods")]
+        fn java_neighbours_json(&self, players: &[horizon_jvm::events::Player]) -> String {
+            use std::fmt::Write;
+            let mut out = String::from("{");
+            let mut level = |out: &mut String, dim: &str, mobs: &[horizon_client::mobs::Mob]| {
+                let near: Vec<[f64; 3]> = players
+                    .iter()
+                    .filter(|p| p.dimension == dim)
+                    .map(|p| p.position)
+                    .collect();
+                if near.is_empty() {
+                    return;
+                }
+                if out.len() > 1 {
+                    out.push(',');
+                }
+                let _ = write!(out, "{}:[", serde_json::to_string(dim).unwrap_or_default());
+                let mut n = 0;
+                for m in mobs.iter().filter(|m| m.alive() && !m.removed) {
+                    let at = [m.position.x, m.position.y, m.position.z];
+                    if !near.iter().any(|p| {
+                        (p[0] - at[0]).powi(2) + (p[1] - at[1]).powi(2) + (p[2] - at[2]).powi(2)
+                            <= 32.0 * 32.0
+                    }) {
+                        continue;
+                    }
+                    if n > 0 {
+                        out.push(',');
+                    }
+                    let _ = write!(
+                        out,
+                        "[{},\"minecraft:{}\",{},{},{},{},{}]",
+                        m.id,
+                        m.kind.id.trim_start_matches("minecraft:"),
+                        at[0],
+                        at[1],
+                        at[2],
+                        m.yaw,
+                        m.health
+                    );
+                    n += 1;
+                    if n >= 128 {
+                        break;
+                    }
+                }
+                out.push(']');
+            };
+            level(&mut out, self.dim.id(), &self.mobs);
+            for dim in self.levels.parked_dims() {
+                if let Some(mobs) = self.levels.parked_mobs(dim) {
+                    level(&mut out, dim.id(), mobs);
+                }
+            }
+            out.push('}');
+            out
         }
 
         /// Moves a player as a Java mod asked: Horizon's own `/tp`, run by the server in the

@@ -28,6 +28,11 @@ public final class CritterMod implements ModInitializer {
     public static final ResourceKey<EntityType<?>> BITER_KEY = ResourceKey.create(Registries.ENTITY_TYPE, BITER_ID);
     public static final EntityType<Biter> BITER = Registry.register(BuiltInRegistries.ENTITY_TYPE, BITER_KEY,
             EntityType.Builder.of(Biter::new, MobCategory.MONSTER).sized(0.8F, 0.9F).build(BITER_KEY));
+    /** A critter that hunts sheep (Hunter): Horizon's own, for a test. */
+    public static final ResourceKey<EntityType<?>> HUNTER_KEY = ResourceKey.create(Registries.ENTITY_TYPE,
+            Identifier.fromNamespaceAndPath("horizon_critters", "hunter"));
+    public static final EntityType<Hunter> HUNTER = Registry.register(BuiltInRegistries.ENTITY_TYPE, HUNTER_KEY,
+            EntityType.Builder.of(Hunter::new, MobCategory.MONSTER).sized(0.8F, 0.9F).build(HUNTER_KEY));
     /** A critter players ride (Mount). */
     public static final ResourceKey<EntityType<?>> MOUNT_KEY = ResourceKey.create(Registries.ENTITY_TYPE,
             Identifier.fromNamespaceAndPath("horizon_critters", "mount"));
@@ -47,6 +52,11 @@ public final class CritterMod implements ModInitializer {
         FabricDefaultAttributeRegistry.register(CRITTER, Mob.createMobAttributes()
                 .add(Attributes.MAX_HEALTH, 8.0)
                 .add(Attributes.MOVEMENT_SPEED, 0.25));
+        FabricDefaultAttributeRegistry.register(HUNTER, Mob.createMobAttributes()
+                .add(Attributes.MAX_HEALTH, 10.0)
+                .add(Attributes.MOVEMENT_SPEED, 0.3)
+                .add(Attributes.ATTACK_DAMAGE, 3.0)
+                .add(Attributes.FOLLOW_RANGE, 16.0));
         FabricDefaultAttributeRegistry.register(MOUNT, Mob.createMobAttributes()
                 .add(Attributes.MAX_HEALTH, 20.0)
                 .add(Attributes.MOVEMENT_SPEED, 0.25));

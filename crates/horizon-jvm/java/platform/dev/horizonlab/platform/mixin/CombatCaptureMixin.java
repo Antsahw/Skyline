@@ -19,6 +19,12 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 public abstract class CombatCaptureMixin {
     @Inject(method = "hurtServer", at = @At("HEAD"), cancellable = true)
     private void horizon$catchHurt(ServerLevel level, DamageSource source, float amount, CallbackInfoReturnable<Boolean> cir) {
+        // A shadow of Horizon's mob (HorizonNeighbours): a mod's mob hurt it, Horizon hurts its own.
+        if (dev.horizonlab.platform.HorizonNeighbours.isShadow(this)) {
+            dev.horizonlab.platform.HorizonNeighbours.hurt((LivingEntity) (Object) this, source, amount);
+            cir.setReturnValue(amount > 0);
+            return;
+        }
         if (!HorizonCombat.isCopy(this)) return;
         HorizonCombat.caughtHurt((LivingEntity) (Object) this, source, amount);
         cir.setReturnValue(amount > 0);
@@ -27,6 +33,10 @@ public abstract class CombatCaptureMixin {
     @Inject(method = "knockback(DDDLnet/minecraft/world/damagesource/DamageSource;FZ)V", at = @At("HEAD"), cancellable = true)
     private void horizon$catchKnockback(double strength, double x, double z, DamageSource source, float amount, boolean resisted,
                                         CallbackInfo ci) {
+        if (dev.horizonlab.platform.HorizonNeighbours.isShadow(this)) {
+            ci.cancel();
+            return;
+        }
         if (!HorizonCombat.isCopy(this)) return;
         HorizonCombat.caughtKnockback((LivingEntity) (Object) this, strength, x, z);
         ci.cancel();

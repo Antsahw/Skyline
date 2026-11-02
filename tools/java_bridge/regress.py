@@ -214,6 +214,17 @@ CASES = {
                 check_file("rose.txt", r"rose (1\.[2-9]|[2-9])", "the player went up with the mount (over 1.2 above the floor)")],
         look="the jump bar over the hotbar (bar.png in the scratch folder)",
     ),
+    "neighbours": dict(
+        about="A mod's mob sees Horizon's own (HorizonNeighbours): crittermod's hunter finds Horizon's sheep and bites it; Horizon's sheep is hurt",
+        fixtures=["crittermod"], scene="neighbours",
+        steps=['$C entities 16 > $S/before.json; $C command "summon horizon_critters:hunter $(cat $S/hunter.pos)" >/dev/null; '
+               'sleep 1; $C screenshot $S/chase.png >/dev/null; sleep 6; $C entities 16 > $S/after.json; '
+               'python3 "$R/tools/java_bridge/sheep_check.py" $S/before.json $S/after.json > $S/sheep.txt'],
+        checks=[check_file("sheep.txt", r"(?m)^there", "Horizon's sheep stood there at first (8 health)"),
+                check_file("sheep.txt", r"(?m)^hurt", "then took the hunter's bites (less health, or killed by them)"),
+                check_log(r"Summoned new Hunter", "the hunter is summoned")],
+        look="the hunter at the sheep",
+    ),
     "gecko": dict(
         about="GeckoLib (geckomod fixture, built against the GeckoLib jar): a mob's GeckoLib model drawn, its looping animation moving it",
         fixtures=["geckomod"], mods=["geckolib"], scene="entity", env={"ENTITY": "horizon_gecko:bobber"},

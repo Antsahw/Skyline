@@ -501,6 +501,11 @@ fn boot(env: &mut JNIEnv, jars: &[PathBuf]) -> jni::errors::Result<String> {
                 fn_ptr: native_hurt_player as *mut c_void,
             },
             NativeMethod {
+                name: "hurtMob".into(),
+                sig: "(Ljava/lang/String;ILjava/lang/String;FDDDI)V".into(),
+                fn_ptr: native_hurt_mob as *mut c_void,
+            },
+            NativeMethod {
                 name: "stateName".into(),
                 sig: "(I)Ljava/lang/String;".into(),
                 fn_ptr: native_state_name as *mut c_void,
@@ -1283,6 +1288,37 @@ extern "system" fn native_hurt_player<'local>(
             amount,
             from,
             by,
+        });
+    }));
+}
+
+#[allow(clippy::too_many_arguments)]
+extern "system" fn native_hurt_mob<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    dimension: JString<'local>,
+    id: sys::jint,
+    damage_type: JString<'local>,
+    amount: sys::jfloat,
+    x: sys::jdouble,
+    y: sys::jdouble,
+    z: sys::jdouble,
+    by: sys::jint,
+) {
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let (Ok(dimension), Ok(damage_type)) = (
+            env.get_string(&dimension).map(String::from),
+            env.get_string(&damage_type).map(String::from),
+        ) else {
+            return;
+        };
+        events::push(events::Action::HurtMob {
+            dimension,
+            id,
+            damage_type,
+            amount,
+            from: (!x.is_nan()).then_some([x, y, z]),
+            by: (by >= 0).then_some(by),
         });
     }));
 }

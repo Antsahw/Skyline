@@ -1609,3 +1609,8 @@ Sample it with gdb (`gdb -p $(pgrep -x horizon-client) -batch -ex bt`, every 2 s
   rider's client. Mirrored players have no Java client: `RiderAuthorityMixin` makes them
   non-authoritative and the mirror moves the mob. Never call `ServerPlayer.rideTick` on a
   mirrored player: it runs `ServerPlayer.tick`.
+
+- **Horizon's mobs in the mirror (`HorizonNeighbours`).** The mods' mobs only see entities the
+  mirrored level lists. Horizon's own mobs near players are shadows there (same id as
+  Horizon's), refreshed each tick. A hurt to a shadow goes to Horizon. Shadows are not ticked:
+  never `tick()` one, and don't add them to `HorizonEntities` (it would save and tick them).
