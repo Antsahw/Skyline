@@ -215,6 +215,16 @@ saying something works.
   that joins it; steps with `$G`, screenshots of the player's game. Its players get mod screens
   (Tech Reborn's machines), HUD mods (Jade with TR's energy) and REI over their inventory and
   over mod screens: the dedicated server runs the same headless client as a LAN host.
+- Dedicated servers with Java mods hung at "Preparing level" after the upstream merge: with
+  nobody online a standalone server streams no center (radius -1), but the spawn search
+  waited for the mods' generator to decide (the first chunk made decides it) and for the
+  origin chunk to be lit, both by moving the center. It now asks for those chunks alone
+  (`request_spawn_chunk`, as upstream's spiral does: `streaming.extra` + `rank_full_task`).
+  Then a player joining was held two minutes (`release_held_joins` waits for the spawn's 3x3,
+  again by the center): `lan_update_streaming` keeps the spawn's 3x3 as an area while players
+  are held. Regress `server` (server=True cases run `server_test.sh`: a dedicated server and a
+  joining player; checks read the server's log). Tested there: Jade, AppleSkin, Xaero's
+  minimap and its settings (Y), Nature's Compass's biome screen, Options → Mods' Java mods.
 - **REI reloads on its own** at a client's join (Architectury's join event, now that joins
   run; on REI's thread): that empties the client's display registry of the server's displays,
   and REI's reload removes the overlay renderer it applied to the open screen (the renderer

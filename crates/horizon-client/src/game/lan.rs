@@ -2427,7 +2427,10 @@ impl Game<'_> {
         // The (new) spawn's chunks, as the player would load them.
         let lit = self.spawn_chunks_lit();
         if !lit && let Some(s) = self.spawn {
-            self.streaming.center = ((s.x.floor() as i32) >> 4, (s.z.floor() as i32) >> 4);
+            let chunk = ((s.x.floor() as i32) >> 4, (s.z.floor() as i32) >> 4);
+            // (A dedicated server streams no center: `lan_update_streaming` adds the spawn
+            // as an area while players are held.)
+            self.streaming.center = chunk;
         }
         for held in &mut self.held_joins {
             held.1 += 1;
@@ -2886,6 +2889,13 @@ impl Game<'_> {
                 self.portal_ticket_chunks(self.dim)
                     .into_iter()
                     .map(|chunk| (chunk, 1)),
+            )
+            // Players held until the Java mods' load functions ran wait for the spawn's 3x3
+            // (`release_held_joins`): a dedicated server with nobody in loads it this way.
+            .chain(
+                self.spawn
+                    .filter(|_| !self.held_joins.is_empty() && self.dim == super::Dim::Overworld)
+                    .map(|s| (((s.x.floor() as i32) >> 4, (s.z.floor() as i32) >> 4), 1)),
             )
             .collect();
     }
