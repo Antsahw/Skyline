@@ -75,6 +75,10 @@ MODS = {
     "mcjtylib": ["mcjtylib*"],
     "rftoolsbase": ["rftoolsbase*"],
     "fcap": ["forgeconfigapiport*"],
+    "cc": ["cc-tweaked*"],
+    "legendarytooltips": ["legendarytooltips*"],
+    "iceberg": ["iceberg*"],
+    "prism-lib": ["prism-*"],
 }
 
 
@@ -614,6 +618,24 @@ CASES = {
         forbid=[r"A mod failed in the GUI's frame", r"A mod failed in the client's"],
         look="MiniHUD's lines at the top left: the date, coordinates, facing",
     ),
+    "computer": dict(
+        about="CC: Tweaked: a computer's screen (its client menu made from Fabric's opening data) draws its terminal, and typing reaches the computer",
+        mods=["cc"], scene="computer",
+        steps=['$C type "mkdir typed"; sleep 1; $C key enter tap; sleep 3; '
+               'find $S -path "*computercraft/computer*" -name typed > $S/typed.txt; $C state > $S/state.json'],
+        checks=[check_json("state.json", ["screen"], "container", "the computer's screen is open"),
+                check_file("typed.txt", r"computer/0/typed", "the typed command ran on the computer")],
+        forbid=[r"Cannot update terminal", r"client's menu of \S+ couldn't be made", r"screen of computercraft:\S+ could not open"],
+        look="the advanced computer's terminal: CraftOS 1.9, '> mkdir typed', a new prompt",
+    ),
+    "tooltips": dict(
+        about="Legendary Tooltips (Iceberg, Prism) over a mod screen: tooltips draw through vanilla's path, where its mixins run (centred title, the border in the item's rarity colour)",
+        mods=["legendarytooltips", "iceberg", "prism-lib", "fd"], scene="pot",
+        steps=['$C click-at 141 187; sleep 1; $C click-at 141 187; sleep 3'],
+        checks=[check_log(r"Java screens' tooltips draw as vanilla's", "tooltips take vanilla's path")],
+        forbid=[r"A mod failed in", r"iceberg\S*: java"],
+        look="the pot's screen, Raw Beef's tooltip: title centred, a white border (common rarity), not vanilla's purple",
+    ),
     "maps-lan": dict(
         about="JourneyMap and VoxelMap per player: a host and a LAN guest 40 blocks east, each map their own",
         mods=["journeymap", "voxelmap"], scene="none", lan=True,
@@ -637,6 +659,16 @@ CASES = {
                 check_log(r"Gave 1 \[Bread\] to Player", "the player was in the world for the console's commands")],
         forbid=[r"waited two minutes for the Java mods"],
         look="Xaero's minimap top left, Jade's box at the top, AppleSkin's hunger outline",
+    ),
+    "maps-server": dict(
+        about="Map mods for a dedicated server's player: JourneyMap's minimap and full-screen map, Xaero's minimap and World Map (M), no JourneyMap server-tick failure",
+        mods=["journeymap", "xaero", "xaeroworldmap"], scene="none", server=True, env={"HORIZON_JAVA_DEBUG": "gpu"},
+        steps=['sleep 70', '$G key m tap; sleep 15; $G key escape tap; sleep 2; $G state > $S/player.json'],
+        checks=[check_log(r"Done \(", "the server starts"),
+                check_file("player.json", r'"screen":"playing"', "the player plays"),
+                check_log(r"gpu: horizon:dynamic/gpu\d+ 427x240, \d+ pixels not transparent, [1-9]\d{4,} not black", "the World Map's target has the map")],
+        forbid=[r"journeymap.common.event.FabricServerEvents\]: java", r"handler\$\w+\$xaero\w*\$\w+\): java"],
+        look="server-1.png: JourneyMap's minimap top right, Xaero's top left; server-2.png: Xaero's World Map",
     ),
     "rei-lan": dict(
         about="REI's settings per player: a LAN guest turns on its craftable-only filter, the host's stays off and its list full",

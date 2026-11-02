@@ -479,6 +479,15 @@ public final class HorizonServer {
             owner.setAccessible(true);
             owner.set(map, level);
             emptyCollections(map, map.getClass());
+            // Its chunk holders' maps (fastutil's), empty: Horizon holds the chunks, and mods
+            // that walk them find none (JourneyMap's loaded-chunk overlay, each server tick).
+            for (java.lang.reflect.Field f : net.minecraft.server.level.ChunkMap.class.getDeclaredFields()) {
+                Class<?> type = f.getType();
+                if (java.lang.reflect.Modifier.isStatic(f.getModifiers()) || !type.getName().startsWith("it.unimi.dsi.fastutil.")
+                        || type.isInterface() || java.lang.reflect.Modifier.isAbstract(type.getModifiers())) continue;
+                f.setAccessible(true);
+                if (f.get(map) == null) f.set(map, type.getDeclaredConstructor().newInstance());
+            }
             java.lang.reflect.Field field = net.minecraft.server.level.ServerChunkCache.class.getDeclaredField("chunkMap");
             field.setAccessible(true);
             field.set(level.getChunkSource(), map);
@@ -1711,6 +1720,8 @@ public final class HorizonServer {
                 Object type = c.getMethod("identifier").invoke(payload);
                 int containerId = (int) c.getMethod("containerId").invoke(payload);
                 Object title = c.getMethod("title").invoke(payload);
+                // Its opening data, for the client's own menu (HorizonClient.clientMenu).
+                HorizonClient.openingData(player, containerId, c.getMethod("innerCodec").invoke(payload), c.getMethod("data").invoke(payload));
                 menuOpened(player, containerId, String.valueOf(type),
                         json((net.minecraft.network.chat.Component) title), (net.minecraft.network.chat.Component) title);
                 return;

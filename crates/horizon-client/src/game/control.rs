@@ -241,6 +241,10 @@ impl Game<'_> {
             title.type_text(text);
             return Ok(());
         }
+        // A Java mod's screen (its focused box, or what it does with keys: CC's terminal).
+        if self.java_screen_chars(text) {
+            return Ok(());
+        }
         match self.screen {
             Screen::Chat => self.chat_type(text),
             Screen::CommandBlock => self.command_block_type(text),

@@ -673,3 +673,35 @@ out (the bridge adds them since round 2; it failed on java-bridge too). Not run 
   hooks `ServerPlayer.teleport` itself, so `teleports` is on in every Java run (one call per
   teleport). Outside the area: `lan_actions.rs` (a few lines). Test: `regress.py --jars
   <jars> jump teleport`.
+
+- **gpu 7, more GPU mods** (`bridge-gpu-7`, round 6 gpu 1), by Claude for iaxivers. Scanned the
+  300 most downloaded client-required 26.3 Fabric mods' jars (nested jars too) for their own
+  render passes, pipelines, pictures in picture and targets; tried five that draw on screens:
+  - CC: Tweaked: works. Its computer's terminal draws and typing runs commands
+    (`mkdir typed` lands on the computer's disk). Fix useful beyond it: Fabric's extended menus
+    get their client menu from the opening data. Regress `computer` (scene `computer`).
+  - Legendary Tooltips (Iceberg, Prism): partly. Java screens' tooltips take vanilla's path
+    when mods hook it: centred title, rarity border. Its 3D model for equipment doesn't draw
+    yet. Regress `tooltips`.
+  - Item Collectors (SuperMartijn's core lib): its screen works; the lib's picture in picture
+    isn't used there.
+  - Gnetum: loads, nothing to see: it caches vanilla's HUD, which Horizon draws itself.
+  - Advanced Loot Info (with REI): doesn't. Its REI plugin asks the server for its data from
+    REI's reload thread, where no player's client runs: the request is dropped, and it waits
+    (3 x 30 s).
+  Small changes outside gpu: `HorizonClient`/`HorizonServer` (extended menus: client area),
+  `game/control.rs` + `game/java_screen.rs` (`type` into mod screens), `HorizonGraphics`'
+  tooltips, a scene in `screen_test.sh`. Regress `pot terminal reiscreen` pass with it. Test:
+  CC: Tweaked in `~/hz-test/mods-java`, place `computercraft:computer_advanced`, right-click,
+  type `ls`.
+
+- **gpu 8, map mods on a dedicated server** (`bridge-gpu-8`, on top of `bridge-gpu-7`; round 6
+  gpu 2, client 3's map half), by Claude for iaxivers. Works (server_test.sh, headless): a
+  dedicated server's player gets JourneyMap (minimap, its About screen, then the full-screen
+  map), VoxelMap, Xaero's minimap and World Map, XaeroPlus, Diorama and MiniHUD. Fixed:
+  JourneyMap's server side failed each tick (`LoadedChunkOverlayPlugin` walks
+  `ChunkMap.visibleChunkMap`, null in the mirror: now the chunk map's fastutil maps are made
+  empty). Not ours: JourneyMap + VoxelMap in one game fail as in the real game (both register
+  `worldinfo:world_id`). Small change outside gpu: `HorizonServer.chunkMap` (pack/mixins).
+  Regress `maps-server` (new), `journeymap` pass. Test: JourneyMap, Xaero's Minimap and World
+  Map in the server's `mods-java/` and the player's, join, M; J twice (About, then the map).

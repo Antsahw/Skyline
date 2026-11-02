@@ -503,6 +503,11 @@ gets SPIR-V, vertex layouts and uniform lists.
 
 ## 26.3 facts that cost time
 
+- Fabric's extended menus (`ExtendedMenuType`) open with `Networking$OpenScreenPayload`
+  (identifier, containerId, title, innerCodec, data); their client menu is
+  `type.create(id, inventory, data)`. Mods with state on the client's menu only (CC: Tweaked's
+  terminal) throw on the server's.
+
 - Mixin renames a merged handler `handler$<id>$<mod>$<name>`, and drops a leading `<mod>_`
   from `<name>` (MaLiLib's handlers: `malilib_foo` becomes `handler$<id>$malilib$foo`). Match
   handlers with `HorizonHooks.handlerNamed`, not `endsWith("$" + name)`.
@@ -1320,6 +1325,24 @@ Map mods (2026-11-01, `bridge-gpu2`, headless, llvmpipe):
   (`HorizonHooks.fireGui`, run at the end of the HUD), starts from `Minecraft.<init>` RETURN
   (`START_END`) and `Options.<init>` (`START_OPTIONS`); MiniHUD waits for
   `Minecraft.isGameLoadFinished()` (set once the models load). Regress case `minihud`.
+- CC: Tweaked 1.120.3 (`bridge-gpu-7`): a computer's screen draws its terminal (a picture in
+  picture), and typing reaches it (`horizon-ctl type` now types into mod screens too). It needed
+  the client's own menu for Fabric's extended menus (`ExtendedMenuType`): made from the opening
+  data the server sent (`HorizonServer.payload` keeps it, `HorizonClient.openingData`), written
+  and read through its stream codec as the network would; before, their screens got the
+  server's menu (CC's: "Cannot update terminal on the server"). Scene `computer`, regress
+  case `computer`.
+- Dedicated servers (`bridge-gpu-8`, `server_test.sh`): their players get the map mods as a
+  LAN host's do: JourneyMap (minimap; J's About screen, then its full-screen map), VoxelMap,
+  Xaero's minimap and World Map, XaeroPlus, Diorama, MiniHUD. The mirror's `ChunkMap` now has
+  its (empty) chunk holder maps: JourneyMap's `LoadedChunkOverlayPlugin` failed each server tick
+  on them. JourneyMap and VoxelMap together fail the same way as in the real game (both
+  register `worldinfo:world_id`: VoxelMap's client code stops). Regress case `maps-server`.
+- Tooltips of Java screens draw through vanilla's path (deferred, `GuiGraphicsExtractor.tooltip`,
+  captured like the rest) when mods merged handlers into the tooltip's drawing
+  (`HorizonGraphics.vanillaTooltips`: Legendary Tooltips, Iceberg); else as one Horizon op as
+  before. Legendary Tooltips 1.6.3: centred titles and rarity borders show; its 3D item model
+  for equipment doesn't yet. Regress case `tooltips`.
 - Per player (host and LAN guest): Xaero's minimap is each player's own (`bridge-gpu3`);
   JourneyMap's and VoxelMap's too since `bridge-gpu-2` (`HorizonClientState`): JourneyMap's
   minimap and full-screen `MapState`/`MapRenderer` per player (static finals, made non-final as

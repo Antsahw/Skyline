@@ -196,6 +196,11 @@ case "$SCENE" in
   omen) "$R/tools/java_bridge/around.sh" \
     'q "tp @s $(p $X+0.5) $Y $(p $Z+0.5) -90 0"' 'q "gamemode survival"' \
     'echo "$((X+3)) $Y $Z" > "$S/spawner.pos"' ;;
+
+  # CC: Tweaked: an advanced computer two blocks east, opened (its terminal screen).
+  computer) "$R/tools/java_bridge/around.sh" \
+    'q "setblock $((X+2)) $Y $Z computercraft:computer_advanced[facing=west]"' \
+    '$C look-at-block $((X+2)) $Y $Z >/dev/null' '$C mouse right click >/dev/null' 'sleep 6' ;;
   none) ;;
 esac
 # For steps: aim FILE looks at the block whose "x y z" FILE holds (a small one too: a flower),

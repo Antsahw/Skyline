@@ -2824,16 +2824,44 @@ public final class HorizonClient {
     private static net.minecraft.world.inventory.AbstractContainerMenu clientMenu(
             net.minecraft.world.inventory.AbstractContainerMenu menu, net.minecraft.server.level.ServerPlayer player) {
         var type = menu.getType();
-        // Fabric's extended menus need their opening data (and often the client's level).
-        if (type.getClass() != net.minecraft.world.inventory.MenuType.class) return null;
+        // Fabric's extended menus: made from their opening data, written and read as the
+        // network would (openingData), in the client's level (CC: Tweaked's computer keeps
+        // its terminal on the client's menu only).
+        Object[] opening = OPENING.remove(player.getUUID());
+        boolean extended = type instanceof net.fabricmc.fabric.api.menu.v1.ExtendedMenuType<?, ?>;
+        if (extended && (opening == null || (int) opening[0] != menu.containerId)) return null;
+        if (!extended && type.getClass() != net.minecraft.world.inventory.MenuType.class) return null;
         try {
-            var made = type.create(menu.containerId, player.getInventory());
+            var made = extended
+                    ? extendedMenu((net.fabricmc.fabric.api.menu.v1.ExtendedMenuType) type, menu.containerId, player, opening)
+                    : type.create(menu.containerId, player.getInventory());
             if (made == null || made.slots.size() != menu.slots.size()) return null;
             syncClientMenu(menu, made);
             return made;
         } catch (Throwable t) {
+            if (extended) Natives.log("Horizon's client: the client's menu of " + net.minecraft.core.registries.BuiltInRegistries.MENU.getKey(type)
+                    + " couldn't be made (its screen shows the server's): " + t);
             return null;
         }
+    }
+
+    /** Each player's last extended menu's opening: {containerId, codec, data}. */
+    private static final java.util.Map<java.util.UUID, Object[]> OPENING = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** Fabric's extended menu opening sent to a player (HorizonServer.payload): kept for its client menu. */
+    public static void openingData(net.minecraft.server.level.ServerPlayer player, int containerId, Object codec, Object data) {
+        OPENING.put(player.getUUID(), new Object[]{containerId, codec, data});
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private static net.minecraft.world.inventory.AbstractContainerMenu extendedMenu(
+            net.fabricmc.fabric.api.menu.v1.ExtendedMenuType type, int containerId,
+            net.minecraft.server.level.ServerPlayer player, Object[] opening) {
+        var codec = (net.minecraft.network.codec.StreamCodec<net.minecraft.network.RegistryFriendlyByteBuf, Object>) opening[1];
+        var buf = new net.minecraft.network.RegistryFriendlyByteBuf(io.netty.buffer.Unpooled.buffer(), player.registryAccess());
+        codec.encode(buf, opening[2]);
+        Object data = codec.decode(buf);
+        return type.create(containerId, player.getInventory(), data);
     }
 
     /**
