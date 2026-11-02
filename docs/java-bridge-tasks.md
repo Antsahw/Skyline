@@ -374,3 +374,16 @@ tests pass; fmt and clippy `-D warnings` clean (horizon-client, horizon-jvm).
   Regress `maps-lan` now also quits the guest and checks both (pass). Test: JourneyMap +
   VoxelMap, `tools/java_bridge/lan_test.sh '$G quit'`: "VoxelMap's map of a player who left
   stopped its thread" in the log.
+
+- **gpu 6, Diorama's water colours** (`bridge-gpu-6`, on top of `bridge-gpu-5`; round 5 gpu 3),
+  by Claude for iaxivers. Checked headless, each against vanilla's values: the client chunks'
+  biomes (plains, water `3f76e4`, grass `91bd59`), Diorama's blended tints, its tint kinds
+  (water → water resolver, grass, leaves), the fluid model's sprite and its image, and its
+  block looks (water `b2b2b2` tinted, grass `959595` tinted). All match. Found and fixed: the
+  client level's light engine gave no sections (`getDataLayerData` null; Diorama then takes
+  sky 15 everywhere): now Horizon's light, a section at a time (new native `lightSection`).
+  Not changed: shallow rivers still bake grey-lilac, likely Diorama's own "clear water" over a
+  sand/clay bed. Needs the user's eye: real Fabric + Diorama 0.6.0, a world with seed 1234,
+  `/tp -525 67 66`, compare the minimap's river with Horizon's (the screenshot in the report).
+  Small change outside gpu: `horizon-jvm/src/lib.rs` and `Natives` (the native),
+  `HorizonLight`. Regress `diorama voxelmap journeymap` pass.

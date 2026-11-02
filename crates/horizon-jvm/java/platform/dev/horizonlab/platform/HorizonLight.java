@@ -52,7 +52,17 @@ public final class HorizonLight extends LevelLightEngine {
         return new LayerLightEventListener() {
             @Override
             public DataLayer getDataLayerData(SectionPos section) {
-                return null;
+                // Horizon's light of the section (map mods read whole sections: Diorama's
+                // water depth, its shade under trees); null outside a call that lent the world.
+                byte[] packed = new byte[4096];
+                if (!Natives.lightSection(dimension, section.x(), section.y(), section.z(), packed)) return null;
+                DataLayer out = new DataLayer();
+                boolean sky = layer == LightLayer.SKY;
+                for (int i = 0; i < 4096; i++) {
+                    int v = packed[i] & 0xFF;
+                    out.set(i & 15, i >> 8, (i >> 4) & 15, sky ? v >> 4 : v & 15);
+                }
+                return out;
             }
 
             @Override

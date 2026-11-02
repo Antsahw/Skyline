@@ -450,6 +450,11 @@ fn boot(env: &mut JNIEnv, jars: &[PathBuf]) -> jni::errors::Result<String> {
                 fn_ptr: native_light as *mut c_void,
             },
             NativeMethod {
+                name: "lightSection".into(),
+                sig: "(Ljava/lang/String;III[B)Z".into(),
+                fn_ptr: native_light_section as *mut c_void,
+            },
+            NativeMethod {
                 name: "setFood".into(),
                 sig: "(Ljava/lang/String;IF)V".into(),
                 fn_ptr: native_set_food as *mut c_void,
@@ -1023,6 +1028,35 @@ extern "system" fn native_light(
         world::light(&dimension, x, y, z).map_or(-1, i32::from)
     }))
     .unwrap_or(-1)
+}
+
+/// `Natives.lightSection(String dimension, int sx, int sy, int sz, byte[] out)`: a section's
+/// light, 4096 bytes in vanilla's index order (y, z, x), each packed as `light` gives it; false
+/// (and `out` untouched) where a block has none (no chunk, or outside a call that lent the world).
+extern "system" fn native_light_section(
+    mut env: JNIEnv,
+    _class: JClass,
+    dimension: JString,
+    sx: jni::sys::jint,
+    sy: jni::sys::jint,
+    sz: jni::sys::jint,
+    out: jni::objects::JByteArray,
+) -> jni::sys::jboolean {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let Ok(dimension) = env.get_string(&dimension).map(String::from) else {
+            return 0;
+        };
+        let mut light = [0i8; 4096];
+        for (i, slot) in light.iter_mut().enumerate() {
+            let (x, y, z) = (i as i32 & 15, i as i32 >> 8, (i as i32 >> 4) & 15);
+            match world::light(&dimension, sx * 16 + x, sy * 16 + y, sz * 16 + z) {
+                Some(v) => *slot = v as i8,
+                None => return 0,
+            }
+        }
+        u8::from(env.set_byte_array_region(&out, 0, &light).is_ok())
+    }))
+    .unwrap_or(0)
 }
 
 /// `Natives.setFood(String uuid, int food, float saturation)`.

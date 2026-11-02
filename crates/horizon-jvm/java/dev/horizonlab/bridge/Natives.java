@@ -40,6 +40,12 @@ public final class Natives {
      */
     public static native int light(String dimension, int x, int y, int z);
 
+    /**
+     * A section's light (section coordinates), 4096 bytes in vanilla's index order (y, z, x),
+     * each packed as {@link #light} gives it; false where a block has none.
+     */
+    public static native boolean lightSection(String dimension, int sx, int sy, int sz, byte[] out);
+
     /** Horizon's block entity at x y z (a chest's), as vanilla saves it, in SNBT; else null. */
     public static native String blockEntity(String dimension, int x, int y, int z);
 

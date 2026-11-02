@@ -1266,7 +1266,12 @@ Map mods (2026-11-01, `bridge-gpu2`, headless, llvmpipe):
   coordinates), through the game renderer's feature dispatcher.
 - Diorama 0.6.0 (`bridge-gpu-3`): its square minimap draws the map tiles it bakes on the CPU
   from the client's chunks (512 px textures written from memory, blitted to the GUI). Its
-  water's colours are to be compared with the real game.
+  water (`bridge-gpu-6`): what it reads matches vanilla (plains water `3f76e4`, grass `91bd59`
+  from the client chunks' biomes, blend radius 2; water's look `b2b2b2` tinted by water, grass
+  `959595` by grass), and the client level's light engine now gives whole sections
+  (`HorizonLight.getDataLayerData`, native `lightSection`; it was null). Its shallow rivers
+  still bake grey-lilac: Diorama's "clear water" shows the bed (sand, clay) through shallow
+  water; compare with real Fabric (seed 1234, near -525 64 70) before changing anything.
 - XaeroPlus 2.37.2 (over Xaero's Minimap 26.6.2 and World Map 1.47.2, `bridge-gpu-4`): the
   minimap, and M's World Map (its target's pixels read at the frame's end, above). Regress
   case `xaeroplus`.
