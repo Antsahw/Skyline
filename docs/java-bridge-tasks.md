@@ -346,3 +346,14 @@ tests pass; fmt and clippy `-D warnings` clean (horizon-client, horizon-jvm).
   per player, unlike client 1 said): its copied config stopped the overlay. Test:
   `MODS=<REI+TR+Jade...> tools/java_bridge/server_test.sh '$G key e tap; sleep 6'` (new);
   regress `reiscreen` (new), `rei hud join modsettings failmsg` pass.
+
+- **client r5-2, dedicated server: the rest of the client mods** (`bridge-client-5`). Found:
+  every dedicated server with Java mods hung at "Preparing level" since the upstream merge
+  (the spawn search moved a stream center a standalone server doesn't use), and then held
+  each joining player two minutes. Fixed both (small changes in `initial_spawn.rs` and
+  `lan.rs`, worldgen/server code: one helper, one chain). Works then (screenshots): Xaero's
+  minimap, Jade, AppleSkin, Xaero's settings (Y), Nature's Compass's biome screen, Options →
+  Mods' Java mods, all for a dedicated server's player. Not tried here: JourneyMap, VoxelMap,
+  Xaero's World Map on dedicated (no jars in this sandbox; LAN works). Test: regress `server`
+  (new: server=True cases), `MODS=... tools/java_bridge/server_test.sh '$G key y tap'`;
+  `pot hud` pass.
