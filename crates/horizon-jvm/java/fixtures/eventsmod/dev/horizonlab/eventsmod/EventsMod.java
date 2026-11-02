@@ -18,7 +18,7 @@ import net.minecraft.server.level.ServerPlayer;
  * A server-side Fabric mod written the usual way, against vanilla and Fabric API only: it
  * greets players who join, answers chat, reports broken blocks, counts ticks and has a
  * command, /events (whoami, add a b, echo text, count, kit, take); breaking a birch log fells the birch logs above it, and
- * diamond ore can't be broken. It knows
+ * diamond ore can't be broken, poppies can't be punched. It knows
  * nothing about Horizon; the bridge's tests (tests/real_game.rs) and players run it as it is.
  */
 public class EventsMod implements ModInitializer {
@@ -142,6 +142,14 @@ public class EventsMod implements ModInitializer {
             player.sendSystemMessage(Component.literal("[events] ding, with "
                     + BuiltInRegistries.ITEM.getKey(player.getItemInHand(hand).getItem()) + " in hand"));
             return net.minecraft.world.InteractionResult.SUCCESS;
+        });
+        // Poppies can't be punched (Fabric API's AttackBlockCallback): no dig, no break.
+        net.fabricmc.fabric.api.event.player.AttackBlockCallback.EVENT.register((player, level, hand, pos, direction) -> {
+            if (level.isClientSide() || !level.getBlockState(pos).is(net.minecraft.world.level.block.Blocks.POPPY)) {
+                return net.minecraft.world.InteractionResult.PASS;
+            }
+            player.sendSystemMessage(Component.literal("[events] leave the poppy alone"));
+            return net.minecraft.world.InteractionResult.FAIL;
         });
         // A tree feller, as FallingTree does it: breaking a log breaks the logs above it, with
         // their drops. And diamond ore can't be broken.

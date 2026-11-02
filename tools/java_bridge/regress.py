@@ -381,6 +381,24 @@ CASES = {
                 check_log(r"Precipitation goes to the mods", "precipitation goes to the mods")],
         look="snow layers on the stone",
     ),
+    "punch": dict(
+        about="Fabric's AttackBlockCallback, asked where native mods' left clicks are (eventsmod: poppies can't be punched)",
+        fixtures=["eventsmod"], scene="punch",
+        steps=['aim $S/poppy.pos || echo poppy >> $S/missed.txt; sleep 0.5; $C mouse left click >/dev/null; sleep 1.5; $C block $(cat $S/poppy.pos) > $S/poppy.json',
+               'aim $S/dandelion.pos || echo dandelion >> $S/missed.txt; sleep 0.5; $C mouse left click >/dev/null; sleep 1.5; $C block $(cat $S/dandelion.pos) > $S/dandelion.json'],
+        checks=[check_json("poppy.json", ["state"], "minecraft:poppy", "the poppy stays (on the client too)"),
+                check_log(r"leave the poppy alone", "the mod took the click"),
+                check_json("dandelion.json", ["state"], "minecraft:air", "the dandelion breaks")],
+    ),
+    "hurt": dict(
+        about="Fabric's ALLOW_DAMAGE, asked where native mods hear a hit (eventsmod: magma doesn't hurt); other damage does",
+        fixtures=["eventsmod"], scene="none",
+        steps=['$C command "gamemode survival" >/dev/null; $C command "gamerule natural_health_regeneration false" >/dev/null; '
+               '$C command "setblock ~ ~-1 ~ minecraft:magma_block" >/dev/null; sleep 3; $C status > $S/magma.json',
+               '$C command "damage @s 4 minecraft:generic" >/dev/null; sleep 1; $C status > $S/generic.json'],
+        checks=[check_json("magma.json", ["player", "health"], 20.0, "no harm standing on magma"),
+                check_json("generic.json", ["player", "health"], 16.0, "4 from /damage")],
+    ),
     "mixins1": dict(
         about="Round one's actions (mixinmod): a broken block also drops a diamond, dirt isn't picked up, wheat grows in dim light, cows can't be milked",
         fixtures=["mixinmod"], scene="mixins1",

@@ -96,7 +96,6 @@ static JAVA_STATES: std::sync::OnceLock<Vec<bool>> = std::sync::OnceLock::new();
 #[cfg(feature = "java-mods")]
 static JAVA_ROUTED_TICKS: std::sync::OnceLock<Vec<bool>> = std::sync::OnceLock::new();
 
-/// horizon-world's RANDOM_TICK_HOOK: a random tick of a Java mod's block is kept for the mods.
 /// The chunks Java mods' tickets keep in each dimension (`Action::ChunkTickets`), kept here
 /// too for a level that opens later.
 #[cfg(feature = "java-mods")]
@@ -180,6 +179,17 @@ pub(super) fn java_precipitation(top: horizon_core::position::BlockPos) -> bool 
 }
 
 /// True when the tick is the mods' instead of Horizon's (a routed vanilla block's).
+#[cfg(not(feature = "java-mods"))]
+pub(super) fn java_random_tick(
+    _pos: horizon_core::position::BlockPos,
+    _state: horizon_world::registry::BlockStateId,
+) -> bool {
+    false
+}
+
+/// True when the tick is the mods' instead of Horizon's (a routed vanilla block's); a Java
+/// mod's own block is kept for the mods too (Game::java_random_ticks), and Horizon still runs
+/// its template block's tick. Asked where native mods get theirs (GameLevel::before_random_tick).
 #[cfg(feature = "java-mods")]
 pub(super) fn java_random_tick(
     pos: horizon_core::position::BlockPos,
@@ -223,21 +233,34 @@ pub(super) fn java_block_set(pos: (i32, i32, i32), previous: u32, state: u32) {
     }
 }
 
-/// The hook at the head of the player's hurtServer (`horizon_client::health::HURT_HOOK`): Java
-/// mods' injections there and Fabric API's ALLOW_DAMAGE, for the player acting now.
-#[cfg(feature = "java-mods")]
-pub(super) fn java_hurt(damage_type: &str, amount: f32) -> horizon_client::health::HurtHook {
-    use horizon_client::health::HurtHook;
-    let Some(uuid) = JAVA_ACTOR.with(|a| a.borrow().clone()) else {
-        return HurtHook::Damage(amount);
-    };
-    match horizon_jvm::events::hurt(&uuid, damage_type, amount) {
-        Ok(Some(a)) => HurtHook::Damage(a),
-        Ok(None) => HurtHook::Cancel,
-        Err(e) => {
-            log::warn!("Java mods: a hit failed: {e}");
-            HurtHook::Damage(amount)
+/// A player is about to be hurt (`LivingEntity.hurtServer` past its guards, where native mods
+/// hear it: native_hooks.rs `hurt_server`): the Java mods' head of `hurtServer` and Fabric's
+/// `ALLOW_DAMAGE`, for the player acting now. They may change `amount`; true cancels the hit.
+pub(super) fn java_hurt(hurting: &horizon_client::health::Hurting<'_>, amount: &mut f32) -> bool {
+    #[cfg(feature = "java-mods")]
+    {
+        let horizon_client::health::Hurting::Player(_, source) = hurting else {
+            return false;
+        };
+        let Some(uuid) = JAVA_ACTOR.with(|a| a.borrow().clone()) else {
+            return false;
+        };
+        match horizon_jvm::events::hurt(&uuid, source.damage_type, *amount) {
+            Ok(Some(a)) => {
+                *amount = a;
+                false
+            }
+            Ok(None) => true,
+            Err(e) => {
+                log::warn!("Java mods: a hit failed: {e}");
+                false
+            }
         }
+    }
+    #[cfg(not(feature = "java-mods"))]
+    {
+        let _ = (hurting, amount);
+        false
     }
 }
 

@@ -1822,6 +1822,7 @@ public final class HorizonServer {
      * first, so an exception vanilla would catch and hide ("An unexpected error occurred")
      * is logged with its stack. The command then runs twice: for finding a mod's needs only.
      */
+    private static final boolean DEBUG_HOOKS = String.valueOf(System.getenv("HORIZON_JAVA_DEBUG")).contains("hooks");
     private static final boolean DEBUG_COMMANDS = String.valueOf(System.getenv("HORIZON_JAVA_DEBUG")).contains("commands");
 
     private static void debugCommand(HorizonData.Loaded data, ServerPlayer player, String line) {
@@ -2596,6 +2597,8 @@ public final class HorizonServer {
             if (result != net.minecraft.world.InteractionResult.PASS) taken[0] = true;
         });
         syncInventories();
+        if (DEBUG_HOOKS) Natives.log("hooks: " + player.getName().getString() + " attacks " + level.getBlockState(pos) + " at "
+                + pos.toShortString() + (taken[0] ? ": a mod took it" : ""));
         return taken[0];
     }
 

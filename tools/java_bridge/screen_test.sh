@@ -158,8 +158,30 @@ case "$SCENE" in
     'q "setblock $((X-3)) $((Y+1)) $((Z+1)) minecraft:light[level=9]"' \
     'q "setblock $((X-3)) $Y $Z minecraft:farmland[moisture=7]"' 'q "setblock $((X-3)) $((Y+1)) $Z minecraft:wheat[age=0]"' \
     'echo "$((X-3)) $((Y+1)) $Z" > "$S/crop.pos"' '$C look-at-block $((X+2)) $Y $Z west >/dev/null' ;;
+  # Flowers to punch, survival: a poppy three blocks east, a dandelion beside it (z+2), on grass;
+  # looking at the poppy. Their positions in $S/poppy.pos and $S/dandelion.pos.
+  punch) "$R/tools/java_bridge/around.sh" \
+    'q "tp @s $(p $X+0.5) $Y $(p $Z+0.5) -90 30"' 'q "gamemode survival"' 'q "fill $((X+3)) $((Y-1)) $Z $((X+3)) $((Y-1)) $((Z+2)) minecraft:grass_block"' \
+    'q "setblock $((X+3)) $Y $Z minecraft:poppy"' 'q "setblock $((X+3)) $Y $((Z+2)) minecraft:dandelion"' \
+    'echo "$((X+3)) $Y $Z" > "$S/poppy.pos"' 'echo "$((X+3)) $Y $((Z+2))" > "$S/dandelion.pos"' \
+    '$C look-at-block $((X+3)) $Y $Z west >/dev/null' ;;
   none) ;;
 esac
+# For steps: aim FILE looks at the block whose "x y z" FILE holds (a small one too: a flower),
+# from points up its middle until the crosshair is on it; false if it never is.
+aim(){
+  local a b c; read a b c < "$1"
+  local try
+  for try in 0.3 0.15 0.45 0.6 up west north south east; do
+    case $try in
+      0.*) $C look-at "$(awk "BEGIN{print $a+0.5}")" "$(awk "BEGIN{print $b+$try}")" "$(awk "BEGIN{print $c+0.5}")" >/dev/null ;;
+      *) $C look-at block "$a" "$b" "$c" "$try" >/dev/null ;;
+    esac
+    sleep 0.4
+    $C state | python3 -c "import json,sys;b=(json.load(sys.stdin).get('looking_at') or {}).get('block') or {};sys.exit(b.get('pos')!=[$a,$b,$c])" && return 0
+  done
+  return 1
+}
 n=0; for step in "$@"; do eval "$step"; sleep 1; n=$((n+1)); $C screenshot "$S/s$n.png" >/dev/null; cp "$S/s$n.png" "$OUT/$SCENE-$n.png"; done
 $C screenshot "$S/s0.png" >/dev/null; cp "$S/s0.png" "$OUT/$SCENE-0.png"
 grep -E "failed|could not|    at " "$S/home/logs/latest.log" | grep -v "content:" | head -30 | cut -c1-260

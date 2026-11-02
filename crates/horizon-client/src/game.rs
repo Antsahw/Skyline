@@ -1222,6 +1222,11 @@ impl LevelAccess for GameLevel<'_> {
         state: &mut BlockStateId,
         handled: &mut bool,
     ) {
+        // Java mods' blocks, and vanilla blocks whose random tick a mod patches (java_server.rs).
+        if java_server::java_random_tick(pos, *state) {
+            *handled = true;
+            return;
+        }
         if self.native_authoritative {
             // Any block the hook writes moves the world's revision on.
             let revision = self.world.revision;

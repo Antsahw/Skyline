@@ -1587,18 +1587,6 @@ impl Game<'_> {
                         self.spawn_protection_message(host, conn, a.pos);
                         return;
                     }
-                    // Fabric's AttackBlockCallback (its injection into handleBlockBreakAction):
-                    // a Java mod that takes the attack stops the dig (the block is resent).
-                    let (pos, side) = (a.pos, i32::from(a.direction));
-                    if self
-                        .as_guest(host, conn, |g| g.java_attack_block(pos, side))
-                        .unwrap_or(false)
-                    {
-                        let state = self.world.block(pos[0], pos[1], pos[2]).0 as i32;
-                        host.hub
-                            .send_to(conn, &C::BlockUpdate(play::BlockUpdate { pos, state }));
-                        return;
-                    }
                     // mayInteract: a block outside the world border can't be
                     // dug (the ack puts it back on the client).
                     if !self
@@ -1613,7 +1601,8 @@ impl Game<'_> {
                     // block back on the client).
                     let canceled = self.as_guest(host, conn, |g| {
                         let state = g.world.block(a.pos[0], a.pos[1], a.pos[2]);
-                        let mut canceled = false;
+                        // Java mods first (Fabric's AttackBlockCallback, java_server.rs).
+                        let mut canceled = g.java_attack_block(a.pos, i32::from(a.direction));
                         g.native_left_click_block(a.pos, face, state, &mut canceled);
                         canceled
                     });

@@ -1550,20 +1550,21 @@ HUD).
 Since the 2026-11-01 sync with upstream `main`, the bridge's calls from Horizon's own files are
 one-line calls into `game/java_server.rs` (upstream deleted `server_mods.rs` with WebAssembly code
 mods: our half of it is that file now). Where they are, and what upstream's native mod hook points
-(docs/native-mods.md, `game/native_hooks.rs`) could replace later. Not switched yet: each needs the
-hook's exact place checked against what the mirror expects.
+(docs/native-mods.md, `game/native_hooks.rs`) could replace later. Switched (mixins round 5): our
+call sits where the native one is, so Horizon's files carry one hook point, not two. The others
+need the hook's exact place checked against what the mirror expects.
 
 | Our hook (where) | Native hook point that could replace it |
 |---|---|
 | `tick_java_server` (game.rs `fn tick`, after `native_tick`) | `native_server_tick` (API 4) end; joins and leaves: `native_player_logged_in/out` (API 57) |
 | `apply_java_level_writes` (levels.rs, before each level's tick) | `native_level_tick_pre` (API 23) |
-| `RANDOM_TICK_HOOK` (horizon-world `level/tick.rs`) | `native_random_tick` with `handled` (API 33; `Level::before_random_tick`) |
+| ~~`RANDOM_TICK_HOOK`~~ | **switched**: `java_random_tick` in `GameLevel::before_random_tick` (game.rs), before `native_random_tick`; horizon-world is upstream's again (`seasons`, `mixins1`) |
 | `SET_HOOK` (render `world.rs` `set`) | `native_block_changed` (only `Level.setBlock` writes; ours sees every write) |
-| `HURT_HOOK` (`health.rs`) | `native_living_incoming_damage` (cancel or change the damage) |
+| ~~`HURT_HOOK`~~ | **switched**: `java_hurt` first in native_hooks.rs `hurt_server` (`health::HURT_SERVER`, past hurtServer's guards, where Fabric's `ALLOW_DAMAGE` fires); `health.rs` is upstream's again (`hurt`) |
 | `java_break` / `java_block_event` (game.rs `break_block`, placing) | `native_destroy_block` / `native_place_block` (API 14); a vein miner's whole-break-in-Java has no equivalent |
-| `java_attack_block` (lan_actions) | `native_left_click_block` (API 30) |
+| `java_attack_block` | **switched**: in the closure that asks `native_left_click_block` (lan_actions, after reach, spawn protection and the border); a cancel leaves the block to the ack (`punch`) |
 | `java_use_block`, `java_use_item` (lan_actions) | `native_right_click_block` (API 21), `native_use_item_on` / `native_use_item` (API 13) |
-| `java_attack_mob`, `java_entity_interact` | `native_attack_entity` (API 22), `native_interact_entity` (API 29) |
+| `java_attack_mob`, `java_entity_interact` | `native_attack_entity` (API 22), `native_interact_entity` (API 29); not a fit yet: ours answer the packet (Java's own entities and copies of Horizon's, with the hub), the native ones a hand on Horizon's entities |
 | `java_item_touch` (item pickup) | `native_item_picked_up` (API 40, cancel only; Clumps' take-part has none) |
 | `note_java_death*` | `native_player_died` (API 40) |
 | `local_java_command`, `guest_java_command`, `send_java_commands` | `native_register_commands` / `native_perform_command` (API 8): usage strings, not Brigadier trees; the Java tree is merged after the native one (hub `mod_commands`) |
