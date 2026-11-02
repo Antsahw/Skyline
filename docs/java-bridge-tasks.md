@@ -355,7 +355,7 @@ tests pass; fmt and clippy `-D warnings` clean (horizon-client, horizon-jvm).
   `handleStartJump` on release (`HorizonEntities.ridingJump`); the rider's game draws the jump
   bar (`MountState::charge_jump`, shared with Horizon's horses). The fixture mount jumps
   (power in chat: "Mount jumps 81"). Task 4: the `mount` scene builds a flat stone lane 24
-  blocks east (40 wasn't loaded) and drives 1.5 s. horizon-ctl `entities` now gives a mob's
+  blocks east (40 wasn't loaded) and drives 0.8 s (~11 blocks; at 2.5 s it ran off the lane in a full run). horizon-ctl `entities` now gives a mob's
   `passenger` and `mount`. Outside the area: `mounts.rs` (charge_jump split out),
   `remote_vehicles.rs`, `agent.rs` (2 fields), `HorizonServer.tick` (1 call), `lan_e2e.py`.
   Test: `regress.py --jars … mount mountjump`; `lan_e2e.py --java-mods <critter jar> --check

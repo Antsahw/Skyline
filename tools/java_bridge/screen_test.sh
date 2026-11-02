@@ -73,8 +73,9 @@ case "$SCENE" in
     'q "summon horizon_critters:biter ~4 ~ ~1"' \
     'q "tp @s ~ ~ ~ -90 15"' 'sleep 2' ;;
   # Riding a mod's mob: a mount (the critter fixture's rideable one: it stays put until
-  # ridden) on a flat stone lane 24 blocks east (the floor's height is the lane's) two blocks east of the player, its middle in $S/mount.pos, the floor's
-  # height in $S/floor.y.
+  # ridden) two blocks east of the player, its middle in $S/mount.pos, on a flat stone lane
+  # 24 blocks east (the floor's height, $S/floor.y, is the lane's; the case drives 0.8 s,
+  # ~11 blocks, short of its end).
   mount) "$R/tools/java_bridge/around.sh" \
     'q "fill $((X-1)) $((Y-1)) $((Z-2)) $((X+24)) $((Y-1)) $((Z+2)) stone"' \
     'q "fill $((X-1)) $Y $((Z-2)) $((X+24)) $((Y+4)) $((Z+2)) air"' \

@@ -193,7 +193,7 @@ CASES = {
         about="Riding a mod's mob (crittermod's mount): a use gets on, the movement keys steer it on the mirror, sneaking gets off",
         fixtures=["crittermod"], scene="mount",
         steps=['$C look-at $(cat $S/mount.pos) >/dev/null; sleep 0.3; $C mouse right click >/dev/null; sleep 1.5; $C state > $S/on.json',
-               '$C key w down >/dev/null; sleep 1.5; $C key w up >/dev/null; sleep 0.5; $C state > $S/drove.json; $C key f5 tap >/dev/null',
+               '$C key w down >/dev/null; sleep 0.8; $C key w up >/dev/null; sleep 0.5; $C state > $S/drove.json; $C key f5 tap >/dev/null',
                '$C key f5 tap >/dev/null; $C key f5 tap >/dev/null; $C key shift down >/dev/null; sleep 1; $C key shift up >/dev/null; sleep 1; $C state > $S/off.json; '
                'python3 $R/tools/java_bridge/ride_check.py $S/floor.y $S/on.json $S/drove.json $S/off.json > $S/ride.txt'],
         checks=[check_file("ride.txt", r"(?m)^seated", "a use put the player on the mount"),

@@ -22,3 +22,5 @@ if drove[1] - floor > 0.3 and moved > 1.5:
     print("drove", round(moved, 2))
 if off[1] - floor < 0.3:
     print("off", round(off[1] - floor, 2))
+# Where each was, for a failure's report.
+print("at", [round(v, 2) for v in on], [round(v, 2) for v in drove], [round(v, 2) for v in off], "floor", floor)
