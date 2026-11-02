@@ -72,6 +72,10 @@ pub struct Config {
     pub class_path: Vec<PathBuf>,
     /// Fabric Loader runs only with a game jar.
     pub fabric: Option<Fabric>,
+    /// A class archive (CDS) the JVM maps at start and writes at its exit when missing or
+    /// stale (`-XX:+AutoCreateSharedArchive`): the classes it loaded, the mods' too, parsed
+    /// and verified once. Written only when the process ends through [`exit`].
+    pub class_archive: Option<PathBuf>,
 }
 
 /// Fabric Loader's part of [`Config`].
@@ -102,6 +106,7 @@ pub struct Bridge {
     /// The mods Fabric loaded, `id version`, built-in ones included; empty without Fabric.
     mods: Vec<String>,
     fabric: bool,
+    class_archive: Option<PathBuf>,
 }
 
 impl Bridge {
@@ -166,6 +171,30 @@ impl Bridge {
 /// The running bridge, if [`start`] succeeded.
 pub fn get() -> Option<&'static Bridge> {
     BRIDGE.get()
+}
+
+/// Ends the process through the JVM (`System.exit(code)`) when one runs, so it exits as
+/// a Java program does: its shutdown hooks run and `-XX:+AutoCreateSharedArchive` writes
+/// the class archive the next start maps ([`class_archive`]). Call it last, with
+/// everything saved: it doesn't return when a JVM runs. `flush` runs before Java's exit
+/// (the game's log). A watchdog ends the process after
+/// `limit` if Java's exit hangs (a mod's shutdown hook waiting for a thread that's gone).
+pub fn exit(code: i32, limit: std::time::Duration, flush: impl FnOnce()) {
+    let Some(bridge) = BRIDGE.get() else { return };
+    if let Some(archive) = bridge.class_archive.as_ref().filter(|a| !a.exists()) {
+        log::info!(
+            "Java mods: archiving the classes this run loaded for the next start ({}; once per set of mods)",
+            archive.display()
+        );
+    }
+    flush();
+    std::thread::spawn(move || {
+        std::thread::sleep(limit);
+        std::process::exit(code);
+    });
+    if let Ok(mut env) = bridge.vm.attach_current_thread_permanently() {
+        let _ = env.call_static_method("java/lang/System", "exit", "(I)V", &[JValue::Int(code)]);
+    }
 }
 
 /// Sends `Natives.log` lines to `sink` instead of the game log.
@@ -268,7 +297,7 @@ pub fn start(config: &Config) -> Result<&'static Bridge, String> {
         class_path.extend(libs::ensure(&config.work.join("lib"))?);
     }
     class_path.extend(config.class_path.iter().cloned());
-    let vm = create_vm(&config.home, &class_path)?;
+    let vm = create_vm(&config.home, &class_path, config.class_archive.as_deref())?;
     let mut env = vm
         .attach_current_thread_permanently()
         .map_err(|e| format!("attach: {e}"))?;
@@ -300,10 +329,15 @@ pub fn start(config: &Config) -> Result<&'static Bridge, String> {
         home: config.home.clone(),
         mods,
         fabric: config.fabric.is_some(),
+        class_archive: config.class_archive.clone(),
     }))
 }
 
-fn create_vm(home: &Path, class_path: &[PathBuf]) -> Result<JavaVM, String> {
+fn create_vm(
+    home: &Path,
+    class_path: &[PathBuf],
+    archive: Option<&Path>,
+) -> Result<JavaVM, String> {
     let path = libjvm(home)?;
     // SAFETY: loading libjvm runs its initialisers, which only set up the library itself.
     let library = unsafe { libloading::Library::new(&path) }
@@ -318,13 +352,20 @@ fn create_vm(home: &Path, class_path: &[PathBuf]) -> Result<JavaVM, String> {
     std::mem::forget(library);
 
     let joined = std::env::join_paths(class_path).map_err(|e| format!("class path: {e}"))?;
-    let options = [
+    let mut options = vec![
         // Leave SIGINT, SIGTERM and SIGHUP to the game: Ctrl+C and shutdown stay Horizon's.
         "-Xrs".to_string(),
         "-Dfile.encoding=UTF-8".into(),
         "-Dhorizon.bridge=1".into(),
         format!("-Djava.class.path={}", joined.to_string_lossy()),
     ];
+    if let Some(archive) = archive {
+        options.push("-XX:+AutoCreateSharedArchive".into());
+        options.push(format!("-XX:SharedArchiveFile={}", archive.display()));
+        // Classes from signed jars (Fabric's own sat4j) can't be archived: said once each.
+        options.push("-Xlog:cds=off".into());
+        options.push("-Xlog:cds+dynamic=off".into());
+    }
     let options: Vec<CString> = options
         .into_iter()
         .map(|o| CString::new(o).map_err(|_| "a NUL in a JVM option".to_string()))

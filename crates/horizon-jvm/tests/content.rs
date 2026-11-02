@@ -30,6 +30,7 @@ fn java_mods_become_content_mods() {
         work: work.clone(),
         jars: jars.clone(),
         class_path: Vec::new(),
+        class_archive: None,
         fabric: Some(horizon_jvm::Fabric {
             game_jar: horizon_jvm::facade::game_jar(&root).unwrap(),
             libraries: horizon_jvm::facade::game_libraries(&root).unwrap(),

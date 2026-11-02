@@ -79,6 +79,9 @@ fn main() {
         });
     }
     logging::flush();
+    // With Java mods, the process ends through Java's exit (its class archive is written).
+    #[cfg(feature = "java-mods")]
+    horizon_jvm::exit(0, std::time::Duration::from_secs(90), logging::flush);
 }
 
 /// The JVM raises its open-file limit to the hard limit as it starts

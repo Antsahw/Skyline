@@ -986,7 +986,8 @@ mod tests {
                 state: BlockStateId(1),
                 biome: 3,
                 light: 0,
-            }],
+            }]
+            .into(),
         }
     }
 

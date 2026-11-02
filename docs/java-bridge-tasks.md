@@ -346,3 +346,27 @@ tests pass; fmt and clippy `-D warnings` clean (horizon-client, horizon-jvm).
   per player, unlike client 1 said): its copied config stopped the overlay. Test:
   `MODS=<REI+TR+Jade...> tools/java_bridge/server_test.sh '$G key e tap; sleep 6'` (new);
   regress `reiscreen` (new), `rei hud join modsettings failmsg` pass.
+
+- **worldgen 5.1, startup** (bridge-worldgen-5): Java's classes are kept between runs in a
+  class archive (CDS, `.horizon-cache/java-classes-<stamp>.jsa`, written as the game quits
+  through Java's exit): 110 jars, Fabric start 89–92 s → ~80 s, join ~166 → ~150 s (2 cores);
+  the first quit of a mod set takes ~25 s more. TerraBlender's unmemoized `possibleBiomes`
+  memoized (server start hooks 3.3 → 2.2 s; the "10 s" was mostly elsewhere). `has_java_mods`
+  cached (it listed every jar every 2 ms during the spawn search). Not done: the mixin
+  transforms (~18% of Fabric's start) and shape caches (~27%); see java-bridge.md "Java's start,
+  cached between runs". Also fixed: java_worldgen's test didn't compile (upstream's `Spans`).
+  Regress: all pass but `preset` once (an oak log at the One Block's spot, 1 of 3 runs; passes
+  alone twice). Test: start a pack twice; the log says "classes mapped from …" the second time.
+
+- **worldgen 5.2, lost blocks** (bridge-worldgen-5): still none. `lost` passed in the full
+  regress run and 3 more times (0 of 33–36 lost), and the repro on the 110-jar pack
+  (`lost_blocks.sh`, 40 s wait): 0 of 27, no "generated again while loaded". No change.
+
+- **worldgen 5.3, big pack far terrain** (bridge-worldgen-5): two findings. (1) Here (2 cores)
+  far terrain draws nothing for minutes at render distance 12, mods or not: upstream's `Lod`
+  holds meshing on ≤4-core machines while near chunks load; `horizon-ctl status` now shows
+  `lod.near_loading(_parts)`. (2) The real gap: Tectonic's density functions change the land,
+  far terrain still draws vanilla noise (ocean where the land is). A Java-side fix works but is
+  far too slow (0.4 s–80 ms a column), parked on `bridge-worldgen-5-farnoise-wip`; the fix
+  worth doing is Horizon's noise reading the pack's density-function JSON. Screens:
+  `lod-bop5.png` (BOP far terrain fine), `lod-big5c.png` (big pack seam).

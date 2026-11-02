@@ -181,7 +181,42 @@ pub(super) fn java_loading() -> bool {
 
 /// Whether `mods-java/` holds jars (the Java mods start, or started).
 pub(super) fn has_java_mods() -> bool {
-    !horizon_jvm::jars(&Game::options_path().with_file_name(horizon_jvm::DIR)).is_empty()
+    // Asked every few milliseconds while the spawn is searched: listing and resolving a
+    // big pack's jars each time took a core of the two here. Java runs once a process, so
+    // once it runs the answer stays; before, it's looked again at most every two seconds.
+    if horizon_jvm::get().is_some() {
+        return true;
+    }
+    static LAST: std::sync::Mutex<Option<(std::time::Instant, bool)>> = std::sync::Mutex::new(None);
+    let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((at, has)) = *last
+        && at.elapsed() < std::time::Duration::from_secs(2)
+    {
+        return has;
+    }
+    let has = !horizon_jvm::jars(&Game::options_path().with_file_name(horizon_jvm::DIR)).is_empty();
+    *last = Some((std::time::Instant::now(), has));
+    has
+}
+
+/// The class archive for this set of jars (`horizon_jvm::Config::class_archive`):
+/// `.horizon-cache/java-classes-<stamp>.jsa`, the archives of other sets removed (each is
+/// ~250 MB for a 110-jar pack). `HORIZON_JAVA_CLASS_ARCHIVE=0`: none.
+fn class_archive(jars: &[PathBuf]) -> Option<PathBuf> {
+    if std::env::var_os("HORIZON_JAVA_CLASS_ARCHIVE").is_some_and(|v| v == "0") {
+        return None;
+    }
+    let cache = super::mods::horizon_cache();
+    let name = format!("java-classes-{}.jsa", horizon_jvm::content::stamp(jars));
+    if let Ok(entries) = std::fs::read_dir(&cache) {
+        for entry in entries.flatten() {
+            let other = entry.file_name().to_string_lossy().into_owned();
+            if other.starts_with("java-classes-") && other != name {
+                let _ = std::fs::remove_file(entry.path());
+            }
+        }
+    }
+    Some(cache.join(name))
 }
 
 fn start_once(root: &Path, dir: &Path, jars: Vec<PathBuf>, side: horizon_jvm::Side) -> bool {
@@ -203,12 +238,14 @@ fn start_once(root: &Path, dir: &Path, jars: Vec<PathBuf>, side: horizon_jvm::Si
             None
         }
     };
+    let archive = class_archive(&jars);
     let config = |home| horizon_jvm::Config {
         home,
         work: work.clone(),
         jars: jars.clone(),
         class_path: Vec::new(),
         fabric,
+        class_archive: archive.clone(),
     };
     let bridge =
         match horizon_jvm::find_java_home().and_then(|home| horizon_jvm::start(&config(home))) {
@@ -218,6 +255,14 @@ fn start_once(root: &Path, dir: &Path, jars: Vec<PathBuf>, side: horizon_jvm::Si
                 return false;
             }
         };
+    match &archive {
+        Some(a) if a.exists() => log::info!("Java mods: classes mapped from {}", a.display()),
+        Some(a) => log::info!(
+            "Java mods: the classes this run loads are archived when the game quits ({}): the next start maps them",
+            a.display()
+        ),
+        None => {}
+    }
     log::info!(
         "Java mods: JVM {} from {} and {} started in {} ms, {} jar(s) in {}",
         bridge.java_version(),
