@@ -111,6 +111,13 @@ fn walk(root: &Path, dir: &Path, out: &mut Vec<String>) {
     }
 }
 impl DataPack {
+    /// A folder pack (`pack.mcmeta` and `data/` in `dir`) under the id `id`.
+    pub fn folder(id: &str, dir: &Path) -> Self {
+        DataPack {
+            id: id.into(),
+            source: Source::Dir(dir.to_path_buf()),
+        }
+    }
     /// The built-in `vanilla` pack: the game's own data directory.
     pub fn builtin(root: &Path) -> Self {
         DataPack {

@@ -537,3 +537,15 @@ tests pass; fmt and clippy `-D warnings` clean (horizon-client, horizon-jvm).
   players, so a filtered search can briefly come out with another player's switch; the
   craftable search is very slow here (30+ s, 2 cores), so the guest's filtered list may lag.
   Test: regress `rei-lan` (new, LAN), `rei reiscreen modsettings` pass.
+
+- **worldgen 6.1, far terrain for Tectonic** (bridge-worldgen-6): far terrain now uses the
+  mods' noise. Java writes the dimension's noise settings, density functions and noises as a
+  data pack (mod types made vanilla, Tectonic's noise seeds kept: `horizon_seed`), and Horizon's
+  own noise reads it. Values identical to Java's at test points; the seam at the render
+  distance is gone. Costs a second worldgen data load (13–44 s on a far thread, ~0.9 GB):
+  sharing it is the follow-up. Touches `horizon-core` (noise seed alias) and `horizon-world`
+  (`noise_seed`), small. Test: a pack with Tectonic, far terrain on, fly up; log says "far
+  terrain from the mods' noise".
+- **worldgen 6.2, the quit through Java**: world quit 3 s (7 s writing the archive), title
+  1.3 s, SIGTERM 3.4 s, SIGINT 2.4 s, SIGSEGV 9.4 s, dedicated `stop` 6.4 s: all end. Details
+  in java-bridge.md.

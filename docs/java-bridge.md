@@ -1736,6 +1736,49 @@ for the 3×3 spawn chunks.
   vanilla's.
 - Elsewhere far terrain follows the mods (BOP: land, biomes, tops), without trees (known).
 
+### Far terrain from the mods' noise (2026-11-02, bridge-worldgen-6)
+
+Done the way above: Horizon's own noise with the pack's worldgen data. On the first far
+column of a dimension the mods generate, `HorizonWorldgen.lodNoise` says whether its land is
+vanilla's noise (`vanillaNoise`: a noise generator with the dimension's vanilla settings and
+no mod data pack with noise settings, density functions or noises). If not,
+`HorizonNoiseExport` writes `<world>/data/horizon_java_noise/<dimension>/` as a data pack,
+from the **loaded** registries (configs, overlays and mixins applied):
+- the noise settings (router inline), every density function they reach and the noises
+  those name, with vanilla's codecs (`DensityFunction.CODEC`, `NormalNoise.DIRECT_CODEC`);
+- a mod's density function type is written as the vanilla one it is in disguise: a constant
+  (range of one value, Tectonic's `config_constant`), `config_clamp` → `max(min(x, max),
+  min)`, `config_noise` → `shiftedNoise2d · multiplier + offset`. Any other type fails the
+  export (logged), and far terrain keeps vanilla's noise. References a mod node hides from
+  `rewriteChildren` (the clamp's bounds) are followed as they're written;
+- the material rule stays vanilla's (mods merge theirs into their own form: Biolith's
+  `base`/`sources`); far tops come from the mods' rules through `lodTops` as before;
+- **seeds**: Tectonic's `NoisesMixin` seeds `tectonic:parameter/<x>` as `minecraft:<x>`. The
+  export compares each noise the level's random state made with one made from each candidate
+  id and writes `"horizon_seed": "<id>"` when it isn't the noise's own; Horizon's noise reads
+  it (`worldgen::noise_seed`, `DensityGraph::register_noise_seeded`). Without it the far land
+  stood ~30 blocks too high.
+Then `java_worldgen::NoiseLand` makes a second `VanillaTerrain` over the world's packs plus
+this one (structures off) and `JavaLod` samples the land from it.
+
+Checked exact: `HORIZON_JAVA_NOISE_EXPORT_CHECK=1` compares the mods' router with the
+written one in Java (0.0 over 200 points) and logs the settings' debug functions at five
+points (`HORIZON_JAVA_NOISE_PROBE=id,…,noise:id` adds functions or raw noises);
+`cargo run -p horizon-client --example noise_pack_probe -- <resources> <pack> 1234 [ids]`
+prints Horizon's at the same points: identical (N −0.458/−0.155/−0.458/−0.458/0.042) with the
+110-jar pack (Tectonic, Lithostitched). Screens: the far ring continues the near land, no seam.
+
+Cost (2 cores): export ~2 s, the second generator's data 13–44 s on a far-terrain thread
+(far terrain waits; near isn't affected), and memory: a second `GeneratorData` (RSS ~5.0 →
+~5.9 GB with far terrain on, some of it far tiles). To do: share the first `GeneratorData`'s
+parts and rebuild only noises, densities and settings.
+
+The quit through Java (class archive), measured with Farmer's Delight (2 cores): quit from a
+world 3 s (7 s the run that writes the archive), from the title screen 1.3 s, SIGTERM 3.4 s,
+SIGINT 2.4 s, a crash (SIGSEGV) 9.4 s; a dedicated server's `stop` 6.4 s (writing its
+archive). All end the process. A quit before Java and Fabric have started goes the way
+without Java (`horizon_jvm::exit` waits for `BRIDGE`), so no archive of half the classes.
+
 ## Working on it
 
 - **The task queue is [java-bridge-tasks.md](java-bridge-tasks.md)**: take your area's next task, follow its loop, add a report there.

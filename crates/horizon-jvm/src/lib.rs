@@ -181,6 +181,8 @@ pub fn get() -> Option<&'static Bridge> {
 /// (the game's log). A watchdog ends the process after
 /// `limit` if Java's exit hangs (a mod's shutdown hook waiting for a thread that's gone).
 pub fn exit(code: i32, limit: std::time::Duration, flush: impl FnOnce()) {
+    // Unset until Java and Fabric have started: a quit before then (from the title screen,
+    // at once) ends as without Java, and no archive of half the classes is written.
     let Some(bridge) = BRIDGE.get() else { return };
     if let Some(archive) = bridge.class_archive.as_ref().filter(|a| !a.exists()) {
         log::info!(

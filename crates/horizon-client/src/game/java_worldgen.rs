@@ -15,6 +15,101 @@ use std::sync::{Arc, OnceLock};
 /// How long the first chunk waits for Java and Fabric to start (they start beside the world).
 const JAVA_START: std::time::Duration = std::time::Duration::from_secs(300);
 
+/// What makes Horizon's generator over a world's data packs (`VanillaTerrain::for_world_with`),
+/// for far terrain with the mods' noise ([`NoiseLand`]).
+pub(super) struct NoiseWorld {
+    /// The worldgen bundle (`<resources>/worldgen`).
+    pub(super) bundle: std::path::PathBuf,
+    pub(super) resources: std::path::PathBuf,
+    pub(super) world_root: std::path::PathBuf,
+    pub(super) enabled_features: Vec<String>,
+    pub(super) preset: String,
+    /// The game's biomes with the world's packs over them.
+    pub(super) biomes: Arc<Biomes>,
+    pub(super) seed: i64,
+}
+
+/// The land of a dimension whose noise the mods change (Tectonic's density functions): the
+/// mods' noise as a data pack (`HorizonNoiseExport`) over the world's, and Horizon's own
+/// generator made with it, which far terrain samples instead of vanilla's noise. Made once,
+/// on the first far column asked after the mods generate the dimension; None when the noise
+/// is vanilla's or can't be written as vanilla data.
+struct NoiseLand {
+    dimension: Arc<str>,
+    registry: &'static BlockRegistry,
+    world: NoiseWorld,
+    terrain: OnceLock<Option<Arc<VanillaTerrain>>>,
+}
+
+impl NoiseLand {
+    fn terrain(&self) -> Option<&Arc<VanillaTerrain>> {
+        self.terrain.get_or_init(|| self.make()).as_ref()
+    }
+
+    fn make(&self) -> Option<Arc<VanillaTerrain>> {
+        let started = std::time::Instant::now();
+        let dir = self
+            .world
+            .world_root
+            .join("data")
+            .join("horizon_java_noise")
+            .join(self.dimension.replace(':', "_"));
+        let _ = std::fs::remove_dir_all(&dir);
+        match horizon_jvm::events::worldgen_lod_noise(&self.dimension, &dir) {
+            Ok(horizon_jvm::events::LodNoise::Written) => {}
+            Ok(horizon_jvm::events::LodNoise::Vanilla) => return None,
+            Ok(horizon_jvm::events::LodNoise::Failed(why)) | Err(why) => {
+                log::warn!(
+                    "Java mods: {}'s far terrain keeps vanilla's noise, not the mods': {why}",
+                    self.dimension
+                );
+                return None;
+            }
+        }
+        let w = &self.world;
+        let packs = horizon_client::datapack::discover_with_features(&w.world_root, &w.resources);
+        let enabled =
+            horizon_client::datapack::enabled_ids(&w.world_root, &packs, &w.enabled_features);
+        let ours = horizon_client::datapack::DataPack::folder("horizon/java_noise", &dir);
+        let mut list: Vec<&horizon_client::datapack::DataPack> = enabled
+            .iter()
+            .filter_map(|id| packs.iter().find(|p| &p.id == id))
+            .collect();
+        list.push(&ours);
+        let (overrides, warnings) =
+            horizon_client::datapack::worldgen_overrides(&list, |b| w.biomes.contains(b));
+        for warning in warnings {
+            log::warn!("Java mods: far terrain's noise: {warning}");
+        }
+        match VanillaTerrain::for_world_with(
+            &w.bundle,
+            &overrides,
+            self.registry,
+            &w.biomes,
+            w.seed,
+            &w.preset,
+            &self.dimension,
+            false,
+        ) {
+            Ok(terrain) => {
+                log::info!(
+                    "Java mods: {}'s far terrain from the mods' noise (made in {} ms)",
+                    self.dimension,
+                    started.elapsed().as_millis()
+                );
+                Some(Arc::new(terrain))
+            }
+            Err(e) => {
+                log::warn!(
+                    "Java mods: {}'s far terrain keeps vanilla's noise: the mods' doesn't load: {e}",
+                    self.dimension
+                );
+                None
+            }
+        }
+    }
+}
+
 /// A dimension's generator when Java mods are installed: Horizon's, or the mods' chunk by chunk.
 pub(super) struct JavaTerrain {
     inner: Arc<VanillaTerrain>,
@@ -30,6 +125,8 @@ pub(super) struct JavaTerrain {
     custom: Arc<OnceLock<bool>>,
     /// Whether Horizon's noise fills the Java protos (asked once the mods generate it).
     horizon_noise: OnceLock<bool>,
+    /// Far terrain's land when the mods change the noise.
+    land: Arc<NoiseLand>,
     registry: &'static BlockRegistry,
     /// The game's assets, for the save tables reading the chunks' ticks (made once).
     assets: Arc<horizon_client::assets::Assets>,
@@ -70,6 +167,7 @@ impl JavaTerrain {
         world: &std::path::Path,
         assets: Arc<horizon_client::assets::Assets>,
         biomes: Arc<Biomes>,
+        noise_world: NoiseWorld,
     ) -> Option<Self> {
         let registry = assets.registry;
         if !super::java_mods::has_java_mods() {
@@ -86,6 +184,12 @@ impl JavaTerrain {
             modded: Arc::new(OnceLock::new()),
             custom: Arc::new(OnceLock::new()),
             horizon_noise: OnceLock::new(),
+            land: Arc::new(NoiseLand {
+                dimension: Arc::from(dimension),
+                registry,
+                world: noise_world,
+                terrain: OnceLock::new(),
+            }),
             registry,
             assets,
             tables: OnceLock::new(),
@@ -211,6 +315,8 @@ impl ChunkGenerator for JavaTerrain {
     fn lod_sampler(self: Arc<Self>) -> Box<dyn LodSampler> {
         Box::new(JavaLod {
             inner: self.inner.clone().lod_sampler(),
+            land: self.land.clone(),
+            land_sampler: None,
             modded: self.modded.clone(),
             custom: self.custom.clone(),
             registry: self.registry,
@@ -509,6 +615,9 @@ impl horizon_client::vanillagen::BiomeOracle for JavaBiomes {
 /// generate it; a mod's own generator's base columns when it isn't on the noise.
 struct JavaLod {
     inner: Box<dyn LodSampler>,
+    /// The mods' noise's land, when they change it ([`NoiseLand`]), and its sampler.
+    land: Arc<NoiseLand>,
+    land_sampler: Option<Box<dyn LodSampler>>,
     modded: Arc<OnceLock<bool>>,
     custom: Arc<OnceLock<bool>>,
     registry: &'static BlockRegistry,
@@ -582,6 +691,17 @@ impl GridMask {
 impl JavaLod {
     fn modded(&self) -> bool {
         self.modded.get() == Some(&true)
+    }
+
+    /// The sampler of the land's shape: the mods' noise's when they change it, else Horizon's.
+    fn land(&mut self) -> &mut Box<dyn LodSampler> {
+        if self.land_sampler.is_none()
+            && self.modded()
+            && let Some(terrain) = self.land.terrain()
+        {
+            self.land_sampler = Some(terrain.clone().lod_sampler());
+        }
+        self.land_sampler.as_mut().unwrap_or(&mut self.inner)
     }
 
     /// A mod's own generator not on the noise makes the dimension (a void with one block):
@@ -823,6 +943,8 @@ impl LodSampler for JavaLod {
     fn fork(&self) -> Option<Box<dyn LodSampler>> {
         Some(Box::new(JavaLod {
             inner: self.inner.fork()?,
+            land: self.land.clone(),
+            land_sampler: None,
             modded: self.modded.clone(),
             custom: self.custom.clone(),
             registry: self.registry,
@@ -837,11 +959,11 @@ impl LodSampler for JavaLod {
     }
 
     fn request_detail(&mut self, chunks: &[(i32, i32)], center: [i32; 2]) {
-        self.inner.request_detail(chunks, center);
+        self.land().request_detail(chunks, center);
     }
 
     fn drain_details(&mut self) -> Vec<horizon_client::streaming::LodDetail> {
-        let mut details = self.inner.drain_details();
+        let mut details = self.land().drain_details();
         if self.custom() {
             for ((cx, cz), columns) in &mut details {
                 let at: Vec<(i32, i32)> = (0..256)
@@ -877,7 +999,7 @@ impl LodSampler for JavaLod {
         if self.custom() {
             return self.own_columns(&[(x, z)]).pop().unwrap_or_default();
         }
-        let column = self.inner.column(x, z);
+        let column = self.land().column(x, z);
         let mut column = self.remap_one(column, x, z);
         self.cut(&mut column, x, z, 1);
         column
@@ -890,7 +1012,7 @@ impl LodSampler for JavaLod {
                 .pop()
                 .unwrap_or_default();
         }
-        let column = self.inner.reduced_column(x, z, width);
+        let column = self.land().reduced_column(x, z, width);
         let mut column = self.remap_one(column, x + width / 2, z + width / 2);
         self.cut(&mut column, x, z, width);
         column
@@ -914,7 +1036,7 @@ impl LodSampler for JavaLod {
         if self.custom() {
             return self.own_columns(&at);
         }
-        let mut columns = self.inner.grid(x, z, stride, side);
+        let mut columns = self.land().grid(x, z, stride, side);
         if self.modded() {
             let mut refs: Vec<&mut horizon_client::lod::Column> = columns.iter_mut().collect();
             self.remap(&mut refs, &at);
