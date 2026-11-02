@@ -574,3 +574,17 @@ bigpack, tech, gridlod. Clippy `-D warnings` clean with `java-mods`.
 `priority` with the loading arg, and the HUD atlas test that said mods' block textures stay
 out (the bridge adds them since round 2; it failed on java-bridge too). Not run here (disk):
 `horizon-client`'s gameplay tests.
+
+- **one-off, Windows** (`bridge-windows-2`, off `bridge-upstream-sync-3`; first done as
+  `bridge-windows-1`; Claude for iaxivers).
+  Works: the bridge cross-checks for Windows (`x86_64-pc-windows-gnu`, horizon-client +
+  horizon-client-lib with `java-mods`, clippy clean on horizon-jvm); `horizon-jvm`'s `boot` test
+  built for Windows passes under Wine with Temurin 25 for Windows (`jvm.dll` loads, natives both
+  ways). Fixed: `jvm.dll`'s C runtime found through the Java home's `bin` on the PATH; build.rs's
+  javac takes an argument file (the platform mod's command line is ~28k characters with short
+  Linux paths, past Windows' limit with real ones). Doesn't (not tested here): Fabric past
+  Mixin's start (Wine lacks a network call the JVM's random seeding makes), the window, the
+  launcher; non-ASCII paths into JNI options. Test on a Windows PC: java-bridge.md, "Windows".
+  Redone on sync 3: round 5's Java download (`runtime.rs`) left `link_depth` unused on Windows
+  (dead code, clippy failed): it's for Unix links only now. Clippy for Windows clean on
+  horizon-client, horizon-client-lib and horizon-jvm; the `boot` test passes under Wine again.
