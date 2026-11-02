@@ -100,7 +100,7 @@ Some sandboxes refuse to run downloaded mod code: then say so; the user can run 
 
 ## Upstream
 
-Synced with upstream main 6f54a627d (2026-11-01, `bridge-upstream-sync`, merged in batch 4).
+Synced with upstream main fdd290b99 (2026-11-02, `bridge-upstream-sync-3`, merged in batch 6).
 Upstream removed WebAssembly code mods (our `server_mods.rs` is `game/java_server.rs` now) and
 moved rendering into `crates/horizon-client-render`. Sync every day or two (a one-off chat, or
 the boss when it's small); keep hooks in shared Horizon files to one-line calls into our files.
@@ -129,16 +129,17 @@ Horizon's mobs reacting to mod mobs; far terrain with Tectonic.
 - Workers run only their cases; the full regress runs at merge time (the boss).
 - The user's own PC runs cost no usage: prefer them for the big pack.
 
-## State at the end of the batch-5 boss chat (2026-11-02)
+## State after merge-batch6 (2026-11-02)
 
-- `java-bridge` = batch 5 (round 5 of all six areas), tested: 53/53 headless cases pass.
-- Waiting for: `bridge-upstream-sync-3` (the sync chat redoes sync 2 on top of batch 5: 2,154
-  upstream commits; watch `models/catalog.rs`, `loot.rs`, `main.rs`, `game.rs`).
-- Not verified in the boss sandbox: `lan_e2e.py --java-mods … --check javamount` (needs
-  `HORIZON_E2E_HEADLESS=1`, `xvfb-run` and `--bin-dir` of a java-mods build; the guest timed out
-  on 2 cores); the quit through Java's timing.
-- The user is considering a message to Ludovic soon (others are building Forge/NeoForge bridges):
-  the boss drafts it when asked.
+- `java-bridge` = batch 6: upstream sync 3, Windows 2, round 6 of entities, pack, mixins, gpu,
+  client. Worldgen's round 6 was still running (merge it alone when it reports).
+- Conflicts this batch: `mounts.rs` (the Java mount's hearts inside upstream's
+  `draw_mount_hud`), deaths (`java_player_died` only in `guest_die`: the window's
+  `death_message` is gone upstream), `control.rs` (title text first, then a Java screen), two
+  `maps-server` cases (gpu-8's kept; client-9's is `voxelmap-server`).
+- Checked in the boss sandbox: clippy only (no Mojang data, 2 cores). The full regress goes to
+  the user's PC; workers had run their own cases.
+- Round 7 queue written; one new chat per area.
 
 ## Next big steps
 

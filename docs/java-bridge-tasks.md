@@ -30,47 +30,50 @@ Never write as the user; mark what you post (CLAUDE.md). Never run mod jars the 
 
 ## Queue (in order)
 
-Round 6 (after merge-batch5, 2026-11-02). Start from the newest `java-bridge`. New for every
-area: a case that fails only in a full regress run is a bug in the case (shared state, timing,
-terrain): make it stable when you meet one (`mount`, `preset`, `veinminer` were).
+Round 7 (after merge-batch6, 2026-11-02). Start from the newest `java-bridge` (it has upstream
+sync 3: build `-p horizon-client -p horizon-client-lib`). A case that fails only in a full
+regress run is a bug in the case: make it stable when you meet one. Worldgen is still on round 6.
 
 ### entities
-1. Horizon's own mobs see mod mobs: target, flee, and strike back when one hurts them.
-2. The rider's HUD shows the mod mob's hearts (as a vanilla mount's).
-3. The `preset` case flakes in a full run (an oak log where One Block's grass should be): find why.
+1. Horizon's projectiles (a skeleton's or player's arrow, trident, snowball) hit mod mobs.
+2. A mod's projectile hitting players and Horizon's mobs: a fixture case (untested so far).
+3. Mod mob tick cost: the bridge's part of Naturalist's whale and skeleton creepers (block
+   reads, collisions); cut what is ours.
 
-### worldgen
+### worldgen (round 6 queue, still running)
 1. Far terrain for packs that change the land's shape (Tectonic): Horizon's own noise reading
-   the pack's worldgen files (density functions, noise settings), not a Java call per column.
-2. The quit through Java (class archive): check quitting from a world, the title screen, a
-   dedicated server's stop and a crash all still end the process, and how long each takes.
+   the pack's worldgen files, not a Java call per column.
+2. The quit through Java: quitting from a world, the title, a dedicated server's stop and a
+   crash all end the process; how long each takes.
 
 ### pack
-1. The full pack with Java in 8 GB: the JVM's own share (heap, metaspace, class data); what
-   Fabric and the mirror keep that Horizon already has.
-2. Grow toward SkyFactory: more tech, storage and automation mods; fix what breaks.
+1. ALA Industrial's content past the 16 MiB fence: a compact form for blocks with many own
+   states (its pipes: 76k states).
+2. The tech mods that open no screen on use (More Barrel Variants, Heater, Chunk Loaders) and
+   the block drawn with the missing texture.
+3. The full pack on a real GPU: the user's PC run (bigpack) → fix what it shows.
 
 ### client
-1. Release builds with Java mods (the `java-mods` feature in the launcher's builds, opt-in), and
-   the launcher's page for the Java mods folder (add, remove, see which failed).
-2. REI's search for all players at once: each player's filter, and its speed on few cores.
-3. Dedicated server: JourneyMap, VoxelMap and Xaero's World Map for its players.
+1. Advanced Loot Info: server requests from REI's loading thread are dropped: queue them.
+2. Mods' settings screens from Options → Mods (`getProvidedConfigScreenFactories`; Compressed
+   Blocks, BuildCraft and others failed).
+3. A LAN guest's mod config files (`config/horizon-players/<uuid>/`) loaded at their next join.
 
 ### mixins
-1. The rest of our hooks onto upstream's hook points where they fit: entity attack and use,
-   deaths, commands, block placing (add a hook point upstream-style where none fits, kept
-   small, as a proposal for Ludovic).
-2. The turtle helmet's water breathing and Bad Omen → Trial Omen asking the mods.
-3. The next "Rust does" lines from `mixin-table.tsv` in the big pack, most-patched first.
+1. A mod cancelling a jump or teleport undoes it (now they only hear it); teleports to another
+   dimension.
+2. Advancements on the mirror, so `PlayerAdvancements.award` hooks (5 mods) run.
+3. The next "Rust does" lines from `mixin-table.tsv`, most-patched first.
 
 ### gpu
-1. Other GPU mods: find 5 more popular 26.3 Fabric client mods that draw with the GPU and get
-   them working.
-2. Map mods on a dedicated server (with client 3).
+1. Legendary Tooltips' 3D item model for tools and armour.
+2. Xaero's World Map when the mirror's models are skipped (big pack: its frame hook needs a
+   ModelManager).
+3. Three more GPU-drawing client mods from the scan (round 6's list).
 
 ### upstream sync (one-off chat)
-1. Sync with upstream main every day or two (`bridge-upstream-sync-N`), regress, report.
-2. Windows: build and run the bridge on Windows.
+1. Sync 4 with upstream main (`bridge-upstream-sync-4`), full regress, report.
+2. Windows: Fabric past Mixin's start (or the steps for the user to try on a Windows PC).
 
 ## Reports
 
