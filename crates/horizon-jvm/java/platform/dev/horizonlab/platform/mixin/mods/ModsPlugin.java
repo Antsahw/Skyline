@@ -19,7 +19,9 @@ public final class ModsPlugin implements IMixinConfigPlugin {
     /** Class (internal name) to its fields made non-final. */
     static final Map<String, Set<String>> FIELDS = Map.of(
             "journeymap/client/ui/minimap/MiniMap", Set.of("state", "mapRenderer"),
-            "journeymap/client/ui/fullscreen/Fullscreen", Set.of("state", "mapRenderer"));
+            "journeymap/client/ui/fullscreen/Fullscreen", Set.of("state", "mapRenderer"),
+            // REI's search executor (HorizonRecipeViewer.searchPerPlayer).
+            "me/shedaniel/rei/impl/client/search/AsyncSearchManager", Set.of("EXECUTOR_SERVICE"));
 
     @Override
     public void onLoad(String mixinPackage) {}

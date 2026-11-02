@@ -150,6 +150,8 @@ final class HorizonClientState {
     /** The fields hold {@code player}'s values (put away whose were there). */
     static synchronized void load(UUID player) {
         if (player == null || player.equals(loaded)) return;
+        // A second player: REI's searches run inside their player's as() (its settings in).
+        if (loaded != null) HorizonRecipeViewer.searchPerPlayer();
         // Their mods' settings too (HorizonClientConfig).
         HorizonClientConfig.swap(loaded, player);
         List<Slot> all = slots();

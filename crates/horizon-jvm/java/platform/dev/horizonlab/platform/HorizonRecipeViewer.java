@@ -222,7 +222,43 @@ public final class HorizonRecipeViewer {
         }
         syncedSize = (int) Class.forName("me.shedaniel.rei.api.common.registry.display.DisplayRegistryCommon", true, loader)
                 .getMethod("size").invoke(client);
+        reindex(clientImpl.getMethod("cache").invoke(client));
         return count;
+    }
+
+    /**
+     * REI's display lookup index made again over every display. Displays added after its reload
+     * ended (the synced ones, here) go to its "not cached" set, which every lookup by input or
+     * output scans whole: the craftable filter then took over 30 s on 2 cores (5,391 displays).
+     * Its endReload indexes the not-cached set (and drops what was indexed), so the indexed ones
+     * join them first. (Not cached is also where every display is while the option is off.)
+     */
+    @SuppressWarnings("unchecked")
+    private static void reindex(Object cache) {
+        try {
+            Class<?> type = cache.getClass();
+            java.lang.reflect.Field enabled = type.getDeclaredField("cache");
+            java.lang.reflect.Field cached = type.getDeclaredField("displaysCached");
+            java.lang.reflect.Field notCached = type.getDeclaredField("displaysNotCached");
+            java.lang.reflect.Field preprocessed = type.getDeclaredField("preprocessed");
+            for (var f : new java.lang.reflect.Field[] {enabled, cached, notCached, preprocessed}) f.setAccessible(true);
+            // REI's "cache display lookup" option (off by default: then every lookup scans every
+            // display); turned on for the headless client, which serves every player's lookups.
+            enabled.setBoolean(cache, true);
+            var waiting = (java.util.Set<Object>) notCached.get(cache);
+            if (waiting.isEmpty()) return;
+            java.util.Set<Object> all = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+            all.addAll((java.util.Set<Object>) cached.get(cache));
+            all.addAll(waiting);
+            long started = System.nanoTime();
+            notCached.set(cache, all);
+            preprocessed.setBoolean(cache, false);
+            type.getMethod("endReload").invoke(cache);
+            Natives.log("Horizon's recipe viewer: REI's display index made again (" + all.size() + " displays, "
+                    + (System.nanoTime() - started) / 1_000_000 + " ms)");
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            if (HorizonServer.failedOnce("recipe viewer reindex")) Natives.log("Horizon's recipe viewer: REI's display index can't be made again: " + e);
+        }
     }
 
     /**
@@ -252,6 +288,134 @@ public final class HorizonRecipeViewer {
     }
 
     private static Method running, size, registry;
+
+    private static volatile boolean perPlayer;
+    /** The searches REI started inside the current as() on this thread, run at its end. */
+    private static final ThreadLocal<java.util.ArrayDeque<Runnable>> QUEUED = new ThreadLocal<>();
+
+    /**
+     * REI's searches run inside their player's {@code as()} once the client serves a second
+     * player. Its one search manager runs on threads of its own and reads the craftable-only
+     * switch and the config when it runs, which with several players was often another
+     * player's. A search started inside {@code as()} is queued and run at that call's end
+     * ({@link #runQueued}), its player's settings still in (run where it was asked, inside the
+     * overlay's layout, it stopped the overlay drawing); one started elsewhere goes to REI's
+     * threads. This needs the display index ({@link #reindex}): without it the craftable search
+     * took over 30 s and held the server thread. One player: REI's threads, as before.
+     */
+    static void searchPerPlayer() {
+        if (perPlayer) return;
+        perPlayer = true;
+        try {
+            Class<?> manager = Class.forName("me.shedaniel.rei.impl.client.search.AsyncSearchManager", true,
+                    HorizonRecipeViewer.class.getClassLoader());
+            java.lang.reflect.Field executor = manager.getDeclaredField("EXECUTOR_SERVICE");
+            if (java.lang.reflect.Modifier.isFinal(executor.getModifiers())) {
+                Natives.log("Horizon's recipe viewer: REI's search executor is final; searches stay on its threads");
+                return;
+            }
+            executor.setAccessible(true);
+            var own = (java.util.concurrent.ExecutorService) executor.get(null);
+            executor.set(null, new java.util.concurrent.AbstractExecutorService() {
+                @Override
+                public void execute(Runnable command) {
+                    var queue = QUEUED.get();
+                    if (queue != null) queue.add(command);
+                    else own.execute(command);
+                }
+
+                @Override
+                public void shutdown() {
+                    own.shutdown();
+                }
+
+                @Override
+                public java.util.List<Runnable> shutdownNow() {
+                    return own.shutdownNow();
+                }
+
+                @Override
+                public boolean isShutdown() {
+                    return own.isShutdown();
+                }
+
+                @Override
+                public boolean isTerminated() {
+                    return own.isTerminated();
+                }
+
+                @Override
+                public boolean awaitTermination(long timeout, java.util.concurrent.TimeUnit unit) throws InterruptedException {
+                    return own.awaitTermination(timeout, unit);
+                }
+            });
+            Natives.log("Horizon's recipe viewer: REI searches inside each player's turn (several players)");
+        } catch (ClassNotFoundException e) {
+            // No REI.
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            Natives.log("Horizon's recipe viewer: REI's search executor can't be replaced: " + e);
+        }
+    }
+
+    /** An as() starts: REI's searches started now wait for its end (once searches are per player). */
+    static java.util.ArrayDeque<Runnable> queueSearches() {
+        if (!perPlayer) return null;
+        var outer = QUEUED.get();
+        QUEUED.set(new java.util.ArrayDeque<>());
+        return outer;
+    }
+
+    /** The as() ends, its player's state still in: the searches it queued run (and the steps they queue). */
+    static void runQueued(java.util.ArrayDeque<Runnable> outer) {
+        var queue = QUEUED.get();
+        if (queue == null) return;
+        long started = System.nanoTime();
+        int ran = 0;
+        try {
+            for (Runnable next; (next = queue.poll()) != null; ran++) {
+                try {
+                    next.run();
+                } catch (Throwable t) {
+                    if (HorizonServer.failedOnce("recipe viewer search")) Natives.log("Horizon's recipe viewer: REI's search failed: " + t);
+                }
+            }
+        } finally {
+            if (outer != null) QUEUED.set(outer);
+            else QUEUED.remove();
+        }
+        long ms = (System.nanoTime() - started) / 1_000_000;
+        if (ran > 0 && ms > 200 && SLOW_SEARCHES.getAndIncrement() < 5) {
+            Natives.log("Horizon's recipe viewer: a search took " + ms + " ms (" + ran + " steps)");
+        }
+        if (ran > 0 && DEBUG) logListSize();
+    }
+
+    private static final boolean DEBUG = String.valueOf(System.getenv("HORIZON_JAVA_DEBUG")).contains("rei");
+
+    /** HORIZON_JAVA_DEBUG=rei: how many entries the current player's item list holds after a search. */
+    private static void logListSize() {
+        try {
+            ClassLoader loader = HorizonRecipeViewer.class.getClassLoader();
+            Object list = Class.forName("me.shedaniel.rei.impl.client.gui.ScreenOverlayImpl", true, loader)
+                    .getMethod("getEntryListWidget").invoke(null);
+            for (Class<?> c = list.getClass(); c != null; c = c.getSuperclass()) {
+                try {
+                    java.lang.reflect.Field stacks = c.getDeclaredField("stacks");
+                    stacks.setAccessible(true);
+                    var player = net.minecraft.client.Minecraft.getInstance().player;
+                    Natives.log("Horizon's recipe viewer: REI's list of " + (player == null ? "?" : player.getName().getString())
+                            + ": " + ((java.util.List<?>) stacks.get(list)).size() + " entries");
+                    return;
+                } catch (NoSuchFieldException e) {
+                    // Up the hierarchy.
+                }
+            }
+        } catch (Throwable t) {
+            // Debug only.
+        }
+    }
+
+    private static final java.util.concurrent.atomic.AtomicInteger SLOW_SEARCHES = new java.util.concurrent.atomic.AtomicInteger();
 
     /**
      * After REI's own reload, on the player's screen (in as()): its reload drops the overlay
