@@ -205,8 +205,17 @@ saying something works.
   AppleSkin's tooltip off and saves; the host's screen and file still say on, the guest's say
   off. Not yet: a guest's saved files aren't loaded at their next join (their session's
   settings start from the host's); mods holding settings elsewhere (Farmer's Delight's
-  ConfigValues) are still shared. Add a mod's holder in `holders()`. REI's config object stays
-  shared: it holds REI's entry stacks, and a copy of it stopped REI's overlay drawing.
+  ConfigValues) are still shared. Add a mod's holder in `holders()`. REI's settings are per
+  player too (its config object, which AutoConfig also holds: one copy for both holders,
+  made in one pass; and its craftable-only switch); the copy shares REI's entry stacks,
+  favourites and filtering rules (its registries know them by identity) while the lists
+  holding them are copied. Regress `rei-lan`: the guest's craftable filter on, the host's off
+  with its list. (The earlier "a copy stopped the overlay drawing" was REI's own reload, fixed
+  by `afterOwnReload`.) Left: REI's search manager is one for all players and runs on its
+  threads, reading the craftable switch as it is when it runs; a filtered search started
+  while another player's settings are in can come out with theirs until the next search.
+  Running the searches inside `as()` was tried: the craftable search took over 30 s on a
+  2-core machine and stalled the server thread.
 - `HorizonClientState` gives a player new to the client a fresh empty collection for a
   collection field (null before): REI's own reload cleared `lastDisplayScreen` and threw on
   null.

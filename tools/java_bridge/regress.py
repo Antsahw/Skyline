@@ -462,6 +462,21 @@ CASES = {
         look="lan-1-host.png and lan-1-guest.png: each minimap centred on its own player "
              "(the guest's coordinates 40 more in x), JourneyMap's and VoxelMap's full",
     ),
+    "rei-lan": dict(
+        about="REI's settings per player: a LAN guest turns on its craftable-only filter, the host's stays off and its list full",
+        mods=["rei", "architectury", "cloth", "fd"], scene="none", lan=True,
+        steps=['$H command "gamemode survival @a" >/dev/null; sleep 1; $G key e tap; sleep 20; $G key escape tap; sleep 2; $G key e tap; sleep 5',
+               # The filter button beside REI's search box (GUI 270 227): green when on.
+               '$G click-at 270 227; sleep 5; $G screenshot $S/g.png >/dev/null; $H key e tap; sleep 8; $H screenshot $S/h.png >/dev/null; '
+               'python3 -c "import sys; from PIL import Image; on=lambda p: (lambda c: c[1] > c[0] + 20)(Image.open(p).convert(\'RGB\').getpixel((812, 680))); '
+               'items=lambda p: Image.open(p).convert(\'RGB\').getpixel((955, 120))[0] < 80; '
+               'print(\'guest\', \'on\' if on(sys.argv[1]) else \'off\', \'host\', \'on\' if on(sys.argv[2]) else \'off\', \'list\' if items(sys.argv[2]) else \'empty\')" '
+               '$S/g.png $S/h.png > $S/filters.txt'],
+        checks=[check_file("filters.txt", r"guest on", "the guest's filter is on"),
+                check_file("filters.txt", r"host off list", "the host's filter is off, its list there")],
+        forbid=[r"settings can't be kept per player"],
+        look="lan-2-guest.png: the filter green; lan-2-host.png: red, the item list",
+    ),
     "bigpack": dict(
         about="A whole pack (--pack): Java starts, the registries load, a player joins in time, the mods' worldgen runs",
         pack=True, scene="none", timeout=2700,

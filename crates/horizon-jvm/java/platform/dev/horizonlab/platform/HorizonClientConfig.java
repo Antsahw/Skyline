@@ -25,7 +25,7 @@ import java.util.stream.Stream;
  *
  * <ul>
  *   <li>In memory: the objects holding mods' settings (cloth-config's AutoConfig holders, and
- *       mods with a holder of their own: Jade, AppleSkin) are swapped per player as the
+ *       mods with a holder of their own: Jade, AppleSkin, REI) are swapped per player as the
  *       client changes player (HorizonClientState.load calls {@link #swap}). A player new to the
  *       client starts with a copy of the settings of the player before them (the host's first).
  *   <li>On disk: the first player the client serves owns config/ (the host, in a LAN world).
@@ -66,8 +66,21 @@ final class HorizonClientConfig {
         }
         // AppleSkin: ModConfig.INSTANCE.
         staticField(out, loader, "squeek.appleskin.ModConfig", "INSTANCE");
-        // (REI's config object isn't copied: it holds REI's entry stacks, and a copy of them
-        // stopped its overlay drawing over mod screens. Its settings stay shared.)
+        // REI: its config manager's object (also AutoConfig's: one copy for both, see swap) and
+        // its craftable-only switch. Its entry stacks inside are shared (see shared()).
+        try {
+            Class<?> api = Class.forName("me.shedaniel.rei.api.client.config.ConfigManager", true, loader);
+            Object instance = api.getMethod("getInstance").invoke(null);
+            for (String name : new String[] {"object", "craftableOnly"}) {
+                Field f = instance.getClass().getDeclaredField(name);
+                f.setAccessible(true);
+                out.add(new Holder("rei:" + name, instance, f));
+            }
+        } catch (ClassNotFoundException e) {
+            // No REI.
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            fail("REI", e);
+        }
         // Jade: each JsonConfig's cached value (configGetter.value).
         try {
             Class<?> jade = Class.forName("snownee.jade.Jade", true, loader);
@@ -126,9 +139,11 @@ final class HorizonClientConfig {
             // The first player keeps the settings as they are (nobody's were put away before).
             if (from == null && !SAVED.containsKey(to)) return;
             Map<String, Object> theirs = SAVED.get(to);
+            // One copy for an object two holders hold (REI's config: its manager's and AutoConfig's).
+            IdentityHashMap<Object, Object> done = new IdentityHashMap<>();
             for (Holder h : all) {
                 Object current = h.field().get(h.target());
-                Object value = theirs != null && theirs.containsKey(h.key()) ? theirs.get(h.key()) : copy(current);
+                Object value = theirs != null && theirs.containsKey(h.key()) ? theirs.get(h.key()) : copy(current, done);
                 if (value != current) h.field().set(h.target(), value);
             }
         } catch (ReflectiveOperationException | RuntimeException e) {
@@ -301,6 +316,14 @@ final class HorizonClientConfig {
         return name.startsWith("net.minecraft.") || name.startsWith("com.mojang.") || name.startsWith("com.google.")
                 || name.startsWith("it.unimi.") || name.startsWith("org.joml.") || name.startsWith("net.fabricmc.")
                 || name.startsWith("org.slf4j.") || name.startsWith("org.apache.") || name.startsWith("dev.horizonlab.")
-                || java.util.function.Function.class.isAssignableFrom(type) || type.isSynthetic() || type.isHidden();
+                || java.util.function.Function.class.isAssignableFrom(type) || type.isSynthetic() || type.isHidden()
+                // REI's entry stacks, favourites and filtering rules in its config: its registries
+                // and caches know them by identity (a copy stopped its overlay drawing). The
+                // lists holding them are copied: a favourite added is the player's own.
+                || name.startsWith("me.shedaniel.rei.impl.common.entry.") || name.startsWith("me.shedaniel.rei.api.common.entry.")
+                || name.startsWith("me.shedaniel.rei.impl.common.util.") || name.contains(".rei.api.client.favorites.")
+                || name.contains(".rei.impl.client.favorites.") || name.contains(".rei.api.client.entry.filtering.")
+                || name.contains(".rei.impl.client.entry.filtering.") || name.contains(".rei.api.client.config.entry.")
+                || name.contains(".rei.impl.client.config.entries.");
     }
 }
