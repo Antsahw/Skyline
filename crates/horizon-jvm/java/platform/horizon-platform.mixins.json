@@ -77,6 +77,8 @@
     "ItemStackRenderStateMixin",
     "ReiGuiGraphicsMixin",
     "GuiGraphicsMixin",
-    "LevelExtractorMixin"
+    "LevelExtractorMixin",
+    "ModelBakeryMixin",
+    "ModelManagerMixin"
   ]
 }

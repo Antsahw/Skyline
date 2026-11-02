@@ -147,6 +147,14 @@ public final class HorizonClient {
         // Its client (mods' injections into its frame read gui's minecraft: Xaero's).
         set(net.minecraft.client.gui.Gui.class, gui, "minecraft", mc);
         set(Minecraft.class, mc, "gui", gui);
+        // A toast manager, so mods adding toasts don't fail (Pufferfish's Skills' message handler
+        // threw on null); their toasts aren't drawn yet.
+        try {
+            set(net.minecraft.client.gui.Gui.class, gui, "toastManager",
+                    new net.minecraft.client.gui.components.toasts.ToastManager(mc, mc.options));
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            Natives.log("Horizon's client: no toast manager: " + e);
+        }
         // Screens click through the game mode (handleContainerInput): GameModeClientMixin.
         set(Minecraft.class, mc, "gameMode", Natives.allocate(net.minecraft.client.multiplayer.MultiPlayerGameMode.class));
         // Text boxes' typing area, for a window it has none of (TextInputManagerMixin).
@@ -1440,7 +1448,10 @@ public final class HorizonClient {
      * GUI atlas stays (screens' sprites are Horizon's): the others join its atlas manager.
      */
     private static void models() {
-        if (!modelsFit()) return;
+        // A pack whose baked models don't fit still gets a model manager: its models are baked
+        // as mods first ask for them (Xaero's World Map's frame hook read getModelManager() and
+        // failed on null when the models were skipped).
+        HorizonLazyModels.on = !modelsFit();
         long started = System.nanoTime();
         // The client's codecs' types (ClientBootstrap, Minecraft's main runs it): without
         // SpriteSources' an atlas's sources parse to nothing and every atlas held only the
@@ -1507,16 +1518,17 @@ public final class HorizonClient {
     private static final long MODEL_BYTES_PER_STATE = 1200;
 
     /**
-     * Whether the mirror bakes the models: Horizon draws with its own, so this copy is only for
-     * the mods that read them, and a big pack's (connected textures on every state) doesn't fit
-     * beside the rest in a default heap: the heap ran out mid-bake and worldgen with it.
-     * HORIZON_JAVA_MODELS=on bakes anyway, off never.
+     * Whether the mirror bakes every model at once: Horizon draws with its own, so this copy is
+     * only for the mods that read them, and a big pack's (connected textures on every state)
+     * doesn't fit beside the rest in a default heap: the heap ran out mid-bake and worldgen with
+     * it. When not, they're baked on first use (HorizonLazyModels). HORIZON_JAVA_MODELS=on bakes
+     * all at once anyway, off always on first use.
      */
     private static boolean modelsFit() {
         String mode = System.getenv("HORIZON_JAVA_MODELS");
         if ("on".equals(mode)) return true;
         if ("off".equals(mode)) {
-            Natives.log("Horizon's client: no baked models for the mods (HORIZON_JAVA_MODELS=off)");
+            Natives.log("Horizon's client: the mods' models are baked on first use (HORIZON_JAVA_MODELS=off)");
             return false;
         }
         long states = net.minecraft.world.level.block.Block.BLOCK_STATE_REGISTRY.size();
@@ -1530,10 +1542,10 @@ public final class HorizonClient {
         }
         long max = Runtime.getRuntime().maxMemory();
         if (live + need <= max * 85 / 100) return true;
-        Natives.log("Horizon's client: no baked models for the mods: " + states + " block states need ~"
+        Natives.log("Horizon's client: the mods' models are baked on first use: " + states + " block states need ~"
                 + need / 1_000_000 + " MB of Java heap, " + (max - live) / 1_000_000 + " MB is free of "
-                + max / 1_000_000 + " (map mods' block colours and other model readers go without; "
-                + "HORIZON_JVM_OPTIONS=-Xmx<size> gives Java more, HORIZON_JAVA_MODELS=on bakes anyway)");
+                + max / 1_000_000 + " (only the states mods read are baked; "
+                + "HORIZON_JVM_OPTIONS=-Xmx<size> gives Java more, HORIZON_JAVA_MODELS=on bakes them all at once)");
         return false;
     }
 
@@ -1592,11 +1604,16 @@ public final class HorizonClient {
         try {
             reload.done().join();
             set(Minecraft.class, minecraft, "modelManager", models);
+            // The client's item models over them (Iceberg's 3D item in Legendary Tooltips:
+            // getItemModelResolver().updateForTopItem). With a model manager the resolver is
+            // vanilla's (ItemModelResolverMixin keeps items only for resolvers without one).
+            set(Minecraft.class, minecraft, "itemModelResolver", new net.minecraft.client.renderer.item.ItemModelResolver(models));
             Class<?> owner = net.minecraft.client.resources.model.sprite.AtlasManager.class;
             set(owner, minecraft.getAtlasManager(), "spriteLookup", field(owner, atlases, "spriteLookup"));
             fonts(atlases, skins);
             featureRenderer(models, atlases);
-            Natives.log("Horizon's client: block and item models loaded in " + (System.nanoTime() - started) / 1_000_000 + " ms");
+            Natives.log("Horizon's client: block and item models loaded in " + (System.nanoTime() - started) / 1_000_000 + " ms"
+                    + (HorizonLazyModels.on ? " (baked on first use)" : ""));
         } catch (Throwable t) {
             Throwable root = t;
             while (root.getCause() != null && root.getCause() != root) root = root.getCause();
@@ -1628,8 +1645,12 @@ public final class HorizonClient {
             Class<?> owner = net.minecraft.client.renderer.GameRenderer.class;
             var buffers = new net.minecraft.client.renderer.RenderBuffers(1);
             set(owner, gameRenderer, "renderBuffers", buffers);
-            set(owner, gameRenderer, "featureRenderDispatcher", new net.minecraft.client.renderer.feature.FeatureRenderDispatcher(
-                    buffers, models, atlases, minecraft.font, gameRenderer.gameRenderState()));
+            var dispatcher = new net.minecraft.client.renderer.feature.FeatureRenderDispatcher(
+                    buffers, models, atlases, minecraft.font, gameRenderer.gameRenderState());
+            set(owner, gameRenderer, "featureRenderDispatcher", dispatcher);
+            // The GUI renderer's too (mods drawing oversized items read it there).
+            Object gui = field(owner, gameRenderer, "guiRenderer");
+            if (gui != null) set(net.minecraft.client.gui.render.GuiRenderer.class, gui, "featureRenderDispatcher", dispatcher);
         } catch (Throwable t) {
             Natives.log("Horizon's client: no feature render dispatcher: " + t);
             for (var f : t.getStackTrace()) Natives.log("    at " + f);
@@ -1650,6 +1671,13 @@ public final class HorizonClient {
             set(net.minecraft.client.gui.render.GuiRenderer.class, gui, "guiProjection", projection);
             set(net.minecraft.client.gui.render.GuiRenderer.class, gui, "guiProjectionMatrixBuffer",
                     new net.minecraft.client.renderer.ProjectionMatrixBuffer("gui"));
+            // Its oversized items' renderers and GUI scale (Pufferfish's Skills draws its icons
+            // through them: OversizedItemRenderer.prepare, a picture in picture each).
+            set(net.minecraft.client.gui.render.GuiRenderer.class, gui, "oversizedItemRenderers", new java.util.HashMap<>());
+            int scale = Math.max(1, minecraft.getWindow().getGuiScale());
+            var window = ((net.minecraft.client.renderer.GameRenderer) gameRenderer).gameRenderState().windowRenderState;
+            if (window.guiScale == 0) window.guiScale = scale;
+            set(net.minecraft.client.gui.render.GuiRenderer.class, gui, "cachedGuiScale", window.guiScale);
             set(net.minecraft.client.renderer.GameRenderer.class, gameRenderer, "guiRenderer", gui);
         } catch (Throwable t) {
             Natives.log("Horizon's client: no GUI renderer: " + t);
@@ -1659,7 +1687,13 @@ public final class HorizonClient {
         // size at the window's scale: drawing aimed at the screen lands there, unseen).
         Class<?> owner = net.minecraft.client.renderer.GameRenderer.class;
         ThrowingRunnable[] parts = {
-            () -> set(owner, gameRenderer, "lighting", new com.mojang.blaze3d.platform.Lighting()),
+            () -> {
+                // The GUI's lights from the start (vanilla's frame sets them; Iceberg's 3D item
+                // draws in them, its pipeline's Lighting unbound otherwise: no draw).
+                var lighting = new com.mojang.blaze3d.platform.Lighting();
+                lighting.setupFor(com.mojang.blaze3d.platform.Lighting.Entry.ITEMS_3D);
+                set(owner, gameRenderer, "lighting", lighting);
+            },
             () -> set(owner, gameRenderer, "overlayTexture", new net.minecraft.client.renderer.texture.OverlayTexture()),
             () -> set(owner, gameRenderer, "lightmap", new net.minecraft.client.renderer.Lightmap()),
             () -> {
@@ -1669,6 +1703,13 @@ public final class HorizonClient {
             },
             () -> set(owner, gameRenderer, "mainRenderTarget", new com.mojang.blaze3d.pipeline.TextureTarget("main", width * 3, height * 3,
                     com.mojang.renderpearl.api.GpuFormat.RGBA8_UNORM, com.mojang.renderpearl.api.GpuFormat.D32_FLOAT)),
+            // The Globals uniform (GameRenderer.render updates it each frame): pipelines on the
+            // GLOBALS layout (item_cutout: Iceberg's 3D item) skipped their draws without it.
+            () -> {
+                var globals = new net.minecraft.client.renderer.GlobalSettingsUniform();
+                globals.update(width * 3, height * 3, 1.0, 0L, 0.0F, 0, net.minecraft.world.phys.Vec3.ZERO, false);
+                set(owner, gameRenderer, "globalSettingsUniform", globals);
+            },
         };
         for (var part : parts) {
             try {
@@ -1734,6 +1775,16 @@ public final class HorizonClient {
      * methods run on its connection, wherever in them they inject (Xaero's minimap starts its
      * session at the login and names the world by the spawn).
      */
+    /**
+     * The player's client joins before its first message from the server is read, as a vanilla
+     * client handles its login before the packets after it (HorizonLoop's deliveries): a mod
+     * clearing its client data at the join (Pufferfish's Skills' categories) cleared what the
+     * server had sent at its own join, delivered the tick before.
+     */
+    static void joinBeforeMessages(net.minecraft.server.level.ServerPlayer player) {
+        joined(player);
+    }
+
     private static void joined(net.minecraft.server.level.ServerPlayer player) {
         if (minecraft.level == null || !JOINED.add(player.getUUID())) return;
         // Mods that failed before a player was there: told now (HorizonFailures).
@@ -1933,6 +1984,10 @@ public final class HorizonClient {
     private static void tickOnce() {
         HorizonHooks.fireClient(minecraft, "runTick");
         HorizonHooks.fireClient(minecraft, "tick");
+        // Once a frame in the game (the headless client's frames are its ticks, getDeltaTracker
+        // whole ticks): Iceberg's render tick (Legendary Tooltips' turning 3D item, its targets'
+        // pool given back).
+        HorizonHooks.fireClient(minecraft, "renderFrame");
         HorizonServer.fireEach("ClientTickEvents.START_CLIENT_TICK",
                 net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents.START_CLIENT_TICK, l -> l.onStartTick(minecraft));
         // The client player's tick (the client level ticks it: Player.tick), as far as mods hook

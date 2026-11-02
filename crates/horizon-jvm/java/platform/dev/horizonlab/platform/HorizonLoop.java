@@ -23,8 +23,8 @@ import net.minecraft.server.level.ServerPlayer;
  * The mods' own messages between their two halves, both in this JVM: what a mod's server code
  * sends a player (ServerPlayNetworking.send) reaches its client code's receiver for that
  * player's headless client, and what its client code sends (ClientPlayNetworking.send) reaches
- * its server receiver as that player's. The payload objects go over as they are, never
- * encoded: one process, one copy of every class.
+ * its server receiver as that player's. Payloads are written and read back with their codecs
+ * (carried), as over a connection; one whose codec fails here goes over as the object.
  *
  * <p>Fabric runs play receivers on the receiving side's main thread; both sides' are Horizon's
  * server thread here. Server messages wait for the end of what sent them (flush), as packets
@@ -100,13 +100,15 @@ public final class HorizonLoop {
         if (DEBUG) Natives.log("loop: server to client " + payload.type().id() + " for " + player.getName().getString());
         var handler = (ClientPlayNetworking.PlayPayloadHandler) ClientNetworkingImpl.PLAY.getHandler(payload.type().id());
         if (handler == null) return false;
+        CustomPacketPayload received = carried(payload, net.fabricmc.fabric.impl.networking.PayloadTypeRegistryImpl.CLIENTBOUND_PLAY);
         Runnable delivery = () -> {
             try {
                 // What the handler schedules on the client's thread (Minecraft.schedule: corelib's
                 // queued packets, Chunk Loaders' loaders) runs now, still as this player: in
                 // their client level, where the packet is for.
                 HorizonClient.as(player, () -> {
-                    handler.receive(payload, clientContext(player));
+                    HorizonClient.joinBeforeMessages(player);
+                    handler.receive(received, clientContext(player));
                     HorizonClient.tasks();
                 });
             } catch (Throwable t) {
@@ -115,6 +117,38 @@ public final class HorizonLoop {
         };
         OUTBOX.add(delivery);
         return true;
+    }
+
+    /** Payload types whose codec failed here: theirs go over as objects. */
+    private static final Set<Identifier> UNCARRIED = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    /**
+     * The payload as the other side reads it: written and read back with its registered codec,
+     * as over a connection. Most payloads read back as the same object, but some mods' are one
+     * class for both ways with fields only one side fills (Pufferfish's Skills: what the server
+     * writes, its client reads into another field, null when the object went over as it was).
+     * A codec that fails here (none registered, a registry it can't reach) leaves the object.
+     */
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private static CustomPacketPayload carried(CustomPacketPayload payload,
+                                               net.fabricmc.fabric.impl.networking.PayloadTypeRegistryImpl<net.minecraft.network.RegistryFriendlyByteBuf> registry) {
+        Identifier id = payload.type().id();
+        if (UNCARRIED.contains(id)) return payload;
+        var server = HorizonServer.server();
+        var type = registry.get(id);
+        if (type == null || server == null) return payload;
+        var buf = new net.minecraft.network.RegistryFriendlyByteBuf(io.netty.buffer.Unpooled.buffer(), server.registryAccess());
+        try {
+            ((net.minecraft.network.codec.StreamCodec) type.codec()).encode(buf, payload);
+            Object read = type.codec().decode(buf);
+            if (read instanceof CustomPacketPayload back) return back;
+        } catch (Throwable t) {
+            if (UNCARRIED.add(id) && DEBUG) Natives.log("loop: " + id + " goes over as it is (its codec: " + t + ")");
+        } finally {
+            buf.release();
+        }
+        UNCARRIED.add(id);
+        return payload;
     }
 
     /** Client to server, for the player whose client runs now (Minecraft.player). */
@@ -131,7 +165,7 @@ public final class HorizonLoop {
                 : (ServerPlayNetworking.PlayPayloadHandler) ServerNetworkingImpl.PLAY.getHandler(payload.type().id());
         if (handler == null) return;
         try {
-            handler.receive(payload, serverContext(player));
+            handler.receive(carried(payload, net.fabricmc.fabric.impl.networking.PayloadTypeRegistryImpl.SERVERBOUND_PLAY), serverContext(player));
             // What the mod's server code changed shows as the server's other changes do.
             HorizonServer.afterLoop();
         } catch (Throwable t) {

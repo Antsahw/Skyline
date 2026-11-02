@@ -197,10 +197,22 @@ public final class HorizonGraphics extends GuiGraphicsExtractor {
                     float k = (float) Math.floor(u0 + (u1 - u0) / 2);
                     owner.spriteQuad(sprite.texture(), x0, y0, x1, y1, u0 - k, u1 - k, v0, v1, top);
                 } else if (!textured) {
-                    owner.quad(x0, y0, x1, y1, top, bottom);
+                    float[][] corners = {vertices.points().get(i), vertices.points().get(i + 1),
+                            vertices.points().get(i + 2), vertices.points().get(i + 3)};
+                    if (axisAligned(corners)) owner.quad(x0, y0, x1, y1, top, bottom);
+                    else owner.slanted(corners, top);
                 }
             }
         }
+    }
+
+    /** Whether a quad's corners make an upright rectangle (each edge level or plumb). */
+    private static boolean axisAligned(float[][] c) {
+        for (int k = 0; k < 4; k++) {
+            float[] a = c[k], b = c[(k + 1) % 4];
+            if (Math.abs(a[0] - b[0]) > 0.01F && Math.abs(a[1] - b[1]) > 0.01F) return false;
+        }
+        return true;
     }
 
     /** Collects a GUI element's vertices: x, y (posed), u, v, and their colours. */
@@ -367,6 +379,21 @@ public final class HorizonGraphics extends GuiGraphicsExtractor {
         String name = HorizonTextures.DYNAMIC_PREFIX + "gpu" + view.id;
         if (DEBUG_GPU) Natives.log("gpu: a blit of " + name + " " + view.getWidth(0) + "x" + view.getHeight(0) + " at " + x0 + "," + y0 + " " + x1 + "," + y1
                 + " uv " + u0 + "," + v0 + " " + u1 + "," + v1 + (modsOnly && !drawnByModNow() ? " (not a mod's)" : ""));
+        var across = repeats(x0, x1, u0, u1);
+        var down = repeats(y0, y1, v0, v1);
+        if ((across != null || down != null) && (across == null ? 1 : across.size()) * (down == null ? 1 : down.size()) <= MAX_TILES) {
+            // A repeated texture (repeats): its image read once, then a blit per repeat.
+            if (across == null) across = java.util.List.of(new float[] {x0, x1, u0, u1});
+            if (down == null) down = java.util.List.of(new float[] {y0, y1, v0, v1});
+            boolean first = read;
+            for (float[] h : across) {
+                for (float[] v : down) {
+                    gpuQuad(new Object[] {view, h[0], v[0], h[1], v[1], h[2], h[3], v[2], v[3], color}, first);
+                    first = false;
+                }
+            }
+            return;
+        }
         if (read && imagesSent != null && (!modsOnly || drawnByModNow())) {
             // Its pixels are read when the frame's ops are taken, not now: a mod may still draw
             // into the target (or clear it first: XaeroPlus clears the World Map's target as
@@ -472,8 +499,41 @@ public final class HorizonGraphics extends GuiGraphicsExtractor {
     }
 
     /** A captured piece of a sprite (already posed): a blit of its texture's part, tinted. */
+    /** At most this many tiles of a repeated texture in one quad (else drawn as it is). */
+    private static final int MAX_TILES = 1024;
+
+    /**
+     * One axis of a quad whose UVs repeat the texture (past 0..1, a repeating sampler: Pufferfish's
+     * Skills' backgrounds): its pieces {x start, x end, u at start, u at end}, x rising, each
+     * piece's UVs within one repeat and made 0..1 (their direction kept); null when the UVs stay
+     * within one repeat. Horizon draws a blit's UVs inside its image only: past them it drew
+     * what lay beside the image.
+     */
+    static java.util.List<float[]> repeats(float x0, float x1, float u0, float u1) {
+        float lo = Math.min(u0, u1), hi = Math.max(u0, u1);
+        double c0 = Math.floor(lo + 1e-4), c1 = Math.ceil(hi - 1e-4);
+        if (hi <= lo || (c1 - c0 <= 1 && c0 == 0) || c1 - c0 > MAX_TILES) return null;
+        var pieces = new java.util.ArrayList<float[]>();
+        for (double c = c0; c < c1; c++) {
+            float a = (float) Math.max(lo, c), b = (float) Math.min(hi, c + 1);
+            if (b <= a) continue;
+            float xa = x0 + (x1 - x0) * (a - u0) / (u1 - u0), xb = x0 + (x1 - x0) * (b - u0) / (u1 - u0);
+            float la = (float) (a - c), lb = (float) (b - c);
+            pieces.add(xa <= xb ? new float[] {xa, xb, la, lb} : new float[] {xb, xa, lb, la});
+        }
+        return pieces;
+    }
+
     private void spriteQuad(String texture, float x0, float y0, float x1, float y1,
                             float u0, float u1, float v0, float v1, int color) {
+        var across = repeats(x0, x1, u0, u1);
+        var down = repeats(y0, y1, v0, v1);
+        if ((across != null || down != null) && (across == null ? 1 : across.size()) * (down == null ? 1 : down.size()) <= MAX_TILES) {
+            if (across == null) across = java.util.List.of(new float[] {x0, x1, u0, u1});
+            if (down == null) down = java.util.List.of(new float[] {y0, y1, v0, v1});
+            for (float[] h : across) for (float[] v : down) spriteQuad(texture, h[0], v[0], h[1], v[1], h[2], h[3], v[2], v[3], color);
+            return;
+        }
         // A dynamic texture's pixels go first, where the receiver lacks them.
         if (texture.startsWith(HorizonTextures.DYNAMIC_PREFIX) && (!modsOnly || drawnByModNow())) {
             var image = HorizonTextures.imageOp(texture, imagesSent);
@@ -495,6 +555,46 @@ public final class HorizonGraphics extends GuiGraphicsExtractor {
             if (color != -1) o.addProperty("color", color);
         } finally {
             pose().popMatrix();
+        }
+    }
+
+    /** Rows a slanted quad is cut into at most. */
+    private static final int MAX_ROWS = 96;
+
+    /**
+     * A captured quad that isn't upright (a turned pose: Pufferfish's Skills' lines between its
+     * skills), as fills a GUI pixel row high, each the quad's span on that row: Horizon's frames
+     * draw upright rectangles only, and the quad's bounding box filled squares around each line.
+     */
+    private void slanted(float[][] corners, int color) {
+        float top = Float.MAX_VALUE, bottom = -Float.MAX_VALUE, left0 = Float.MAX_VALUE, right0 = -Float.MAX_VALUE;
+        for (float[] c : corners) {
+            top = Math.min(top, c[1]);
+            bottom = Math.max(bottom, c[1]);
+            left0 = Math.min(left0, c[0]);
+            right0 = Math.max(right0, c[0]);
+        }
+        // Off the screen (a scrolled skill tree's far lines): nothing to send.
+        if (right0 <= 0 || left0 >= guiWidth() || bottom <= 0 || top >= guiHeight()) return;
+        float first = Math.max(top, 0), last = Math.min(bottom, guiHeight());
+        float step = Math.max(1F, (last - first) / MAX_ROWS);
+        top = first;
+        bottom = last;
+        for (float y = top; y < bottom; y += step) {
+            float mid = Math.min(bottom, y + step / 2), left = Float.MAX_VALUE, right = -Float.MAX_VALUE;
+            for (int k = 0; k < 4; k++) {
+                float[] a = corners[k], b = corners[(k + 1) % 4];
+                if ((a[1] <= mid && b[1] >= mid) || (b[1] <= mid && a[1] >= mid)) {
+                    float x = a[1] == b[1] ? a[0] : a[0] + (b[0] - a[0]) * (mid - a[1]) / (b[1] - a[1]);
+                    left = Math.min(left, x);
+                    right = Math.max(right, x);
+                    if (a[1] == b[1]) {
+                        left = Math.min(left, b[0]);
+                        right = Math.max(right, b[0]);
+                    }
+                }
+            }
+            if (right > left) quad(left, y, right, Math.min(bottom, y + step), color, color);
         }
     }
 

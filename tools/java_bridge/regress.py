@@ -76,6 +76,7 @@ MODS = {
     "rftoolsbase": ["rftoolsbase*"],
     "fcap": ["forgeconfigapiport*"],
     "cc": ["cc-tweaked*"],
+    "skills": ["puffish_skills*"],
     "legendarytooltips": ["legendarytooltips*"],
     "iceberg": ["iceberg*"],
     "prism-lib": ["prism-*"],
@@ -681,6 +682,17 @@ CASES = {
         forbid=[r"handler\$\w+\$xaero\w*\$\w+\): java", r"Failed to get data directory"],
         look="the World Map: the explored land in its colours, the red arrow, X/Y/Z at the top",
     ),
+    "worldmap-lazy": dict(
+        about="Xaero's Minimap and World Map with the mirror's models baked on first use (a big pack's don't fit: HORIZON_JAVA_MODELS=off): both draw, no frame hook fails on a missing ModelManager",
+        mods=["xaero", "xaeroworldmap"], scene="none", env={"HORIZON_JAVA_DEBUG": "gpu", "HORIZON_JAVA_MODELS": "off"},
+        steps=['sleep 40', '$C key m tap; sleep 25'],
+        checks=[check_log(r"models are baked on first use", "the models are lazy"),
+                check_log(r"models baked on first use \(BlockState\)", "map mods baked the states they read"),
+                check_log(r"gpu: horizon:dynamic/gpu\d+ 447x267, \d+ pixels not transparent, [1-9]\d{3,} not black", "the minimap draws"),
+                check_log(r"gpu: horizon:dynamic/gpu\d+ 427x240, \d+ pixels not transparent, [1-9]\d{4,} not black", "the World Map's target (shrunk) has the map")],
+        forbid=[r"handler\$\w+\$xaero\w*\$\w+\): java", r"ModelManager\.getBlockStateModelSet\(\)", r"model baked on first use failed"],
+        look="the World Map in its colours (plains, forest, water), the red arrow, X/Y/Z at the top",
+    ),
     "minihud": dict(
         about="MiniHUD (MaLiLib): its info lines draw at the end of the GUI's frame (Gui.extractRenderState TAIL)",
         mods=["malilib", "minihud"], scene="none",
@@ -700,13 +712,38 @@ CASES = {
         forbid=[r"Cannot update terminal", r"client's menu of \S+ couldn't be made", r"screen of computercraft:\S+ could not open"],
         look="the advanced computer's terminal: CraftOS 1.9, '> mkdir typed', a new prompt",
     ),
+    "skills": dict(
+        about="Pufferfish's Skills: K opens its skill tree (a client-only screen): item icons drawn as oversized items on the headless GPU, lines between skills at their angle; its messages carried by their codecs (one class both ways), the client joined before them",
+        mods=["skills"], scene="none", env={"HORIZON_JAVA_DEBUG": "gpu"},
+        config={
+            "puffish_skills/config.json": '{"version": 3, "categories": ["test"]}',
+            "puffish_skills/categories/test/category.json":
+                '{"unlocked_by_default": true, "title": "Test", "icon": {"type": "item", "data": {"item": "diamond_sword"}}, "background": "textures/block/stone.png"}',
+            "puffish_skills/categories/test/definitions.json":
+                '{"sword": {"title": "Sword", "icon": {"type": "item", "data": {"item": "iron_sword"}}, "rewards": []},'
+                ' "heart": {"title": "Heart", "icon": {"type": "effect", "data": {"effect": "health_boost"}}, "rewards": []}}',
+            "puffish_skills/categories/test/skills.json":
+                '{"a": {"x": 0, "y": 0, "definition": "sword", "root": true}, "b": {"x": 64, "y": 48, "definition": "heart"},'
+                ' "c": {"x": -64, "y": 48, "definition": "sword"}}',
+            "puffish_skills/categories/test/connections.json": '{"normal": {"bidirectional": [["a", "b"], ["a", "c"]]}}',
+            "puffish_skills/categories/test/experience.json": '{"experience_per_level": {"type": "expression", "data": {"expression": "10"}}, "sources": []}',
+        },
+        steps=['sleep 20', '$C key k tap; sleep 30'],
+        checks=[check_log(r"gpu: a blit of horizon:dynamic/gpu\d+ 48x48", "the skills' item icons draw (oversized items on the GPU)")],
+        forbid=[r"A mod failed in", r"the client of puffish_skills:\S+ failed", r"puffish_skills\S*: java"],
+        look="none-0: the skill tree: an iron sword skill in the middle, slanted white lines to a heart and another sword, the Test tab with a diamond sword (the background stays black: not drawn yet)",
+    ),
     "tooltips": dict(
         about="Legendary Tooltips (Iceberg, Prism) over a mod screen: tooltips draw through vanilla's path, where its mixins run (centred title, the border in the item's rarity colour)",
-        mods=["legendarytooltips", "iceberg", "prism-lib", "fd"], scene="pot",
-        steps=['$C click-at 141 187; sleep 1; $C click-at 141 187; sleep 3'],
-        checks=[check_log(r"Java screens' tooltips draw as vanilla's", "tooltips take vanilla's path")],
-        forbid=[r"A mod failed in", r"iceberg\S*: java"],
-        look="the pot's screen, Raw Beef's tooltip: title centred, a white border (common rarity), not vanilla's purple",
+        mods=["legendarytooltips", "iceberg", "prism-lib", "fd"], scene="pot", env={"HORIZON_JAVA_DEBUG": "gpu"},
+        steps=['$C click-at 141 187; sleep 1; $C click-at 141 187; sleep 3',
+               # An iron sword's tooltip: Iceberg draws its turning 3D model on the headless GPU.
+               '$C command "give @s minecraft:iron_sword"; sleep 2; $C click-at 177 187; sleep 1; $C click-at 177 187; sleep 3'],
+        checks=[check_log(r"Java screens' tooltips draw as vanilla's", "tooltips take vanilla's path"),
+                check_log(r"gpu: horizon:dynamic/gpu\d+ 96x96, [1-9]\d* pixels not transparent", "the sword's 3D model drew (Iceberg's target)"),
+                check_log(r"mod injection\(s\) run each client renderFrame", "Iceberg's render tick runs (the model turns)")],
+        forbid=[r"A mod failed in", r"iceberg\S*: java", r"a draw skipped: \S+: uniform \d+ unbound"],
+        look="pot-0: Raw Beef's tooltip: title centred, a white border (common rarity), not vanilla's purple; pot-1: the Iron Sword's tooltip with the sword's 3D model in its box",
     ),
     "maps-lan": dict(
         about="JourneyMap and VoxelMap per player: a host and a LAN guest 40 blocks east, each map their own",
