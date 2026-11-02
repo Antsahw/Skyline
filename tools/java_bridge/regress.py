@@ -66,6 +66,10 @@ MODS = {
     "journeymap": ["journeymap*"],
     "voxelmap": ["voxelmap*"],
     "diorama": ["diorama*"],
+    "xaeroworldmap": ["xaeroworldmap*", "xaeros_world_map*", "xaeros-world-map*"],
+    "xaeroplus": ["xaeroplus*"],
+    "malilib": ["malilib*"],
+    "minihud": ["minihud*"],
 }
 
 
@@ -450,6 +454,24 @@ CASES = {
         checks=[check_log(r"gpu: a blit of horizon:dynamic/gpu\d+ 512x512", "a baked 512 px tile reaches the HUD")],
         forbid=[r"\[dev\.diorama\.\S+\]: java", r"\$diorama\$\w+\): java"],
         look="Diorama's square minimap at the top right: the land around, N/E/S/W, the arrow",
+    ),
+    "xaeroplus": dict(
+        about="XaeroPlus over Xaero's maps: the minimap, and M's World Map draws (XaeroPlus clears its target as it adds it to the GUI)",
+        mods=["xaero", "xaeroworldmap", "xaeroplus"], scene="none", env={"HORIZON_JAVA_DEBUG": "gpu"},
+        steps=['sleep 40', '$C key m tap; sleep 15'],
+        checks=[check_log(r"gpu: horizon:dynamic/gpu\d+ 447x267, \d+ pixels not transparent, [1-9]\d{3,} not black", "the minimap draws"),
+                check_log(r"gpu: horizon:dynamic/gpu\d+ 427x240, \d+ pixels not transparent, [1-9]\d{4,} not black", "the World Map's target (shrunk) has the map")],
+        forbid=[r"handler\$\w+\$xaero\w*\$\w+\): java", r"Failed to get data directory"],
+        look="the World Map: the explored land in its colours, the red arrow, X/Y/Z at the top",
+    ),
+    "minihud": dict(
+        about="MiniHUD (MaLiLib): its info lines draw at the end of the GUI's frame (Gui.extractRenderState TAIL)",
+        mods=["malilib", "minihud"], scene="none",
+        steps=['sleep 30'],
+        checks=[check_log(r"mod injection\(s\) run at the end of the GUI's frame", "MaLiLib's GUI hook is found"),
+                check_log(r"run each client <start at its end>", "MaLiLib's hooks at the end of the client's start are found")],
+        forbid=[r"A mod failed in the GUI's frame", r"A mod failed in the client's"],
+        look="MiniHUD's lines at the top left: the date, coordinates, facing",
     ),
     "maps-lan": dict(
         about="JourneyMap and VoxelMap per player: a host and a LAN guest 40 blocks east, each map their own",

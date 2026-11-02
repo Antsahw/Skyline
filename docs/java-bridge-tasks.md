@@ -346,3 +346,17 @@ tests pass; fmt and clippy `-D warnings` clean (horizon-client, horizon-jvm).
   per player, unlike client 1 said): its copied config stopped the overlay. Test:
   `MODS=<REI+TR+Jade...> tools/java_bridge/server_test.sh '$G key e tap; sleep 6'` (new);
   regress `reiscreen` (new), `rei hud join modsettings failmsg` pass.
+
+- **gpu 4, XaeroPlus and MiniHUD** (`bridge-gpu-4`, round 5 gpu 1), by Claude for iaxivers.
+  Works: XaeroPlus over Xaero's Minimap and World Map (minimap and M's World Map), MiniHUD with
+  MaLiLib (its info lines top left). Fixes useful beyond them: a GPU texture blitted to the
+  GUI is read back at the frame's end, not at its blit (XaeroPlus clears the World Map's target
+  as it's added, then the map is drawn: read at once, it was black); Mixin's renamed handlers
+  (`<mod>_` prefix dropped) are found (`handlerNamed`); `Gui.extractRenderState` TAIL
+  injections run (`fireGui`) and `Minecraft.<init>` RETURN ones (`START_END`);
+  `isGameLoadFinished()` is true once the models load; `Gui.minecraft` is set. Small changes
+  outside gpu: `HorizonHooks` (mixins: `fireGui`, `handlerNamed`, `START_END`) and
+  `HorizonClient` (client: `gameConfig()`, the GUI hook in `hud()`, the load flag). Regress
+  cases `xaeroplus`, `minihud` (new); `maps diorama journeymap voxelmap` pass. Test: XaeroPlus +
+  Xaero's Minimap + World Map in `~/hz-test/mods-java`, join, M; or MiniHUD + MaLiLib: the lines
+  top left.
