@@ -537,3 +537,11 @@ tests pass; fmt and clippy `-D warnings` clean (horizon-client, horizon-jvm).
   players, so a filtered search can briefly come out with another player's switch; the
   craftable search is very slow here (30+ s, 2 cores), so the guest's filtered list may lag.
   Test: regress `rei-lan` (new, LAN), `rei reiscreen modsettings` pass.
+
+- **client r6-3, map mods on a dedicated server** (`bridge-client-9`). Not done: JourneyMap,
+  VoxelMap and Xaero's World Map aren't in this sandbox (downloaded mod jars aren't run here),
+  so only a regress case was added: `maps-server` (server=True: the four map mods for a
+  dedicated server's player, the World Map opened with M; checks the player plays and no
+  per-player state errors). Xaero's Minimap already works there (regress `server`). Test on
+  the PC: `python3 tools/java_bridge/regress.py --jars ~/hz-test/mods-java maps-server`, then
+  look at /tmp/hz-regress/maps-server/server-*.png.
