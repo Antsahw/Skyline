@@ -249,6 +249,41 @@ CASES = {
                 check_file("gone.txt", r"(?m)^kept", "the golem is still there")],
         look="the golem at the biter",
     ),
+    "arrows": dict(
+        about="Horizon's projectiles hit mods' mobs: the player's bow shots kill crittermod's biter on the mirror (HorizonNeighbours.hurtByProjectile)",
+        fixtures=["crittermod"], scene="range",
+        steps=['$C command "item replace entity @s hotbar.0 with minecraft:bow" >/dev/null; $C select 1 >/dev/null; '
+               '$C command "summon horizon_critters:biter $(cat $S/critter.pos)" >/dev/null; sleep 1.5; $C entities 16 > $S/before.json; '
+               'for i in 1 2 3 4; do at=$(python3 -c "import json,sys; b=[e[\'pos\'] for e in json.load(open(sys.argv[1])).get(\'entities\', []) if e.get(\'type\') == \'horizon_critters:biter\']; print(\' \'.join(str(v + d) for v, d in zip(b[0], (0, 0.45, 0))) if b else \'\')" $S/$([ $i = 1 ] && echo before || echo now).json); '
+               '[ -z "$at" ] && break; $C look-at $at >/dev/null; $C use-item --hold 1.2 >/dev/null; sleep 1; '
+               '[ $i = 1 ] && $C screenshot $S/shot.png >/dev/null; $C entities 16 > $S/now.json; '
+               'grep -q horizon_critters:biter $S/now.json || break; done; sleep 1; $C entities 16 > $S/after.json; '
+               'python3 "$R/tools/java_bridge/gone_check.py" horizon_critters:biter $S/before.json $S/after.json > $S/gone.txt'],
+        checks=[check_file("gone.txt", r"(?m)^there", "the biter stood in the pen"),
+                check_file("gone.txt", r"(?m)^gone", "the player's arrows killed it")],
+        forbid=[r"projectile's hit on a mod entity failed", r"no minecraft:arrow for a projectile"],
+        look="an arrow in flight at (or stuck beside) the biter",
+    ),
+    "spit": dict(
+        about="A mod's own projectile hits players: crittermod's spitter throws Pebbles (2 damage each) at the player in survival",
+        fixtures=["crittermod"], scene="range",
+        steps=['$C command "gamerule natural_health_regeneration false" >/dev/null; $C command "gamemode survival" >/dev/null; '
+               '$C command "summon horizon_critters:spitter $(cat $S/critter.pos)" >/dev/null; sleep 3; $C screenshot $S/spit.png >/dev/null; sleep 3; '
+               '$C status > $S/status.json; python3 -c "import json,sys; h=json.load(open(sys.argv[1]))[\'player\'][\'health\']; print(\'hurt\' if h < 20 else \'whole\', h)" $S/status.json > $S/hurt.txt'],
+        checks=[check_file("hurt.txt", r"^hurt", "the Pebbles took some of the player's health")],
+        look="the spitter facing the player, hearts below 10",
+    ),
+    "spitsheep": dict(
+        about="A mod's own projectile hits Horizon's mobs: crittermod's spitter (the player in creative: not its target) throws Pebbles at Horizon's sheep until it dies",
+        fixtures=["crittermod"], scene="neighbours",
+        steps=['$C entities 16 > $S/before.json; $C command "summon horizon_critters:spitter $(cat $S/hunter.pos)" >/dev/null; sleep 4; '
+               '$C screenshot $S/spit.png >/dev/null; sleep 14; $C entities 16 > $S/after.json; '
+               'python3 "$R/tools/java_bridge/gone_check.py" minecraft:sheep $S/before.json $S/after.json horizon_critters:spitter > $S/gone.txt'],
+        checks=[check_file("gone.txt", r"(?m)^there", "Horizon's sheep stood there"),
+                check_file("gone.txt", r"(?m)^gone", "the Pebbles killed it"),
+                check_file("gone.txt", r"(?m)^kept", "the spitter is still there")],
+        look="the spitter turned to the sheep",
+    ),
     "strikeback": dict(
         about="Horizon's mob strikes back at a mod's mob that hurts it: crittermod's hunter (no Enemy: golems leave it be) bites Horizon's iron golem, which kills it",
         fixtures=["crittermod"], scene="golem",

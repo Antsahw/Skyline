@@ -1746,6 +1746,48 @@ pub fn hurt_by_horizon(id: i32, attacker: i32, amount: f32) -> Result<bool, Stri
     Ok(hurt.unwrap_or(false))
 }
 
+/// Horizon's projectile of type `kind` (an arrow, a trident, a snowball) hit the mods' entity
+/// `id` for `amount`, at `at` flying `velocity`: shot by the player `player` (a UUID, empty
+/// when not a player's) or Horizon's mob `mob` (-1 for none), burning or not
+/// (`HorizonNeighbours.hurtByProjectile`). False when it took nothing.
+#[allow(clippy::too_many_arguments)]
+pub fn hurt_by_projectile(
+    id: i32,
+    kind: &str,
+    player: &str,
+    mob: i32,
+    amount: f32,
+    at: [f64; 3],
+    velocity: [f64; 3],
+    burning: bool,
+) -> Result<bool, String> {
+    let hurt = with_server(|env, class| {
+        let kind = env.new_string(kind)?;
+        let player = env.new_string(player)?;
+        env.call_static_method(
+            class,
+            "hurtByProjectile",
+            "(ILjava/lang/String;Ljava/lang/String;IFDDDDDDZ)Z",
+            &[
+                JValue::Int(id),
+                JValue::Object(&kind),
+                JValue::Object(&player),
+                JValue::Int(mob),
+                JValue::Float(amount),
+                JValue::Double(at[0]),
+                JValue::Double(at[1]),
+                JValue::Double(at[2]),
+                JValue::Double(velocity[0]),
+                JValue::Double(velocity[1]),
+                JValue::Double(velocity[2]),
+                JValue::Bool(u8::from(burning)),
+            ],
+        )?
+        .z()
+    })?;
+    Ok(hurt.unwrap_or(false))
+}
+
 /// A player hit the mod entity with this id (`Player.attack` on the mods' server). False when
 /// no mod entity has it.
 pub fn attack_entity(uuid: &str, id: i32) -> Result<bool, String> {

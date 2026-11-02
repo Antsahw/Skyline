@@ -7235,7 +7235,9 @@ impl Game<'_> {
             return true;
         }
         // A Java mod's entity: the server's mods use it (Player.interactOn); this client has
-        // no copy of it to ask, so the click ends here.
+        // no copy of it to ask, so the click ends here, unless the hand holds what is aimed
+        // past entities (a bow, a snowball: no vanilla mob takes those, Mob.interact passes):
+        // the item is used too, as vanilla's PASS goes on to useItem.
         if let Some((id, distance)) = self.java_entity_hit()
             && self.mob_hit().is_none_or(|(_, d)| distance < d)
             && self.before_block(distance)
@@ -7249,6 +7251,10 @@ impl Game<'_> {
                 location: self.java_entity_location(id, distance),
                 secondary: sneaking,
             }));
+            let item = self.stack_in(self.selected).map_or("", |s| &*s.item);
+            if super::java_entities::used_past_entities(item) {
+                return false;
+            }
             self.swing_arm();
             return true;
         }

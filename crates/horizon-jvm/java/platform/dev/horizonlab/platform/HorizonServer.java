@@ -623,6 +623,15 @@ public final class HorizonServer {
         return hurt;
     }
 
+    /** Horizon's projectile hit the mods' entity `id` (HorizonNeighbours.hurtByProjectile). */
+    public static boolean hurtByProjectile(int id, String kind, String player, int mob, float amount,
+            double x, double y, double z, double vx, double vy, double vz, boolean burning) {
+        boolean hurt = HorizonNeighbours.hurtByProjectile(id, kind, player, mob, amount, x, y, z, vx, vy, vz, burning);
+        runTasks();
+        afterCall();
+        return hurt;
+    }
+
     /** Horizon's mobs near its players this tick, for the mods' mobs (HorizonNeighbours.update). */
     public static void horizonMobs(String json) {
         HorizonNeighbours.update(json);

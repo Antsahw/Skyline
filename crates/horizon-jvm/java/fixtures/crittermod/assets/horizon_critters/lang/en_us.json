@@ -4,5 +4,7 @@
   "subtitles.horizon_critters.critter.squeak": "Critter squeaks",
   "entity.horizon_critters.biter": "Biter",
   "entity.horizon_critters.mount": "Mount",
-  "entity.horizon_critters.hunter": "Hunter"
+  "entity.horizon_critters.hunter": "Hunter",
+  "entity.horizon_critters.spitter": "Spitter",
+  "entity.horizon_critters.pebble": "Pebble"
 }
