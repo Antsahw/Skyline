@@ -160,6 +160,13 @@ public final class Natives {
     public static native void hurtPlayer(String uuid, String damageType, float amount, double x, double y, double z, String by);
 
     /**
+     * A mod's mob hurt one of Horizon's (its shadow in the mirror, HorizonNeighbours): Horizon's
+     * mob `id` of `dimension` takes `amount` of `damageType` from (x, y, z) (NaN: nowhere), by
+     * the mods' entity `by` (-1: none).
+     */
+    public static native void hurtMob(String dimension, int id, String damageType, float amount, double x, double y, double z, int by);
+
+    /**
      * The chunks mods' tickets keep loaded and ticking in a dimension, as forced chunks
      * (ticket level 31): "x,z;x,z;..." (empty: none). Sent when they change.
      */

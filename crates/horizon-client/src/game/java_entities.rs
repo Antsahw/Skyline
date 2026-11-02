@@ -109,6 +109,8 @@ pub(super) struct JavaEntities {
     own: Vec<Shown>,
     pub(super) hands: Option<Hands>,
     pub(super) ride: Option<Ride>,
+    /// Other players riding mods' mobs: player entity id → the mob's id.
+    riders: HashMap<u32, u32>,
 }
 
 /// The atlas key of an entity texture: `ns:textures/entity/x.png` is `ns:entity/x`
@@ -155,6 +157,9 @@ struct RawPayload {
     /// The mod's mob this game's player rides, and its seat this tick.
     #[serde(default)]
     ride: Option<Ride>,
+    /// Players riding mods' mobs, by their entity id: the mob's id.
+    #[serde(default)]
+    riders: HashMap<String, i32>,
     #[serde(default)]
     models: HashMap<String, Value>,
 }
@@ -166,6 +171,9 @@ pub(super) struct Ride {
     pub(super) id: i32,
     /// The seat: where the mirror's `positionRider` put the player this tick.
     pub(super) p: [f64; 3],
+    /// It jumps as a horse (PlayerRideableJumping): the game charges the jump bar.
+    #[serde(default)]
+    pub(super) jump: bool,
 }
 
 #[derive(serde::Deserialize)]
@@ -362,6 +370,11 @@ impl JavaEntities {
             .collect();
         self.own = payload.own.into_iter().map(RawShown::shown).collect();
         self.ride = payload.ride;
+        self.riders = payload
+            .riders
+            .iter()
+            .filter_map(|(player, mob)| Some((player.parse().ok()?, *mob as u32)))
+            .collect();
         self.hands = payload.hands.map(|h| Hands {
             models: h.models.into_iter().filter_map(RawModel::drawn).collect(),
             items: h.items.iter().filter_map(item).collect(),
@@ -396,6 +409,18 @@ impl Game<'_> {
     pub(super) fn remote_java_entities(&mut self, data: &[u8]) {
         let _timed = super::java_profile::Timed::named("(Rust) entities: the player's game reads");
         self.java_entities.receive(data);
+        // Other players on mods' mobs sit there (HumanoidModel's riding pose), as a
+        // passengers packet would put them on a vehicle of Horizon's.
+        let riders = &self.java_entities.riders;
+        for m in &mut self.mobs {
+            if let Some(&mob) = riders.get(&m.id) {
+                m.extra.mount = Some(mob);
+                m.extra.passenger = true;
+            } else if m.extra.mount.is_some_and(|v| v >= FIRST_ID as u32) {
+                m.extra.mount = None;
+                m.extra.passenger = false;
+            }
+        }
     }
 
     /// The Java entities for the entity pass: each model its renderer submitted, posed as it

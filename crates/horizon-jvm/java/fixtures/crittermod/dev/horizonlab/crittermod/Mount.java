@@ -10,9 +10,13 @@ import net.minecraft.world.phys.Vec3;
 
 /**
  * A critter a player rides (as a strider or a saddled pig, without the saddle): a use gets on,
- * the rider steers it with the movement keys and faces it where they look, sneaking gets off.
+ * the rider steers it with the movement keys and faces it where they look, charges a jump with
+ * the jump key (as a horse), and sneaking gets off.
  */
-public class Mount extends Critter {
+public class Mount extends Critter implements net.minecraft.world.entity.PlayerRideableJumping {
+    /** A charged jump waiting for the ground (onPlayerJump's scale, as a horse's playerJumpPendingScale). */
+    private float pendingJump;
+
     public Mount(EntityType<? extends Mount> type, Level level) {
         super(type, level);
     }
@@ -41,6 +45,33 @@ public class Mount extends Critter {
         super.tickRidden(player, input);
         setRot(player.getYRot(), player.getXRot() * 0.5F);
         yRotO = yBodyRot = yHeadRot = getYRot();
+        if (pendingJump > 0.0F && onGround()) {
+            setDeltaMovement(getDeltaMovement().x, 0.42 + 0.5 * pendingJump, getDeltaMovement().z);
+            needsSync = true;
+            pendingJump = 0.0F;
+        }
+    }
+
+    @Override
+    public void onPlayerJump(int power) {
+        pendingJump = power >= 90 ? 1.0F : 0.4F + 0.4F * power / 90.0F;
+    }
+
+    @Override
+    public boolean canJump() {
+        return true;
+    }
+
+    /** The server's START_RIDING_JUMP: the rider hears how hard (a test reads it). */
+    @Override
+    public void handleStartJump(int power) {
+        if (getControllingPassenger() instanceof Player player) {
+            player.sendSystemMessage(net.minecraft.network.chat.Component.literal("Mount jumps " + power));
+        }
+    }
+
+    @Override
+    public void handleStopJump() {
     }
 
     @Override

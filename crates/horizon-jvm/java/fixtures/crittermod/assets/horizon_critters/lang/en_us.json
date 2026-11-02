@@ -3,5 +3,6 @@
   "item.horizon_critters.critter_spawn_egg": "Critter Spawn Egg",
   "subtitles.horizon_critters.critter.squeak": "Critter squeaks",
   "entity.horizon_critters.biter": "Biter",
-  "entity.horizon_critters.mount": "Mount"
+  "entity.horizon_critters.mount": "Mount",
+  "entity.horizon_critters.hunter": "Hunter"
 }

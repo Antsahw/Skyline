@@ -604,6 +604,11 @@ public final class HorizonServer {
         HorizonServer.seed = seed;
     }
 
+    /** Horizon's mobs near its players this tick, for the mods' mobs (HorizonNeighbours.update). */
+    public static void horizonMobs(String json) {
+        HorizonNeighbours.update(json);
+    }
+
     /**
      * Horizon's game rules into the mirror's (the server's, which every mirrored level reads)
      * and its difficulty: "id=value;...;difficulty=n" as Horizon has them. Set without the server (no
@@ -1267,6 +1272,7 @@ public final class HorizonServer {
                     player.zza = ((keys & 1) != 0 ? 1.0F : 0.0F) - ((keys & 2) != 0 ? 1.0F : 0.0F);
                     player.xxa = ((keys & 4) != 0 ? 1.0F : 0.0F) - ((keys & 8) != 0 ? 1.0F : 0.0F);
                     player.setJumping((keys & 16) != 0);
+                    HorizonEntities.ridingJump(player, (keys & 16) != 0);
                 } else {
                     player.xxa = 0.0F;
                     player.zza = 0.0F;
@@ -2248,6 +2254,8 @@ public final class HorizonServer {
                 all.addAll(HorizonEntities.of(level));
                 // Copies of Horizon's mobs standing in for a routed attack (HorizonCombat).
                 all.addAll(HorizonCombat.visiting(level));
+                // Horizon's own mobs near its players (HorizonNeighbours).
+                all.addAll(HorizonNeighbours.of(level));
                 return all;
             }
 
@@ -2286,6 +2294,7 @@ public final class HorizonServer {
                 // Copies of Horizon mobs standing in the level during a routed call
                 // (Better Combat's sweep finds its targets with a box query).
                 for (var e : HorizonCombat.visiting(level)) if (e.getBoundingBox().intersects(box)) out.accept(e);
+                for (var e : HorizonNeighbours.of(level)) if (e.getBoundingBox().intersects(box)) out.accept(e);
             }
 
             @Override

@@ -1680,3 +1680,12 @@ for the 3×3 spawn chunks.
   rider's client. Mirrored players have no Java client: `RiderAuthorityMixin` makes them
   non-authoritative and the mirror moves the mob. Never call `ServerPlayer.rideTick` on a
   mirrored player: it runs `ServerPlayer.tick`.
+
+- **Horizon's mobs in the mirror (`HorizonNeighbours`).** The mods' mobs only see entities the
+  mirrored level lists. Horizon's own mobs near players are shadows there (same id as
+  Horizon's), refreshed each tick. A hurt to a shadow goes to Horizon. Shadows are not ticked:
+  never `tick()` one, and don't add them to `HorizonEntities` (it would save and tick them).
+
+- **Far mods' mobs are drawn less often.** `HorizonEntityRender.drawEvery`: past 24 blocks from
+  every player an entity's look is made every 2nd tick, past 48 every 4th (its position each
+  tick; the game keeps the look). Animations far away run at 10 or 5 Hz.

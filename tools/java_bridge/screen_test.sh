@@ -73,12 +73,22 @@ case "$SCENE" in
     'q "summon horizon_critters:biter ~4 ~ ~1"' \
     'q "tp @s ~ ~ ~ -90 15"' 'sleep 2' ;;
   # Riding a mod's mob: a mount (the critter fixture's rideable one: it stays put until
-  # ridden) two blocks east of the player, its middle in $S/mount.pos, the floor's
-  # height in $S/floor.y.
+  # ridden) two blocks east of the player, its middle in $S/mount.pos, on a flat stone lane
+  # 24 blocks east (the floor's height, $S/floor.y, is the lane's; the case drives 0.8 s,
+  # ~11 blocks, short of its end).
   mount) "$R/tools/java_bridge/around.sh" \
+    'q "fill $((X-1)) $((Y-1)) $((Z-2)) $((X+24)) $((Y-1)) $((Z+2)) stone"' \
+    'q "fill $((X-1)) $Y $((Z-2)) $((X+24)) $((Y+4)) $((Z+2)) air"' \
     'q "summon horizon_critters:mount $(p $X+2.5) $Y $(p $Z+0.5)"' \
     'echo "$(p $X+2.5) $(p $Y+0.5) $(p $Z+0.5)" > "$S/mount.pos"' 'echo "$Y" > "$S/floor.y"' \
     'q "tp @s $(p $X+0.5) $Y $(p $Z+0.5) -90 20"' 'sleep 2' ;;
+  # Mods' mobs and Horizon's: one of Horizon's sheep (no AI: it stays) ahead of the player;
+  # where a hunter (the critter fixture's, it hunts sheep) goes, four blocks from it, in
+  # $S/hunter.pos (the case summons it).
+  neighbours) "$R/tools/java_bridge/around.sh" \
+    'q "summon minecraft:sheep $(p $X+3.5) $Y $(p $Z+2.5) {NoAI:1b}"' \
+    'echo "$(p $X+3.5) $Y $(p $Z-1.5)" > "$S/hunter.pos"' \
+    'q "tp @s ~ ~ ~ -90 25"' 'sleep 1' ;;
   # Farmer's Delight's block entity renderers: beef on a lit stove's grill, a carrot on a
   # cutting board beside it; the player looking at both.
   ber) "$R/tools/java_bridge/around.sh" \

@@ -424,3 +424,51 @@ tests pass; fmt and clippy `-D warnings` clean (horizon-client, horizon-jvm).
   Doesn't: `mod_block_fall` on the routed path isn't tested at runtime (it needs a native mod
   block). Outside the area: the client lib's `landing.rs`, `lan_actions.rs` (a few lines).
   Test: `regress.py --jars <jars> windfall fall`.
+
+- **entities 5 (round 5, tasks 1 and 4: riders seen sitting, charged jumps, a flat `mount`
+  lane)**, `bridge-entities-5`. Agent: Claude (iaxivers' chats). Works: each player's
+  snapshot payload carries `riders` (player entity id → the mod's mob it rides); the games put
+  those players on it as a passengers packet would (`extra.mount`, sitting pose), and clear it
+  when they get off. A mod's horse-style mob (`PlayerRideableJumping`) jumps: the mirror charges
+  the jump from the held jump key as `LocalPlayer.aiStep` does and calls `onPlayerJump` then
+  `handleStartJump` on release (`HorizonEntities.ridingJump`); the rider's game draws the jump
+  bar (`MountState::charge_jump`, shared with Horizon's horses). The fixture mount jumps
+  (power in chat: "Mount jumps 81"). Task 4: the `mount` scene builds a flat stone lane 24
+  blocks east (40 wasn't loaded) and drives 0.8 s (~11 blocks; at 2.5 s it ran off the lane in a full run). horizon-ctl `entities` now gives a mob's
+  `passenger` and `mount`. Outside the area: `mounts.rs` (charge_jump split out),
+  `remote_vehicles.rs`, `agent.rs` (2 fields), `HorizonServer.tick` (1 call), `lan_e2e.py`.
+  Test: `regress.py --jars … mount mountjump`; `lan_e2e.py --java-mods <critter jar> --check
+  javamount` (now also: the host sees the guest ride). Not done: the mod mob's hearts on the
+  rider's HUD.
+- **entities 6 (round 5, task 2: mod mobs and Horizon's mobs)**, `bridge-entities-6` (on
+  `bridge-entities-5`). Agent: Claude (iaxivers' chats). Works, one way: Horizon's mobs within
+  32 blocks of a player (128 a level, every level) stand in the mirror as shadows of their
+  type (`HorizonNeighbours`: no AI, not ticked, moved and given their health each tick), so
+  mods' mobs see them as any entity (`HorizonServer.entities` lists them): a mod's predator
+  hunts Horizon's sheep, a mod's prey flees Horizon's fox. What a mod's mob does to one goes to
+  Horizon (`CombatCaptureMixin` → `Natives.hurtMob` → `Action::HurtMob` → `java_hurt_mob`):
+  Horizon's mob takes it as a mob attack, knocked back from the attacker, in its own level.
+  During a routed player attack the shadows step aside for HorizonCombat's copies. New fixture
+  mob `horizon_critters:hunter` (hunts sheep). Outside the area: `HorizonServer` (2 lines
+  and a delegate), `CombatCaptureMixin` (mixins), `Natives`, `events.rs`, `lib.rs`. Test:
+  `regress.py --jars … neighbours` (Horizon's sheep at 8, then killed by the hunter). Not done:
+  the other way. Horizon's mobs don't see mods' mobs (its AI targets and flees only its own
+  mobs and players), and a Horizon mob a mod's mob hurt doesn't strike back.
+- **entities 7 (round 5, task 3: a bigger mob pack)**, `bridge-entities-7` (on
+  `bridge-entities-6`). Agent: Claude (iaxivers' chats). The 134-jar pack plus 10 mob mods
+  (Alex's Mobs, Wilder Wild, The Graveyard, Mo' Animals, Ender Zoology, Eternal Nether, Fish of
+  Thieves, Variants and Ventures, Cosy Critters, Snuffles; 147 jars) loads and runs. Measured
+  (`HORIZON_JAVA_PROFILE=1`, ~50 mod mobs near): entity ticks 11-17 ms a tick, the snapshot
+  6.5-10 ms. Top three: (1) the snapshot of animated mobs (GeckoLib: Graveyard's magpie and
+  nightmare, Alex's bison and cockroach, 0.5-1.5 ms each), (2) Naturalist's whale ticks
+  (0.55-0.9 ms each, its body parts' collisions, as entities 1 found), (3) Graveyard's skeleton
+  creepers (10-12 of them at 0.1-0.3 ms each; JFR shows only vanilla movement and collisions,
+  nothing of the mod's own). Cut: the snapshot. A GeckoLib mesh's vertices are written as text
+  at once (`HorizonJson.Raw`, `tenThousandths`) instead of a boxed Gson number each, and mobs
+  far from every player are drawn again every 2nd tick past 24 blocks and every 4th past 48
+  (`HorizonEntityRender.drawEvery`: their position still each tick, a hurt one each tick).
+  Same 40 s scene (bison, cockroaches, magpies, nightmares at 10 and 40 blocks), JFR samples
+  in the snapshot: 497 before, 286 after (-42%). Not cut: the whale's and skeleton creepers'
+  ticks (vanilla's own movement code; the bridge's block reads are a part of it). Test:
+  `regress.py --jars … entity gecko hostile mount carry ber`; to measure, a mobs pack and
+  `HORIZON_JAVA_PROFILE=1` ("entity snapshot" lines).

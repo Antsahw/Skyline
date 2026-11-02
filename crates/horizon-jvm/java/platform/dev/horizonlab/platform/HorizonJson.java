@@ -21,8 +21,33 @@ final class HorizonJson {
         return out.toString();
     }
 
+    /**
+     * JSON already written (a mesh's vertices, thousands of numbers a tick for a GeckoLib mob):
+     * kept as text in a Gson tree instead of a boxed number each.
+     */
+    @SuppressWarnings("deprecation")
+    static final class Raw extends JsonElement {
+        final String text;
+
+        Raw(String text) {
+            this.text = text;
+        }
+
+        @Override
+        public JsonElement deepCopy() {
+            return this;
+        }
+
+        @Override
+        public String toString() {
+            return text;
+        }
+    }
+
     static void write(JsonElement element, StringBuilder out) {
-        if (element == null || element.isJsonNull()) {
+        if (element instanceof Raw raw) {
+            out.append(raw.text);
+        } else if (element == null || element.isJsonNull()) {
             out.append("null");
         } else if (element instanceof JsonObject object) {
             out.append('{');
@@ -50,6 +75,29 @@ final class HorizonJson {
             } else {
                 number(primitive.getAsNumber(), out);
             }
+        }
+    }
+
+    /** A float rounded to ten-thousandths, as `number` writes such floats, without boxing. */
+    static void tenThousandths(float v, StringBuilder out) {
+        if (!Float.isFinite(v)) {
+            out.append('0');
+            return;
+        }
+        long scaled = Math.round(v * 10000.0);
+        if (scaled < 0) {
+            out.append('-');
+            scaled = -scaled;
+        }
+        out.append(scaled / 10000);
+        long frac = scaled % 10000;
+        if (frac != 0) {
+            out.append('.');
+            if (frac < 1000) out.append('0');
+            if (frac < 100) out.append('0');
+            if (frac < 10) out.append('0');
+            while (frac % 10 == 0) frac /= 10;
+            out.append(frac);
         }
     }
 

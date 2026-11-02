@@ -321,6 +321,50 @@ public final class HorizonEntities {
         for (Entity rider : passenger.getPassengers()) tickPassenger(passenger, rider);
     }
 
+    /** Per mirrored player riding a jumping mob: LocalPlayer's jumpRidingTicks. */
+    private static final Map<UUID, int[]> RIDING_JUMPS = new HashMap<>();
+
+    /**
+     * A horse-style jump (PlayerRideableJumping), which vanilla charges on the rider's client
+     * (LocalPlayer.aiStep): the jump key held charges it, its release jumps (onPlayerJump, as
+     * that client does, then handleStartJump, as START_RIDING_JUMP does on the server), and
+     * ten ticks of cooldown follow. Called each tick with the jump key.
+     */
+    static void ridingJump(net.minecraft.server.level.ServerPlayer player, boolean jump) {
+        if (!(player.getVehicle() instanceof net.minecraft.world.entity.PlayerRideableJumping jumping)
+                || !modded(player.getVehicle().getType())) {
+            RIDING_JUMPS.remove(player.getUUID());
+            return;
+        }
+        // {ticks, was jumping, scale * 1000}
+        int[] st = RIDING_JUMPS.computeIfAbsent(player.getUUID(), k -> new int[3]);
+        if (jumping.getJumpCooldown() != 0) {
+            st[1] = jump ? 1 : 0;
+            return;
+        }
+        // The jump key charges it rather than jumping (as vanilla's horse ignores `jumping`).
+        player.setJumping(false);
+        if (st[0] < 0 && ++st[0] == 0) st[2] = 0;
+        boolean was = st[1] != 0;
+        if (was && !jump) {
+            st[0] = -10;
+            int power = net.minecraft.util.Mth.floor(st[2] / 1000.0F * 100.0F);
+            if (jumping.canJump() && power > 0) {
+                Entity vehicle = player.getVehicle();
+                fire(vehicle, "PlayerRideableJumping.onPlayerJump", () -> jumping.onPlayerJump(power));
+                fire(vehicle, "PlayerRideableJumping.handleStartJump", () -> jumping.handleStartJump(power));
+            }
+        } else if (!was && jump) {
+            st[0] = 0;
+            st[2] = 0;
+        } else if (was) {
+            st[0]++;
+            float scale = st[0] < 10 ? st[0] * 0.1F : 0.8F + 2.0F / (st[0] - 9) * 0.1F;
+            st[2] = Math.round(scale * 1000.0F);
+        }
+        st[1] = jump ? 1 : 0;
+    }
+
     /** An entity whose chunk Horizon unloaded: saved, and out of the level until it loads. */
     private static void putAway(ServerLevel level, Entity entity) {
         CompoundTag tag = saveOne(level, entity);
