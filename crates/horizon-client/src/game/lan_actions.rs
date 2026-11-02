@@ -980,6 +980,7 @@ impl Game<'_> {
         std::mem::swap(&mut self.carried, &mut g.carried);
         // A teleport with a rotation (commands) turns the guest.
         let turned = [self.yaw, self.pitch] != [g.yaw, g.pitch];
+        let old_look = [g.yaw, g.pitch];
         [g.yaw, g.pitch] = [self.yaw, self.pitch];
         self.yaw = yaw;
         self.pitch = pitch;
@@ -1006,8 +1007,20 @@ impl Game<'_> {
                     yaw,
                 }));
             }
-            let teleported = std::mem::take(&mut m.teleported);
-            let moved: f64 = (0..3).map(|k| (at[k] - g.position[k]).powi(2)).sum();
+            let mut teleported = std::mem::take(&mut m.teleported);
+            let mut moved: f64 = (0..3).map(|k| (at[k] - g.position[k]).powi(2)).sum();
+            let mut turned = turned;
+            // ServerPlayer.teleport's head: a Java mod that cancels it leaves the guest
+            // where it was, facing as it did (java_server.rs).
+            if g.vehicle.is_none() && (moved > 0.0001 || teleported) && {
+                let dim = self.dim.id();
+                self.java_player_teleport(g.uuid, dim, at, [g.yaw, g.pitch], false)
+            } {
+                m.position = Vec3::new(g.position[0], g.position[1], g.position[2]);
+                [g.yaw, g.pitch] = old_look;
+                (teleported, moved, turned) = (false, 0.0, false);
+            }
+            let at = if moved > 0.0 { at } else { g.position };
             g.motion = Some(Box::new(m));
             // Entity.teleportTo takes a rider out of its vehicle.
             let left_vehicle = match g.vehicle.filter(|_| teleported) {
@@ -1036,7 +1049,8 @@ impl Game<'_> {
         }
         // Java mods hear the teleport (ServerPlayer.teleport; java_server.rs).
         if let Some((uuid, at, look)) = java_teleport {
-            self.java_teleported(uuid, at, look);
+            let dim = self.dim.id();
+            self.java_player_teleport(uuid, dim, at, look, true);
         }
         let g = &mut host.hub.guests[i];
         if let Some(head) = g.bed.filter(|_| fell_asleep) {
@@ -4149,7 +4163,20 @@ impl Game<'_> {
         let riding = g.vehicle.is_some();
         let mut soul = None;
         let mut jumps = 0;
+        // Where a jump a Java mod cancelled took off: the guest is put back there.
+        let mut refused_from = None;
         let events = self.as_guest(host, conn, |game| {
+            // LivingEntity.jumpFromGround's heads, before the moves: the Java mods may
+            // cancel each jump the moves make (java_server.rs).
+            let mut refused = Vec::new();
+            let mut ground = from_ground;
+            for (moved, on_ground) in &moves {
+                if ground && !on_ground && moved[1] > 0.0 {
+                    refused.push(game.java_jump_refused());
+                }
+                ground = *on_ground;
+            }
+            let mut refused = refused.into_iter();
             let (rules, motion) = (game.world.health_rules, game.motion);
             let health = &motion.health;
             let freeze_immune = game.wears_freeze_immune();
@@ -4206,16 +4233,24 @@ impl Game<'_> {
                     });
                 from = to;
             }
+            let mut from = start;
             for (moved, on_ground) in moves {
                 let movement = Vec3::new(moved[0], moved[1], moved[2]);
                 if w.player.ground.on_ground && !on_ground && moved[1] > 0.0 {
-                    // ServerGamePacketListenerImpl.handlePlayerPositionChange:
-                    // the server's copy jumps with the player, so the velocity
-                    // it sends them keeps the jump.
-                    jumps += 1;
-                    let _ = w.jump_from_ground();
-                    jumped = true;
+                    if refused.next().unwrap_or(false) {
+                        // A mod cancelled the jump: no jump on the server, and the
+                        // guest goes back to where it took off.
+                        refused_from.get_or_insert([from.x, from.y, from.z]);
+                    } else {
+                        // ServerGamePacketListenerImpl.handlePlayerPositionChange:
+                        // the server's copy jumps with the player, so the velocity
+                        // it sends them keeps the jump.
+                        jumps += 1;
+                        let _ = w.jump_from_ground();
+                        jumped = true;
+                    }
                 }
+                from = from.add_vector(movement);
                 let landed = (|| -> horizon_client::Result<()> {
                     w.set_on_ground_with_movement(on_ground, false, movement)?;
                     let pos = w.legacy_on_position()?;
@@ -4381,6 +4416,11 @@ impl Game<'_> {
         let Some((events, marked)) = events else {
             return;
         };
+        if let Some(at) = refused_from
+            && let Some(i) = host.hub.guests.iter().position(|g| g.conn == conn)
+        {
+            host.hub.teleport(i, Some(at));
+        }
         if jumps > 0
             && !horizon_client::mod_api::mods().is_empty()
             && let Some((uuid, name)) = host.hub.guest(conn).map(|g| (g.uuid, g.name.clone()))

@@ -17,7 +17,8 @@
     "EffectMixin",
     "MilkMixin",
     "JumpMixin",
-    "TeleportMixin"
+    "TeleportMixin",
+    "AdvancementMixin"
   ],
   "injectors": {
     "defaultRequire": 1

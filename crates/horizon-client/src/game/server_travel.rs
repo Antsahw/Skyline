@@ -419,6 +419,16 @@ impl Game<'_> {
         let Some(i) = host.hub.guests.iter().position(|g| g.conn == conn) else {
             return;
         };
+        // ServerPlayer.teleport's head (Entity.teleport from handlePortal): a Java mod
+        // that cancels it keeps the player here; the portal asks again next tick, as
+        // vanilla's does (java_server.rs).
+        let (uuid, look, here) = {
+            let g = &host.hub.guests[i];
+            (g.uuid, [g.yaw, g.pitch], g.position)
+        };
+        if self.java_player_teleport(uuid, target.id(), here, look, false) {
+            return;
+        }
         if target != self.dim {
             drop_hook(host, conn);
         }
@@ -473,6 +483,7 @@ impl Game<'_> {
         self.as_guest(host, conn, |g| {
             g.trigger_dimension(source, target, [from.x, from.y, from.z])
         });
+        self.java_player_teleport(uuid, target.id(), at, look, true);
         self.server_trips.push(Trip {
             conn,
             dim: target,
@@ -826,6 +837,15 @@ impl Game<'_> {
                 continue;
             };
             let source = self.dim;
+            // ServerPlayer.teleport's head: a Java mod that cancels it keeps the player
+            // in its level (java_server.rs).
+            let (uuid, look) = {
+                let g = &host.hub.guests[i];
+                (g.uuid, t.rotation.unwrap_or([g.yaw, g.pitch]))
+            };
+            if self.java_player_teleport(uuid, t.dim.id(), t.at, look, false) {
+                continue;
+            }
             if t.dim != source {
                 drop_hook(host, t.conn);
             }
@@ -850,6 +870,7 @@ impl Game<'_> {
                 // player's state swapped in.
                 g.native_player_teleported(uuid, &name, origin, t.at, t.dim.id());
             });
+            self.java_player_teleport(uuid, t.dim.id(), t.at, [yaw, pitch], true);
             self.server_trips.retain(|trip| !trip.is(t.conn));
             self.server_trips.push(Trip {
                 conn: t.conn,

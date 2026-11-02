@@ -264,9 +264,9 @@ public final class HorizonMixinTable {
             "net/minecraft/world/entity/Entity.stopRiding", "net/minecraft/world/entity/LivingEntity.stopRiding",
             "net/minecraft/world/entity/Entity.removeVehicle", "net/minecraft/world/entity/player/Player.removeVehicle",
             "net/minecraft/world/entity/LivingEntity.addEffect",
-            // A player's jump (HorizonVanillaActions.jumped).
+            // A player's jump (HorizonVanillaActions.jumpStart, jumpEnd).
             "net/minecraft/world/entity/LivingEntity.jumpFromGround", "net/minecraft/world/entity/player/Player.jumpFromGround",
-            // A player's teleport in its level (HorizonVanillaActions.teleported).
+            // A player's teleport, in its level or to another (HorizonVanillaActions.teleportStart, teleportEnd).
             "net/minecraft/server/level/ServerPlayer.teleport");
 
     public static Where where(String owner, String method) {
@@ -283,6 +283,7 @@ public final class HorizonMixinTable {
         if (owner.equals(ORB) && XP.contains(method)) return new Where("routed", "experience orbs");
         // A player's attack on Horizon's mobs: Player.attack runs on copies when mods patch it
         // (HorizonCombat); precipitation asks the biomes on the mirror (HorizonVanillaActions).
+        if (key.equals("net/minecraft/server/PlayerAdvancements.award")) return new Where("routed", "a player's advancements (vanilla's award on the mirror)");
         if (key.equals("net/minecraft/world/entity/player/Player.attack")) return new Where("routed", "a player's attack (on copies of Horizon's mobs)");
         if (owner.equals("net/minecraft/world/level/biome/Biome") && (method.equals("shouldSnow") || method.equals("shouldFreeze")
                 || method.equals("getPrecipitationAt") || method.equals("warmEnoughToRain") || method.equals("coldEnoughToSnow"))

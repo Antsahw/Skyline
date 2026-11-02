@@ -424,12 +424,26 @@ it does nothing unless Horizon fires it or hands the action to the mirror.
     (`java_add_effect_to`, the guest's UUID); a refusal still takes the Bad Omen.
   - Round 6, the next "Rust does" lines by count: a player's jump (`LivingEntity` /
     `Player.jumpFromGround`, 4 mods: Puzzles Lib's jump event, Mythic Upgrades, Spell Engine,
-    Wizards) and a teleport in its level (`ServerPlayer.teleport`, 5: Balm, GlitchCore, Polymer,
-    FrozenLib) fire their heads and ends on the mirror, heard only (routed actions `jumps`,
-    `teleports`: `lan_actions`' jump detection and `leave_guest` when an action moved the
-    guest). Not done: `PlayerAdvancements.award` (5, mostly inside the method; the mirror has
-    no advancements), `tickEffects`, `openMenu` (Horizon's own menus have no Java
-    `MenuProvider`), teleports across dimensions (`server_travel.rs`).
+    Wizards) and a teleport (`ServerPlayer.teleport`, 5: Balm, GlitchCore, Polymer,
+    FrozenLib) fire their heads and ends on the mirror (routed actions `jumps`, `teleports`).
+    Round 7: a head that cancels undoes them. A jump: the heads run before the guest's moves
+    (`HorizonVanillaActions.jumpStart`, one per jump the moves make); a cancelled one isn't
+    made on the server (no statistic, exhaustion or velocity) and the guest is teleported
+    back to where it took off; the ends (`jumpEnd`) only for the jumps made. A teleport: the
+    head (`teleportStart`) before Horizon moves the guest, in its level (`lan_actions`'
+    swap-out: the guest keeps its place and look), to another level by command
+    (`run_level_teleports`) or through a portal (`start_server_trip`; the portal asks again
+    next tick, as vanilla's does); the ends (`teleportEnd`) once it is there, with the new
+    level's `TeleportTransition`. Not routed: the host's own player in-frame (no LAN hub).
+  - Round 7: advancements on the mirror (routed action `advancements`, when a mod patches
+    `PlayerAdvancements.award` anywhere: Balm's and Puzzles Lib's events inject inside it).
+    Before Horizon grants a criterion (`trigger_criteria`, `/advancement grant`), vanilla's
+    whole `award` runs on the mirrored player's advancements (`HorizonVanillaActions.award`):
+    the mirror's own advancement (the server data's criteria and requirements, rewards
+    empty and no chat announcement: Horizon gives those), its progress set first to the
+    criteria Horizon has. `award` returning false with the criterion still ungranted is a
+    refusal: Horizon doesn't grant it. Not done: `tickEffects`, `openMenu` (Horizon's own
+    menus have no Java `MenuProvider`), `revoke`.
   - Precipitation (`ServerLevel.tickPrecipitation`), when a mod patches the biomes' weather
     (`Biome.shouldSnow`, `shouldFreeze`, `getPrecipitationAt`...: Serene Seasons): the game
     keeps each column's top (`GameLevel::precipitation` → `java_precipitation`) and, at the
@@ -449,7 +463,10 @@ it does nothing unless Horizon fires it or hands the action to the mirror.
   diamond), an `@Redirect` inside `CropBlock.randomTick` (crops grow in the dark), a HEAD
   cancel of `ItemEntity.playerTouch` (dirt can't be picked up), an INVOKE inside
   `ResultSlot.checkTakeAchievements` (an emerald with every craft), a HEAD cancel of
-  `SnowballItem.use` (no throwing), a HEAD cancel of `Player.attack` on pigs.
+  `SnowballItem.use` (no throwing), a HEAD cancel of `Player.attack` on pigs, a HEAD cancel
+  of `jumpFromGround` holding a slime ball, of `ServerPlayer.teleport` to x 666, of `award`
+  for "Acquire Hardware", and an INVOKE inside `award` (before the rewards) that hears the
+  rest.
 
 ## Mods that draw with the GPU
 
@@ -510,6 +527,16 @@ gets SPIR-V, vertex layouts and uniform lists.
 
 ## 26.3 facts that cost time
 
+- The mirror's `PlayerAdvancements` is made without its constructor (`HorizonServer
+  .advancements`): its `tree` is null and `award` NPEs in `markForVisibilityUpdate` unless it
+  is set (`HorizonVanillaActions.award` sets the server data's tree). `AdvancementHolder`s are
+  equal by id, so a copy with other rewards finds the same progress entry. `DisplayInfo` is a
+  record (`announceToChat()`, `showToast()`, `hidden()`), its constructor (icon, title,
+  description, background, type, toast, chat, hidden).
+- Mixin's `@Inject` on `award` at `INVOKE AdvancementRewards.grant` only runs where the
+  advancement becomes done (`!wasDone && isDone`): the progress has to be Horizon's first.
+- A jump's or teleport's HEAD cancel must be asked before Horizon acts, not after: a
+  `TeleportTransition`'s `newLevel()` is the target level, so mods check the dimension there.
 - Fabric's extended menus (`ExtendedMenuType`) open with `Networking$OpenScreenPayload`
   (identifier, containerId, title, innerCodec, data); their client menu is
   `type.create(id, inventory, data)`. Mods with state on the client's menu only (CC: Tweaked's

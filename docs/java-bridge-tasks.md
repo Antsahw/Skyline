@@ -739,3 +739,18 @@ out (the bridge adds them since round 2; it failed on java-bridge too). Not run 
   per-player state errors). Xaero's Minimap already works there (regress `server`). Test on
   the PC: `python3 tools/java_bridge/regress.py --jars ~/hz-test/mods-java maps-server`, then
   look at /tmp/hz-regress/maps-server/server-*.png.
+
+- **mixins 7-1** (`bridge-mixins-7-1`, round 7 mixins 1 and 2), by Claude for iaxivers.
+  Works: a mod's HEAD cancel undoes a jump (`jumpStart` before the guest's moves: no server
+  jump, statistic or exhaustion, the guest put back where it took off; the ends only for jumps
+  made) and a teleport, in the level (the guest keeps place and look), to another dimension
+  by command and through a portal (`teleportStart`/`teleportEnd`, the new level in the
+  `TeleportTransition`). Advancements on the mirror (routed action `advancements`): vanilla's
+  whole `PlayerAdvancements.award` runs there before Horizon grants a criterion, progress
+  copied from Horizon's, rewards and chat left to Horizon; a refusal keeps it ungranted, an
+  injection inside `award` (before the rewards) is heard. New cases `jump2`, `teleport2`,
+  `advancement` (mixinmod: slime ball, x 666, Acquire Hardware); the older mixin cases rerun.
+  Doesn't: task 3 (the next "Rust does" lines): this machine has none of the pack's jars, so
+  no `mixin-table.tsv` to rank; the host's own in-frame player isn't routed; `revoke`.
+  Outside the area: `advancements.rs`, `lan_actions.rs`, `server_travel.rs` (a few lines
+  each). Test: `regress.py --jars <jars> jump2 teleport2 advancement jump teleport`.

@@ -989,14 +989,29 @@ pub fn add_effect(
     Ok(r.unwrap_or(false))
 }
 
-/// A player jumped (`HorizonVanillaActions.jumped`): the mods' heads and ends of
-/// `jumpFromGround`, heard only.
-pub fn jumped(uuid: &str) -> Result<(), String> {
+/// Player `uuid` is about to jump (`HorizonVanillaActions.jumpStart`): the mods' heads of
+/// `Player/LivingEntity.jumpFromGround`. True when one cancelled (the game doesn't jump it).
+pub fn jump_start(uuid: &str) -> Result<bool, String> {
+    let r = with_server(|env, _| {
+        let uuid = env.new_string(uuid)?;
+        call_vanilla(
+            env,
+            "jumpStart",
+            "(Ljava/lang/String;)Z",
+            &[JValue::Object(&uuid)],
+        )?
+        .z()
+    })?;
+    Ok(r.unwrap_or(false))
+}
+
+/// Player `uuid` jumped: the ends of `jumpFromGround` (`HorizonVanillaActions.jumpEnd`).
+pub fn jump_end(uuid: &str) -> Result<(), String> {
     with_server(|env, _| {
         let uuid = env.new_string(uuid)?;
         call_vanilla(
             env,
-            "jumped",
+            "jumpEnd",
             "(Ljava/lang/String;)V",
             &[JValue::Object(&uuid)],
         )?;
@@ -1005,29 +1020,77 @@ pub fn jumped(uuid: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// A player was teleported in `dimension` to `at` facing `look` (`HorizonVanillaActions.teleported`):
-/// the mods' heads and ends of `ServerPlayer.teleport`, heard only.
-pub fn teleported(uuid: &str, dimension: &str, at: [f64; 3], look: [f32; 2]) -> Result<(), String> {
-    with_server(|env, _| {
+/// Player `uuid` is to be teleported to `at` in `dimension` facing `look`, or was (`end`):
+/// the mods' heads of `ServerPlayer.teleport` (true when one cancelled: the game leaves the
+/// player where it is), or its ends.
+pub fn teleport(
+    uuid: &str,
+    dimension: &str,
+    at: [f64; 3],
+    look: [f32; 2],
+    end: bool,
+) -> Result<bool, String> {
+    let r = with_server(|env, _| {
         let uuid = env.new_string(uuid)?;
         let dimension = env.new_string(dimension)?;
+        let args = [
+            JValue::Object(&uuid),
+            JValue::Object(&dimension),
+            JValue::Double(at[0]),
+            JValue::Double(at[1]),
+            JValue::Double(at[2]),
+            JValue::Float(look[0]),
+            JValue::Float(look[1]),
+        ];
+        if end {
+            call_vanilla(
+                env,
+                "teleportEnd",
+                "(Ljava/lang/String;Ljava/lang/String;DDDFF)V",
+                &args,
+            )?;
+            Ok(false)
+        } else {
+            call_vanilla(
+                env,
+                "teleportStart",
+                "(Ljava/lang/String;Ljava/lang/String;DDDFF)Z",
+                &args,
+            )?
+            .z()
+        }
+    })?;
+    Ok(r.unwrap_or(false))
+}
+
+/// Player `uuid` is to get `criterion` of advancement `id`, `done` being the criteria it has:
+/// vanilla's `PlayerAdvancements.award` on the mirror with the mods' patches
+/// (`HorizonVanillaActions.award`). True when the mods refused it.
+pub fn award(uuid: &str, id: &str, criterion: &str, done: &[&str]) -> Result<bool, String> {
+    let r = with_server(|env, _| {
+        let uuid = env.new_string(uuid)?;
+        let id = env.new_string(id)?;
+        let criterion = env.new_string(criterion)?;
+        let string = env.find_class("java/lang/String")?;
+        let list = env.new_object_array(done.len() as i32, &string, JObject::null())?;
+        for (i, c) in done.iter().enumerate() {
+            let c = env.new_string(c)?;
+            env.set_object_array_element(&list, i as i32, &c)?;
+        }
         call_vanilla(
             env,
-            "teleported",
-            "(Ljava/lang/String;Ljava/lang/String;DDDFF)V",
+            "award",
+            "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;[Ljava/lang/String;)Z",
             &[
                 JValue::Object(&uuid),
-                JValue::Object(&dimension),
-                JValue::Double(at[0]),
-                JValue::Double(at[1]),
-                JValue::Double(at[2]),
-                JValue::Float(look[0]),
-                JValue::Float(look[1]),
+                JValue::Object(&id),
+                JValue::Object(&criterion),
+                JValue::Object(&list),
             ],
-        )?;
-        Ok(())
+        )?
+        .z()
     })?;
-    Ok(())
+    Ok(r.unwrap_or(false))
 }
 
 /// Precipitation ticks of `dimension` at columns topped by `tops` (x, y, z each): the

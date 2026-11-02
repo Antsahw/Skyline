@@ -485,6 +485,39 @@ CASES = {
         steps=['$C command "tp @s 100 120 200" >/dev/null; sleep 2'],
         checks=[check_log(r"\[mixinmod\] teleported to 100, 120, 200", "the mod heard the teleport, at its end")],
     ),
+    "jump2": dict(
+        about="LivingEntity.jumpFromGround's head cancels (mixinmod: not holding a slime ball): no jump on the server, its end not reached",
+        fixtures=["mixinmod"], scene="omen",
+        steps=['$C command "item replace entity @s weapon.mainhand with slime_ball" >/dev/null; sleep 0.5; '
+               '$C key space down >/dev/null; sleep 0.3; $C key space up >/dev/null; sleep 1.5; '
+               '$C key space down >/dev/null; sleep 0.3; $C key space up >/dev/null; sleep 1.5; '
+               '$C command "item replace entity @s weapon.mainhand with air" >/dev/null; sleep 0.5; '
+               '$C key space down >/dev/null; sleep 0.3; $C key space up >/dev/null; sleep 1.5'],
+        checks=[check_log(r"\[mixinmod\] no jumping", "the jump was refused"),
+                check_log(r"\[mixinmod\] jump 1 after 2 refused", "only the allowed jump reached the end")],
+    ),
+    "teleport2": dict(
+        about="ServerPlayer.teleport's head cancels (mixinmod: not to x 666), in the level and to another; a teleport to the Nether is heard there",
+        fixtures=["mixinmod"], scene="none",
+        steps=['$C command "tp @s 10 120 10" >/dev/null; sleep 1; $C command "tp @s 666 120 0" >/dev/null; sleep 1; '
+               '$C command "execute in minecraft:the_nether run tp @s 666 100 0" >/dev/null; sleep 2; $C state > $S/state1.json; '
+               '$C command "execute in minecraft:the_nether run tp @s 20 100 20" >/dev/null; sleep 4; $C state > $S/state2.json'],
+        checks=[check_log(r"\[mixinmod\] no teleport to 666 in minecraft:overworld", "refused in the level"),
+                check_log(r"\[mixinmod\] no teleport to 666 in minecraft:the_nether", "refused to the Nether"),
+                check_file("state1.json", r'"dimension":\s*"minecraft:overworld"', "still in the Overworld after the refusal"),
+                check_file("state1.json", r'"position":\s*\[\s*10\.5', "still where the last teleport put it"),
+                check_log(r"\[mixinmod\] teleported to 20, 100, 20 in minecraft:the_nether", "the Nether teleport heard at its end"),
+                check_file("state2.json", r'"dimension":\s*"minecraft:the_nether"', "in the Nether")],
+    ),
+    "advancement": dict(
+        about="PlayerAdvancements.award runs on the mirror: mixinmod hears one inside it (before the rewards) and refuses another at the head",
+        fixtures=["mixinmod"], scene="none",
+        steps=['$C command "advancement grant @s only minecraft:story/smelt_iron" >/dev/null; sleep 1; '
+               '$C command "advancement grant @s only minecraft:story/smelt_iron" >/dev/null; sleep 1; '
+               '$C command "advancement grant @s only minecraft:story/mine_stone" >/dev/null; sleep 1'],
+        checks=[check_log(r"\[mixinmod\] refused minecraft:story/smelt_iron 2", "refused twice: Horizon didn't award it"),
+                check_log(r"\[mixinmod\] earned minecraft:story/mine_stone", "heard inside award")],
+    ),
     "slot": dict(
         about="Inventory.setSelectedSlot's head (mixinmod: not the ninth): the slot stays",
         fixtures=["mixinmod"], scene="none",

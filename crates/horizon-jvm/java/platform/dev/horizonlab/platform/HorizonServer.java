@@ -2412,6 +2412,7 @@ public final class HorizonServer {
         if (HorizonHooks.hooked("net/minecraft/world/entity/LivingEntity", "addEffect")) out.add("effects");
         if (HorizonVanillaActions.jumpsHooked()) out.add("jumps");
         if (HorizonVanillaActions.teleportsHooked()) out.add("teleports");
+        if (HorizonVanillaActions.advancementsRouted()) out.add("advancements");
         if (!out.isEmpty()) {
             Natives.log("Routed to the mods: " + out + " (item pickup: " + HorizonMixinTable.mods(ITEM_ENTITY, "playerTouch")
                     + ", orbs: " + HorizonMixinTable.mods(ORB, "playerTouch") + ")");
