@@ -67,6 +67,9 @@ pub(super) struct JavaOverlay {
     pressed: bool,
     /// A client-only screen opened over the inventory (REI's recipes): closing it goes back.
     back: bool,
+    /// A mod's settings screen opened from the Mods page: closing it (Done) goes back there,
+    /// as Mod Menu's list is the screen's parent.
+    mods_page: bool,
 }
 
 /// Java mods' dynamic textures this game holds (`{"op":"image"}`): by name, their atlas slot
@@ -158,6 +161,7 @@ impl Game<'_> {
         // they're open, and the server would make the screen's frames only after.
         self.settings.save(&Self::options_path());
         self.screen = Screen::Playing;
+        self.java_overlay.mods_page = true;
         let data = json!({"kind": "modconfig", "mod": id})
             .to_string()
             .into_bytes();
@@ -406,6 +410,10 @@ impl Game<'_> {
     fn leave_java_screen(&mut self) {
         if std::mem::take(&mut self.java_overlay.back) {
             self.screen = Screen::Inventory;
+            return;
+        }
+        if std::mem::take(&mut self.java_overlay.mods_page) {
+            self.open_options_at(false, horizon_client::options_ui::Page::Mods);
             return;
         }
         self.screen = Screen::Playing;

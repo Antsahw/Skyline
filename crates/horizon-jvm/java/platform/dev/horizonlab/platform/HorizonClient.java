@@ -280,31 +280,53 @@ public final class HorizonClient {
         });
     }
 
+    /** Mods whose "modmenu" entrypoint failed (told once). */
+    private static final java.util.Set<String> BROKEN_MENUS = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
     /** The mods with a settings screen, by id: what makes it from a parent screen. */
     static java.util.Map<String, java.util.function.UnaryOperator<net.minecraft.client.gui.screens.Screen>> configScreens() {
         java.util.Map<String, java.util.function.UnaryOperator<net.minecraft.client.gui.screens.Screen>> out = new java.util.TreeMap<>();
         // Mod Menu's API when Mod Menu isn't installed: mods' "modmenu" entrypoints load then.
         HorizonModMenuApi.ensure();
-        java.lang.reflect.Method create;
+        java.lang.reflect.Method create, own, provided;
+        Class<?> api;
         try {
-            create = Class.forName("com.terraformersmc.modmenu.api.ConfigScreenFactory", true, HorizonClient.class.getClassLoader())
+            ClassLoader loader = HorizonClient.class.getClassLoader();
+            create = Class.forName("com.terraformersmc.modmenu.api.ConfigScreenFactory", true, loader)
                     .getMethod("create", net.minecraft.client.gui.screens.Screen.class);
+            // The interface's methods, not the implementation's: a mod's ModMenuApi class may
+            // not be public (its methods then can't be called through its own class).
+            api = Class.forName("com.terraformersmc.modmenu.api.ModMenuApi", true, loader);
+            own = api.getMethod("getModConfigScreenFactory");
+            provided = api.getMethod("getProvidedConfigScreenFactories");
         } catch (ReflectiveOperationException | LinkageError e) {
             return out; // No Mod Menu: its entrypoints can't load.
         }
+        java.util.Map<String, java.util.function.UnaryOperator<net.minecraft.client.gui.screens.Screen>> others = new java.util.TreeMap<>();
         for (var container : net.fabricmc.loader.api.FabricLoader.getInstance().getEntrypointContainers("modmenu", Object.class)) {
             String id = container.getProvider().getMetadata().getId();
             try {
-                Object api = container.getEntrypoint();
-                Object factory = api.getClass().getMethod("getModConfigScreenFactory").invoke(api);
+                Object entry = container.getEntrypoint();
+                if (!api.isInstance(entry)) {
+                    // Mod Menu skips it too (Compressed Blocks' is an empty class): no screen.
+                    if (BROKEN_MENUS.add(id)) Natives.log("Horizon's client: " + id + "'s \"modmenu\" entrypoint isn't a ModMenuApi (Mod Menu skips it too): no settings screen");
+                    continue;
+                }
+                Object factory = own.invoke(entry);
                 if (factory != null) out.put(id, parent -> make(create, factory, parent));
-                if (api.getClass().getMethod("getProvidedConfigScreenFactories").invoke(api) instanceof java.util.Map<?, ?> provided) {
-                    provided.forEach((mod, f) -> out.putIfAbsent(String.valueOf(mod), parent -> make(create, f, parent)));
+                // Screens a mod gives others (Forge Config API Port's, for mods with its
+                // configs), as Mod Menu: a mod's own screen wins over one given for it.
+                if (provided.invoke(entry) instanceof java.util.Map<?, ?> given) {
+                    given.forEach((mod, f) -> {
+                        if (f != null) others.putIfAbsent(String.valueOf(mod), parent -> make(create, f, parent));
+                    });
                 }
             } catch (Throwable t) {
-                Natives.log("Horizon's client: " + id + "'s settings screen can't be made: " + t);
+                Throwable root = t instanceof java.lang.reflect.InvocationTargetException && t.getCause() != null ? t.getCause() : t;
+                if (BROKEN_MENUS.add(id)) Natives.log("Horizon's client: " + id + "'s settings screen can't be made: " + root);
             }
         }
+        others.forEach(out::putIfAbsent);
         return out;
     }
 
@@ -354,7 +376,7 @@ public final class HorizonClient {
             return 0;
         }
         try {
-            as(player, () -> setScreen(factory.apply(null)));
+            as(player, () -> setScreen(factory.apply(new HorizonModsPage())));
         } catch (Throwable t) {
             Throwable root = t;
             while (root.getCause() != null && root.getCause() != root) root = root.getCause();
@@ -1005,7 +1027,15 @@ public final class HorizonClient {
         }
     }
 
+    /** The player whose client ran last (as()): a mod thread's client messages are theirs. */
+    private static volatile net.minecraft.server.level.ServerPlayer lastPlayer;
+
+    static net.minecraft.server.level.ServerPlayer lastPlayer() {
+        return lastPlayer;
+    }
+
     static void as(net.minecraft.server.level.ServerPlayer player, ThrowingRunnable run) throws Throwable {
+        lastPlayer = player;
         var before = minecraft.player;
         var screenBefore = minecraft.gui.screen();
         var local = localPlayer(player);
@@ -1161,6 +1191,8 @@ public final class HorizonClient {
         // back to the screen it opened over): the client-only screen closes, and the player's
         // game goes back to its inventory.
         if (screen instanceof HorizonOverlayScreen) screen = null;
+        // A mod's settings screen going back to its parent (Done): Horizon's Mods page.
+        if (screen instanceof HorizonModsPage) screen = null;
         var current = SCREENS.get(id);
         if (screen == current) return;
         boolean clientOnly = CLIENT_ONLY.contains(id);
@@ -2771,7 +2803,7 @@ public final class HorizonClient {
             if (DEBUG_INPUT) Natives.log("settings screen of " + in.get("mod").getAsString() + " for " + player + ": " + (factory != null));
             if (player == null || factory == null) return;
             try {
-                as(player, () -> setScreen(factory.apply(null)));
+                as(player, () -> setScreen(factory.apply(new HorizonModsPage())));
             } catch (Throwable t) {
                 Throwable root = t;
                 while (root.getCause() != null && root.getCause() != root) root = root.getCause();

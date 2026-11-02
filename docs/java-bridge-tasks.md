@@ -851,3 +851,22 @@ to run downloaded mod jars; run them on a PC (`regress.py --jars <jars>`).
   `HorizonClient` (toast manager). Regress `skills pot terminal computer rei reiscreen hud
   tooltips worldmap-lazy maps xaeroplus` pass. Test: build, then
   `regress.py --jars ~/hz-test/mods-java tooltips worldmap-lazy skills`.
+- **client r7, round 7's three** (`bridge-client-10`), by Claude for iaxivers. Headless, this
+  sandbox (2 cores, lavapipe), screenshots:
+  1. Advanced Loot Info works: its REI plugin's request from REI's thread is queued
+     (`HorizonLoop.INBOX`, as the player whose client ran last) and answered at the next
+     flush; Horizon's REI reload pumps the queue while it waits. Block Drops pages show, REI's
+     reload ~3 s (was 3 x 30 s of the plugin's timeouts). Regress `lootinfo`.
+  2. Mods' settings screens: `getProvidedConfigScreenFactories` listed (a mod's own screen
+     wins), methods called through the interface (non-public implementations), broken
+     entrypoints skipped as Mod Menu does, a parent screen given (`HorizonModsPage`), Done
+     goes back to Options → Mods (small Rust change in `java_screen.rs`). Compressed Blocks
+     3.1.0 has no settings at all (its "modmenu" class is empty): nothing to show, now one
+     quiet line instead of an error. BuildCraft (BCRefabricated 26.10.15) has no "modmenu"
+     entrypoint: its failure wasn't reproducible from its jar; the pack's log would say which
+     path. Regress `modsettings2` (fixture `configmod`).
+  3. A LAN guest's kept config files are read at their next join (AutoConfig's holders
+     `load()` with their files laid over `config/`, then `config/` put back). Regress
+     `config-rejoin`: guest rejoins, REI's list on their left, the host's on the right.
+  Test: `regress.py --jars ~/hz-test/mods-java lootinfo modsettings2 config-rejoin` (needs ALI,
+  Advanced Core Info, REI, Architectury, Cloth Config).

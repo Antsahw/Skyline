@@ -21,7 +21,14 @@ done
 # FIXTURE_CP: mod jars a fixture builds against (GeckoLib for geckomod), ':'-separated.
 [ -n "$FIXTURE_CP" ] && CP="$CP:$FIXTURE_CP"
 W=$(mktemp -d)
-"$JAVA_HOME/bin/javac" -nowarn -proc:none -d "$W" -cp "$CP" $(find "$SRC" -name '*.java')
+# compile-only/: APIs the fixture compiles against that the game provides (Mod Menu's,
+# which Horizon makes): built beside the jar, not into it.
+if [ -d "$SRC/compile-only" ]; then
+  C=$(mktemp -d)
+  "$JAVA_HOME/bin/javac" -nowarn -proc:none -d "$C" -cp "$CP" $(find "$SRC/compile-only" -name '*.java')
+  CP="$CP:$C"
+fi
+"$JAVA_HOME/bin/javac" -nowarn -proc:none -d "$W" -cp "$CP" $(find "$SRC" -name '*.java' -not -path "$SRC/compile-only/*")
 cp "$SRC/fabric.mod.json" "$W/"
 cp "$SRC"/*.mixins.json "$W/" 2>/dev/null || true
 [ -d "$SRC/assets" ] && cp -r "$SRC/assets" "$W/"

@@ -83,6 +83,14 @@ public final class HorizonLoop {
      * the server's tank, which sent its contents again: the server thread never left this).
      */
     public static void flush() {
+        loopThread = Thread.currentThread();
+        // Clients' messages sent off this thread (REI's reload threads: Advanced Loot Info asks
+        // for its loot data there) reach the server here, as a real server reads its network.
+        for (int left = INBOX.size(); left > 0; left--) {
+            Runnable request = INBOX.poll();
+            if (request == null) break;
+            request.run();
+        }
         for (int left = OUTBOX.size(); left > 0; left--) {
             Runnable delivery = OUTBOX.poll();
             if (delivery == null) break;
@@ -151,15 +159,48 @@ public final class HorizonLoop {
         return payload;
     }
 
+    /** Client messages sent off the loop's thread, run at the next flush (on the loop's thread). */
+    private static final java.util.Queue<Runnable> INBOX = new java.util.concurrent.ConcurrentLinkedQueue<>();
+    /** The thread that runs the mods' server and clients (the one flush runs on). */
+    private static volatile Thread loopThread;
+
+    /**
+     * What waits on the loop's thread for a mod's own thread (Horizon's REI reload) runs the
+     * messages between the halves meanwhile, so a client thread waiting for its server's
+     * answer (Advanced Loot Info's plugin) gets it instead of timing out.
+     */
+    public static void pump() {
+        if (Thread.currentThread() == loopThread && (!INBOX.isEmpty() || !OUTBOX.isEmpty())) {
+            flush();
+        }
+    }
+
     /** Client to server, for the player whose client runs now (Minecraft.player). */
     @SuppressWarnings({"unchecked", "rawtypes"})
     public static void toServer(CustomPacketPayload payload) {
         ServerPlayer player = HorizonClient.serverPlayer(Minecraft.getInstance().player);
-        if (DEBUG) Natives.log("loop: client to server " + payload.type().id() + " from " + (player == null ? null : player.getName().getString()));
+        boolean elsewhere = loopThread != null && Thread.currentThread() != loopThread;
+        // A client thread of a mod's own (REI's reload) sends with no player's client running:
+        // its client is the one whose client ran last (the only one in single player).
+        if (player == null && elsewhere) player = HorizonClient.lastPlayer();
+        if (DEBUG) Natives.log("loop: client to server " + payload.type().id() + " from " + (player == null ? null : player.getName().getString())
+                + (elsewhere ? " (off the loop's thread: queued)" : ""));
         if (player == null) {
             Natives.log("Java mods: " + payload.type().id() + " was sent with no player's client running; dropped");
             return;
         }
+        if (elsewhere) {
+            ServerPlayer from = player;
+            INBOX.add(() -> receive(from, payload));
+            return;
+        }
+        receive(player, payload);
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private static void receive(ServerPlayer player, CustomPacketPayload payload) {
+        // Queued by a player who has left since: no one to answer.
+        if (HorizonServer.player(player.getUUID()) == null) return;
         var own = PLAYER_RECEIVERS.getOrDefault(player.getUUID(), Map.of()).get(payload.type().id());
         ServerPlayNetworking.PlayPayloadHandler handler = own != null ? own
                 : (ServerPlayNetworking.PlayPayloadHandler) ServerNetworkingImpl.PLAY.getHandler(payload.type().id());
