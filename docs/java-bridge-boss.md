@@ -117,6 +117,29 @@ pack's world at 3.76 GB (was 5.2), Java's classes kept between runs.
 Not yet: the user's PC run of the full pack; release builds and the launcher page; Windows;
 Horizon's mobs reacting to mod mobs; far terrain with Tectonic.
 
+## Chats and usage (from 2026-11-02)
+
+- **A new chat for every round**, boss and workers alike. A long chat re-reads everything at
+  each step, which is where most of the usage goes. Each new chat starts from the docs: the
+  boss from this file, a worker from java-bridge-tasks.md (its area's queue and the Reports).
+- The user is on Claude Max; at 67% of the week on 2026-11-02 the plan was 3 chats (sync, pack,
+  client) and the others paused until the week resets. Ask the user before starting more.
+- Waiting on builds and runs: one long command that waits (a foreground `timeout`, or a
+  background run checked rarely), not a check every 5 minutes.
+- Workers run only their cases; the full regress runs at merge time (the boss).
+- The user's own PC runs cost no usage: prefer them for the big pack.
+
+## State at the end of the batch-5 boss chat (2026-11-02)
+
+- `java-bridge` = batch 5 (round 5 of all six areas), tested: 53/53 headless cases pass.
+- Waiting for: `bridge-upstream-sync-3` (the sync chat redoes sync 2 on top of batch 5: 2,154
+  upstream commits; watch `models/catalog.rs`, `loot.rs`, `main.rs`, `game.rs`).
+- Not verified in the boss sandbox: `lan_e2e.py --java-mods … --check javamount` (needs
+  `HORIZON_E2E_HEADLESS=1`, `xvfb-run` and `--bin-dir` of a java-mods build; the guest timed out
+  on 2 cores); the quit through Java's timing.
+- The user is considering a message to Ludovic soon (others are building Forge/NeoForge bridges):
+  the boss drafts it when asked.
+
 ## Next big steps
 
 1. Daily upstream syncs.
