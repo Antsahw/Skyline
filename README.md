@@ -52,7 +52,7 @@ The Java bridge runs **real Fabric mods for 26.3** inside Horizon. A Java VM in 
 | Mods that draw in the world (Litematica's overlay) | 🚧 |
 | Windows, release builds | 🚧 builds cross-compile; untested on a Windows PC; no published build yet |
 
-How it works, the tick flow, 26.3 traps and the test tools: **[docs/java-bridge.md](docs/java-bridge.md)**.
+**Beta testers: start with the [testers' guide](docs/java-bridge-beta.md)** (install, where mods go, reporting bugs). How it works, the tick flow, 26.3 traps and the test tools: **[docs/java-bridge.md](docs/java-bridge.md)**.
 
 ### Try it
 
