@@ -123,6 +123,21 @@ CASES = {
                 check_log(r"Java mods: commands", "the mods started")],
         look="the terminal shows 12 diamonds and 40 oak logs",
     ),
+    "placed": dict(
+        about="A mod block placed by the player's right-click (Farmer's Delight's stove, placed by the "
+              "mod's BlockItem in the mirror) is in the player's game from the click on: the click's "
+              "correction no longer sends air before the mod's block is in the level (it vanished)",
+        mods=["fd"], scene="none",
+        steps=['"$R/tools/java_bridge/around.sh" \'q "give @s farmersdelight:stove"\' '
+               '\'$C select 1 >/dev/null; $C look-at-block $((X+2)) $((Y-1)) $Z up >/dev/null; sleep 0.5; '
+               '$C mouse right click >/dev/null; for i in $(seq 40); do $C block $((X+2)) $Y $Z; '
+               'sleep 0.05; done > $S/placed.txt; $C look-at-block $((X+2)) $Y $Z >/dev/null; sleep 2\''],
+        checks=[check_file("placed.txt", r'"block":"farmersdelight:stove"', "the stove is placed"),
+                check_file("placed.txt", r'\A(?:[^\n]*"minecraft:air"[^\n]*\n)*'
+                           r'(?:[^\n]*"block":"farmersdelight:stove"[^\n]*\n)+\Z',
+                           "once there, the stove never turns back to air in the player's game")],
+        look="the stove in front of the player",
+    ),
     "ber": dict(
         about="Farmer's Delight's block entity renderers: beef on the stove, a carrot on the board",
         mods=["fd"], scene="ber",

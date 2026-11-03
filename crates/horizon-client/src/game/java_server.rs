@@ -2363,6 +2363,36 @@ mod run {
             }
         }
 
+        /// The blocks a Java mod set in the level in place while it used a block or an item
+        /// (a mod's `BlockItem.useOn` placing its block in the mirror), made now, before the
+        /// click's correction and its acknowledgement go to the player: vanilla's
+        /// `useItemOn` sets the block in the handler. Left for the next tick, the correction
+        /// sent air where the player's game had predicted the block and the acknowledgement
+        /// made its game take that air: the placed block vanished until the next tick's update
+        /// brought it back, and stayed gone where that update didn't come.
+        fn apply_java_use_writes(&mut self) {
+            let dim = self.dim.id();
+            let mut later = Vec::new();
+            for action in horizon_jvm::events::take_actions() {
+                match action {
+                    horizon_jvm::events::Action::SetBlock {
+                        dimension,
+                        position,
+                        state,
+                    } if dimension == dim => self
+                        .mods
+                        .java
+                        .block_writes
+                        .push((dimension, position, state)),
+                    other => later.push(other),
+                }
+            }
+            for action in later {
+                horizon_jvm::events::push_action(action);
+            }
+            self.apply_java_level_writes();
+        }
+
         /// `player` died (where native mods hear it: `native_player_died`, with the death
         /// message's key): what killed it, for the Java mods' death hooks at the next tick. The
         /// damage type the message names, else the last hit of its tracker (the guest's of
@@ -2437,6 +2467,7 @@ mod run {
                     )
                 });
                 self.apply_java_actor_slots(&uuid);
+                self.apply_java_use_writes();
                 match used {
                     Ok(horizon_jvm::events::UseResult::Pass) => None,
                     Ok(horizon_jvm::events::UseResult::Taken) => Some(false),
@@ -2478,6 +2509,7 @@ mod run {
                     )
                 });
                 self.apply_java_actor_slots(&uuid);
+                self.apply_java_use_writes();
                 match used {
                     Ok(horizon_jvm::events::UseResult::Pass) => None,
                     Ok(horizon_jvm::events::UseResult::Taken) => Some(false),
