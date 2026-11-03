@@ -38,6 +38,12 @@ public final class HorizonSavedData {
             java.lang.reflect.Field field = MinecraftServer.class.getDeclaredField("savedDataStorage");
             field.setAccessible(true);
             field.set(mirror, server);
+            // MinecraftServer.loadLevel makes the command storage over the saved data next:
+            // mods keep state there (The Sift's rifts, each tick; getCommandStorage threw
+            // "Called before server init" on the mirror).
+            java.lang.reflect.Field commands = MinecraftServer.class.getDeclaredField("commandStorage");
+            commands.setAccessible(true);
+            commands.set(mirror, new net.minecraft.world.level.storage.CommandStorage(server));
         } catch (ReflectiveOperationException | RuntimeException e) {
             Natives.log("Java mods: the server's saved data could not be set: " + e);
         }
