@@ -1574,9 +1574,23 @@ fn write_loop(
     let mut sent_at: Option<(i64, Instant)> = None;
     let mut next = Instant::now() + KEEP_ALIVE_EVERY;
     loop {
+        // Why the connection ends here is told: the client only sees "End of stream".
         let mut write = |body: Vec<u8>| {
             pending.fetch_sub(body.len(), Ordering::Relaxed);
-            send_body(&mut writer, &body).is_ok() && pending.load(Ordering::Relaxed) <= MAX_PENDING
+            if let Err(e) = send_body(&mut writer, &body) {
+                log::warn!("[lan] connection closed: writing a packet failed: {e}");
+                return false;
+            }
+            let queued = pending.load(Ordering::Relaxed);
+            if queued > MAX_PENDING {
+                log::warn!(
+                    "[lan] connection closed: {} MiB of packets queued for the client (most {} MiB)",
+                    queued >> 20,
+                    MAX_PENDING >> 20
+                );
+                return false;
+            }
+            true
         };
         match rx.recv_timeout(Duration::from_millis(200)) {
             Ok(Out::Packet(body)) => {
@@ -1615,6 +1629,7 @@ fn write_loop(
                 .send(&play::Clientbound::KeepAlive(cfg::KeepAlive { id }).encode())
                 .is_err()
             {
+                log::warn!("[lan] connection closed: the keep-alive couldn't be written");
                 break;
             }
             sent_at = Some((id, now));
