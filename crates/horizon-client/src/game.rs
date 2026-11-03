@@ -7735,6 +7735,12 @@ impl Game<'_> {
             && self.control.is_none()
             && self.screen == Screen::Playing
             && self.player.is_some()
+            // LevelLoadingScreen is a screen in vanilla (pauseIfInactive pauses only with
+            // none): a pause here held the server's chunks back, and the terrain never came.
+            && !self
+                .remote
+                .as_ref()
+                .is_some_and(|r| r.level_load.is_active())
             && !self.options.no_pause
             && self.settings.file.bool("pauseOnLostFocus")
             && self.book.is_none()
