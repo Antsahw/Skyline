@@ -32,7 +32,7 @@ Minecraft: Java Edition 26.3, rewritten in Rust. Same worlds, same rules, same t
 
 > **Branch `java-bridge`** of [iaxivers/horizon](https://github.com/iaxivers/horizon). Work in progress, not part of upstream Horizon yet.
 
-The Java bridge runs **real Fabric mods for 26.3** inside Horizon. A Java VM in the game's own process loads Fabric Loader and the real 26.3 jar; the mods' code runs there, against a mirror of Horizon's world, and Horizon draws and plays the result. The goal is big packs, SkyFactory-style, at Horizon's speed.
+The Java bridge runs **real Fabric mods for 26.3** inside Horizon. **Horizon's world stays the real one:** Horizon (Rust) keeps running all of vanilla's logic (terrain, blocks, redstone, mobs, physics, the server, saving, rendering). A Java VM in the game's own process loads Fabric Loader and the real 26.3 jar and runs **only the mods' own code** (their mobs, machines, worldgen features, screens) against a mirror of Horizon's world, made lazily as mods read it; what the mods change is written back into Horizon's world. Without mod jars, Java never starts. The goal is big packs, SkyFactory-style, at Horizon's speed.
 
 **Status (2026-11-03):** an 81-jar pack (165 mods with the ones they bundle) plays on a real PC (RX 9070 XT, Fedora), from the launcher, at about the same speed as Horizon without mods. Not released yet: build it yourself (below).
 
