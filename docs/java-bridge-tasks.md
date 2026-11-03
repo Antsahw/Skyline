@@ -59,6 +59,11 @@ Works for them: Bedrock Reloaded (small pack), Terralith ("runs better than norm
 Biomes O' Plenty; 800 FPS stable on a GTX 1060 3 GB / i5-9400F / 16 GB. Reported:
 - **A pack's resource packs aren't picked up**: a modpack's bundled resource packs had to be put
   in the folder by hand (pack: imports and the pack screen).
+- **Mods' overrides of vanilla structure templates are ignored** when Horizon generates the
+  structure itself: Mielon's The Sift replaces `data/minecraft/structure/ancient_city/city_center/
+  city_center_{1,2,3}.nbt` (8 sonorous deepslate before the frame), new worlds get vanilla's
+  centres. Horizon's structure code must read templates (and template pools, processors) from
+  the mods' data the way a data pack overrides them (worldgen; the same for any data pack).
 - **JEI doesn't appear** (its Fabric build: needs its overlay on Horizon's inventory, as REI's
   has; client).
 - **3D Skin Layers** doesn't draw (a player-model renderer mod: draws in the world; gpu/entities).
