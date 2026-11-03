@@ -2171,6 +2171,44 @@ pub fn worldgen_lod_mask(dimension: &str) -> Result<Option<Vec<String>>, String>
     Ok(parts.flatten())
 }
 
+/// What far terrain's noise is for a dimension the mods generate ([`worldgen_lod_noise`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LodNoise {
+    /// Vanilla's: Horizon's own noise stands for the land.
+    Vanilla,
+    /// The mods' (Tectonic's), written as a data pack into the folder asked.
+    Written,
+    /// The mods' but not writable as vanilla data (a mod's own density function type).
+    Failed(String),
+}
+
+/// Writes the mods' noise of `dimension` into `dir` as a data pack when it isn't vanilla's
+/// (`HorizonWorldgen.lodNoise`): far terrain's land from Horizon's noise with it.
+pub fn worldgen_lod_noise(dimension: &str, dir: &std::path::Path) -> Result<LodNoise, String> {
+    let said = with_server(|env, class| {
+        let dimension = env.new_string(dimension)?;
+        let dir = env.new_string(dir.to_string_lossy())?;
+        let said = env
+            .call_static_method(
+                class,
+                "worldgenLodNoise",
+                "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+                &[JValue::Object(&dimension), JValue::Object(&dir)],
+            )?
+            .l()?;
+        if said.is_null() {
+            return Ok(String::from("no answer"));
+        }
+        Ok(env.get_string(&JString::from(said))?.into())
+    })?
+    .unwrap_or_else(|| String::from("Java isn't running"));
+    Ok(match said.as_str() {
+        "vanilla" => LodNoise::Vanilla,
+        "" => LodNoise::Written,
+        _ => LodNoise::Failed(said),
+    })
+}
+
 /// The blocks a dimension's surface rules can give and its default block
 /// (`HorizonWorldgen.lodMaterials`): a far column's land, under its features. None if the
 /// mods don't generate it with a noise generator.

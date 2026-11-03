@@ -845,6 +845,15 @@ pub(super) fn make_streaming(
             world_root,
             pack.assets.clone(),
             res.biomes().clone(),
+            super::java_worldgen::NoiseWorld {
+                bundle: options.resources.join("worldgen"),
+                resources: options.resources.clone(),
+                world_root: world_root.to_path_buf(),
+                enabled_features: enabled_features.to_vec(),
+                preset: preset.to_string(),
+                biomes: biomes.clone(),
+                seed,
+            },
         ) {
             let mut streaming = Streaming::new(
                 Arc::new(Persistent {

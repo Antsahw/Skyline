@@ -726,6 +726,45 @@ public final class HorizonWorldgen {
      * {@code zSpacing} and the {@code replacementBlock} the rest becomes): {"grid", x, y, z,
      * state}. Null for none (or a generator not known to cut).
      */
+    /**
+     * Far terrain's noise for a dimension the mods generate: "vanilla" when its land is
+     * vanilla's noise (Horizon's own stands for it), "" when the mods' noise was written into
+     * {@code dir} as a data pack (HorizonNoiseExport), else why it couldn't be.
+     */
+    public static String lodNoise(String dimension, String dir) {
+        Thread.currentThread().setContextClassLoader(HorizonWorldgen.class.getClassLoader());
+        Dimension d = DIMENSIONS.get(dimension);
+        if (d == null) return "the mods don't generate it";
+        if (vanillaNoise(dimension, d.generator)) return "vanilla";
+        String failed = HorizonNoiseExport.export(d.level.registryAccess(), d.generator, java.nio.file.Path.of(dir), d.level.getSeed(), d.level.getChunkSource().randomState());
+        return failed == null ? "" : failed;
+    }
+
+    /**
+     * Whether the dimension's land is vanilla's noise: a noise generator with the dimension's
+     * vanilla settings, and no mod's data pack with noise settings, density functions or noises
+     * (Tectonic replaces the overworld's; any such pack counts).
+     */
+    private static boolean vanillaNoise(String dimension, ChunkGenerator generator) {
+        if (!(generator instanceof net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator noise)) return false;
+        var vanilla = switch (dimension) {
+            case "minecraft:overworld" -> net.minecraft.world.level.levelgen.NoiseGeneratorSettings.OVERWORLD;
+            case "minecraft:the_nether" -> net.minecraft.world.level.levelgen.NoiseGeneratorSettings.NETHER;
+            case "minecraft:the_end" -> net.minecraft.world.level.levelgen.NoiseGeneratorSettings.END;
+            default -> null;
+        };
+        if (vanilla == null || !noise.generatorSettings().is(vanilla)) return false;
+        var resources = HorizonData.loaded.resources();
+        for (String folder : new String[] {"worldgen/noise_settings", "worldgen/density_function", "worldgen/noise"}) {
+            for (var stack : resources.listResourceStacks(folder, id -> true).values()) {
+                for (var resource : stack) {
+                    if (!"vanilla".equals(resource.sourcePackId())) return false;
+                }
+            }
+        }
+        return true;
+    }
+
     public static String[] lodMask(String dimension) {
         Dimension d = DIMENSIONS.get(dimension);
         if (d == null) return null;

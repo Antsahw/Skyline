@@ -62,17 +62,14 @@ impl SeededContext {
         if let Some(noise) = instances.get(&id) {
             return Ok(noise.clone());
         }
+        let seed = entry.seed.as_deref().unwrap_or(&entry.name);
         let noise: Arc<dyn Noise> = match &self.factory {
-            Factory::Legacy(factory) => Arc::new(
-                entry
-                    .definition
-                    .create(&mut factory.from_hash_of(&entry.name))?,
-            ),
-            Factory::Xoroshiro(factory) => Arc::new(
-                entry
-                    .definition
-                    .create(&mut factory.from_hash_of(&entry.name))?,
-            ),
+            Factory::Legacy(factory) => {
+                Arc::new(entry.definition.create(&mut factory.from_hash_of(seed))?)
+            }
+            Factory::Xoroshiro(factory) => {
+                Arc::new(entry.definition.create(&mut factory.from_hash_of(seed))?)
+            }
         };
         instances.insert(id, noise.clone());
         Ok(noise)
@@ -93,5 +90,7 @@ impl SeededContext {
 #[derive(Clone, Debug)]
 pub(super) struct NoiseEntry {
     pub(super) name: String,
+    /// The identifier its random is hashed from, when not `name`.
+    pub(super) seed: Option<String>,
     pub(super) definition: NormalNoise,
 }
