@@ -53,6 +53,15 @@ Broken, first in every area's queue below:
   Say so in-game (a "not needed in Horizon" line) rather than a failure (client).
 - The test's offscreen window renders uncapped (99% GPU, coil whine): cap it (tools).
 
+### First beta testers (2026-11-03, Discord)
+
+Works for them: Bedrock Reloaded (small pack), Terralith ("runs better than normal Fabric"),
+Biomes O' Plenty; 800 FPS stable on a GTX 1060 3 GB / i5-9400F / 16 GB. Reported:
+- **A pack's resource packs aren't picked up**: a modpack's bundled resource packs had to be put
+  in the folder by hand (pack: imports and the pack screen).
+- Asked: native Rust mods beside Java mods (untested; the launcher's native build has no
+  `java-mods` feature: add it in the fork, then test one native mod with the test pack).
+
 ### entities
 1. The rest of Horizon's arrows on mod mobs: Punch, tipped arrows' effects, piercing.
 2. Iceberg/Legendary Tooltips' armour on its armour stand: `HorizonEntityRender.context` has no
