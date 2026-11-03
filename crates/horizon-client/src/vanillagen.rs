@@ -984,6 +984,11 @@ impl ChunkGenerator for VanillaTerrain {
             .collect()
     }
     fn decorate(&self, worker: &mut GeneratorWorker, region: &mut [Proto; 9]) {
+        // A neighbour made by another generator (the Java mods' worldgen, beside a chunk it
+        // failed and this one made): left as it is, as a failed neighbour is below.
+        if region.iter().any(|p| !p.is::<VanillaProto>()) {
+            return;
+        }
         let taken: Vec<Box<VanillaProto>> = region
             .iter_mut()
             .map(|p| {
