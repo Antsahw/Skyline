@@ -35,6 +35,24 @@ sync 4). A case that fails only in a full regress run is a bug in the case: make
 you meet one (on a slow box: `jump2` saw an extra refused jump, `worldmap-lazy`'s World Map
 count stayed under its 10k mark while the map was still filling in). Worldgen is still on round 6.
 
+### The user's PC run (2026-11-03, 81-jar test pack from `tools/java_bridge/get_test_pack.py`)
+
+Plays (RX 9070 XT, Fedora): JourneyMap, Xaero's Minimap/World Map, Jade, REI, mod mobs ("very
+well"), structures, the mods' terrain, most mod blocks and their logic; performance about the
+same as without mods. Fixed on the way (java-bridge, boss): worldgen workers racing on the
+structure ring positions, a Horizon-made chunk beside Java ones panicking, the window's
+in-memory connection dropping a 2.3 MB packet ("End of stream"), a pause on lost focus during
+"Loading terrain" that held the chunks back. Run it yourself: in `~/hz-play` (the game folder is
+the working directory: `mods-java` is read from there, not from `HORIZON_HOME`).
+Broken, first in every area's queue below:
+- **Invisible blocks** in a swamp biome (a few), and **mod blocks invisible when placed** until
+  a relaunch (gpu/client: a state's model not there for the mesher until the next start).
+- **Hoppers don't work** (with Lithium in the pack: its hopper mixins; mixins/entities).
+- **Litematica's UI** doesn't show (client; MaLiLib's MiniHUD does).
+- **Sodium** doesn't work: expected, it replaces vanilla's renderer, which Horizon doesn't use.
+  Say so in-game (a "not needed in Horizon" line) rather than a failure (client).
+- The test's offscreen window renders uncapped (99% GPU, coil whine): cap it (tools).
+
 ### entities
 1. The rest of Horizon's arrows on mod mobs: Punch, tipped arrows' effects, piercing.
 2. Iceberg/Legendary Tooltips' armour on its armour stand: `HorizonEntityRender.context` has no
