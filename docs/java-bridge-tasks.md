@@ -59,7 +59,10 @@ Works for them: Bedrock Reloaded (small pack), Terralith ("runs better than norm
 Biomes O' Plenty; 800 FPS stable on a GTX 1060 3 GB / i5-9400F / 16 GB. Reported:
 - **A pack's resource packs aren't picked up**: a modpack's bundled resource packs had to be put
   in the folder by hand (pack: imports and the pack screen).
-- Asked: native Rust mods beside Java mods (untested; the launcher's native build has no
+- **JEI doesn't appear** (its Fabric build: needs its overlay on Horizon's inventory, as REI's
+  has; client).
+- **3D Skin Layers** doesn't draw (a player-model renderer mod: draws in the world; gpu/entities).
+- Asked: macOS (untested); native Rust mods beside Java mods (untested; the launcher's native build has no
   `java-mods` feature: add it in the fork, then test one native mod with the test pack).
 
 ### entities
