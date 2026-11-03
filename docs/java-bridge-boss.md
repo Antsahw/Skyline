@@ -158,6 +158,19 @@ Horizon's mobs reacting to mod mobs; far terrain with Tectonic.
 - Results: see the batch 7 entry in the Reports. New bug queued (client 1): Java's log4j and
   Horizon both write a dedicated server's `logs/latest.log`.
 
+## 2026-11-03: the first full-pack run on the user's PC
+
+After batch 7 and worldgen 6, the boss chat debugged the user's run of the 81-jar test pack
+(`tools/java_bridge/get_test_pack.py`) with him, straight on `java-bridge`: worldgen workers
+racing on the structure ring positions, a Horizon-made chunk panicking beside Java ones, the
+window's in-memory connection dropping a 2.3 MB packet, a pause during "Loading terrain". The
+pack then played, also from the launcher (Java mods tab), at about Horizon's own speed. What's
+broken is listed in java-bridge-tasks.md ("The user's PC run"). README's status rewritten.
+Lessons: the game folder is the working directory (`mods-java` is read there, not from
+`HORIZON_HOME`); `ctl.log` in the run's scratch has the game's stderr; a thread dump (`jcmd`,
+`gdb -p $(pgrep -x horizon-client)`) settles a hang in one round. The user's runs are free and
+fast: prefer them to cloud runs for big packs.
+
 ## Next big steps
 
 1. Daily upstream syncs.
