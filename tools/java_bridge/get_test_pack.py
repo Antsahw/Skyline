@@ -33,9 +33,12 @@ while todo:
     f = next((x for x in v["files"] if x["primary"]), v["files"][0])
     path = os.path.join(OUT, f["filename"])
     if not os.path.exists(path):
+        print(f"[{len(got) + 1}] {f['filename']} ({f['size'] // 1024} KB)", flush=True)
         data = urllib.request.urlopen(urllib.request.Request(f["url"], headers=H), timeout=300).read()
         if hashlib.sha1(data).hexdigest() != f["hashes"]["sha1"]: sys.exit("checksum mismatch: " + f["filename"])
         open(path, "wb").write(data)
+    else:
+        print(f"[{len(got) + 1}] {f['filename']} (already here)", flush=True)
     got.append(f["filename"])
     for d in v.get("dependencies", []):
         if d.get("dependency_type") == "required" and d.get("project_id"): todo.append(d["project_id"])
