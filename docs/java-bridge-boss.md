@@ -100,7 +100,7 @@ Some sandboxes refuse to run downloaded mod code: then say so; the user can run 
 
 ## Upstream
 
-Synced with upstream main fdd290b99 (2026-11-02, `bridge-upstream-sync-3`, merged in batch 6).
+Synced with upstream main 97937bcf8 (2026-11-02, `bridge-upstream-sync-4`, merged in batch 7).
 Upstream removed WebAssembly code mods (our `server_mods.rs` is `game/java_server.rs` now) and
 moved rendering into `crates/horizon-client-render`. Sync every day or two (a one-off chat, or
 the boss when it's small); keep hooks in shared Horizon files to one-line calls into our files.
@@ -140,6 +140,23 @@ Horizon's mobs reacting to mod mobs; far terrain with Tectonic.
 - Checked in the boss sandbox: clippy only (no Mojang data, 2 cores). The full regress goes to
   the user's PC; workers had run their own cases.
 - Round 7 queue written; one new chat per area.
+
+## State after merge-batch7 (2026-11-03)
+
+- `java-bridge` = batch 7: upstream sync 4, round 7 of entities (`-9`), mixins (`-7-1`), gpu
+  (`-9`), client (`-10`); pack's round 7 task 1 (`bridge-pack-8`) was already in. Worldgen's
+  round 6 is still running: merge it alone when it reports.
+- Found branches without pasted reports: `git branch -r --no-merged origin/java-bridge`,
+  sorted by date; each branch's report is its diff to `docs/java-bridge-tasks.md`.
+- Conflicts: only the docs (keep both) and `HorizonLoop.java` (gpu's `carried()` and client's
+  `INBOX`/`pump()`: both kept, a `}` between them).
+- This boss container (2 cores, 7 GB) ran the full setup: JDK 25 from apt
+  (`openjdk-25-jdk-headless`), Mojang's files fetched by a script (version manifest → client,
+  server, libraries, assets: ~5k files), `horizon-prepare` (73 s), Fabric's libraries fetched by
+  the build itself (no proxy trouble this time), Modrinth jars by slug. First game build 19 min.
+  Regress of 30 cases (round 7's, server, LAN, fixtures) took ~1 h 40 here.
+- Results: see the batch 7 entry in the Reports. New bug queued (client 1): Java's log4j and
+  Horizon both write a dedicated server's `logs/latest.log`.
 
 ## Next big steps
 

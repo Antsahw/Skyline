@@ -30,15 +30,17 @@ Never write as the user; mark what you post (CLAUDE.md). Never run mod jars the 
 
 ## Queue (in order)
 
-Round 7 (after merge-batch6, 2026-11-02). Start from the newest `java-bridge` (it has upstream
-sync 3: build `-p horizon-client -p horizon-client-lib`). A case that fails only in a full
-regress run is a bug in the case: make it stable when you meet one. Worldgen is still on round 6.
+Round 8 (after merge-batch7, 2026-11-03). Start from the newest `java-bridge` (it has upstream
+sync 4). A case that fails only in a full regress run is a bug in the case: make it stable when
+you meet one (on a slow box: `jump2` saw an extra refused jump, `worldmap-lazy`'s World Map
+count stayed under its 10k mark while the map was still filling in). Worldgen is still on round 6.
 
 ### entities
-1. Horizon's projectiles (a skeleton's or player's arrow, trident, snowball) hit mod mobs.
-2. A mod's projectile hitting players and Horizon's mobs: a fixture case (untested so far).
-3. Mod mob tick cost: the bridge's part of Naturalist's whale and skeleton creepers (block
-   reads, collisions); cut what is ours.
+1. The rest of Horizon's arrows on mod mobs: Punch, tipped arrows' effects, piercing.
+2. Iceberg/Legendary Tooltips' armour on its armour stand: `HorizonEntityRender.context` has no
+   equipment renderer (gpu r7 found it).
+3. Mod mob tick cost, next part: `Natives.chunkRevision` (a JNI call and a dimension string per
+   chunk per view), then vanilla movement and collisions.
 
 ### worldgen (round 6 queue, still running)
 1. Far terrain for packs that change the land's shape (Tectonic): Horizon's own noise reading
@@ -47,33 +49,36 @@ regress run is a bug in the case: make it stable when you meet one. Worldgen is 
    crash all end the process; how long each takes.
 
 ### pack
-1. ALA Industrial's content past the 16 MiB fence: a compact form for blocks with many own
-   states (its pipes: 76k states).
-2. The tech mods that open no screen on use (More Barrel Variants, Heater, Chunk Loaders) and
-   the block drawn with the missing texture.
-3. The full pack on a real GPU: the user's PC run (bigpack) → fix what it shows.
+1. (round 7's 2) The tech mods that open no screen on use (More Barrel Variants, Heater, Chunk
+   Loaders) and the block drawn with the missing texture.
+2. (round 7's 3) The full pack on a real GPU: the user's PC run (bigpack) → fix what it shows.
+   ALA Industrial's pipes there (no "over 16 MiB" in the log, pipes place).
 
 ### client
-1. Advanced Loot Info: server requests from REI's loading thread are dropped: queue them.
-2. Mods' settings screens from Options → Mods (`getProvidedConfigScreenFactories`; Compressed
-   Blocks, BuildCraft and others failed).
-3. A LAN guest's mod config files (`config/horizon-players/<uuid>/`) loaded at their next join.
+1. **Dedicated servers' `logs/latest.log` is written by two writers.** Java's log4j uses
+   Mojang's `log4j2.xml` (in `com/mojang/logging`'s jar: a `RollingRandomAccessFile` at
+   `logs/latest.log`, relative to the working folder), which on a dedicated server is the
+   server's folder, where Horizon writes its own `latest.log`: lines are overwritten (batch 7's
+   `maps-server` lost "Done (" there; server.log had it). Give log4j a config of the bridge's
+   (no file of its own, or `logs/java.log`) and keep mods' log lines in Horizon's log. Check
+   `server`, `maps-server` and a client case.
+2. BuildCraft's settings screen from the pack's log (r7 couldn't reproduce it from its jar).
+3. Toasts from Java mods (Pufferfish's Skills; gpu r7 saw none drawn).
 
 ### mixins
-1. A mod cancelling a jump or teleport undoes it (now they only hear it); teleports to another
-   dimension.
-2. Advancements on the mirror, so `PlayerAdvancements.award` hooks (5 mods) run.
-3. The next "Rust does" lines from `mixin-table.tsv`, most-patched first.
+1. The next "Rust does" lines from `mixin-table.tsv`, most-patched first (needs the pack's
+   jars: ask the user for the table from his PC run if the sandbox has none).
+2. The host's own in-frame player routed like guests (jump/teleport cancels); `revoke` for
+   advancements.
 
 ### gpu
-1. Legendary Tooltips' 3D item model for tools and armour.
-2. Xaero's World Map when the mirror's models are skipped (big pack: its frame hook needs a
-   ModelManager).
-3. Three more GPU-drawing client mods from the scan (round 6's list).
+1. Pufferfish's Skills' category background.
+2. Two more from the r7 scan: Cape Provider (player picture in picture), Puzzles Lib's
+   pictures in picture (TSL Entity Status, Spell Engine after).
 
 ### upstream sync (one-off chat)
-1. Sync 4 with upstream main (`bridge-upstream-sync-4`), full regress, report.
-2. Windows: Fabric past Mixin's start (or the steps for the user to try on a Windows PC).
+1. Sync 5 with upstream main (`bridge-upstream-sync-5`), regress, report.
+2. `punch`'s lost first click after `/gamemode` or a teleport (sync 4 saw it; the case retries).
 
 ## Reports
 
@@ -870,3 +875,15 @@ to run downloaded mod jars; run them on a PC (`regress.py --jars <jars>`).
      `config-rejoin`: guest rejoins, REI's list on their left, the host's on the right.
   Test: `regress.py --jars ~/hz-test/mods-java lootinfo modsettings2 config-rejoin` (needs ALI,
   Advanced Core Info, REI, Architectury, Cloth Config).
+
+### Merge batch 7 (2026-11-03, boss; Claude for iaxivers)
+
+Merged: upstream sync 4, entities-9, mixins-7-1, gpu-9, client-10 (pack-8 was already in).
+Conflicts: docs (both kept), `HorizonLoop.java` (gpu's `carried()` + client's `INBOX`/`pump()`).
+`check_public_tree.py` now allows a fixture's `compile-only/` stubs (client-10's Mod Menu API).
+Built here (2 cores, lavapipe); fmt and clippy clean. Regress, 30 cases (round 7's, `server`,
+`maps-server`, `maps-lan`, `rei-lan`, the fixtures): all pass except `maps-server`'s "the server
+starts" — a real bug, queued (client 1): Java's log4j and Horizon both write the server's
+`logs/latest.log`, "Done (" was overwritten (server.log has it; the maps draw). `jump2`,
+`attack`, `worldmap-lazy` failed in the long run on timing and passed alone; `teleport` was
+cut off and passed alone.

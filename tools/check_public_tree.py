@@ -23,7 +23,10 @@ def prohibited(path):
     if parsed.suffix == ".java" and path.startswith(
         ("mods/horizon/src/", "mods/horizon-lab/src/", "crates/horizon-jvm/java/")
     ):
-        return not ("/dev/horizonlab/" in path)
+        # A fixture mod's compile-only stubs: hand-written API interfaces it compiles against
+        # (another mod's, e.g. Mod Menu's), never shipped in its jar.
+        stub = path.startswith("crates/horizon-jvm/java/fixtures/") and "/compile-only/" in path
+        return not ("/dev/horizonlab/" in path or stub)
     return (
         bool(parsed.parts and parsed.parts[0] in PRIVATE_ROOTS)
         or parsed.suffix.lower() in PRIVATE_EXTENSIONS
