@@ -764,8 +764,15 @@ public final class HorizonServer {
 
     private static synchronized net.minecraft.world.level.chunk.ChunkGeneratorStructureState makeGeneratorState(ServerLevel level) {
         var random = randomState(level);
-        return STRUCTURE_STATES.computeIfAbsent(level, l -> generator(l).createState(
-                HorizonData.loaded.registries().compositeAccess().lookupOrThrow(Registries.STRUCTURE_SET), random, seed));
+        return STRUCTURE_STATES.computeIfAbsent(level, l -> {
+            var state = generator(l).createState(
+                    HorizonData.loaded.registries().compositeAccess().lookupOrThrow(Registries.STRUCTURE_SET), random, seed);
+            // Vanilla's ChunkMap does this once, on the server thread, before any chunk
+            // generates; left to the first chunks, the worldgen workers each start it and fill
+            // its unsynchronized ring-position map together (AIOOBE in fastutil's rehash).
+            state.ensureStructuresGenerated();
+            return state;
+        });
     }
 
     // The mods' world generation (HorizonWorldgen), for horizon-jvm's events.rs.

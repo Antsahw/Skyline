@@ -547,6 +547,10 @@ gets SPIR-V, vertex layouts and uniform lists.
 
 ## 26.3 facts that cost time
 
+- `ChunkGeneratorStructureState.ensureStructuresGenerated` isn't thread-safe: vanilla's
+  ChunkMap runs it once before any chunk generates. Left to the worldgen workers, they fill its
+  ring-position map together (AIOOBE "Index -1 out of bounds for length 33" in fastutil's
+  rehash, every first chunk failing). `HorizonServer.makeGeneratorState` runs it.
 - The mirror's `PlayerAdvancements` is made without its constructor (`HorizonServer
   .advancements`): its `tree` is null and `award` NPEs in `markForVisibilityUpdate` unless it
   is set (`HorizonVanillaActions.award` sets the server data's tree). `AdvancementHolder`s are
