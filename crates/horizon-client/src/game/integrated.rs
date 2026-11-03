@@ -424,6 +424,20 @@ impl Game<'_> {
             .spawn(move || {
                 // MinecraftServer.spin's Thread.setPriority(8).
                 horizon_threads::favour_current();
+                // Says how the thread ended when nothing else did (a thread that left
+                // without an error or a panic message: the 81-jar pack, 2026-11-03).
+                struct Ends;
+                impl Drop for Ends {
+                    fn drop(&mut self) {
+                        if std::thread::panicking() {
+                            log::error!("Horizon: the server thread ends by unwinding");
+                        } else {
+                            log::info!("Horizon: the server thread ends");
+                        }
+                        horizon_client::logging::flush();
+                    }
+                }
+                let _ends = Ends;
                 let result = serve(
                     &res,
                     pack,
@@ -433,6 +447,10 @@ impl Game<'_> {
                     server_flags.clone(),
                     server_tasks,
                     &ready_tx,
+                );
+                log::info!(
+                    "Horizon: the server thread's loop returned (stop asked: {})",
+                    server_flags.stop.load(Ordering::Relaxed)
                 );
                 if let Err(e) = result {
                     log::error!("Horizon: integrated server: {e}");
