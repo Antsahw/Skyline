@@ -180,5 +180,14 @@ fast: prefer them to cloud runs for big packs.
    (10–20 testers) — only after asking Ludovic.
 4. Draft the message to Ludovic (what the bridge does, how it could fit: opt-in feature,
    separate crate, or on top of native mods).
-5. NeoForge/Forge for 26.3 (same mirror; a different loader and events). 1.12 is a separate
-   research project (Cleanroom 1.12.2 + a 1.12↔26.3 translation), last.
+5. NeoForge/Forge for 26.3 (same mirror; a different loader and events).
+6. **1.12 (SkyFactory 4 and its packs): a committed goal, not a maybe** (the user, 2026-11-03:
+   "it has to happen"; mods called too hard on day one run now). After NeoForge. The likely
+   shape: Forge 1.12.2 mods on Cleanroom (a maintained 1.12.2 Forge on modern Java) in the
+   bridge's JVM, against a 1.12 mirror of Horizon's 26.3 world: blocks and items translated
+   both ways (pre-flattening ids and metadata ↔ 26.3 states), entities and NBT likewise, the
+   1.12 client's GL rendering captured as today's GPU path does for 26.3. Start with a research
+   round: what SkyFactory 4's mods touch (worldgen, tile entities, capabilities, GUIs), and
+   a first 1.12 mod's block placed in Horizon. Old-mod translation in general (remapping renames,
+   a shim library, local only: many mods are all rights reserved) is the other route for
+   1.20–1.21 mods.
