@@ -22,6 +22,20 @@ pub fn encode(body: &[u8], threshold: Option<usize>) -> Result<Vec<u8>> {
 /// What [`encode`] puts after the length prefix: the same for every
 /// connection with the same threshold.
 pub fn contents(body: &[u8], threshold: Option<usize>) -> Result<Vec<u8>> {
+    let inner = unbounded_contents(body, threshold)?;
+    if inner.len() > MAX_FRAME {
+        return Err(Error::new(format!(
+            "packet too large: {} bytes",
+            inner.len()
+        )));
+    }
+    Ok(inner)
+}
+
+/// [`contents`] without the 21-bit frame limit: an in-memory connection's
+/// (vanilla's LocalChannel passes packets as objects, with no frame at all), read
+/// back with [`wide_header`].
+pub fn unbounded_contents(body: &[u8], threshold: Option<usize>) -> Result<Vec<u8>> {
     let inner = match threshold {
         None => body.to_vec(),
         Some(t) if body.len() < t => {
@@ -38,12 +52,6 @@ pub fn contents(body: &[u8], threshold: Option<usize>) -> Result<Vec<u8>> {
             z.finish()?
         }
     };
-    if inner.len() > MAX_FRAME {
-        return Err(Error::new(format!(
-            "packet too large: {} bytes",
-            inner.len()
-        )));
-    }
     Ok(inner)
 }
 
@@ -74,6 +82,25 @@ pub fn header(bytes: &[u8]) -> Result<Option<(usize, usize)>> {
         }
     }
     Err(Error::new("length wider than 21 bits"))
+}
+
+/// [`header`] for an in-memory connection: a length of up to five VarInt bytes
+/// (frames made by [`unbounded_contents`]).
+pub fn wide_header(bytes: &[u8]) -> Result<Option<(usize, usize)>> {
+    let mut len = 0usize;
+    for i in 0..5 {
+        let Some(&b) = bytes.get(i) else {
+            return Ok(None);
+        };
+        len |= usize::from(b & 0x7F) << (7 * i);
+        if b & 0x80 == 0 {
+            if len == 0 {
+                return Err(Error::new("Frame length cannot be zero"));
+            }
+            return Ok(Some((i + 1, len)));
+        }
+    }
+    Err(Error::new("length wider than 32 bits"))
 }
 
 /// Inflates compressed frames, keeping its state from one to the next

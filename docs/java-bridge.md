@@ -547,6 +547,11 @@ gets SPIR-V, vertex layouts and uniform lists.
 
 ## 26.3 facts that cost time
 
+- A big pack's join sends packets past the network's 2 MiB frame (2.3 MB in the 81-jar test
+  pack) to the window's own client. Its connection is an in-memory pipe without compression, so
+  it now takes wider frames (`frame::unbounded_contents`/`wide_header`); before, the server's
+  writer dropped the connection silently ("End of stream" in the window, then the server
+  stopped). Sockets keep vanilla's limit.
 - `ChunkGeneratorStructureState.ensureStructuresGenerated` isn't thread-safe: vanilla's
   ChunkMap runs it once before any chunk generates. Left to the worldgen workers, they fill its
   ring-position map together (AIOOBE "Index -1 out of bounds for length 33" in fastutil's
