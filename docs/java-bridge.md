@@ -473,6 +473,18 @@ it does nothing unless Horizon fires it or hands the action to the mirror.
     winter; the sky still rains in Horizon's window (the client's biome weather is Horizon's).
   - Performance mods (Lithium, FerriteCore, ModernFix...: `HorizonMixinTable.PERFORMANCE`)
     never make an action the mirror's: Lithium overwrites `Biome.getTemperature`.
+- **Hoppers and Java mods' blocks** (bridge-mixins-8). A Java mod's block entity lives only in
+  Java (`HorizonBlockEntities.LIVE`): Horizon's world has none there, so Horizon's hoppers
+  didn't see a cooking pot, a mod's chest or machine at all. Now `hopper_eject` and
+  `suck_from_container` (`machines.rs`), finding no Horizon container, ask Java
+  (`java_hopper_insert`/`java_hopper_extract` → `events::hopper_insert`/`hopper_extract` →
+  `HorizonHoppers`): the block's Fabric `ItemStorage.SIDED` on the face, as Fabric Transfer
+  API's own patch of `ejectItems`/`suckInItems` does (it wraps plain vanilla `Container`s
+  too). One item a call, in the hopper's slot order; vanilla blocks stay Rust's. A block with
+  no storage on that face isn't asked again for 40 ticks (`JAVA_NO_STORAGE`).
+  `HORIZON_JAVA_DEBUG=hoppers` logs each move. Not done: droppers into Java blocks, Java mods'
+  hoppers/pipes pulling from Horizon's hoppers (those go through `COPIES` as before), native
+  mods' `InventoryMoveItem` event for these moves.
 - The mirrored player's `tickCount` follows Horizon's ticks: Carry On refuses a second action
   on the tick of the last one, and the mirror's players aren't ticked.
 - `HORIZON_JAVA_DEBUG=entities` logs each attack on/use of Horizon's entities, a vanilla mob a
@@ -547,6 +559,15 @@ gets SPIR-V, vertex layouts and uniform lists.
 
 ## 26.3 facts that cost time
 
+- "Hoppers don't work" with a big pack was not Lithium: Horizon's hoppers are Rust and move
+  vanilla containers tick for tick as without mods (same counts after `tick step` 1/8/8/23,
+  with and without the pack). Lithium's hopper mixins only reach the mirror (they show as
+  `java`/`rust` in the table, never routed). What failed was any Java mod's container
+  (no Horizon block entity there). Also: in this pack every block use is routed
+  (`ServerPlayerGameMode.useItemOn` patched inside by Energized Power, SuperMartijn642's lib,
+  Mythic Upgrades), so chests and hoppers open as mirror menus over `COPIES`: that works.
+  Test trap: `look-at X.5` with a negative X aims at the block's west edge; press Escape only
+  with a screen open (else the pause menu stops the server and nothing moves).
 - A big pack's join sends packets past the network's 2 MiB frame (2.3 MB in the 81-jar test
   pack) to the window's own client. Its connection is an in-memory pipe without compression, so
   it now takes wider frames (`frame::unbounded_contents`/`wide_header`); before, the server's

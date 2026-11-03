@@ -1422,6 +1422,91 @@ pub fn item_touch(
     Ok(left.filter(|&l| l >= 0))
 }
 
+/// What a hopper got from a Java mod's block ([`hopper_insert`], [`hopper_extract`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HopperMove<T> {
+    /// The block holds no items on that face (Fabric's `ItemStorage.SIDED` found none).
+    NoStorage,
+    /// It does, and nothing moved.
+    Nothing,
+    Moved(T),
+}
+
+/// A Horizon hopper pushes one item into the Java mod's block at `pos` through `face`
+/// (`Direction.get3DDataValue`): `stacks` are the hopper's slots in order (one-item SNBT, None
+/// when empty); the index of the slot whose item went in.
+pub fn hopper_insert(
+    dimension: &str,
+    pos: [i32; 3],
+    face: i32,
+    stacks: &[Option<&str>],
+) -> Result<HopperMove<usize>, String> {
+    let slot = with_server(|env, class| {
+        let dimension = env.new_string(dimension)?;
+        let stacks = optional_strings(env, stacks)?;
+        env.call_static_method(
+            class,
+            "hopperInsert",
+            "(Ljava/lang/String;IIII[Ljava/lang/String;)I",
+            &[
+                JValue::Object(&dimension),
+                JValue::Int(pos[0]),
+                JValue::Int(pos[1]),
+                JValue::Int(pos[2]),
+                JValue::Int(face),
+                JValue::Object(&stacks),
+            ],
+        )?
+        .i()
+    })?;
+    Ok(match slot {
+        Some(i) if i >= 0 => HopperMove::Moved(i as usize),
+        Some(-1) => HopperMove::Nothing,
+        _ => HopperMove::NoStorage,
+    })
+}
+
+/// A Horizon hopper pulls one item out of the Java mod's block at `pos` through `face`: the
+/// first it offers that the hopper has room for (`any_room`: an empty slot; else one of
+/// `partial`, one-item SNBT of its stacks not full yet). The item as SNBT.
+pub fn hopper_extract(
+    dimension: &str,
+    pos: [i32; 3],
+    face: i32,
+    any_room: bool,
+    partial: &[&str],
+) -> Result<HopperMove<String>, String> {
+    let out = with_server(|env, class| {
+        let dimension = env.new_string(dimension)?;
+        let partial = strings(env, partial)?;
+        let value = env
+            .call_static_method(
+                class,
+                "hopperExtract",
+                "(Ljava/lang/String;IIIIZ[Ljava/lang/String;)Ljava/lang/String;",
+                &[
+                    JValue::Object(&dimension),
+                    JValue::Int(pos[0]),
+                    JValue::Int(pos[1]),
+                    JValue::Int(pos[2]),
+                    JValue::Int(face),
+                    JValue::Bool(u8::from(any_room)),
+                    JValue::Object(&partial),
+                ],
+            )?
+            .l()?;
+        if value.is_null() {
+            return Ok(None);
+        }
+        Ok(Some(String::from(env.get_string(&JString::from(value))?)))
+    })?;
+    Ok(match out.flatten() {
+        None => HopperMove::NoStorage,
+        Some(s) if s.is_empty() => HopperMove::Nothing,
+        Some(s) => HopperMove::Moved(s),
+    })
+}
+
 /// Random ticks that reached Java mods' blocks in `dimension` (`ServerLevel.tickChunk`'s), and
 /// vanilla blocks [`routed_random_ticks`] names: each still such a block that ticks randomly
 /// runs `BlockState.randomTick`.
