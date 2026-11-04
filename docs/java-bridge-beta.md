@@ -8,7 +8,7 @@ rewritten in Rust) runs **real Fabric mods for 26.3** inside Horizon.
 
 | System | Status |
 |---|---|
-| Windows 10/11 (64-bit) | Works: tested on Windows 11 with an NVIDIA GPU |
+| Windows 10/11 (64-bit) | Works: tested on Windows 11 with an NVIDIA GPU. Windows support and `horizon-play` by [martipops](https://github.com/martipops) |
 | Linux | The bridge works: it's the fork's main test system (Fedora, Ubuntu). `horizon-play` is new there, so tell us how it goes |
 | macOS | **Untested.** It may work. Tell us what happens |
 

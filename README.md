@@ -50,7 +50,7 @@ The Java bridge runs **real Fabric mods for 26.3** inside Horizon. **Horizon's w
 | The launcher | ✅ a **Java mods** tab (add, remove, which mods failed last game); runs from a normal install, fetches Java 25 itself |
 | Renderer replacements (Sodium, Iris) | ➖ not needed: Horizon has its own renderer, so they have nothing to replace |
 | Mods that draw in the world (Litematica's overlay) | 🚧 |
-| Windows | ✅ builds and plays on Windows 11; no published build yet |
+| Windows | ✅ builds and plays on Windows 11; no published build yet. Windows support and `horizon-play` by [martipops](https://github.com/martipops) |
 
 **Beta testers: start with [Try it](#try-it) and the [testers' guide](docs/java-bridge-beta.md).** How it works, the tick flow, 26.3 traps and the test tools: **[docs/java-bridge.md](docs/java-bridge.md)**.
 
