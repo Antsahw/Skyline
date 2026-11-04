@@ -1,0 +1,12 @@
+modLoader = "javafml"
+loaderVersion = "[1,)"
+license = "MIT"
+
+[[mods]]
+modId = "horizon_neo"
+version = "0.1.0"
+displayName = "Horizon bridge platform (NeoForge prototype)"
+description = "Takes over from vanilla's server main once NeoForge has loaded the mods."
+
+[[mixins]]
+config = "horizon_neo.mixins.json"
