@@ -166,6 +166,9 @@ By area:
   vanilla's `SoundManager` (`Minecraft.getSoundManager().play(SoundInstance)`, looping and moving
   sounds); Horizon's client has no vanilla sound engine: give mods one that hands their sounds
   to Horizon's audio. Casings work (tester).
+  **Encased fans** do nothing: a fan's air current pushes entities and processes item entities
+  in front of it (Java moving Horizon's entities: players, mobs, items; the same item-entity
+  path as the depot and crushing wheels, plus entity motion set from a mod).
 - **A broken block's moving parts stay** (tester, batch 10): break a cogwheel and the hand
   crank's handle on it keeps floating, drawn. A removed mod block entity must drop its
   renderer's instance (gpu-13: the recorder's per-block-entity draws on removal).
