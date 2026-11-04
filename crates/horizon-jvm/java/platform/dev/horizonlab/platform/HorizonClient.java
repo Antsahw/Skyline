@@ -1203,7 +1203,7 @@ public final class HorizonClient {
             return;
         }
         try {
-            if (current != null && clientOnly) current.removed();
+            if (current != null && clientOnly) HorizonScreenEvents.removed(current);
             if (screen == null) {
                 closeScreen(id);
                 Natives.clientScreen(id.toString(), false);
@@ -1378,6 +1378,7 @@ public final class HorizonClient {
             }
             HorizonServer.fireEach("ClientLifecycleEvents.CLIENT_STARTED",
                     net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents.CLIENT_STARTED, l -> l.onClientStarted(minecraft));
+            reloadAddedListeners();
         }
         finishModels();
         // Its loading is done once the models are (Minecraft.isGameLoadFinished: MiniHUD draws
@@ -1969,10 +1970,12 @@ public final class HorizonClient {
         } catch (Throwable t) {
             Natives.log("Horizon's client: no client resource manager: " + t);
         }
+        clientResources = manager;
         java.util.concurrent.Executor here = Runnable::run;
         int ran = 0;
         int skipped = 0;
         for (var listener : new java.util.ArrayList<>(listeners)) {
+            RELOADED.add(listener);
             if (afterModels(listener)) {
                 // Run with the models' reload instead (models()), after them as Fabric orders
                 // it: Trinkets' model discovery waits for its manager's preparation.
@@ -1992,6 +1995,43 @@ public final class HorizonClient {
         }
         Natives.log("Horizon's client: " + ran + " of the mods' resource reload listeners ran over " + packs.size()
                 + " packs" + (skipped > 0 ? "; " + skipped + " that read baked models or textures run with the models" : ""));
+    }
+
+    /** The client resources the mods' reload ran over (reloadClientResources), for listeners added later. */
+    private static net.minecraft.server.packs.resources.ResourceManager clientResources;
+    /** The mods' client reload listeners that ran (or wait for the models) already. */
+    private static final java.util.Set<Object> RELOADED = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+
+    /**
+     * The mods' client reload listeners registered after the client's reload ran, at
+     * CLIENT_STARTED (JEI registers its GUI colours' there), run once over the same resources:
+     * in a real client the next reload (or the first, still running) would give them theirs.
+     */
+    @SuppressWarnings("unchecked")
+    private static void reloadAddedListeners() {
+        if (clientResources == null) return;
+        java.util.List<net.minecraft.server.packs.resources.PreparableReloadListener> added = new java.util.ArrayList<>();
+        try {
+            var loader = net.fabricmc.fabric.impl.resource.ResourceLoaderImpl.get(net.minecraft.server.packs.PackType.CLIENT_RESOURCES);
+            for (var listener : ((java.util.Map<Object, net.minecraft.server.packs.resources.PreparableReloadListener>)
+                    field(net.fabricmc.fabric.impl.resource.ResourceLoaderImpl.class, loader, "addedReloaders")).values()) {
+                if (RELOADED.add(listener) && !afterModels(listener)) added.add(listener);
+            }
+        } catch (Throwable t) {
+            return;
+        }
+        java.util.concurrent.Executor here = Runnable::run;
+        for (var listener : added) {
+            try {
+                net.minecraft.server.packs.resources.SimpleReloadInstance.of(clientResources, java.util.List.of(listener), here, here,
+                        java.util.concurrent.CompletableFuture.completedFuture(net.minecraft.util.Unit.INSTANCE)).done().join();
+            } catch (Throwable t) {
+                Throwable root = t;
+                while (root.getCause() != null && root.getCause() != root) root = root.getCause();
+                Natives.log("Horizon's client: a mod's resource reload (" + listener.getClass().getName() + ") failed: " + root);
+            }
+        }
+        if (!added.isEmpty()) Natives.log("Horizon's client: " + added.size() + " reload listener(s) the mods added at their start ran");
     }
 
     /**
@@ -2171,6 +2211,9 @@ public final class HorizonClient {
                 set(owner, level, "worldBorder", new net.minecraft.world.level.border.WorldBorder());
                 set(owner, level, "environmentAttributes", server.environmentAttributes());
                 set(owner, level, "seaLevel", server.getSeaLevel());
+                // Its tick rate (ClientboundTickingStatePacket's): the server's (potions'
+                // tooltips read it for their durations; JEI's search reads every tooltip).
+                set(owner, level, "tickRateManager", server.tickRateManager());
                 // Its chunk source (mods ask it for the light engine: Xaero's World Map), its
                 // light Horizon's as the level's own (LevelMixin).
                 try {
@@ -2465,7 +2508,7 @@ public final class HorizonClient {
         try {
             as(OWNERS.get(player), () -> {
                 mouseAt(mouseX, mouseY);
-                screen.extractRenderStateWithTooltipAndSubtitles(graphics, mouseX, mouseY, 0);
+                HorizonScreenEvents.extract(screen, graphics, mouseX, mouseY, 0);
             });
         } catch (Throwable t) {
             Throwable root = t;
@@ -2495,8 +2538,9 @@ public final class HorizonClient {
             at = parent.getFocused();
         }
         if (at instanceof net.minecraft.client.gui.components.EditBox box && box.isFocused()) return true;
-        // REI's search box, over a container screen: not one of the screen's widgets.
-        if (screen instanceof net.minecraft.client.gui.screens.inventory.AbstractContainerScreen<?> && HorizonRecipeViewer.searchFocused()) return true;
+        // REI's or JEI's search box, over a container screen: not one of the screen's widgets.
+        if (screen instanceof net.minecraft.client.gui.screens.inventory.AbstractContainerScreen<?>
+                && (HorizonRecipeViewer.searchFocused() || HorizonJei.searchFocused())) return true;
         if (screen instanceof net.minecraft.client.gui.screens.inventory.AbstractRecipeBookScreen<?>) {
             try {
                 var book = field(net.minecraft.client.gui.screens.inventory.AbstractRecipeBookScreen.class, screen, "recipeBookComponent");
@@ -2557,7 +2601,7 @@ public final class HorizonClient {
             var player = HorizonServer.player(id);
             if (screen == null || player == null) continue;
             try {
-                as(player, screen::tick);
+                as(player, () -> HorizonScreenEvents.tick(screen));
             } catch (Throwable t) {
                 if (TICK_FAILED.add(screen)) Natives.log("Horizon's client: the inventory overlay's tick failed: " + t);
             }
@@ -2591,7 +2635,7 @@ public final class HorizonClient {
         try {
             as(player, () -> {
                 mouseAt(mouse[0], mouse[1]);
-                screen.extractRenderStateWithTooltipAndSubtitles(graphics, (int) mouse[0], (int) mouse[1], 0);
+                HorizonScreenEvents.extract(screen, graphics, (int) mouse[0], (int) mouse[1], 0);
             });
         } catch (Throwable t) {
             if (TICK_FAILED.add(String.valueOf(t))) {
@@ -2651,7 +2695,7 @@ public final class HorizonClient {
                 case "close" -> {
                     var screen = OVERLAYS.remove(id);
                     OVERLAY_SENT.remove(id);
-                    if (screen != null) as(player, screen::removed);
+                    if (screen != null) as(player, () -> HorizonScreenEvents.removed(screen));
                     // An empty frame: nothing left over the next inventory before it draws.
                     Natives.overlayFrame(id.toString(), "[]");
                 }
@@ -2699,6 +2743,7 @@ public final class HorizonClient {
                     } finally {
                         acting = null;
                     }
+                    if (HorizonJei.DEBUG) as(player, HorizonJei::logList);
                     HorizonServer.afterScreenInput();
                     HorizonClientConfig.afterInput(id);
                     sendOverlay(id);
@@ -2734,7 +2779,7 @@ public final class HorizonClient {
         if (screen == null || player == null) return;
         try {
             syncClientMenu(id);
-            as(player, screen::tick);
+            as(player, () -> HorizonScreenEvents.tick(screen));
         } catch (Throwable t) {
             Throwable root = t;
             while (root.getCause() != null && root.getCause() != root) root = root.getCause();

@@ -36,7 +36,8 @@ public final class HorizonRecipeViewer {
         try {
             Class.forName("me.shedaniel.rei.api.client.view.ViewSearchBuilder", false, loader);
         } catch (ClassNotFoundException e) {
-            source.sendFailure(Component.literal("No recipe viewer: add Roughly Enough Items to the Java mods"));
+            if (HorizonJei.present()) return openJei(source, player, item, uses);
+            source.sendFailure(Component.literal("No recipe viewer: add Roughly Enough Items or JEI to the Java mods"));
             return 0;
         }
         boolean[] opened = new boolean[1];
@@ -79,11 +80,37 @@ public final class HorizonRecipeViewer {
         return 1;
     }
 
+    /** JEI's recipes screen for {@code item} (no REI among the mods). */
+    private static int openJei(CommandSourceStack source, net.minecraft.server.level.ServerPlayer player, ItemStack item, boolean uses) {
+        boolean[] opened = new boolean[1];
+        try {
+            HorizonClient.as(player, () -> opened[0] = HorizonJei.open(item, uses));
+        } catch (Throwable t) {
+            Throwable root = t;
+            while (root.getCause() != null && root.getCause() != root) root = root.getCause();
+            Natives.log("Horizon's recipe viewer (JEI) failed: " + root);
+            HorizonFailures.report("the recipe viewer", root);
+            StackTraceElement[] frames = root.getStackTrace();
+            for (int f = 0; f < Math.min(frames.length, 20); f++) Natives.log("    at " + frames[f]);
+            source.sendFailure(Component.literal("The recipe viewer failed: " + root));
+            return 0;
+        }
+        Natives.log("Horizon's recipe viewer (JEI): " + (uses ? "uses" : "recipes") + " of " + item + ": "
+                + (opened[0] ? "opened" : "nothing to show"));
+        if (!opened[0]) {
+            source.sendFailure(Component.literal("No " + (uses ? "uses" : "recipes") + " for " + item.getHoverName().getString()));
+            return 0;
+        }
+        return 1;
+    }
+
     /**
-     * REI's displays ready for the client (its first reload: ~3 s), when REI is there; called in
-     * the player's client (as()). Before an overlay that shows REI's item list.
+     * The recipe viewers ready for the client, in the player's client (as()), before an overlay
+     * that shows their item list: JEI started (HorizonJei), REI's displays in (its first reload:
+     * ~3 s).
      */
     public static void prepare() {
+        HorizonJei.prepare();
         if (reloaded) return;
         ClassLoader loader = HorizonRecipeViewer.class.getClassLoader();
         try {

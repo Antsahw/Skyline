@@ -37,6 +37,7 @@ MODS = {
     "jade": ["jade*"],
     "appleskin": ["appleskin*"],
     "rei": ["rei.jar", "roughlyenoughitems*", "rei-*"],
+    "jei": ["jei-*fabric*", "jei.jar"],
     "architectury": ["architectury*"],
     "cloth": ["cloth-config*", "cloth_config*"],
     "bop": ["biomes*o*plenty*", "biomesoplenty*"],
@@ -147,6 +148,40 @@ CASES = {
         checks=[check_log(r"recipes of 1 minecraft:crafting_table: opened", "crafting table's recipe shows"),
                 check_log(r"recipes of 1 farmersdelight:beef_stew: opened", "beef stew's recipe shows")],
         forbid=[r"recipe viewer failed"],
+    ),
+    "jei": dict(
+        about="JEI over Horizon's inventory: its item list (started with the server's recipes), its search box typed in, "
+              "a right click on an entry (its uses screen), Escape back to the inventory, /recipes and /uses (a mod's item)",
+        mods=["jei", "fd"], optional=["fabric-api"], scene="none", env={"HORIZON_JAVA_DEBUG": "jei"},
+        steps=['$C command "gamemode survival" >/dev/null; sleep 1; $C key e tap >/dev/null; sleep 12',
+               # JEI's search box (bottom right), then "beef" typed: the keys go to the overlay.
+               '$C click-at 357 223 >/dev/null; sleep 1; for k in b e e f; do $C key $k tap >/dev/null; sleep 0.3; done; sleep 3',
+               # Each Backspace a key to the overlay too: the list full again; a right click on its first entry.
+               'for k in 1 2 3 4; do $C key backspace tap >/dev/null; sleep 0.3; done; sleep 2; '
+               '$C click-at 322 38 right >/dev/null; sleep 4; $C state > $S/uses.json',
+               '$C key escape tap >/dev/null; sleep 3; $C state > $S/back.json',
+               '$C key escape tap >/dev/null; sleep 1; $C command "recipes minecraft:crafting_table" >/dev/null; sleep 4; '
+               '$C key escape tap >/dev/null; sleep 1; $C command "uses farmersdelight:tomato" >/dev/null; sleep 4'],
+        checks=[check_log(r"Horizon's JEI: started with [0-9]{4,} of the server's recipes", "JEI starts with the server's recipes (vanilla's and Farmer's Delight's)"),
+                check_log(r'JEI: the list of \S+: "": [0-9]{3,} items', "its item list over the inventory holds the items"),
+                check_log(r'JEI: the list of \S+: "beef": [1-9] items \(first 1 minecraft:beef\)', "typing in its search box filters it"),
+                check_file("uses.json", r'"screen":"java-screen"', "a right click on an entry opens its uses screen"),
+                check_file("back.json", r'"screen":"inventory"', "Escape there goes back to the inventory"),
+                check_log(r"recipe viewer \(JEI\): recipes of 1 minecraft:crafting_table: opened", "/recipes opens JEI's recipes"),
+                check_log(r"recipe viewer \(JEI\): uses of 1 farmersdelight:tomato: opened", "/uses opens a mod item's uses")],
+        forbid=[r"JEI: could not start", r"recipe viewer \(JEI\) failed", r"screen event handler failed"],
+        look="none-1.png: JEI's list right of the inventory; none-2.png: beef's 4 items; none-3.png: oak log's uses",
+    ),
+    "jei-lan": dict(
+        about="JEI per player: the host types in its search box; the guest's list stays full, its box empty and not typed in",
+        mods=["jei", "fd"], optional=["fabric-api"], scene="none", lan=True, env={"HORIZON_JAVA_DEBUG": "jei"},
+        steps=['$H command "gamemode survival @a" >/dev/null; sleep 1; $H key e tap; sleep 12; $G key e tap; sleep 6',
+               '$H click-at 357 223; sleep 1; for k in b e e f; do $H key $k tap >/dev/null; sleep 0.3; done; sleep 3; '
+               '$G scroll-at 340 100 -1; sleep 3'],
+        checks=[check_log(r'JEI: the list of Player\S*: "beef": [1-9] items', "the host's search filters the host's list"),
+                check_log(r'JEI: the list of Guest: "": [0-9]{3,} items', "the guest's list is still full")],
+        forbid=[r"JEI: could not start", r"search can't be kept per player"],
+        look="lan-2-host.png: beef's items, 'beef' in the box; lan-2-guest.png: the whole list, the box empty",
     ),
     "reiscreen": dict(
         about="REI's item list over a mod's screen (Farmer's Delight's pot) stays after REI's own reload (a client's join)",

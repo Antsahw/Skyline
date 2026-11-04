@@ -304,6 +304,44 @@ saying something works.
 - The headless Minecraft has a `KeyboardHandler` (allocated): a focused text box resubmits
   its IME preedit through it.
 
+## JEI (Just Enough Items) over Horizon's inventory
+
+JEI's item list, search box, bookmarks and recipe screens work over Horizon's inventory, as
+REI's do (2026-11-04, `bridge-client-11`). `HorizonJei.java` (reflection: JEI is optional).
+- **Why it never appeared**: JEI registers its `CLIENT_STARTED` listener (which registers the
+  listeners that start it) from its injection into `Minecraft.<init>` at the first
+  `ResourceLoadStateTracker.startReload`; the headless Minecraft is allocated, so that never
+  ran. `HorizonHooks.startPoint` now fires injections there with the constructor's end
+  (`START_END`, before `CLIENT_STARTED`). Client reload listeners that mods register at
+  `CLIENT_STARTED` (JEI's GUI colours) run right after it (`reloadAddedListeners`).
+- **Its start** (`HorizonJei.prepare`, from `HorizonRecipeViewer.prepare`: before an overlay
+  or a mod screen is laid out, in the player's `as()`): what a joining client does, Fabric's
+  `ClientRecipeSynchronizedEvent` with the mirror's recipes (all of them, ~2,400 vanilla + FD),
+  then JEI's `AFTER_RECIPES_UPDATED` (its `handleUpdateRecipes` mixin's event), which starts
+  its runtime (~3 s). JEI keeps client recipes only for the connection they came from
+  (`Internal.getRemoteConnectionId`: null, the connection has no channel): `JeiConnectionMixin`
+  (mods config, `@Pseudo`) gives one id.
+- **Input**: JEI takes clicks, keys and scrolls through Fabric's `ScreenMouseEvents` /
+  `ScreenKeyboardEvents` (fired by Fabric's MouseHandler/KeyboardHandler mixins in a real
+  client) and characters through its own injection at `KeyboardHandler.charTyped`'s head.
+  `HorizonScreenEvents` fires all of them now (allow/before/after around the screen's handler;
+  `charTyped`'s HEAD/TAIL injections through `HorizonHooks.fire`), for mod screens too. Its
+  search box focused makes the overlay `typing` (`HorizonJei.searchFocused`).
+- **Frames and ticks**: `HorizonScreenEvents.extract`/`tick`/`removed` fire Fabric's
+  `beforeExtract`/`afterExtract`, `beforeTick`/`afterTick` and `remove` (Gui's mixin fires them
+  in a real client): JEI updates what the mouse is over before each frame and ticks its list after
+  the screen's tick.
+- `/recipes` and `/uses` (and R/U over Horizon's slots) open JEI's `RecipesGui` when REI isn't
+  there (`HorizonJei.open`: a focus, its categories looked up first): a client-only screen; Escape
+  goes back to the inventory (its parent is the overlay screen). Clicks on its list (left:
+  recipes, right: uses) and R/U over its entries open it too.
+- **Per player**: JEI's search text and keyboard focus are kept per player
+  (`HorizonJei.swap`, from `HorizonClientState.load`). Its keyboard focus lets go of a control
+  whose screen isn't the open one, so a guest's frame took the host's search box from them
+  mid-word. Not per player yet: bookmarks, JEI's settings, the recipe screen's history.
+- `HORIZON_JAVA_DEBUG=jei` logs each player's list (search text, item count) after overlay
+  input. Regress `jei` (list, search, uses, Escape, /recipes, /uses) and `jei-lan`.
+
 ## Client HUD mods
 
 - Once players exist, `HorizonClient.clientTick` runs each player's client in turn inside
@@ -546,6 +584,18 @@ gets SPIR-V, vertex layouts and uniform lists.
   pipeline's SPIR-V, which `HORIZON_SPV_DIR=dir cargo test -p horizon-jvm gpu` reads back.
 
 ## 26.3 facts that cost time
+
+- **Fabric's screen events come from Fabric's mixins into MouseHandler, KeyboardHandler and
+  Gui** (`ScreenMouseEvents`, `ScreenKeyboardEvents`, `ScreenEvents.beforeExtract`/`afterTick`/
+  `remove`), not from `Screen`. The headless client calls the screen's handlers itself, so it
+  fires them in `HorizonScreenEvents` (only `BEFORE_INIT`/`AFTER_INIT` come from `Screen.init`).
+  A screen Fabric's init never saw throws "has not been correctly initialised" from its events:
+  the handler then runs without them.
+- **Client levels need a `tickRateManager`** (made without their constructor): every potion's
+  tooltip reads it (`TickRateManager.tickrate()` NPE). JEI reads every item's tooltip to build its
+  search index; with 256 of them failing, its searches came back empty. It is the server
+  level's now.
+- 26.3's mouse buttons count from one (`InputConstants.MOUSE_BUTTON_LEFT` = 1, RIGHT = 3).
 
 - A big pack's join sends packets past the network's 2 MiB frame (2.3 MB in the 81-jar test
   pack) to the window's own client. Its connection is an in-memory pipe without compression, so
@@ -1477,6 +1527,8 @@ through the mods with no failed chunk. Not available for 26.3 Fabric yet: EMI, P
 `/recipes [item]` and `/uses [item]` (the held item without one) open REI's recipe view
 (`HorizonRecipeViewer`): vanilla crafting, Farmer's Delight cooking, Tech Reborn's compressor,
 Energized Power's recipes draw. The first one reloads REI (~3 s).
+JEI's item list, search, recipe screens and `/recipes`/`/uses` work over Horizon's inventory
+too (2026-11-04, `bridge-client-11`; REI first when both are there).
 REI's item list, search box and R/U keys work over Horizon's inventory (2026-10-31,
 `bridge-rei-overlay`), and over mod container screens (2026-11-01, `bridge-client2`). REI
 26.3's craftable-filter button has no icon of its own (a tinted button: none is drawn in its
