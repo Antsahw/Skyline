@@ -281,7 +281,7 @@ public final class HorizonGraphics extends GuiGraphicsExtractor {
     private static long debugImages;
     private static final java.util.Set<String> DEBUG_NAMES = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
-    /** HORIZON_JAVA_DEBUG=gpu: a GPU texture blitted is saved as /tmp/horizon-gpu-N.png now and then. */
+    /** HORIZON_JAVA_DEBUG=gpu: a GPU texture blitted is saved in the temp folder as horizon-gpu-N.png now and then. */
     private static void debugImage(String name, int w, int h, byte[] rgba) {
         if (rgba == null) {
             Natives.log("gpu: " + name + " has no pixels");
@@ -307,7 +307,7 @@ public final class HorizonGraphics extends GuiGraphicsExtractor {
                 }
             }
             try {
-                javax.imageio.ImageIO.write(image, "png", new java.io.File("/tmp/horizon-gpu-" + (debugImages / 100) + ".png"));
+                javax.imageio.ImageIO.write(image, "png", new java.io.File(System.getProperty("java.io.tmpdir"), "horizon-gpu-" + (debugImages / 100) + ".png"));
             } catch (java.io.IOException e) {
                 Natives.log("gpu: " + e);
             }

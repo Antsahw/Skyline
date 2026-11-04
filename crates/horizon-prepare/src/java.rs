@@ -46,7 +46,7 @@ fn executable(dir: &Path, name: &str) -> PathBuf {
 
 /// `fs::canonicalize`, without the `\\?\` prefix it gives a Windows drive path: the
 /// home goes into `JAVA_HOME` and the PATH of preparers, whose lookups don't take it.
-fn real_path(path: PathBuf) -> PathBuf {
+pub fn real_path(path: PathBuf) -> PathBuf {
     let real = fs::canonicalize(&path).unwrap_or(path);
     if cfg!(windows) {
         without_verbatim(real)

@@ -42,6 +42,9 @@ pub const JAVA_MAJOR: i64 = 25;
 /// the folder holding `bin/` and `lib/`.
 pub const JAVA_HOME_VAR: &str = "HORIZON_JAVA_HOME";
 
+/// The game's exit code when the player's Java mods can't start (`horizon-play` explains it).
+pub const NOT_STARTED_EXIT: i32 = 78;
+
 /// The bridge's jar, built by build.rs.
 const BRIDGE_JAR: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/horizon-bridge.jar"));
 /// The platform mod (`java/platform/`, Fabric mod `horizon`), built by build.rs against the
@@ -218,7 +221,8 @@ pub fn jars(dir: &Path) -> Vec<PathBuf> {
         .flatten()
         .map(|e| e.path())
         .filter(|p| p.is_file() && p.extension().is_some_and(|e| e.eq_ignore_ascii_case("jar")))
-        .map(|p| std::fs::canonicalize(&p).unwrap_or(p))
+        // Without Windows' `\?\` prefix: Java's paths reject it, and these go to Fabric.
+        .map(horizon_prepare::java::real_path)
         .collect();
     jars.sort();
     jars
@@ -247,7 +251,7 @@ pub fn find_java_home() -> Result<PathBuf, String> {
             });
     }
     let jdk = horizon_prepare::java::find_runtime(JAVA_MAJOR, &runtimes)?;
-    let java = std::fs::canonicalize(&jdk.java).unwrap_or(jdk.java);
+    let java = horizon_prepare::java::real_path(jdk.java);
     java.parent()
         .and_then(Path::parent)
         .map(Path::to_path_buf)

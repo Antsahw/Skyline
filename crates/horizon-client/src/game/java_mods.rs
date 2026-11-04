@@ -259,6 +259,20 @@ fn class_archive(jars: &[PathBuf]) -> Option<PathBuf> {
     Some(cache.join(name))
 }
 
+/// The player's mods can't run. The game stops rather than going on without them: they'd think
+/// the mods were loaded, and a world opened without its mods loses their blocks and items.
+/// `HORIZON_JAVA_OPTIONAL=1` goes on without them. Exits with [`horizon_jvm::NOT_STARTED_EXIT`].
+fn not_started(reason: &str) {
+    log::error!("Java mods: not started: {reason}");
+    log::logger().flush();
+    if std::env::var("HORIZON_JAVA_OPTIONAL").is_ok_and(|v| v == "1") {
+        log::warn!("Java mods: going on without them (HORIZON_JAVA_OPTIONAL)");
+        return;
+    }
+    eprintln!("Your Java mods couldn't start, so the game stopped: {reason}");
+    std::process::exit(horizon_jvm::NOT_STARTED_EXIT)
+}
+
 fn start_once(root: &Path, dir: &Path, jars: Vec<PathBuf>, side: horizon_jvm::Side) -> bool {
     if horizon_jvm::get().is_some() {
         return true;
@@ -274,7 +288,7 @@ fn start_once(root: &Path, dir: &Path, jars: Vec<PathBuf>, side: horizon_jvm::Si
     let fabric = match fabric {
         Ok(fabric) => Some(fabric),
         Err(e) => {
-            log::warn!("Java mods: Fabric can't start: {e}");
+            not_started(&format!("Fabric can't start: {e}"));
             None
         }
     };
@@ -294,7 +308,7 @@ fn start_once(root: &Path, dir: &Path, jars: Vec<PathBuf>, side: horizon_jvm::Si
     {
         Ok(bridge) => bridge,
         Err(e) => {
-            log::warn!("Java mods: not started: {e}");
+            not_started(&e);
             return false;
         }
     };

@@ -100,6 +100,12 @@ public final class HorizonGameProvider implements GameProvider {
     @Override
     public void initialize(FabricLauncher launcher) {
         launcher.setValidParentClassPath(parentClassPath);
+        // The libraries now: language adapters load before unlockClassPath and use them as they
+        // load (Config Manager's log4j, Crash Assistant's Gson), and under a launcher they're on
+        // the JVM's class path from the start. Only the game waits.
+        for (Path library : libraries) {
+            launcher.addToClassPath(library);
+        }
         // No patches: an empty table, so the transformer answers "unchanged" for every class.
         transformer.locateEntrypoints(launcher, new ArrayList<>(Collections.singletonList(gameJar)));
     }
@@ -112,9 +118,6 @@ public final class HorizonGameProvider implements GameProvider {
     @Override
     public void unlockClassPath(FabricLauncher launcher) {
         launcher.addToClassPath(gameJar);
-        for (Path library : libraries) {
-            launcher.addToClassPath(library);
-        }
     }
 
     @Override
