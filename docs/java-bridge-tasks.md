@@ -160,6 +160,11 @@ By area:
   **Blaze burners** work but draw wrong: the blaze head looks doubled/overlapping and a pale
   blue-white flat square under it (the same pale square as the press/mixer report: likely one
   sprite or render type wrong for animated/emissive block-entity parts; gpu-13).
+  **New kind (client chat): mods' client sounds.** Using Create's frogport: "failed in using a
+  block: NullPointerException ... FrogportAudioBehaviour.open". Mods play client sounds through
+  vanilla's `SoundManager` (`Minecraft.getSoundManager().play(SoundInstance)`, looping and moving
+  sounds); Horizon's client has no vanilla sound engine: give mods one that hands their sounds
+  to Horizon's audio. Casings work (tester).
 - **A broken block's moving parts stay** (tester, batch 10): break a cogwheel and the hand
   crank's handle on it keeps floating, drawn. A removed mod block entity must drop its
   renderer's instance (gpu-13: the recorder's per-block-entity draws on removal).
