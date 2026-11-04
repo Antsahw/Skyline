@@ -103,8 +103,9 @@ Some sandboxes refuse to run downloaded mod code: then say so; the user can run 
 
 ## Upstream
 
-Synced with upstream main 97937bcf8 (2026-11-02, `bridge-upstream-sync-4`, merged in batch 7).
-Upstream removed WebAssembly code mods (our `server_mods.rs` is `game/java_server.rs` now) and
+Synced with upstream main 73d3ee3d2 (2026-11-04, `bridge-upstream-sync-5`: 2452 commits;
+conflicts in 16 files, traps in java-bridge.md "Found in upstream sync 5"). Before that
+97937bcf8 (sync 4), when upstream removed WebAssembly code mods (our `server_mods.rs` is `game/java_server.rs` now) and
 moved rendering into `crates/horizon-client-render`. Sync every day or two (a one-off chat, or
 the boss when it's small); keep hooks in shared Horizon files to one-line calls into our files.
 

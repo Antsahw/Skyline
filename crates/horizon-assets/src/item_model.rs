@@ -17,6 +17,7 @@ use std::{
 };
 
 mod component_predicate;
+mod foreign;
 mod special;
 pub use special::{SpecialKind, SpecialModel};
 
@@ -431,8 +432,16 @@ impl ItemModelNode {
     pub fn decode(v: &Value) -> Result<Self> {
         let m = object(v)?;
         let kind = ident(required(m, "type")?)?;
-        if let Some(node) = Self::modded(&kind, m)? {
-            return Ok(node);
+        if kind == "minecraft:condition" {
+            let property = ident(required(m, "property")?)?;
+            if !property.starts_with("minecraft:") {
+                return Ok(Self::Condition {
+                    transformation: optional_transformation(m)?,
+                    property: ConditionProperty::Custom(property),
+                    on_true: Box::new(Self::decode(required(m, "on_true")?)?),
+                    on_false: Box::new(Self::decode(required(m, "on_false")?)?),
+                });
+            }
         }
         Ok(match kind.as_str() {
             "minecraft:empty" => Self::Empty,
@@ -454,12 +463,21 @@ impl ItemModelNode {
                     .collect::<Result<_>>()?,
                 transformation: optional_transformation(m)?,
             },
+            "minecraft:condition" if foreign::property_is_foreign(m)? => foreign::wrap(
+                Self::decode(required(m, "on_false")?)?,
+                optional_transformation(m)?,
+            ),
             "minecraft:condition" => Self::Condition {
                 transformation: optional_transformation(m)?,
                 property: ConditionProperty::decode(m)?,
                 on_true: Box::new(Self::decode(required(m, "on_true")?)?),
                 on_false: Box::new(Self::decode(required(m, "on_false")?)?),
             },
+            "minecraft:select" if foreign::property_is_foreign(m)? => {
+                // No case can match a property Horizon cannot read.
+                let fallback = get(m, "fallback").map(Self::decode).transpose()?;
+                foreign::wrap(fallback.unwrap_or(Self::Empty), optional_transformation(m)?)
+            }
             "minecraft:select" => {
                 let transformation = optional_transformation(m)?;
                 let property = SelectProperty::decode(m)?;
@@ -487,6 +505,7 @@ impl ItemModelNode {
                 }
             }
             "minecraft:range_dispatch" => {
+                let foreign_property = foreign::property_is_foreign(m)?;
                 let mut entries = list(required(m, "entries")?)?
                     .iter()
                     .map(|e| {
@@ -499,6 +518,17 @@ impl ItemModelNode {
                     .collect::<Result<Vec<_>>>()?;
                 // `Comparator.comparingDouble`: Double.compare, a total order.
                 entries.sort_by(|a, b| f64::from(a.0).total_cmp(&f64::from(b.0)));
+                if foreign_property {
+                    // A property Horizon cannot read is 0.
+                    let fallback = get(m, "fallback").map(Self::decode).transpose()?;
+                    let chosen = last_index_less_or_equal(&entries, 0.0)
+                        .map(|i| entries.swap_remove(i).1)
+                        .or(fallback);
+                    return Ok(foreign::wrap(
+                        chosen.unwrap_or(Self::Empty),
+                        optional_transformation(m)?,
+                    ));
+                }
                 Self::RangeDispatch {
                     transformation: optional_transformation(m)?,
                     property: NumericProperty::decode(m)?,
@@ -509,54 +539,22 @@ impl ItemModelNode {
                         .transpose()?,
                 }
             }
+            "minecraft:special" if SpecialModel::is_foreign(required(m, "model")?) => {
+                // The mod's own renderer is not run: the base model stands in.
+                Self::Model(ModelLeaf {
+                    model: ident(required(m, "base")?)?,
+                    transformation: optional_transformation(m)?,
+                    tints: Vec::new(),
+                })
+            }
             "minecraft:special" => Self::Special {
                 base: ident(required(m, "base")?)?,
                 transformation: optional_transformation(m)?,
                 model: SpecialModel::decode(required(m, "model")?)?,
             },
             "minecraft:bundle/selected_item" => Self::BundleSelectedItem,
+            other if foreign::is_foreign(other) => foreign::decode_node(other, m),
             _ => return Err(err("unknown item model type")),
-        })
-    }
-    /// A Java mod's own model type or property (registered by its client code, which Horizon
-    /// doesn't run): what it shows without it. A type's inner `model` (a node, or a model id);
-    /// a condition's `on_false`; a select's or range's fallback, else its first model. Vanilla's
-    /// own unknown names stay errors.
-    fn modded(kind: &str, m: &Map<String, Value>) -> Result<Option<Self>> {
-        let foreign = |id: &str| !id.starts_with("minecraft:");
-        let property = || -> Result<Option<String>> { get(m, "property").map(ident).transpose() };
-        if foreign(kind) {
-            return Ok(Some(match get(m, "model") {
-                Some(Value::String(id)) => Self::Model(ModelLeaf {
-                    model: ident(&Value::String(id.clone()))?,
-                    transformation: optional_transformation(m)?,
-                    tints: Vec::new(),
-                }),
-                Some(node @ Value::Object(_)) => Self::decode(node)?,
-                _ => Self::Empty,
-            }));
-        }
-        let Some(property) = property()? else {
-            return Ok(None);
-        };
-        if !foreign(&property) {
-            return Ok(None);
-        }
-        let first = |list_key: &str| -> Result<Option<Self>> {
-            if let Some(fallback) = get(m, "fallback") {
-                return Self::decode(fallback).map(Some);
-            }
-            let first = get(m, list_key)
-                .and_then(Value::as_array)
-                .and_then(|l| l.first())
-                .and_then(|e| e.get("model"));
-            first.map(Self::decode).transpose()
-        };
-        Ok(match kind {
-            "minecraft:condition" => Some(Self::decode(required(m, "on_false")?)?),
-            "minecraft:select" => Some(first("cases")?.unwrap_or(Self::Empty)),
-            "minecraft:range_dispatch" => Some(first("entries")?.unwrap_or(Self::Empty)),
-            _ => None,
         })
     }
     /// Every model resource id the tree can ask for.
@@ -647,6 +645,8 @@ impl TintSource {
             "minecraft:firework" => Self::Firework(default()?),
             "minecraft:potion" => Self::Potion(default()?),
             "minecraft:team" => Self::Team(default()?),
+            // A mod's own tint source, which its Java code computes: untinted here.
+            other if foreign::is_foreign(other) => Self::Constant(-1),
             _ => return Err(err("unknown item tint source")),
         })
     }
@@ -658,6 +658,7 @@ impl TintSource {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ConditionProperty {
+    Custom(String),
     CustomModelData(i32),
     UsingItem,
     Broken,
@@ -990,6 +991,10 @@ pub struct Context<'a> {
 
 /// Host services the resolver cannot derive from data alone.
 pub trait ItemEnv {
+    /// A mod's namespaced conditional property, false when no mod supplies it.
+    fn item_model_property(&self, _property: &str, _stack: &StackView) -> bool {
+        false
+    }
     /// `PotionContents.getColorOr` for the potion/effects part: the mixed
     /// effect colour, or `None` when the contents have no visible effects.
     fn potion_effect_color(&self, _potion_contents: &Value) -> Option<i32> {
@@ -1343,6 +1348,9 @@ impl Resolve<'_> {
     fn condition(&self, property: &ConditionProperty) -> bool {
         let owner = self.ctx.owner;
         match property {
+            ConditionProperty::Custom(property) => {
+                self.env.item_model_property(property, self.stack)
+            }
             ConditionProperty::CustomModelData(i) => {
                 self.component("minecraft:custom_model_data")
                     .and_then(|d| custom_data_at(d, "flags", *i))
@@ -1761,5 +1769,7 @@ fn binary_search(a: &[f32], key: f32) -> std::result::Result<usize, usize> {
     Err(low as usize)
 }
 
+#[cfg(test)]
+mod foreign_tests;
 #[cfg(test)]
 mod tests;

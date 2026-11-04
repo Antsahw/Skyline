@@ -3,7 +3,7 @@
 //! resource-pack reloads remain separate work.
 use crate::{Result, sprites::Sprites};
 use horizon_assets::{
-    bake::{BlockModelTransform, ModelQuad, bake_block_model},
+    bake::{BlockModelTransform, ModelQuad, RenderType, bake_block_model},
     blockstate::{
         BlockStateDefinition, Variant, VariantSet,
         bind::{Properties, PropertySchema, PropertyValues, SelectedModels},
@@ -36,6 +36,11 @@ pub struct BakedQuad {
     pub tint_index: i32,
     pub shade_direction_override: Option<horizon_assets::model::Direction>,
     pub light_emission: u8,
+    pub light: [u8; 2],
+    pub color: Option<i32>,
+    pub ambient_occlusion: Option<bool>,
+    pub render_type: Option<horizon_assets::bake::RenderType>,
+    pub shade: bool,
 }
 impl From<ModelQuad> for BakedQuad {
     fn from(q: ModelQuad) -> Self {
@@ -47,6 +52,11 @@ impl From<ModelQuad> for BakedQuad {
             tint_index: q.tint_index,
             shade_direction_override: q.shade_direction_override,
             light_emission: q.light_emission,
+            light: q.light,
+            color: q.color,
+            ambient_occlusion: q.ambient_occlusion,
+            render_type: q.render_type,
+            shade: q.shade,
         }
     }
 }
@@ -59,7 +69,7 @@ pub struct BakedFace {
     pub opaque: bool,
     /// Fractional alpha: drawn in the sorted translucent pass.
     pub translucent: bool,
-    /// The model forces it translucent (`render_type`): an OptiFine tile keeps that.
+    /// The material forces it translucent and no `render_type` overrides: an OptiFine tile keeps that.
     pub force_translucent: bool,
     /// The Fusion connecting texture rule its sprite joins by ([`crate::fusion`]), plus one:
     /// two bytes, within the padding every face already has.
@@ -116,10 +126,20 @@ fn bake_resolved(
         .into_iter()
         .map(|quad| {
             let layer = sprites.insert(root, &quad.material.sprite)?;
+            // A model's `render_type` replaces the pass its sprite would pick.
+            let (translucent, opaque) = match quad.render_type {
+                Some(RenderType::Translucent | RenderType::Tripwire) => (true, false),
+                Some(RenderType::Solid) => (false, true),
+                Some(RenderType::Cutout | RenderType::CutoutMipped) => (false, false),
+                None => (
+                    quad.material.force_translucent || sprites.translucent[layer as usize],
+                    sprites.region_opaque(layer, &quad.uv),
+                ),
+            };
             Ok(BakedFace {
-                translucent: quad.material.force_translucent || sprites.translucent[layer as usize],
-                force_translucent: quad.material.force_translucent,
-                opaque: sprites.region_opaque(layer, &quad.uv),
+                translucent,
+                force_translucent: quad.render_type.is_none() && quad.material.force_translucent,
+                opaque,
                 quad: quad.into(),
                 layer,
                 fusion: None,

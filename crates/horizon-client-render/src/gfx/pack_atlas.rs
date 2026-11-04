@@ -27,6 +27,37 @@ impl PackAtlas {
         layers: u32,
         sprite: u32,
     ) -> Option<Self> {
+        Self::with_levels(
+            device,
+            encoder,
+            arrays,
+            split,
+            layers,
+            sprite,
+            arrays[0].mip_level_count(),
+        )
+    }
+
+    /// Encoded material channels must select an existing texel, including at distance.
+    pub fn material(
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        arrays: &[wgpu::Texture],
+        split: u32,
+        layers: u32,
+    ) -> Option<Self> {
+        Self::with_levels(device, encoder, arrays, split, layers, arrays[0].width(), 1)
+    }
+
+    fn with_levels(
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        arrays: &[wgpu::Texture],
+        split: u32,
+        layers: u32,
+        sprite: u32,
+        levels: u32,
+    ) -> Option<Self> {
         let layers = layers.max(1);
         let columns = (f64::from(layers).sqrt().ceil() as u32).max(1);
         let rows = layers.div_ceil(columns);
@@ -35,7 +66,7 @@ impl PackAtlas {
             return None;
         }
         // Levels past a sprite's single pixel would mix neighbours: stop there.
-        let levels = arrays[0].mip_level_count().min(sprite.ilog2() + 1);
+        let levels = levels.min(sprite.ilog2() + 1);
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("Shader pack block atlas"),
             size: wgpu::Extent3d {
@@ -136,6 +167,10 @@ const FACE: &str = "    uint hz_q = (uint(gl_VertexIndex) & ~3u) * 6u;\n    \
     vec2 hz_t0 = vec2(hz_w.x & 65535u, hz_w.x >> 16u);\n    \
     vec2 hz_d1 = vec2(hz_w.y & 65535u, hz_w.y >> 16u) - hz_t0;\n    \
     vec2 hz_d2 = vec2(hz_w.z & 65535u, hz_w.z >> 16u) - hz_t0;\n    \
+    uint hz_w3 = hz_vertices[hz_q + 21u];\n    \
+    vec2 hz_t3 = vec2(hz_w3 & 65535u, hz_w3 >> 16u);\n    \
+    hz_mid = (clamp(hz_t0 * hz_uv_scale, 0.0, 1.0) + clamp((hz_t0 + hz_d1) * hz_uv_scale, 0.0, 1.0)\n        \
+        + clamp((hz_t0 + hz_d2) * hz_uv_scale, 0.0, 1.0) + clamp(hz_t3 * hz_uv_scale, 0.0, 1.0)) * 0.25;\n    \
     vec3 hz_e1 = hz_p1 - hz_p0;\n    \
     vec3 hz_e2 = hz_p2 - hz_p0;\n    \
     vec3 hz_n = cross(hz_e1, hz_e2);\n    \
@@ -195,7 +230,9 @@ impl PackAtlas {
              hz_cell = vec2(float(hz_layer % {columns}u), float(hz_layer / {columns}u));\n    \
              hz_scale = vec2({:?}, {:?});\n    \
              hz_Vertex = vec4(hz_v_pos + hz_origin.xyz, 1.0);\n    \
-             hz_MultiTexCoord0 = vec4((hz_cell + clamp(vec2(hz_v_uv) * (hz_origin.w > 0.0 ? uintBitsToFloat(floatBitsToUint(hz_origin.w) & 0xff800000u) : fract(abs(hz_origin.w))), 0.0, 1.0)) * hz_scale, 0.0, 1.0);\n    \
+             hz_uv_scale = hz_origin.w > 0.0 ? uintBitsToFloat(floatBitsToUint(hz_origin.w) & 0xff800000u) : fract(abs(hz_origin.w));\n    \
+             hz_mid = vec2(0.5);\n    \
+             hz_MultiTexCoord0 = vec4((hz_cell + clamp(vec2(hz_v_uv) * hz_uv_scale, 0.0, 1.0)) * hz_scale, 0.0, 1.0);\n    \
              hz_MultiTexCoord1 = vec4(float(hz_v_light.y), float(hz_v_light.x), 0.0, 1.0);\n    \
              hz_MultiTexCoord2 = hz_MultiTexCoord1;\n    \
              hz_Color = vec4(hz_v_color.rgb, {color_a});\n    \
@@ -207,7 +244,9 @@ impl PackAtlas {
         if flat {
             body.push_str(FACE);
         }
-        declarations.push_str("vec2 hz_cell; vec2 hz_scale; vec4 hz_tangent;\n");
+        declarations.push_str(
+            "vec2 hz_cell; vec2 hz_scale; vec2 hz_mid; float hz_uv_scale; vec4 hz_tangent;\n",
+        );
         let entity = if flat {
             "vec4(float(hz_block_ids[3u * hz_layer]), float(hz_block_ids[3u * hz_layer + 1u]), 0.0, 0.0)"
         } else {
@@ -226,7 +265,7 @@ impl PackAtlas {
             ("at_midBlock", mid_block),
             (
                 "mc_midTexCoord",
-                "vec4((hz_cell + 0.5) * hz_scale, 0.0, 1.0)",
+                "vec4((hz_cell + hz_mid) * hz_scale, 0.0, 1.0)",
             ),
             ("at_tangent", "hz_tangent"),
             ("vaPosition", "hz_Vertex.xyz"),
@@ -244,9 +283,14 @@ impl PackAtlas {
                 .collect(),
             after: String::new(),
             alpha_test: None,
+            item_id_declared: false,
         }
     }
 }
+
+#[cfg(test)]
+#[path = "pack_atlas/midpoint_test.rs"]
+mod midpoint_test;
 
 #[cfg(test)]
 mod tests {
