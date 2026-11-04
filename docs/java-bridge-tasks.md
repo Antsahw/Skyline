@@ -116,6 +116,8 @@ Broken, first in every area's queue below:
   Not checked: whether the kinetic network turns (`/data get block` reads Horizon's world, which
   has no Java block entity: read Java's `LIVE` instead). Order: 1 (gpu), then 2–3 (client),
   then a regress case `create` (motor → shaft → cogwheel; speed read in Java; a screenshot).
+  **1–3 fixed (gpu 12, see Reports); the `create` case is written but not yet run with the
+  real jar** (CurseForge's CDN is blocked from the agents' machines): run it on a PC.
 
 Works for them: Bedrock Reloaded (small pack), Terralith ("runs better than normal Fabric"),
 Biomes O' Plenty; 800 FPS stable on a GTX 1060 3 GB / i5-9400F / 16 GB. Reported:
@@ -1072,4 +1074,31 @@ reload listeners added at `CLIENT_STARTED` run. Search text and keyboard focus p
 Not yet per player: JEI's bookmarks and settings. Regress `jei`, `jei-lan` (new), `rei`,
 `reiscreen`, `pot`, `terminal`, `rei-lan`, `modsettings`, `config-rejoin`, `keys`, `failmsg`.
 Test: `regress.py --jars <jars with jei, fabric-api, Farmer's Delight> jei jei-lan`.
+
+### gpu 12: Flywheel initialised for Create (2026-11-04, branch `bridge-gpu-12`; Claude for iaxivers)
+
+The boss probe's three Create failures, fixed in the bridge (no Create-specific code):
+- **Flywheel's model helpers** (`ModelRenderHelper.INSTANCE` null in every Create block entity
+  renderer) are made at the end of `LevelExtractor.allChanged`, Flywheel's level renderer
+  reload. Horizon cancels that method at its head (it draws the world), which also skipped the
+  mods' injections at its end. Now, once the models are in and per client level, the mods'
+  RETURN injections there run (`HorizonClient.levelRendererReady`), and those at the head of
+  `Minecraft.onResourceLoadFinished` once the models load (Flywheel picks its backend there:
+  off, the GPU not being OpenGL, so Create draws its parts through its renderers, which the
+  bridge records). They're found from the merged class (`HorizonHooks.fireMerged`): Create's
+  client mixins come from its Mixin plugin's list, which the census never read.
+- `LocalPlayer.firstPersonHandsAndItems()` is made (and ticked) for the client player.
+- The client player's class gets its synced data built (`new SynchedEntityData.Builder(local)`):
+  Create keys its player data accessors by class and had none for `LocalPlayer`.
+- `HORIZON_JAVA_DEBUG=ber`: each drawn mod block entity every 5 s (models submitted, its data:
+  Create's `Speed`).
+Not tested with Create itself: its jar couldn't be downloaded here (CurseForge's CDN refused;
+building it from source wasn't allowed). A fixture with Create's three patterns (`kineticmod`:
+a renderer throwing until an `allChanged` injection from a Mixin plugin ran, the hands and
+class-keyed data read each client tick) fails on the old bridge exactly as Create did and
+passes now. Regress `kinetic` (new), `ber`, `pot`, `hud`, `placed` pass; `create` (new) needs
+the jar. Not done: the blank items in the creative tab (custom item renderers), Create's own
+reload listeners (registered from `Minecraft.<init>` at a point the bridge doesn't fire),
+fluids, contraptions.
+Test: jar into `~/hz-test/jars`, `regress.py --java-only --jars ~/hz-test/jars create kinetic`.
 

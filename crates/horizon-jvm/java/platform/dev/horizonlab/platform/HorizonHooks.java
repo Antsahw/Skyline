@@ -657,6 +657,104 @@ public final class HorizonHooks {
         return new String[] {head, desc};
     }
 
+    // ---- A client method's injections, read from the merged class ---------------------------
+
+    /** The mixin classes read for fireMerged, by name: their injections (method, handler, at). */
+    private static final Map<String, List<String[]>> MERGED_MIXINS = new ConcurrentHashMap<>();
+    private static final Map<String, List<Method>> MERGED_RESOLVED = new ConcurrentHashMap<>();
+
+    /**
+     * The mods' @Injects at {@code at} (HEAD, or TAIL/RETURN as one) of {@code owner.method}, as
+     * Mixin merged them into the (client) class: found from the class's own merged handlers,
+     * whatever config or Mixin plugin applied them (Create's client mixins come from its
+     * plugin's list, which the census doesn't read). Horizon's own are left out. For a vanilla
+     * method the headless client never calls, or whose body Horizon cancels at its head
+     * (LevelExtractor.allChanged), where vanilla would have run it.
+     */
+    private static List<Method> merged(Class<?> owner, String method, String at) {
+        return MERGED_RESOLVED.computeIfAbsent(owner.getName() + "." + method + "|" + at, k -> {
+            List<Method> found = new ArrayList<>();
+            for (Method m : owner.getDeclaredMethods()) {
+                MixinMerged info = m.getAnnotation(MixinMerged.class);
+                if (info == null || info.mixin().startsWith("dev.horizonlab.platform.")) continue;
+                for (String[] inject : mixinInjects(info.mixin())) {
+                    if (!inject[0].equals(method) || !handlerNamed(m.getName(), inject[1])) continue;
+                    boolean head = "HEAD".equals(inject[2]);
+                    if (head != "HEAD".equals(at)) continue;
+                    m.setAccessible(true);
+                    found.add(m);
+                    break;
+                }
+            }
+            found.sort(Comparator.comparing(Method::getName));
+            if (!found.isEmpty()) {
+                Natives.log("Horizon's client: " + found.size() + " mod injection(s) at " + at + " of "
+                        + owner.getSimpleName() + "." + method);
+            }
+            return found;
+        });
+    }
+
+    /** A mixin class's event-like @Injects: (target method, handler, HEAD/TAIL/RETURN). */
+    private static List<String[]> mixinInjects(String mixin) {
+        return MERGED_MIXINS.computeIfAbsent(mixin, name -> {
+            List<String[]> out = new ArrayList<>();
+            try (var in = HorizonHooks.class.getClassLoader().getResourceAsStream(name.replace('.', '/') + ".class")) {
+                if (in == null) return out;
+                ClassNode node = new ClassNode();
+                new ClassReader(in.readAllBytes()).accept(node, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+                for (MethodNode m : node.methods) {
+                    for (AnnotationNode a : annotations(m.invisibleAnnotations, m.visibleAnnotations)) {
+                        if (!"Lorg/spongepowered/asm/mixin/injection/Inject;".equals(a.desc)) continue;
+                        String point = eventPoint(get(a, "at"));
+                        if (point == null || !(get(a, "method") instanceof List<?> specs)) continue;
+                        for (Object spec : specs) out.add(new String[] {parseSpec((String) spec)[0], m.name, point});
+                    }
+                }
+            } catch (Throwable t) {
+                Natives.log("Horizon's client: mixin " + name + " couldn't be read: " + t);
+            }
+            return out;
+        });
+    }
+
+    /**
+     * Runs the mods' injections at {@code at} of {@code self}'s {@code method} (see merged):
+     * each handler gets the arguments of {@code args} its parameters take by type, else null
+     * (zero), and a CallbackInfo. Failures are logged a few times each.
+     */
+    public static void fireMerged(Object self, Class<?> owner, String method, String at, Object... args) {
+        for (Method handler : merged(owner, method, at)) {
+            Class<?>[] params = handler.getParameterTypes();
+            Object[] call = new Object[params.length];
+            for (int i = 0; i < params.length; i++) {
+                if (CallbackInfo.class.isAssignableFrom(params[i])) {
+                    call[i] = params[i] == CallbackInfo.class ? new CallbackInfo(method, true)
+                            : new CallbackInfoReturnable<>(method, true);
+                    continue;
+                }
+                for (Object arg : args) {
+                    if (params[i].isInstance(arg)) {
+                        call[i] = arg;
+                        break;
+                    }
+                }
+                if (call[i] == null && params[i].isPrimitive()) call[i] = zero(params[i]);
+            }
+            try {
+                handler.invoke(Modifier.isStatic(handler.getModifiers()) ? null : self, call);
+            } catch (Throwable t) {
+                Throwable cause = t instanceof java.lang.reflect.InvocationTargetException ite && ite.getCause() != null ? ite.getCause() : t;
+                if (FAILURES.merge(handler.toString(), 1, Integer::sum) <= 3) {
+                    Natives.log("A mod failed at " + at + " of " + owner.getSimpleName() + "." + method + " (" + handler.getName() + "): " + cause);
+                    HorizonFailures.report(owner.getSimpleName() + "." + method, cause, handler);
+                    StackTraceElement[] frames = cause.getStackTrace();
+                    for (int f = 0; f < Math.min(frames.length, 10); f++) Natives.log("    at " + frames[f]);
+                }
+            }
+        }
+    }
+
     // ---- Firing -----------------------------------------------------------------------------
 
     /** Whether any mod has an event-like injection into owner.method (owner with slashes). */

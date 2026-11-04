@@ -85,6 +85,7 @@ MODS = {
     "aci": ["advancedcoreinfo*"],
     "compressedblocks": ["compressedblocks*"],
     "sift": ["mielon*the*sift*", "mielons-the-sift*"],
+    "create": ["create-fly*"],
 }
 
 
@@ -139,6 +140,39 @@ CASES = {
                            r'(?:[^\n]*"block":"farmersdelight:stove"[^\n]*\n)+\Z',
                            "once there, the stove never turns back to air in the player's game")],
         look="the stove in front of the player",
+    ),
+    "kinetic": dict(
+        about="Create's client patterns (kineticmod fixture): a block entity renderer whose helper is made at the end "
+              "of the level renderer's reload (LevelExtractor.allChanged, from a Mixin plugin's list) draws a turning "
+              "shaft; the client tick reads the player's first-person hands and its class's synced data",
+        fixtures=["kineticmod"], scene="none", env={"HORIZON_JAVA_DEBUG": "ber"},
+        steps=['"$R/tools/java_bridge/around.sh" \'q "setblock $((X+2)) $Y $Z horizon_kinetic:shaft"\' '
+               '\'$C look-at $(p $X+2.5) $((Y+1)) $(p $Z+0.5) >/dev/null; sleep 6\''],
+        checks=[check_log(r"mod injection\(s\) at RETURN of LevelExtractor\.allChanged", "the level renderer's reload ran the mod's injection"),
+                check_log(r"horizon_kinetic: client ready \(hands FirstPersonHandsAndItems, data for LocalPlayer, reload ended true\)",
+                          "the client tick reads the hands and the player's data; the resource reload's end was told"),
+                check_log(r"ber horizon_kinetic:shaft at .*: [1-9]\d* model\(s\).*Speed:16", "the shaft's renderer draws it, turning")],
+        forbid=[r"drawing horizon_kinetic", r"no synced data accessor", r"failed in the client's tick"],
+        look="a turning wooden cube and a small orange one beside it, above the shaft",
+    ),
+    "create": dict(
+        about="Create (Create Fly's unofficial 26.3 port; Flywheel inside): a creative motor turns a shaft and a "
+              "cogwheel. Flywheel's model helpers are made at the level renderer's reload (its backend off), so "
+              "Create's block entity renderers draw the turning parts; the network's speed is read in Java",
+        mods=["create"], optional=["fabric-api"], scene="none", env={"HORIZON_JAVA_DEBUG": "ber"}, timeout=900,
+        steps=['"$R/tools/java_bridge/around.sh" '
+               '\'q "setblock $((X+2)) $Y $((Z-1)) create:creative_motor[facing=south]"\' '
+               '\'q "setblock $((X+2)) $Y $Z create:shaft[axis=z]"\' '
+               '\'q "setblock $((X+2)) $Y $((Z+1)) create:cogwheel[axis=z]"\' '
+               '\'q "tp @s $(p $X-0.5) $Y $(p $Z+0.5)"\' '
+               '\'$C look-at $(p $X+2.5) $(p $Y+0.5) $(p $Z+0.5) >/dev/null; sleep 8\''],
+        checks=[check_log(r"mod injection\(s\) at RETURN of LevelExtractor\.allChanged", "Flywheel's level renderer reload ran"),
+                check_log(r"ber create:motor at .*: [1-9]\d* model\(s\)", "the motor's renderer draws its shaft"),
+                check_log(r"ber create:bracketed_kinetic at .*: [1-9]\d* model\(s\).*Speed:-?[1-9]",
+                          "the shaft and cogwheel draw, turning (their Speed in Java isn't 0)")],
+        forbid=[r"drawing create:", r"ModelRenderHelper", r"firstPersonHandsAndItems",
+                r"SynchedEntityData\.get"],
+        look="the motor, shaft and cogwheel in front of the player, turned (two screenshots differ)",
     ),
     "ber": dict(
         about="Farmer's Delight's block entity renderers: beef on the stove, a carrot on the board",

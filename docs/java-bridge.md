@@ -588,6 +588,12 @@ gets SPIR-V, vertex layouts and uniform lists.
   GUI, then Xaero draws the map into it; read at the blit, the map was black.
 - Mods' blits of a screen-sized target land in `gameRenderState().guiRenderState` (Xaero's
   World Map): the capture's `GuiRenderState` stands there while a screen or the HUD draws.
+- **Flywheel (inside Create Fly) runs with its backend off**: its instancing backends need
+  OpenGL, and the headless client's device is Horizon's, so Create draws its kinetic parts
+  through its block entity renderers (SuperByteBuffers as custom geometry), which the bridge
+  records. Flywheel's model helpers are made at the level renderer's reload
+  (`LevelExtractor.allChanged`'s end): `HorizonClient.levelRendererReady` runs the mods'
+  injections there once per client level after the models load.
 - `HORIZON_JAVA_GPU=0` turns the device off. `HORIZON_JAVA_DEBUG=gpu` logs textures,
   pipelines and GPU blits (and saves one in 100 as `/tmp/horizon-gpu-N.png`; logs each target's
   first picture that isn't all black: "gpu: <name> WxH, N pixels not transparent, M not black");
@@ -596,6 +602,17 @@ gets SPIR-V, vertex layouts and uniform lists.
   pipeline's SPIR-V, which `HORIZON_SPV_DIR=dir cargo test -p horizon-jvm gpu` reads back.
 
 ## 26.3 facts that cost time
+
+- **A vanilla method Horizon cancels at its head skips the mods' injections at its end.**
+  `LevelExtractorMixin` cancels `allChanged` (Horizon draws the world), so Flywheel's RETURN
+  injection there never ran. `HorizonHooks.fireMerged(self, owner, method, at)` runs the
+  mods' HEAD or RETURN/TAIL injections of a client method from the merged class (whatever
+  config or Mixin plugin applied them: Create's come from its plugin's list, which the
+  census doesn't read); call it where vanilla would have run the method.
+- **The client player is allocated: its constructor's objects aren't there.**
+  `firstPersonHandsAndItems` was null (Create's client tick); its class's synced data was
+  never built, and mods that key their data accessors by entity class (Create's
+  `AllSynchedDatas`) had none for `LocalPlayer`. Both made in `HorizonClient.localPlayer`.
 
 - "Hoppers don't work" with a big pack was not Lithium: Horizon's hoppers are Rust and move
   vanilla containers tick for tick as without mods (same counts after `tick step` 1/8/8/23,

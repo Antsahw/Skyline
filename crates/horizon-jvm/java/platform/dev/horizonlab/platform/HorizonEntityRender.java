@@ -217,6 +217,7 @@ public final class HorizonEntityRender {
             if (renderer == null) continue;
             JsonArray itemsHere = new JsonArray();
             JsonArray models = blockModels(renderer, be, itemsHere);
+            if (DEBUG_BER) debugBlock(level, be, models.size(), itemsHere.size());
             if (models.isEmpty() && itemsHere.isEmpty()) continue;
             JsonObject o = new JsonObject();
             o.addProperty("id", BLOCK_IDS.computeIfAbsent(pos.asLong(), k -> -1 - BLOCK_IDS.size()));
@@ -230,6 +231,32 @@ public final class HorizonEntityRender {
             out.add(o);
         }
         return out;
+    }
+
+    /** HORIZON_JAVA_DEBUG=ber: each drawn mod block entity, every 5 s: what it drew and its data. */
+    private static final boolean DEBUG_BER = String.valueOf(System.getenv("HORIZON_JAVA_DEBUG")).contains("ber");
+    private static final Map<Long, Long> BER_LOGGED = new java.util.HashMap<>();
+
+    /**
+     * One line for a drawn block entity: its type and place, how many models and items its
+     * renderer submitted, and its data as the mirror saves it (a Create shaft's Speed: whether
+     * its kinetic network turns, which Horizon's /data can't tell, its world having no copy).
+     */
+    private static void debugBlock(ServerLevel level, net.minecraft.world.level.block.entity.BlockEntity be, int models, int items) {
+        long now = level.getGameTime();
+        Long last = BER_LOGGED.get(be.getBlockPos().asLong());
+        if (last != null && now - last < 100) return;
+        BER_LOGGED.put(be.getBlockPos().asLong(), now);
+        String data;
+        try {
+            data = be.saveWithoutMetadata(level.registryAccess()).toString();
+        } catch (Throwable t) {
+            data = "(not saved: " + t + ")";
+        }
+        if (data.length() > 400) data = data.substring(0, 400) + "...";
+        var pos = be.getBlockPos();
+        Natives.log("ber " + BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(be.getType()) + " at " + pos.getX() + " " + pos.getY()
+                + " " + pos.getZ() + ": " + models + " model(s), " + items + " item(s), " + data);
     }
 
     @SuppressWarnings({"unchecked", "rawtypes"})

@@ -1,0 +1,8 @@
+{
+  "required": true,
+  "package": "dev.horizonlab.kineticmod.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "plugin": "dev.horizonlab.kineticmod.mixin.KineticMixinPlugin",
+  "client": [],
+  "injectors": {"defaultRequire": 1}
+}

@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "horizon_kinetic",
+  "version": "1.0.0",
+  "name": "Horizon Kinetic",
+  "description": "A turning shaft drawn as Create draws its kinetic parts without Flywheel's backend: a block entity renderer whose model helper is set up at the end of the level renderer's reload (LevelExtractor.allChanged), a Mixin plugin's client mixins, the client player's hands read each client tick and data keyed by its class (SynchedEntityData.Builder). A check of the Java mod bridge.",
+  "environment": "*",
+  "entrypoints": {
+    "main": ["dev.horizonlab.kineticmod.KineticMod"],
+    "client": ["dev.horizonlab.kineticmod.KineticClient"]
+  },
+  "mixins": [
+    "horizon_kinetic.mixins.json",
+    {"config": "horizon_kinetic.client.mixins.json", "environment": "client"}
+  ],
+  "depends": {
+    "fabricloader": ">=0.20",
+    "minecraft": "26.3",
+    "fabric-api": "*"
+  }
+}
