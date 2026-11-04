@@ -44,7 +44,7 @@ printf 'server-port=%s\nonline-mode=false\nwhite-list=false\nenforce-whitelist=f
 echo 'eula=true' > "$SD/eula.txt"
 mkfifo "$SD/console"
 (cd "$SD" && HORIZON_HOME=$SD/home HORIZON_LAUNCHER_HOME=$SD/lh XDG_DATA_HOME=$SD/data XDG_CONFIG_HOME=$SD/conf \
-  HORIZON_LAUNCHER_NO_SELF_UPDATE=1 HORIZON_NO_AUDIO=1 HORIZON_ROOT=$R \
+  HORIZON_LAUNCHER_NO_SELF_UPDATE=1 HORIZON_NO_AUDIO=1 HORIZON_JAVA_MODS=1 HORIZON_ROOT=$R \
   exec "$R/target/fast/horizon-client" --resources "$R/.local/horizon-client/26.3" --dedicated --nogui \
   < "$SD/console" > "$SD/server.log" 2>&1) &
 echo $! > "$SD/pid"
@@ -56,7 +56,7 @@ for _ in $(seq 600); do grep -q 'Done (' "$SD/server.log" 2>/dev/null && break; 
 grep -q 'Done (' "$SD/server.log" || { echo "the server never started: $SD/server.log"; tail -20 "$SD/server.log"; exit 1; }
 GS=$(scratch player); echo "$GS" > /tmp/hz-bridge-player
 (cd "$GS" && HORIZON_HOME=$GS/home HORIZON_LAUNCHER_HOME=$GS/lh XDG_DATA_HOME=$GS/data XDG_CONFIG_HOME=$GS/conf \
-  HORIZON_LAUNCHER_NO_SELF_UPDATE=1 HORIZON_NO_AUDIO=1 HORIZON_ROOT=$R \
+  HORIZON_LAUNCHER_NO_SELF_UPDATE=1 HORIZON_NO_AUDIO=1 HORIZON_JAVA_MODS=1 HORIZON_ROOT=$R \
   "$CTL" --socket "$GS/ctl.sock" launch --offscreen \
   --game "$R/target/fast/horizon-client" --resources "$R/.local/horizon-client/26.3" > "$GS/ctl.out" 2>&1)
 G="$CTL --socket $GS/ctl.sock"

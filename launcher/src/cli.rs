@@ -245,6 +245,32 @@ enum JavaModsCmd {
         #[arg(long)]
         instance: Option<String>,
     },
+    /// Whether the instance plays Fabric 26.3 mods (beta), and its version's Java mods build
+    Status {
+        #[arg(long)]
+        instance: Option<String>,
+    },
+    /// Turn Fabric 26.3 mods (beta) on: the instance plays the version's Java mods build
+    /// (downloaded now) and runs the jars of its mods-java/
+    On {
+        #[arg(long)]
+        instance: Option<String>,
+    },
+    /// Turn them off: the plain build, no Java started, whatever mods-java/ holds
+    Off {
+        #[arg(long)]
+        instance: Option<String>,
+    },
+    /// Use a Java mods build of your own (a horizon-client built with --features java-mods) as an
+    /// installed version's, in place of a download
+    UseBuild {
+        program: PathBuf,
+        /// The installed version (default: the one the instance plays)
+        #[arg(long)]
+        version: Option<String>,
+        #[arg(long)]
+        instance: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -963,8 +989,8 @@ enum Cmd {
         #[command(subcommand)]
         action: Option<ModsCmd>,
     },
-    /// The Fabric Java mods a game built with Java mods runs (mods-java/ in an instance's game
-    /// folder, docs/java-bridge.md): list them, add a jar, send one to the trash, and see which
+    /// Fabric 26.3 mods (beta), off by default (docs/java-bridge.md): turn them on or off for an
+    /// instance, and its mods-java/: list the jars, add one, send one to the trash, and see which
     /// failed in the last game
     JavaMods {
         #[command(subcommand)]
@@ -1212,13 +1238,31 @@ fn attached(mut cmd: Command) -> Result<(), String> {
 
 /// `java-mods`: an instance's mods-java/.
 fn java_mods(action: JavaModsCmd, as_json: bool) -> Result<(), String> {
-    use horizon_launcher::java_mods;
-    let home = |instance: &Option<String>| -> Result<PathBuf, String> {
+    use horizon_launcher::{java_mods, java_variant};
+    let pick = |instance: &Option<String>| -> Result<instances::Instance, String> {
         Ok(match instance {
             Some(name) => instances::find(name)?,
             None => instances::selected(),
+        })
+    };
+    let home = |instance: &Option<String>| -> Result<PathBuf, String> { Ok(pick(instance)?.home) };
+    let status = |i: &instances::Instance| {
+        let tag = i.resolve_version(None).ok();
+        let build = tag.as_deref().is_some_and(java_variant::is_installed);
+        if as_json {
+            json(serde_json::json!({
+                "instance": i.id, "on": i.java_mods, "version": tag,
+                "java_build_installed": build, "available": java_variant::available(),
+            }));
+        } else {
+            let state = if i.java_mods { "on" } else { "off" };
+            let build = match (&tag, build) {
+                (Some(tag), true) => format!("; {tag}'s Java mods build is installed"),
+                (Some(tag), false) => format!("; {tag} has no Java mods build installed"),
+                (None, _) => String::new(),
+            };
+            println!("Fabric 26.3 mods (beta) are {state} for {}{build}.", i.name);
         }
-        .home)
     };
     let mod_json = |m: &java_mods::JavaMod| {
         serde_json::json!({
@@ -1258,6 +1302,47 @@ fn java_mods(action: JavaModsCmd, as_json: bool) -> Result<(), String> {
             } else {
                 println!("Moved {} to the trash.", removed.file);
             }
+        }
+        JavaModsCmd::Status { instance } => status(&pick(&instance)?),
+        JavaModsCmd::On { instance } => {
+            let i = pick(&instance)?;
+            if i.java.is_some() {
+                return Err(format!(
+                    "{} plays Minecraft: Java Edition, not Horizon.",
+                    i.name
+                ));
+            }
+            if !java_variant::available() {
+                return Err(
+                    "Fabric mods have no build for this system yet (Linux and Windows only)."
+                        .into(),
+                );
+            }
+            let i = instances::edit(&i.id, |m| m.java_mods = true)?;
+            // The version's build now, so Play doesn't wait for it. A version installed later
+            // gets its own with it (`java_variant::follow`); Play fetches a missing one.
+            if let Ok(tag) = i.resolve_version(None) {
+                if let Err(e) =
+                    java_variant::ensure(&tag, progress(format!("Fabric mods build of {tag}")))
+                {
+                    eprintln!("{e}");
+                }
+            }
+            status(&i);
+        }
+        JavaModsCmd::Off { instance } => {
+            let i = instances::edit(&pick(&instance)?.id, |m| m.java_mods = false)?;
+            status(&i);
+        }
+        JavaModsCmd::UseBuild {
+            program,
+            version,
+            instance,
+        } => {
+            let i = pick(&instance)?;
+            let tag = i.resolve_version(version.as_deref())?;
+            java_variant::use_build(&tag, &program)?;
+            status(&i);
         }
         JavaModsCmd::Failed { instance } => {
             let failures = java_mods::failures(&home(&instance)?);
@@ -1567,8 +1652,12 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
             if let Some(who) = &who {
                 accounts.play_as(account::store(), who.clone())?;
             }
-            let mut cmd =
-                backend::client_as(&instance.resolve_version(version.as_deref())?, who.as_ref())?;
+            let tag = instance.resolve_version(version.as_deref())?;
+            if instance.java_mods {
+                let label = format!("Fabric mods build of {tag}");
+                horizon_launcher::java_variant::ensure(&tag, progress(label))?;
+            }
+            let mut cmd = backend::client_as(&tag, who.as_ref())?;
             instances::apply(&mut cmd, &instance)?;
             if let Some(code) = join {
                 backend::join_friend(&mut cmd, &code)?;
@@ -2920,7 +3009,7 @@ fn instance(action: InstanceCmd, as_json: bool) -> Result<(), String> {
         serde_json::json!({
             "id": i.id, "name": i.name, "kind": format!("{:?}", i.kind).to_lowercase(),
             "home": i.home, "icon": i.icon, "group": i.group, "selected": selected,
-            "version": i.version, "java": i.java, "played_secs": i.played.as_secs(),
+            "version": i.version, "java": i.java, "java_mods": i.java_mods, "played_secs": i.played.as_secs(),
             "last_played_ms": i.last_played.and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64),
         })
     };

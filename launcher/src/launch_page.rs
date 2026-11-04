@@ -636,6 +636,7 @@ impl Launcher {
                 .child(wrapper)
                 .child(env)
                 .child(post)
+                .children(self.java_mods_switch(cx))
                 .children(self.linux_switches(cx))
                 .child(
                     div()

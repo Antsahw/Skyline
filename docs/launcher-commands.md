@@ -944,6 +944,89 @@ Turn off a mod the browser installed; it stays installed (in a Java instance, as
 
 MCP: `mods_disable`.
 
+## `horizon-launcher java-mods list`
+
+The jars, with their Fabric names and versions.
+
+    horizon-launcher java-mods list
+
+- `--instance`: The instance (default: the one Play starts)
+
+MCP: `java_mods_list`.
+
+## `horizon-launcher java-mods add`
+
+Copy a Fabric mod's jar into mods-java/.
+
+    horizon-launcher java-mods add <JAR>
+
+- `JAR`
+- `--instance`
+
+MCP: `java_mods_add`.
+
+## `horizon-launcher java-mods remove`
+
+Send a jar to the trash (its file name, Fabric id or name).
+
+    horizon-launcher java-mods remove <NAME>
+
+- `NAME`
+- `--instance`
+
+MCP: `java_mods_remove`.
+
+## `horizon-launcher java-mods failed`
+
+What failed with the Java mods in the instance's last game (its log).
+
+    horizon-launcher java-mods failed
+
+- `--instance`
+
+MCP: `java_mods_failed`.
+
+## `horizon-launcher java-mods status`
+
+Whether the instance plays Fabric 26.3 mods (beta), and its version's Java mods build.
+
+    horizon-launcher java-mods status
+
+- `--instance`
+
+MCP: `java_mods_status`.
+
+## `horizon-launcher java-mods on`
+
+Turn Fabric 26.3 mods (beta) on: the instance plays the version's Java mods build (downloaded now) and runs the jars of its mods-java/.
+
+    horizon-launcher java-mods on
+
+- `--instance`
+
+MCP: `java_mods_on`.
+
+## `horizon-launcher java-mods off`
+
+Turn them off: the plain build, no Java started, whatever mods-java/ holds.
+
+    horizon-launcher java-mods off
+
+- `--instance`
+
+MCP: `java_mods_off`.
+
+## `horizon-launcher java-mods use-build`
+
+Use a Java mods build of your own (a horizon-client built with --features java-mods) as an installed version's, in place of a download.
+
+    horizon-launcher java-mods use-build <PROGRAM>
+
+- `PROGRAM`
+- `--instance`
+
+MCP: `java_mods_use_build`.
+
 ## `horizon-launcher rust status`
 
 Whether it is installed, its version and whether this computer can link with it.

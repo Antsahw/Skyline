@@ -447,6 +447,8 @@ struct Launcher {
     screenshots: screenshots_page::Screenshots,
     java_mods: java_mods_page::JavaModsTab,
     shot_blur: glass_shot_blur::ShotBlur,
+    /// The Fabric 26.3 mods switch's download, while it runs and once it ended.
+    java_build: Option<java_mods_page::JavaBuild>,
     game_packs: packs_page::Packs,
     world_packs: datapacks_page::WorldPacks,
     export: Option<export_page::ExportPanel>,
@@ -696,6 +698,7 @@ impl Launcher {
             screenshots: screenshots_page::Screenshots::default(),
             java_mods: java_mods_page::JavaModsTab::default(),
             shot_blur: Default::default(),
+            java_build: None,
             game_packs: packs_page::Packs::default(),
             world_packs: datapacks_page::WorldPacks::default(),
             export: None,
@@ -759,6 +762,10 @@ impl Launcher {
             && std::env::var("HORIZON_LAUNCHER_PAGE").as_deref() == Ok("wardrobe")
         {
             this.wardrobe_preview();
+        }
+        // `HORIZON_LAUNCHER_PAGE=launch`: Launch… open under the Instance row, for screenshots.
+        if std::env::var("HORIZON_LAUNCHER_PAGE").as_deref() == Ok("launch") {
+            this.toggle_launch();
         }
         // What the game and the launcher kept, if the player allows it and there is a server.
         telemetry::send_in_background();
@@ -1254,6 +1261,7 @@ impl Launcher {
                     }
                 }
                 Msg::DiskUse(disk) => self.disk = disk,
+                Msg::JavaBuild(tag, result) => self.java_build_done(tag, result),
                 Msg::Imported(result) => {
                     self.importing_build = false;
                     self.installed = backend::installed();
@@ -1739,7 +1747,15 @@ impl Launcher {
         self.play_pressed = Some(Instant::now());
         let tx = self.tx.clone();
         let offline_without_owner = self.settings.dev_offline;
+        // Fabric 26.3 mods on: the version's Java mods build first, when it isn't there yet.
+        let java_build =
+            self.starting_pack.is_none() && self.selected_instance().is_some_and(|i| i.java_mods);
         std::thread::spawn(move || {
+            if java_build {
+                if let Err(e) = horizon_launcher::java_variant::ensure(&tag, |_| {}) {
+                    let _ = tx.send(Msg::Line(Job::Client, e));
+                }
+            }
             backend::complete_assets(&tag);
             let session = account::session_for_game(&backend::game_home(), offline_without_owner);
             let _ = tx.send(Msg::Session(session));

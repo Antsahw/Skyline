@@ -1781,10 +1781,50 @@ version (binary, research-lock.json, the preparation's folders linked from the c
 game started as the launcher starts it (in its game folder, `--resources` only; no
 `HORIZON_ROOT`, Java variables or Java on the PATH, `HORIZON_JAVA_NO_SYSTEM=1` so installed
 JDKs aren't looked at), so Fabric's jars and Mojang's Java are downloaded into the scratch
-folders. The launcher needs no change: it starts the game that way already (`client_command`:
-the game folder, `--resources`); `mods-java/` goes in the game folder (HORIZON_HOME). What is
-left: release builds with `java-mods` (the build needs a prepared game for the platform mod),
-and a Mods page in the launcher for `mods-java/`.
+folders. The launcher starts the game that way (`client_command`: the game folder,
+`--resources`), plus `--java-mods` when the instance's switch is on (below); `mods-java/` goes in
+the game folder (HORIZON_HOME). `OFF=1` runs it without `--java-mods`: no Java may start.
+
+### The Fabric switch: off by default (2026-11-04, bridge-upstream-prep)
+
+For upstream (Ludovic asked for the bridge in the main repo), Java mods are **off unless the
+player turns them on**, per instance:
+- **The game** (built with `java-mods`) starts Java only when opted in: `--java-mods`, or
+  `HORIZON_JAVA_MODS=1` (developers' scripts, servers). Every read of `mods-java/` goes through
+  `java_mods::mod_jars()`, which has no jars otherwise (one log line says how many it left off).
+  So no Java start, no Java 25 download, no Fabric download without the switch. The tools set it:
+  `launch.sh`, `lan_test.sh`, `server_test.sh` (`HORIZON_JAVA_MODS=1`), `install_test.sh`
+  (`--java-mods`, as the launcher), `horizon-play` (`--java-mods`). **Trap:** a game started by
+  hand (or by a script of your own) with jars in `mods-java/` and no opt-in runs plain: the log's
+  "Java mods: off (N jars in mods-java)" says so.
+- **The launcher** (`launcher/src/java_variant.rs`): Launch… on Home's Instance row has a
+  "Fabric 26.3 mods (beta)" switch (Horizon instances, Linux and Windows: game-build.yml makes no
+  macOS `-java` build), saved in `instances.json` (`java_mods`). On: the version's Java mods
+  build (`<asset>-java`, signed like the plain one) is installed in the version's `java/` folder,
+  beside the plain build, so it plays with the version's prepared files; Play starts
+  `java/horizon-client … --java-mods` (`instances::apply` → `java_variant::switch_command`), and
+  Home shows the Java mods tab. A missing build is fetched when the switch turns on, after each
+  install or update of a version an instance with the switch plays (`java_variant::follow`), and
+  before Play; when it can't be had, Play refuses and says why instead of starting the plain game.
+  Off: the plain build, no tab, `--java-mods` never passed, whatever `mods-java/` holds.
+- **CLI:** `horizon-launcher java-mods on|off|status [--instance X]`, and
+  `java-mods use-build <horizon-client> [--version TAG]` for a Java mods build of your own (no
+  release has `-java` assets yet: nightly-build.yml doesn't call game-build.yml with
+  `java_mods`, the maintainer's call). `instance list --json` has `java_mods`.
+- **Tested headless:** `tools/java_bridge/launcher_switch_test.py --launcher <horizon-launcher>`
+  (stand-in programs: off by default, plain program with jars in `mods-java/`; on with no build:
+  Play refuses; `use-build`; off again). Its Play checks stop at the owner gate in a scratch home
+  (no signed-in account) and say so. The window's Play was checked under Xvfb with the developer
+  option (`settings.json` `"dev_offline": true`) and `HORIZON_LAUNCHER_PAGE=launch` (Launch…
+  open): off → `horizon-client --resources …`, no Java mods tab; on → `java/horizon-client
+  --resources … --java-mods` and the tab; off → plain again.
+- **The game, as the launcher starts it** (`install_test.sh`, Farmer's Delight in `mods-java/`):
+  `OFF=1`: the world plays, the log says "Java mods: off (1 jars in mods-java)", no `libjvm` in
+  the process, no `.local/bridge` (nothing of Fabric's downloaded) and no Java runtime fetched;
+  with `--java-mods`: Fabric and Farmer's Delight load, `/give @s farmersdelight:cooking_pot` works.
+
+What is left: release builds with `java-mods` published beside the plain ones (`-java` assets in
+the signed SHA256SUMS), which the maintainer turns on.
 
 ### horizon-play: one step, any system
 

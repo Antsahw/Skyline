@@ -1091,5 +1091,12 @@
   "Save changes switches it. Nothing in its folder is deleted.": "“保存更改”会切换它。其文件夹中的任何内容都不会被删除。",
   "Its mods made for {loader} stay in its folder but won't load.": "其为 {loader} 制作的模组会留在其文件夹中，但不会加载。",
   "Its mods made for Minecraft {from} stay in its folder; some may not load in {to}.": "其为 Minecraft {from} 制作的模组会留在其文件夹中；部分可能无法在 {to} 中加载。",
-  "Its worlds were saved by Minecraft {from}: {to} upgrades them for good, and can't open them if it is older.": "其世界由 Minecraft {from} 保存：{to} 会永久升级它们；如果 {to} 更旧，则无法打开它们。"
+  "Its worlds were saved by Minecraft {from}: {to} upgrades them for good, and can't open them if it is older.": "其世界由 Minecraft {from} 保存：{to} 会永久升级它们；如果 {to} 更旧，则无法打开它们。",
+  "Fabric 26.3 mods (beta)": "Fabric 26.3 模组（测试版）",
+  "Runs the Fabric mods in this instance's mods-java folder. Off, the game never starts Java. On, the launcher downloads Horizon's build with Java mods, and the game gets Java 25 the first time it starts them.": "运行此实例 mods-java 文件夹中的 Fabric 模组。关闭时，游戏从不启动 Java。开启后，启动器会下载带 Java 模组的 Horizon 版本，游戏在首次启动这些模组时获取 Java 25。",
+  "Downloading the Fabric mods build…": "正在下载 Fabric 模组版本…",
+  "The Fabric mods build is ready.": "Fabric 模组版本已就绪。",
+  "Added {names}: they load the next time the game starts.": "已添加 {names}：下次启动游戏时加载。",
+  "Java mods": "Java 模组",
+  "No Java mods yet: add Fabric mods' jars, or drop them here.": "还没有 Java 模组：添加 Fabric 模组的 jar 文件，或拖放到这里。"
 }

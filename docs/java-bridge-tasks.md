@@ -42,7 +42,8 @@ count stayed under its 10k mark while the map was still filling in). Worldgen is
 
 The user's decisions: **off by default; the launcher has a switch to turn on Fabric 26.3 mods.**
 One chat, branch `bridge-upstream-prep`, in this order:
-1. **The switch.** A launcher setting (per instance, `tr()` text, design-system look) "Fabric
+1. ~~**The switch.**~~ Done 2026-11-04 (bridge-upstream-prep; docs/java-bridge.md, "The Fabric
+   switch"). Left: `-java` assets in the signed releases (the maintainer's). A launcher setting (per instance, `tr()` text, design-system look) "Fabric
    26.3 mods (beta)", off. On: the instance installs/updates the `-java` game variant
    (game-build.yml already packages it), shows the Java mods tab (today it shows whenever
    `mods-java/` exists), and starts the game with an explicit opt-in (e.g. `--java-mods`).

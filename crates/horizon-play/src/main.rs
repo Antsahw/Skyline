@@ -631,6 +631,8 @@ fn run(request: Request) -> Result<i32, String> {
         .env("HORIZON_HOME", &places.home)
         .env("HORIZON_ROOT", &root)
         .env("HORIZON_JAVA_HOME", &java)
+        // Fabric mods are off unless asked for: horizon-play is how players run them.
+        .arg("--java-mods")
         .arg("--resources")
         .arg(&resources);
     if let Some(name) = &who.name {

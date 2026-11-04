@@ -20,8 +20,8 @@ const JAVA_START: std::time::Duration = std::time::Duration::from_secs(300);
 /// vanilla's templates (The Sift's ancient city centres) changes the structures Horizon
 /// generates as a data pack would. Fabric adds each mod's data as a pack below the world's.
 pub(super) fn mod_structure_packs() -> Vec<horizon_client::datapack::DataPack> {
-    let dir = super::Game::options_path().with_file_name(horizon_jvm::DIR);
-    horizon_jvm::jars(&dir)
+    super::java_mods::mod_jars()
+        .1
         .iter()
         .filter_map(|jar| {
             let name = jar.file_name()?.to_string_lossy();

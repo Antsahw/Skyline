@@ -203,9 +203,14 @@ The opening, then Play ([clip](docs/opening.webm)):
   right folder; **Remove** turns it off and moves it to the trash after a confirmation. From the
   command line: `horizon-launcher packs [list|add|on|off|remove] [--kind resource|shader]
   [--instance <name>]`.
-- **Java mods** (a game built with Java mods, docs/java-bridge.md): an instance whose game folder has
-  `mods-java/` gets a Java mods tab on Home: the Fabric jars with their names and versions, Add (or
-  drop jars), Open folder, Remove (to the trash), and which mods failed in the last game.
+- **Fabric 26.3 mods (beta)** (docs/java-bridge.md): a switch in an instance's **Launch…**, off by
+  default. Off, the instance plays the plain game and Java never starts, whatever its `mods-java/`
+  holds. On, the launcher installs the version's build with Java mods (`<asset>-java`, in the
+  version's `java/` folder; again with each update), starts it with `--java-mods`, and Home gets a
+  Java mods tab: the Fabric jars with their names and versions, Add (or drop jars), Open folder,
+  Remove (to the trash), and which mods failed in the last game. Linux and Windows. From the
+  command line: `horizon-launcher java-mods on|off|status`, and `java-mods use-build <horizon-client>`
+  for a build of your own.
 - **Screenshots**: Home shows the selected instance's newest screenshots (what F2 saves in its
   `screenshots/` folder) and all of them on request. Clicking one opens it over the window (← and →
   step through) with **Copy** (the picture, to the clipboard), **Open**, **Show in folder** and
@@ -383,7 +388,7 @@ and don't set `%ERRORLEVEL%` / `$LASTEXITCODE`. Scripts that need the exit code 
     horizon-launcher packs add <file> | on|off|remove <pack> [--kind shader]
     horizon-launcher screenshots [list] [--instance <name>]   an instance's screenshots, the newest first
     horizon-launcher screenshots delete <name> [--instance <name>]   moves it to the trash
-    horizon-launcher java-mods [list|add <jar>|remove <name>|failed] [--instance <name>]   mods-java/ (Fabric mods of a game built with Java mods)
+    horizon-launcher java-mods [list|add <jar>|remove <name>|failed|on|off|status|use-build <program>] [--instance <name>]   Fabric 26.3 mods (beta): the switch and mods-java/
     horizon-launcher java [list]          Java runtimes: Mojang's (downloaded by Horizon) and installed ones
     horizon-launcher java install <21|java-runtime-delta>   downloads Mojang's runtime, each file sha1-checked
     horizon-launcher multiplayer [list] [--instance <name>]   the servers in an instance's Multiplayer list
