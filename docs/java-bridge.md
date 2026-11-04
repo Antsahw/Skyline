@@ -1348,6 +1348,13 @@ generator config are gone; what replaced them is generic (sections above):
   License; WorldWeaver MIT (parts ARR); TerraBlender LGPLv3; Grid World Zlib; GeckoLib MIT
   (only our fixture uses its public API); Farmer's Delight MIT (test data, comments); Create
   (comments, our kinetic fixture copies its patterns, no code of it).
+Survey of the 60 most-downloaded Fabric 26.3 mods (2026-11-04, bridge-survey-1): 39 work, 4 left
+out on purpose (Sodium, Iris, Sodium Extra, Reese's), 16 play with a failure, Essential stops the
+game. See [java-bridge-survey.md](java-bridge-survey.md); rerun with `tools/java_bridge/survey/`.
+**26.3 traps it found:** the headless `Minecraft` still has nulls mods read at init
+(`resourcePackRepository`, `profileKeyPairManager`, `launchedVersion`, `userPropertiesFuture`,
+`modelManager`, the SDL window); one Java mod failing to start stops the whole game; mods writing
+`config/x` relative to the game folder fail on a fresh folder (no `config/` yet).
 
 Create (Create Fly's 26.3 port, 2026-11-04, bridge-gpu-12): kinetic networks run and their
 shafts, cogs and motors draw turning; OBJ items draw; mods' fluids use their own sprites; 3D Skin

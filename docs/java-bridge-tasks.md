@@ -328,6 +328,47 @@ Biomes O' Plenty; 800 FPS stable on a GTX 1060 3 GB / i5-9400F / 16 GB. Reported
 - Asked: macOS (untested); native Rust mods beside Java mods (untested; the launcher's native build has no
   `java-mods` feature: add it in the fork, then test one native mod with the test pack).
 
+### Survey 1: failures of the 60 most-downloaded Fabric 26.3 mods (2026-11-04, `bridge-survey-1`)
+
+Details and log lines: [java-bridge-survey.md](java-bridge-survey.md). Rerun one mod:
+`SURVEY_DIR=… python3 tools/java_bridge/survey/survey.py <slug>` (after `fetch.py`, `inspect.py`).
+
+**client** (`HorizonClient`'s allocated `Minecraft` and join)
+1. **Essential stops the game** (exit 78): its coroutine dispatcher on Minecraft's executor has none
+   (`ExecutorCoroutineDispatcherImpl.getExecutor()` null, from `PackRepository.openAllSelected` in
+   `HorizonData.prepare`). Give the headless `Minecraft` its executor; and a Java mod that fails to
+   start should be left out (and named), not stop the game.
+2. Null fields of the headless `Minecraft`, one pass: `resourcePackRepository` (Simple Voice Chat's
+   client entrypoint), `profileKeyPairManager` (No Chat Reports), `launchedVersion` (Veinminer
+   Client), `userPropertiesFuture` (Language Reload's screen close), the window's SDL handle for
+   `SDL_GetWindowFlags`/`SDL_GetWindowPosition` and `getPreferredFullscreenVideoMode` (Dynamic FPS,
+   CreativeCore's `resizeGui`, Language Reload's options save).
+3. Client join order: `ClientPlayConnectionEvents.INIT` fires before receivers may be registered
+   (ShulkerBoxTooltip: "Cannot register receiver while not in game!"); `handleLogin` injections run
+   with no client level (Sound Physics: `clientLevel` null).
+4. FancyMenu's client→server packets: the headless client's `Connection.pendingActions` is null.
+5. `/modconfig` is silent when a mod's factory gives no screen (Architectury, Balm, Forge Config API
+   Port, Fzzy Config, BadOptimizations): say so.
+6. `config/` in the game folder before mods initialise (Entity Culling, Presence Footsteps write
+   `config/x` relative to it on a fresh folder).
+
+**gpu** (`HorizonGpu`, textures, models)
+1. Continuity: its reload listeners fail (`Invalid atlas id`, CTM reloader NPE), "the models couldn't
+   be loaded", and its settings screen draws half ("Texture view does not exist").
+2. Entity Model Features: `ModelManager` null on the headless client (`entityModels()`), so every
+   EMF model falls back.
+3. ImmediatelyFast: `onResourceLoadFinished` hook, `VanillaPackResources.fullResources()` null.
+
+**entities** (`HorizonEntityRender`)
+1. 3D Skin Layers' settings preview: a preview player's `ClientAvatarState` is null
+   (`AvatarRenderer.extractFlightData`).
+2. BadOptimizations: "a player's mod layers couldn't be drawn": `mannequinRenderers` null.
+
+**worldgen** (the mirror's `ChunkMap`)
+1. C2ME's `ChunkMap` constructor wraps: the light executor's name and scheduler are null in the mirror.
+2. Lithium: "a client level has no chunk source" (view distance 0 outside 1..32) and its
+   `Entity.vicinityCache` mixin field not made.
+
 ### entities
 1. The rest of Horizon's arrows on mod mobs: Punch, tipped arrows' effects, piercing.
 2. Iceberg/Legendary Tooltips' armour on its armour stand: `HorizonEntityRender.context` has no
@@ -1507,3 +1548,9 @@ Pass: `attack keys skinlayers gecko kinetic pot placed worldgen hud server`. Fai
 (above). Not run: `cargo test` (the 2-core box timed out compiling), clippy (fails first in
 `horizon-world`, untouched).
 Test: `regress.py --jars <folder> skinlayers bettercombat attack gecko kinetic pot placed worldgen hud server`.
+### Survey 1 (2026-11-04, branch `bridge-survey-1`; Claude for iaxivers)
+
+The 60 most-downloaded Fabric 26.3 mods on Modrinth, each alone with its dependencies (headless,
+switch on): 39 work, 4 left out on purpose (Sodium family), 16 play with a failure, 1 stops the game
+(Essential). None adds blocks or mobs. Results: [java-bridge-survey.md](java-bridge-survey.md);
+failures queued above ("Survey 1"). Tools: `tools/java_bridge/survey/`. No code changed.
