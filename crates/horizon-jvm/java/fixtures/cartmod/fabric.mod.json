@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "horizon_carts",
+  "version": "1.0.0",
+  "name": "Horizon Carts",
+  "description": "A mod's container entity: a barrel minecart (vanilla's chest minecart with the mod's own type), for Horizon's hoppers and droppers moving items into and out of a mod's entity.",
+  "environment": "*",
+  "entrypoints": {
+    "main": ["dev.horizonlab.cartmod.CartMod"],
+    "client": ["dev.horizonlab.cartmod.CartClient"]
+  },
+  "depends": {
+    "fabricloader": ">=0.20",
+    "minecraft": "26.3",
+    "fabric-api": "*"
+  }
+}

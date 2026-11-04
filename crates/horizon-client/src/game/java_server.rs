@@ -288,8 +288,16 @@ static JAVA_NO_STORAGE: std::sync::Mutex<
     Option<std::collections::HashMap<(&'static str, [i32; 3], u8), i64>>,
 > = std::sync::Mutex::new(None);
 
+/// The blocks the mods' container entities (a mod's chest minecart) were in at the last
+/// snapshot, by dimension: Horizon's hoppers and droppers ask Java there too.
+#[cfg(feature = "java-mods")]
+static JAVA_CONTAINER_BLOCKS: std::sync::Mutex<
+    Option<std::collections::HashMap<String, std::collections::HashSet<[i32; 3]>>>,
+> = std::sync::Mutex::new(None);
+
 impl Game<'_> {
-    /// Whether the block at `pos` is a Java mod's that a hopper may ask about `face`.
+    /// Whether the block at `pos` is a Java mod's that a hopper may ask about `face`, or a mod's
+    /// container entity is in it.
     #[cfg(feature = "java-mods")]
     fn java_hopper_block(&self, pos: [i32; 3], face: horizon_core::geometry::Direction) -> bool {
         if !horizon_jvm::events::enabled() {
@@ -300,7 +308,14 @@ impl Game<'_> {
         };
         let state = self.world.block(pos[0], pos[1], pos[2]);
         if !states.get(state.0 as usize).copied().unwrap_or(false) {
-            return false;
+            // Not a mod's block: a mod's container entity there, as the last snapshot saw them
+            // (no wait after a miss: a cart moves on).
+            return JAVA_CONTAINER_BLOCKS
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .as_ref()
+                .and_then(|m| m.get(self.dim.id()))
+                .is_some_and(|at| at.contains(&pos));
         }
         let key = (self.dim.id(), pos, face as u8);
         let mut cache = JAVA_NO_STORAGE.lock().unwrap_or_else(|e| e.into_inner());
@@ -434,6 +449,16 @@ impl Game<'_> {
             let _ = (pos, face, any_room, partial);
             None
         }
+    }
+
+    /// Whether the Java mod's block (or a mod's container entity) at `pos` holds items on
+    /// `face`: Fabric's `ItemStorage.SIDED` finds a storage there (asked with no item).
+    pub(super) fn java_item_storage(
+        &mut self,
+        pos: [i32; 3],
+        face: horizon_core::geometry::Direction,
+    ) -> bool {
+        self.java_hopper_insert(pos, face, &[]).is_some()
     }
 }
 
@@ -1377,6 +1402,10 @@ mod run {
                 /// The mods' living entities as Horizon's mobs see them, per dimension.
                 #[serde(default)]
                 seen: HashMap<String, Vec<crate::game::java_entities::Neighbour>>,
+                /// The blocks the mods' container entities are in, per dimension
+                /// (`HorizonHoppers.containers`).
+                #[serde(default)]
+                containers: HashMap<String, Vec<[i32; 3]>>,
             }
             static SENT: std::sync::Mutex<Option<Sent>> = std::sync::Mutex::new(None);
             let _timed =
@@ -1397,6 +1426,14 @@ mod run {
             *crate::game::java_entities::NEIGHBOURS
                 .lock()
                 .unwrap_or_else(|e| e.into_inner()) = Some(std::mem::take(&mut snapshot.seen));
+            *crate::game::java_server::JAVA_CONTAINER_BLOCKS
+                .lock()
+                .unwrap_or_else(|e| e.into_inner()) = Some(
+                std::mem::take(&mut snapshot.containers)
+                    .into_iter()
+                    .map(|(dim, at)| (dim, at.into_iter().collect()))
+                    .collect(),
+            );
             // Whole entries kept for players that haven't had an entity's look; entities gone
             // go with theirs.
             let present: HashSet<i64> = snapshot

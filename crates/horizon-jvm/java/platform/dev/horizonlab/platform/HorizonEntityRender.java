@@ -389,6 +389,10 @@ public final class HorizonEntityRender {
             }
             out.append('}');
         }
+        // The blocks the mods' container entities are in (HorizonHoppers): Horizon's hoppers
+        // and droppers there ask Java.
+        out.append("},\"containers\":{");
+        HorizonHoppers.containers(out);
         out.append("},\"models\":{");
         boolean first = true;
         for (var t : NEW_TREES.entrySet()) {

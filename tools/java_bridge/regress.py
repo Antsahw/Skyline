@@ -985,6 +985,55 @@ CASES = {
                 check_file("top_hopper.json", r"block data: \[\]", "the top hopper emptied into the cabinet")],
         forbid=[r"a hopper's (push|pull)"],
     ),
+    "droppers": dict(
+        about="Horizon's droppers into a Java mod's block (Fabric's DropperBlockMixin: three carrots into Farmer's "
+              "Delight's oak cabinet, a hopper under it into a chest), and its hoppers into and out of a mod's "
+              "container entity (the cartmod fixture's barrel cart: hopper -> cart -> hopper -> chest)",
+        fixtures=["cartmod"], mods=["fd"], scene="none",
+        steps=['read X Y Z < <($C state | python3 -c "import json,sys,math;p=json.load(sys.stdin)[\'player\'][\'position\'];'
+               'print(math.floor(p[0]),math.floor(p[1]),math.floor(p[2]))"); '
+               '$C command "fill $((X - 6)) $((Y - 3)) $((Z - 2)) $((X + 6)) $((Y + 4)) $((Z + 2)) minecraft:air" > /dev/null; '
+               '$C command "setblock $((X - 3)) $Y $Z minecraft:dropper[facing=west]{Items:[{Slot:0b,id:\\"minecraft:carrot\\",count:3}]}" > /dev/null; '
+               '$C command "setblock $((X - 4)) $Y $Z farmersdelight:oak_cabinet" > /dev/null; '
+               '$C command "setblock $((X - 4)) $((Y - 1)) $Z minecraft:hopper[facing=down]" > /dev/null; '
+               '$C command "setblock $((X - 4)) $((Y - 2)) $Z minecraft:chest" > /dev/null; '
+               '$C command "setblock $((X + 3)) $((Y + 2)) $Z minecraft:hopper[facing=down]{Items:[{Slot:0b,id:\\"minecraft:beef\\",count:4}]}" > /dev/null; '
+               '$C command "setblock $((X + 3)) $Y $Z minecraft:hopper[facing=east]" > /dev/null; '
+               '$C command "setblock $((X + 4)) $Y $Z minecraft:chest" > /dev/null; '
+               '$C command "summon horizon_carts:barrel_cart $(awk "BEGIN{print $X + 3.5}") $((Y + 1)) $(awk "BEGIN{print $Z + 0.5}") {NoGravity:1b}" > /dev/null; '
+               'for i in 1 2 3; do $C command "setblock $((X - 3)) $((Y + 1)) $Z minecraft:redstone_block" > /dev/null; sleep 0.6; '
+               '$C command "setblock $((X - 3)) $((Y + 1)) $Z minecraft:air" > /dev/null; sleep 0.6; done; '
+               '$C look-at-block $((X + 3)) $Y $Z > /dev/null; sleep 15; '
+               '$C command "data get block $((X - 3)) $Y $Z Items" > $S/dropper.json; '
+               '$C command "data get block $((X - 4)) $((Y - 2)) $Z Items" > $S/cabinet_chest.json; '
+               '$C command "data get block $((X + 3)) $((Y + 2)) $Z Items" > $S/top_hopper.json; '
+               '$C command "data get block $((X + 4)) $Y $Z Items" > $S/cart_chest.json'],
+        checks=[check_file("dropper.json", r"block data: \[\]", "the dropper gave its three carrots"),
+                check_file("cabinet_chest.json", r"count: 3, Slot: 0b, id: \\+\"minecraft:carrot", "through the cabinet into the chest"),
+                check_file("top_hopper.json", r"block data: \[\]", "the hopper above emptied into the cart"),
+                check_file("cart_chest.json", r"count: 4, Slot: 0b, id: \\+\"minecraft:beef", "the hopper under the cart took its four beef")],
+        forbid=[r"a hopper's (push|pull)"],
+    ),
+    "eat": dict(
+        about="Farmer's Delight's foods are eaten (a beta tester's bowl meal never was: the mirror started the "
+              "use and nothing ticked it): a beef stew from hunger 0 feeds and leaves its bowl; cooked bacon feeds",
+        mods=["fd"], scene="none",
+        steps=['$C command "gamemode survival" >/dev/null; $C command "clear @s" >/dev/null; '
+               '$C command "effect give @s minecraft:hunger 20 255" >/dev/null; sleep 8; '
+               '$C command "effect clear @s" >/dev/null; $C state > $S/before.json',
+               '$C command "give @s farmersdelight:beef_stew" >/dev/null; $C select 1 >/dev/null; $C look 0 -70 >/dev/null; '
+               '$C mouse right down >/dev/null; sleep 3.5; $C mouse right up >/dev/null; sleep 1; '
+               '$C state > $S/meal.json; $C inventory > $S/meal_inv.json',
+               '$C command "give @s farmersdelight:cooked_bacon 3" >/dev/null; $C select 2 >/dev/null; '
+               '$C mouse right down >/dev/null; sleep 1.2; $C mouse right up >/dev/null; sleep 1; '
+               '$C state > $S/bacon.json; $C inventory > $S/bacon_inv.json'],
+        checks=[check_json("before.json", ["player", "food"], 0, "starved first"),
+                check_json("meal.json", ["player", "food"], 12, "the stew fed 12"),
+                check_json("meal_inv.json", ["counts"], {"minecraft:bowl": 1}, "the stew is gone, its bowl left"),
+                check_file("bacon_inv.json", r'"farmersdelight:cooked_bacon":2\b', "one bacon eaten"),
+                check_file("bacon.json", r'"food":(1[3-9]|20)\b', "the bacon fed")],
+        look="the bowl in hand",
+    ),
     "tech": dict(
         about="BuildCraft's module blocks (buildcraftbuilders:quarry) and two Large Fluid Tanks placed; the game still answers",
         mods=["buildcraft", "fluidtank", "scala"], scene="none",
