@@ -121,6 +121,12 @@ By area:
   a fluid in a GUI from its still sprite in the block atlas, tinted (Fabric's
   `FluidRenderHandler`/`FluidVariantRendering`, `GuiGraphics` blit of a `TextureAtlasSprite`):
   the screen path needs those sprites and the tint. gpu-13 (it did fluids in the world).
+- **Create machines, tester batch 10 (gpu-13 checks logic first, then drawing):** a water wheel
+  in flowing water doesn't spin (Create reads the neighbours' `FluidState` flow vectors in the
+  mirror: are Horizon's flowing water levels and falling flags there, and does the kinetic
+  network get a speed?); the mechanical mixer over a basin is "just bugged" (ask what: no
+  mixing, no animation, or a drawing gap; his screenshot has a block between mixer and basin,
+  check his setup). Confirmed working on batch 10: eating FD meals.
 - **A broken block's moving parts stay** (tester, batch 10): break a cogwheel and the hand
   crank's handle on it keeps floating, drawn. A removed mod block entity must drop its
   renderer's instance (gpu-13: the recorder's per-block-entity draws on removal).
