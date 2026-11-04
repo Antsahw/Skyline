@@ -492,7 +492,7 @@ public final class HorizonWorldgen {
     /**
      * Where a dimension the mods generate starts (MinecraftServer.setInitialSpawn's
      * ChunkGenerator.getOrigin and getSpawnHeight), and whether its generator is a mod's own
-     * rather than vanilla's noise generator (One Block's void, Grid World's grid): {x, z,
+     * rather than vanilla's noise generator (a void, a grid): {x, z,
      * height, own}. Null if the mods don't generate it.
      */
     public static int[] origin(String dimension) {
@@ -732,12 +732,6 @@ public final class HorizonWorldgen {
     }
 
     /**
-     * What a mod's generator on the noise cuts out of the noise's land, for far terrain:
-     * Grid World's grid ({@code getConfig()} with {@code xSpacing}, {@code ySpacing},
-     * {@code zSpacing} and the {@code replacementBlock} the rest becomes): {"grid", x, y, z,
-     * state}. Null for none (or a generator not known to cut).
-     */
-    /**
      * Far terrain's noise for a dimension the mods generate: "vanilla" when its land is
      * vanilla's noise (Horizon's own stands for it), "" when the mods' noise was written into
      * {@code dir} as a data pack (HorizonNoiseExport), else why it couldn't be.
@@ -774,25 +768,6 @@ public final class HorizonWorldgen {
             }
         }
         return true;
-    }
-
-    public static String[] lodMask(String dimension) {
-        Dimension d = DIMENSIONS.get(dimension);
-        if (d == null) return null;
-        try {
-            var config = d.generator.getClass().getMethod("getConfig").invoke(d.generator);
-            if (config == null) return null;
-            Class<?> type = config.getClass();
-            int x = type.getField("xSpacing").getInt(config);
-            int y = type.getField("ySpacing").getInt(config);
-            int z = type.getField("zSpacing").getInt(config);
-            Object replacement = type.getField("replacementBlock").get(config);
-            if (x <= 0 || y <= 0 || z <= 0 || !(replacement instanceof BlockState state)) return null;
-            return new String[] {"grid", Integer.toString(x), Integer.toString(y), Integer.toString(z),
-                    net.minecraft.commands.arguments.blocks.BlockStateParser.serialize(state)};
-        } catch (ReflectiveOperationException | RuntimeException e) {
-            return null;
-        }
     }
 
     /**

@@ -459,19 +459,23 @@ it does nothing unless Horizon fires it or hands the action to the mirror.
   - Crop and sapling growth: covered by the first round (random ticks, bone meal through
     `useRouted`: BCLib and Puzzles Lib patch `BoneMealItem`, Balm `CropBlock`/`StemBlock`).
 - Third round:
-  - A player's attack (`HorizonCombat`, Rust `java_attack_mob` from `guest_attack`), when
-    Better Combat is loaded or a mod patches `Player.attack`'s inside (Farmer's Delight,
-    Spell Engine): copies of the target and the mobs within 8 blocks (NBT, Horizon's ids)
+  - A player's attack (`HorizonCombat`, Rust `java_attack_mob` from `guest_attack`), when a
+    mod patches `Player.attack`'s inside (Farmer's Delight, Spell Engine) or the head of the
+    client's `Minecraft.startAttack`: copies of the target and the mobs within 8 blocks (NBT, Horizon's ids)
     stand in the mirror's level for the call (`HorizonServer.entities` lists them);
     vanilla's `Player.attack` runs with the patches; `CombatCaptureMixin` catches what
     reaches each copy's `hurtServer` and `knockback` (vanilla's bodies don't run on a copy),
     and Horizon hurts and pushes its own mobs with it (`Game::routed_hit`). The weapon's wear
-    and exhaustion are the mirror's. Better Combat: a click becomes its attack request (combo
-    counted here, reset after 40 ticks; targets from its own `TargetFinder` among the copies;
-    `ServerNetwork.handleAttackRequest`). It hands each hit to the connection's
-    `handleAttack`, which on a mirrored connection now attacks directly (`GameListenerMixin`:
-    the mirror has no packet processor). Better Combat's client half (animations, its own
-    swing timing, the HUD) doesn't run: a click is one attack.
+    and exhaustion are the mirror's. First the click's client half
+    (`HorizonClient.startAttack`, 2026-11-04 generic-entities): the mods' injections at the
+    head of `Minecraft.startAttack` run on the player's headless client, looking at what the
+    player looks at; one that cancels takes the click (its own swing follows from its client,
+    whose request reaches its server half and hits the mirror's entities: Horizon's mobs'
+    shadows), and the copies' hit is left out (an empty answer: the game swings, hits nothing
+    itself). The attack key reads down for the click's next 2 client ticks, and the client
+    tick fires the mods' head of `continueAttack` (vanilla's `handleKeybinds`). A mod's
+    attack handed to a mirrored connection's `handleAttack` attacks directly
+    (`GameListenerMixin`: the mirror has no packet processor). No code of any one mod.
   - A hotbar pick (`SetCarriedItem`): the heads of `Inventory.setSelectedSlot` (Carry On while
     carrying); a cancel keeps the old slot and sends it (`SetHeldSlot`).
   - Getting onto a vehicle (after the guest's interact boarded one): the heads of
@@ -483,9 +487,8 @@ it does nothing unless Horizon fires it or hands the action to the mirror.
     `Player/Entity.removeVehicle` run with the player sitting on a copy of its vehicle
     (`HorizonVanillaActions.dismount`, the `vehicle` field set by reflection); a cancel keeps
     it seated (its shift is dropped for the tick). Once off, their RETURN/TAIL run.
-  - Better Combat's sweep: the mirror level's box queries (`HorizonServer.entities`'
-    `get(box, ...)`) now list the visiting copies too, so its `TargetFinder` finds every mob
-    in the swing, not just the cursor's. Passive mobs aren't swept (its relation rules).
+  - A sweep's box queries: the mirror level's (`HorizonServer.entities`' `get(box, ...)`) list
+    the visiting copies too, so a mod's swing finds every mob in it, not just the cursor's.
   - A player's fall damage (`fall_damage`, when a mod patches `causeFallDamage` or
     `calculateFallDamage`: Moving Elevators, Mythic Upgrades, Balm's and Puzzles Lib's
     events): the server sets `PlayerMotion::route_fall` for a guest's moves; a landing that
@@ -704,12 +707,14 @@ gets SPIR-V, vertex layouts and uniform lists.
   mod block's `<ns>:block|fluid/<name>_still|_flow` when the files exist (no model names them).
   Flow is still lava's (Horizon's fluid ticks; mixins chat). Only where the process runs the
   mods (single player, a LAN host): a dedicated server's players don't get the looks yet.
-- **3D Skin Layers**: it gives the PlayerModel's outer parts meshes in `setupAnim` (within its
-  LOD of the camera entity, from the client player's skin) and draws them in `ModelPart.render`.
-  `HorizonEntityRender.skinLayers` keeps the pose the player renderer submitted its model with,
-  runs `setupAnim` as that player with the camera on it, shows the parts that have a mesh (the
-  mirrored player's skin-part flags are all off), skips the other parts' cubes and renders the
-  root into custom geometry with the skin texture. Horizon still draws its flat outer layers
+- **Player model parts mods draw their own way** (3D Skin Layers; generic since 2026-11-04):
+  when a mod patches `ModelPart.render`/`compile` (`HorizonMixinTable.patchedAnywhere`, client
+  patches counted), `HorizonEntityRender.modParts` keeps the pose the player renderer submitted
+  its model with, runs `setupAnim` as that player with the camera on it (mods build their
+  parts there), and renders each leaf part alone through vanilla's `ModelPart.render`: a part
+  whose quads differ from its own cubes' faces is the mod's. Those are shown (the mirrored
+  player's skin-part flags are all off), the others' cubes skipped, and the root rendered into
+  custom geometry with the skin texture. Horizon still draws its flat outer layers
   too; downloaded skins (not resource ids) don't reach Horizon's atlas.
 
 ## 26.3 facts that cost time
@@ -724,6 +729,15 @@ gets SPIR-V, vertex layouts and uniform lists.
   screen would get instead of a list of mods' keys.
 - `ctl click-at` twice on a slot within a second is a double click (collects the stack):
   a test that hovers a slot by picking its item up and putting it back sleeps between.
+- **The mirror's `Connection` is allocated, so its mixins' fields are null** (Fabric's
+  `playChannels`, its `packetContext = new PacketContextImpl(this)`): anything that builds a
+  listener on it (a configuration listener) needs `HorizonHooks.initFields` + `constructed`
+  first. And a send on it would NPE (`pendingActions`): `ConnectionMixin.send` drops it.
+- **Fabric's `getSendableChannels()` is a read-only view**; the addon's `sendableChannels`
+  field is the set. Configuration payloads must go through their codecs: Fabric's attachment
+  sync mutates the set it receives (`retainAll` on the client's immutable one failed).
+- **`HorizonMixinTable.patchedInside` ignores client patches** (actions the server routes);
+  for how a client class draws use `patchedAnywhere`.
 
 - **A use the mirror starts never finishes.** The mirrored players are never ticked, so
   `LivingEntity.updatingUsingItem` never counts a use down: anything vanilla's `Item.use`
@@ -1313,6 +1327,27 @@ in `crates/horizon-jvm crates/horizon-client` finds comments only.)
 - Licences: REI MIT; JEI MIT; Jade CC-BY-NC-SA-4.0; AppleSkin Unlicense; Architectury
   LGPL-3.0; Cloth Config LGPL-3.0 (from each jar's `fabric.mod.json`). The bridge ships none of
   their code and now names none of their classes.
+No code tied to one mod's internals (2026-11-04, bridge-generic-entities; the maps, recipe
+viewers, Jade and Architectury are another chat's): Better Combat's reflection, 3D Skin Layers'
+`getInjectedMesh`, WorldWeaver's preset manager, TerraBlender's rule shape and Grid World's
+generator config are gone; what replaced them is generic (sections above):
+- **The configuration phase** (`HorizonConfiguration`): a joining player's mods' configuration
+  tasks run before play on a real `ServerConfigurationPacketListenerImpl` (Fabric's configure
+  events, then each task started in turn), their payloads carried by codec to the headless
+  client's configuration receivers and the answers back. Better Combat's weapon and config
+  sync, Fabric's attachment sync now reach the client. The mirror's connection gets its mixins'
+  parts (`HorizonHooks.initFields`/`constructed`; `new T(this)` field inits now too) and drops
+  what is sent on it (`ConnectionMixin.send`). Fabric's own channel handshake tasks
+  (`c:version`, `c:register`) are skipped: both halves are in one JVM.
+- **The client's attack** (`HorizonClient.startAttack`): see the third round above.
+- Not working now: **Better Combat**'s attacks (its client takes the click after the
+  configuration sync, but its swing never sends its request; its client tick, `continueAttack`
+  and the held attack key are fired, so what it still waits on is unknown without reading its
+  closed code); **Grid World**'s far terrain (whole land far away).
+- Licences (fabric.mod.json): Better Combat All Rights Reserved; 3D Skin Layers tr7zw Protective
+  License; WorldWeaver MIT (parts ARR); TerraBlender LGPLv3; Grid World Zlib; GeckoLib MIT
+  (only our fixture uses its public API); Farmer's Delight MIT (test data, comments); Create
+  (comments, our kinetic fixture copies its patterns, no code of it).
 
 Create (Create Fly's 26.3 port, 2026-11-04, bridge-gpu-12): kinetic networks run and their
 shafts, cogs and motors draw turning; OBJ items draw; mods' fluids use their own sprites; 3D Skin
@@ -1324,8 +1359,9 @@ both generate through the mods, the Nether with BetterNether's and BOP's biomes 
 (lumabus and golden vines, cincinnasite and nether ores), the End with WorldWeaver's End
 source (`WoverEndBiomeSource`: Better End's chorus forest with its pythadendrons; `/locate
 biome betterend:chorus_forest` finds one). Three things it took: the new world's dimensions
-are the server default's (`HorizonData.defaultDimensions`: DedicatedServerProperties'
-WorldDimensionData with the preset WorldWeaver suggests, as its create-world screen picks it),
+are the server default's (`HorizonData.defaultDimensions`: vanilla's DedicatedServerProperties
+from no properties, whose default level type WorldWeaver's own patch makes `wover:normal`, then
+its WorldDimensionData.create; no code of WorldWeaver's),
 the mods' `ServerLevel` constructor injections fire (`HorizonWorldgen.levelHooks`: WorldWeaver
 seeds its biome sources there) and `MinecraftServer`'s get the constructor's arguments
 (`serverArguments`: WorldWeaver's registry-ready events), and Better End's content loads
@@ -1389,10 +1425,9 @@ biomes keep Horizon's own (they are vanilla's rules). BOP areas: grass to podzol
 forests, sand to dirt or gravel by its marshes, dried salt; ~3 ms a batch of columns on a far
 terrain thread. A mod's own generator off the noise (One Block) draws its base columns
 (`lodColumns`: ChunkGenerator.getBaseColumn): the void stays empty. Grid World is on the
-noise; far away its land is cut by the grid too (`HorizonWorldgen.lodMask`: the generator's
-`getConfig()` spacings and replacement block, `GridMask` in `java_worldgen.rs`): a column on
-two grid lines whole, on one its layers every `ySpacing` blocks, else gone; a coarse far
-tile (wider than a spacing) holds lines, so it shows the layers (regress case `gridlod`).
+noise and cuts its land after it (its own `doFill`, no `getBaseColumn` of its own): far away
+its land shows whole. Its per-mod mask (`lodMask` reading its config) was removed
+2026-11-04 (no code tied to one mod); regress `gridlod` shows it.
 Lost blocks: a column generated again while it is loaded now leaves the loaded one (and
 warns); a decorated region's protos of columns already in the world are dropped, and so is a
 far proto of a loaded column instead of saved over its save. Repro (`setblock` of 36 marker
@@ -1450,8 +1485,8 @@ Vanilla-patching mods (tested headless 2026-11-01, server thread, survival; each
 `snow`, `sweep`; the `mixinmod` fixture's `mixins1`, `attack`, `ride`, `dismount`, `fall`,
 `effects`, `slot`, `mixins2`; every routed action has one, and the fixture ones need no
 downloaded jars):
-- Better Combat: a click with an iron sword is its attack request; the cow takes 6. One swing
-  at three zombies in a row hurts them all (`sweep`).
+- Better Combat (since 2026-11-04 through the generic client attack, see Status): its client
+  takes the click, but its swing doesn't land yet (`bettercombat`, `sweep` fail).
 - Serene Seasons' snow: mid winter, rain: the plains' floor gets snow layers.
 - The fixture: ten times the damage inside `Player.attack` (a cow dies to one sword hit, a pig
   spared by its head), no minecarts (the boat still takes the player), no ninth hotbar slot,

@@ -1467,3 +1467,43 @@ voxelmap xaeroplus worldmap-lazy minihud litematica maps-server maps-lan`.
   Config LGPL-3.0.
 - Test: `regress.py --jars <fabric-api, FD, REI, Architectury, Cloth Config, JEI, Jade, AppleSkin>
   rei jei pot-jei reiscreen hud modsettings join` (`--java-only` after the Rust build).
+### Generic bridge: entities and the rest (2026-11-04, branch `bridge-generic-entities`; Claude for iaxivers)
+
+Ludovic's condition 2 for Better Combat, GeckoLib, Create, Farmer's Delight and the other mods
+named in `crates/horizon-jvm`/`crates/horizon-client` outside the maps, recipe viewers, Jade and
+Architectury. Jars from Modrinth (26.3 Fabric). 2 cores, llvmpipe.
+- **Better Combat** (ARR): its reflection (`WeaponRegistry`, `TargetFinder`, `C2S_AttackRequest`,
+  `ServerNetwork`) is gone. Generic instead: (1) the click's client half
+  (`HorizonClient.startAttack`: the mods' head of `Minecraft.startAttack` on the player's client;
+  a cancel takes the click, the copies' hit is left out), the attack key down for a click's 2
+  ticks, `continueAttack`'s head fired each client tick; (2) **the configuration phase**
+  (`HorizonConfiguration`): the mods' configuration tasks run at join on a real configuration
+  listener, payloads carried by codec to the client's configuration receivers and back, so Better
+  Combat's weapon/config sync and Fabric's attachment sync reach the client. Result: its client
+  takes the click, but its swing never sends its request: **Better Combat's attacks don't work
+  now** (`bettercombat` fails; `sweep` passes only through zombies burning in daylight, a weak
+  check). Not dug further: that would mean reading its closed code.
+- **3D Skin Layers** (tr7zw Protective License): `getInjectedMesh` is gone. Generic: when a mod
+  patches `ModelPart.render`/`compile`, each leaf part of the player model rendered alone through
+  vanilla's code; a part whose quads aren't its cubes' faces is the mod's and is drawn. Regress
+  `skinlayers` passes (127 quads).
+- **WorldWeaver** (MIT, parts ARR): its `WorldPresetsManagerImpl` reflection is gone. Generic:
+  vanilla's `DedicatedServerProperties` from no properties (WorldWeaver's own patch makes the
+  default `wover:normal`), then its `WorldDimensionData.create`. Checked with Better End, Better
+  Nether, BCLib, WorldWeaver: level type `wover:normal`, the End generates through Better End
+  (`WoverEndBiome`).
+- **TerraBlender** (LGPLv3): the `base()`/`sources()` duck typing is gone; a mod's own surface rule
+  kinds are walked by their fields (rules, holders, lists, maps). `worldgen` (BOP) passes.
+- **Grid World** (Zlib): the far-terrain mask reading its generator's `getConfig()` is removed
+  (Java `lodMask`, JNI, `GridMask` and its test). Its far land shows whole now. `gridlod` failed
+  here earlier at world creation ("minecraft:overworld is not a noise generator") before far
+  terrain; not checked against java-bridge.
+- **GeckoLib** (MIT), **Create**, **Farmer's Delight** (MIT): no code of theirs; comments, our
+  `geckomod` fixture (GeckoLib's public API) and `kineticmod` fixture, FD as test data. Kept.
+- Generic fixes on the way: `HorizonHooks.fireMerged` returns its result (one CallbackInfo per
+  call), `hasMerged`; mixin field inits `new T(this)`; `HorizonMixinTable.patchedAnywhere`; the
+  mirror's `Connection` drops sends (`ConnectionMixin`).
+Pass: `attack keys skinlayers gecko kinetic pot placed worldgen hud server`. Fail: `bettercombat`
+(above). Not run: `cargo test` (the 2-core box timed out compiling), clippy (fails first in
+`horizon-world`, untouched).
+Test: `regress.py --jars <folder> skinlayers bettercombat attack gecko kinetic pot placed worldgen hud server`.

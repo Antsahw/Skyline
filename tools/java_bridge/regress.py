@@ -228,8 +228,8 @@ CASES = {
               "PlayerModel's parts, rendered by the bridge as custom geometry)",
         mods=["skinlayers", "fabric-api"], scene="none",
         steps=['sleep 4; $C key f5 tap >/dev/null; $C key f5 tap >/dev/null; $C look 0 10 >/dev/null; sleep 4'],
-        checks=[check_log(r"3D Skin Layers draws [1-9][0-9]* quads on a player", "the layers' meshes are drawn")],
-        forbid=[r"3D Skin Layers' parts couldn't be drawn"],
+        checks=[check_log(r"mods draw [1-9][0-9]* quads of a player's model parts their own way", "the layers' meshes are drawn")],
+        forbid=[r"the player's model parts mods draw couldn't be drawn"],
         look="none-1: the player from the front; jacket, sleeves and trousers stand out in 3D",
     ),
     "hud": dict(
@@ -699,11 +699,13 @@ CASES = {
                 check_log(r"Players' attacks go to the mods", "attacks go to the mods")],
     ),
     "bettercombat": dict(
-        about="Better Combat: a click is its attack request; the cow takes the sword's hit",
+        about="Better Combat: the click's client half (Minecraft.startAttack's head) is its own attack; the cow takes the sword's hit",
         mods=["bettercombat", "cloth", "playeranim"], scene="fight", env={"HORIZON_JAVA_DEBUG": "combat"},
-        steps=['$C mouse left click >/dev/null; sleep 1.5; $C entities 6 minecraft:cow > $S/cow.json'],
+        # Within the iron sword's own reach (Better Combat's 2.5 blocks; the scene's cow is 2.57 away).
+        steps=['$C command "tp @s ^ ^ ^0.4" >/dev/null; sleep 1; $C mouse left click >/dev/null; sleep 1.5; '
+               '$C entities 6 minecraft:cow > $S/cow.json'],
         checks=[check_file("cow.json", r'"health":[0-4]\.', "the cow lost 6 health"),
-                check_log(r"combat: Better Combat combo 0", "Better Combat's attack ran")],
+                check_log(r"taken by a mod's client attack", "Better Combat's client took the click")],
     ),
     "ride": dict(
         about="Entity.startRiding's head (mixinmod: no minecarts): the cart refuses, the boat takes the player",

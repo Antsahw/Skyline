@@ -8,7 +8,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.ProblemReporter;
@@ -21,16 +20,16 @@ import net.minecraft.world.level.storage.TagValueInput;
 
 /**
  * A player's attack on Horizon's own mobs, routed: vanilla's Player.attack runs on the mirror,
- * with the mods' patches inside it (Better Combat's combo damage and knockback, Farmer's
- * Delight's knives, Spell Engine), against copies of the mobs made from Horizon's NBT and
- * standing in the mirror's level for the call (so a sweep, or Better Combat's targets, find the
- * ones around). What reaches each copy's hurtServer and knockback is caught (LivingEntityMixin:
- * vanilla's body doesn't run on a copy) and sent back: Horizon hurts its own mobs with it.
+ * with the mods' patches inside it (a knife's or a spell's damage), against copies of the mobs
+ * made from Horizon's NBT and standing in the mirror's level for the call (so a sweep finds the
+ * ones around). What reaches each copy's hurtServer and knockback is caught
+ * (LivingEntityMixin: vanilla's body doesn't run on a copy) and sent back: Horizon hurts its
+ * own mobs with it.
  *
- * <p>With Better Combat, a click is its attack request (Horizon's game sends vanilla's attack,
- * Better Combat's client half doesn't run): the combo counted here, its targets found by its
- * own TargetFinder among the copies, its server handler (ServerNetwork.handleAttackRequest)
- * run as for its packet.
+ * <p>First the click's client half (HorizonClient.startAttack: the mods' injections at the head
+ * of Minecraft.startAttack, on the player's client): a mod that takes it over makes its own
+ * attack (its client's request to its server half, which hits the mirror's entities: Horizon's
+ * mobs' shadows), and Horizon's own hit is left out.
  */
 public final class HorizonCombat {
     private HorizonCombat() {}
@@ -83,30 +82,32 @@ public final class HorizonCombat {
     private static Boolean routed;
 
     /**
-     * Whether a player's attack is the mirror's: Better Combat is loaded, or a mod patches
-     * the inside of Player.attack (not only its head, which HorizonVanillaActions fires).
+     * Whether a player's attack is the mirror's: a mod patches the inside of Player.attack (not
+     * only its head, which HorizonVanillaActions fires), or the head of the client's attack
+     * (Minecraft.startAttack: a mod's own attack in place of vanilla's).
      */
     public static boolean routed() {
         if (routed == null) {
-            routed = betterCombat() || HorizonMixinTable.patchedInside(Player.class, Set.of("attack"),
+            boolean inside = HorizonMixinTable.patchedInside(Player.class, Set.of("attack"),
                     Set.of("net/minecraft/world/entity/player/Player.attack"));
+            boolean client = clientAttack();
+            routed = inside || client;
             if (routed) {
                 Natives.log("Players' attacks go to the mods (" + HorizonMixinTable.mods("net/minecraft/world/entity/player/Player", "attack")
-                        + (betterCombat() ? ", Better Combat's attack requests" : "") + ")");
+                        + (client ? ", the client's attack: " + HorizonMixinTable.mods("net/minecraft/client/Minecraft", "startAttack") : "") + ")");
             }
         }
         return routed;
     }
 
-    private static Boolean betterCombat;
-
-    private static boolean betterCombat() {
-        if (betterCombat == null) betterCombat = net.fabricmc.loader.api.FabricLoader.getInstance().isModLoaded("bettercombat");
-        return betterCombat;
+    /** Mods inject at the head of the client's attack (Minecraft.startAttack). */
+    private static boolean clientAttack() {
+        try {
+            return HorizonHooks.hasMerged(net.minecraft.client.Minecraft.class, "startAttack", "HEAD");
+        } catch (LinkageError e) {
+            return false; // No client classes (a dedicated server).
+        }
     }
-
-    /** Per player: Better Combat's combo count and the tick of the last attack (its client keeps these). */
-    private static final Map<UUID, long[]> COMBO = new ConcurrentHashMap<>();
 
     /**
      * Player {@code uuid} attacks Horizon's mob {@code ids[0]} (the one under the crosshair);
@@ -148,8 +149,9 @@ public final class HorizonCombat {
             setStrength(player, ticks);
             if (DEBUG) Natives.log("combat: ticks " + ticks + ", the level finds the target: " + level.getEntity(ids[0])
                     + ", distance " + Math.sqrt(player.distanceToSqr(target)));
-            boolean viaBetterCombat = betterCombat() && betterCombatAttack(player, level, target);
-            if (!viaBetterCombat) HorizonServer.fire("Player.attack", () -> player.attack(target));
+            // The click's client half first: a mod may take it (its own attack, by request).
+            boolean viaClient = clientAttack() && HorizonClient.startAttack(player, ticks);
+            if (!viaClient) HorizonServer.fire("Player.attack", () -> player.attack(target));
             HorizonServer.runTasks();
             HorizonServer.afterCall();
             List<Double> out = new ArrayList<>();
@@ -165,7 +167,7 @@ public final class HorizonCombat {
                 if (k < types.length) types[k] = hit.damageType;
                 k++;
             }
-            if (DEBUG) Natives.log("combat: " + player.getName().getString() + " attacks " + target + (viaBetterCombat ? " (Better Combat)" : "")
+            if (DEBUG) Natives.log("combat: " + player.getName().getString() + " attacks " + target + (viaClient ? " (taken by a mod's client attack)" : "")
                     + ": " + out);
             double[] result = new double[out.size()];
             for (int i = 0; i < result.length; i++) result[i] = out.get(i);
@@ -177,68 +179,13 @@ public final class HorizonCombat {
     }
 
     /** The mirror's player isn't ticked: its attack strength is Horizon's swing (ticks since it). */
-    private static void setStrength(ServerPlayer player, int ticks) {
+    static void setStrength(Player player, int ticks) {
         try {
             var ticker = LivingEntity.class.getDeclaredField("attackStrengthTicker");
             ticker.setAccessible(true);
             ticker.setInt(player, Math.max(0, ticks));
         } catch (ReflectiveOperationException e) {
             // Full strength, then.
-        }
-    }
-
-    /**
-     * Better Combat's attack, as its client would request it: the combo (counted up while
-     * attacks follow within its reset window), the targets its TargetFinder finds among the
-     * copies, then its server handler. False when the held item has no Better Combat attack
-     * (vanilla's attack then).
-     */
-    private static boolean betterCombatAttack(ServerPlayer player, ServerLevel level, Entity cursor) {
-        try {
-            ClassLoader loader = HorizonCombat.class.getClassLoader();
-            Class<?> registry = Class.forName("net.bettercombat.logic.WeaponRegistry", true, loader);
-            Object attributes = registry.getMethod("getAttributes", net.minecraft.world.item.ItemStack.class).invoke(null, player.getMainHandItem());
-            if (attributes == null) return false;
-            long now = HorizonServer.currentTick();
-            long[] combo = COMBO.computeIfAbsent(player.getUUID(), u -> new long[] {0, Long.MIN_VALUE / 2});
-            // Better Combat's client resets the combo after a pause (ticks past the cooldown).
-            if (now - combo[1] > 40) combo[0] = 0;
-            int count = (int) combo[0];
-            combo[0]++;
-            combo[1] = now;
-            Class<?> helper = Class.forName("net.bettercombat.logic.PlayerAttackHelper", true, loader);
-            Object hand = helper.getMethod("getCurrentAttack", Player.class, int.class).invoke(null, player, count);
-            if (hand == null) return false;
-            Object attack = hand.getClass().getMethod("attack").invoke(hand);
-            Object handStack = hand.getClass().getMethod("itemStack").invoke(hand);
-            double range = (double) helper.getMethod("getRangeForItem", Player.class, net.minecraft.world.item.ItemStack.class)
-                    .invoke(null, player, handStack);
-            Class<?> finder = Class.forName("net.bettercombat.client.collision.TargetFinder", true, loader);
-            Class<?> attackClass = Class.forName("net.bettercombat.api.WeaponAttributes$Attack", true, loader);
-            @SuppressWarnings("unchecked")
-            List<Entity> targets = (List<Entity>) finder.getMethod("findAttackTargets", Player.class, Entity.class, attackClass, double.class)
-                    .invoke(null, player, cursor, attack, range);
-            if (DEBUG) Natives.log("combat: Better Combat's targets " + targets);
-            if (targets == null || targets.isEmpty()) targets = List.of(cursor);
-            Class<?> request = Class.forName("net.bettercombat.network.Packets$C2S_AttackRequest", true, loader);
-            Object packet = request.getConstructor(int.class, boolean.class, int.class, Entity.class, List.class)
-                    .newInstance(count, player.isShiftKeyDown(), player.getInventory().getSelectedSlot(), cursor, targets);
-            Class<?> network = Class.forName("net.bettercombat.network.ServerNetwork", true, loader);
-            var handle = network.getMethod("handleAttackRequest", request, net.minecraft.server.MinecraftServer.class, ServerPlayer.class,
-                    net.minecraft.server.network.ServerGamePacketListenerImpl.class);
-            List<Entity> chosen = targets;
-            HorizonServer.fire("Better Combat's attack", () -> {
-                try {
-                    handle.invoke(null, packet, HorizonServer.server(), player, player.connection);
-                } catch (ReflectiveOperationException e) {
-                    throw new IllegalStateException(e.getCause() != null ? e.getCause() : e);
-                }
-            });
-            if (DEBUG) Natives.log("combat: Better Combat combo " + count + ", " + chosen.size() + " target(s) in " + range + " blocks");
-            return true;
-        } catch (Throwable t) {
-            if (HorizonServer.failedOnce("better combat attack")) Natives.log("Java mods: Better Combat's attack couldn't run: " + t);
-            return false;
         }
     }
 }

@@ -352,7 +352,6 @@ impl ChunkGenerator for JavaTerrain {
             custom: self.custom.clone(),
             registry: self.registry,
             materials: Arc::new(OnceLock::new()),
-            mask: Arc::new(OnceLock::new()),
             oracle: JavaBiomes {
                 dimension: self.dimension.clone(),
                 biomes: self.biomes.clone(),
@@ -655,68 +654,7 @@ struct JavaLod {
     /// What the land is made of ([`JavaLod::materials`]), shared by the samplers.
     materials:
         Arc<OnceLock<Option<std::collections::HashSet<horizon_world::registry::BlockStateId>>>>,
-    /// What the mods' generator cuts out of the noise's land ([`JavaLod::grid_mask`]).
-    mask: Arc<OnceLock<Option<GridMask>>>,
     oracle: JavaBiomes,
-}
-
-/// Grid World's grid (its `GridChunkGenerator.doFill`): a block stays where two of its
-/// coordinates are multiples of their spacing; the rest becomes `replacement` (air: gone).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct GridMask {
-    x: i32,
-    y: i32,
-    z: i32,
-    replacement: Option<horizon_world::registry::BlockStateId>,
-}
-
-impl GridMask {
-    /// `column` (at `x z`, standing for a `width`-wide square) as the grid leaves it: whole
-    /// where it is a pillar (x and z on the grid), its grid layers where one of them is (a
-    /// wider square always holds a line: its layers), nothing (or the replacement) else.
-    fn cut(&self, column: &mut horizon_client::lod::Column, x: i32, z: i32, width: i32) {
-        let on_x = width >= self.x || x.rem_euclid(self.x) == 0;
-        let on_z = width >= self.z || z.rem_euclid(self.z) == 0;
-        if width == 1 && on_x && on_z {
-            return;
-        }
-        let beams = on_x || on_z;
-        let mut spans: Vec<horizon_client::lod::Span> = Vec::new();
-        for span in &column.spans {
-            for y in span.min..span.max {
-                let state = if beams && i32::from(y).rem_euclid(self.y) == 0 {
-                    span.state
-                } else if let Some(r) = self.replacement {
-                    r
-                } else {
-                    continue;
-                };
-                match spans.last_mut() {
-                    Some(last)
-                        if last.max == y && last.state == state && last.biome == span.biome =>
-                    {
-                        last.max = y + 1;
-                    }
-                    _ => spans.push(horizon_client::lod::Span {
-                        min: y,
-                        max: y + 1,
-                        state,
-                        ..*span
-                    }),
-                }
-            }
-        }
-        column.surface = column.surface.and_then(|surface| {
-            let top = spans.last()?;
-            Some(horizon_client::lod::Surface {
-                height: i32::from(top.max),
-                state: top.state,
-                water: None,
-                ..surface
-            })
-        });
-        column.spans = spans.into();
-    }
 }
 
 impl JavaLod {
@@ -739,40 +677,6 @@ impl JavaLod {
     /// Horizon's columns would show land that isn't there.
     fn custom(&self) -> bool {
         self.custom.get() == Some(&true)
-    }
-
-    /// The grid the mods' generator cuts the land with (`HorizonWorldgen.lodMask`), asked once
-    /// the mods generate the dimension.
-    fn grid_mask(&self) -> Option<GridMask> {
-        if !self.modded() {
-            return None;
-        }
-        *self.mask.get_or_init(|| {
-            let parts = horizon_jvm::events::worldgen_lod_mask(&self.oracle.dimension)
-                .ok()
-                .flatten()?;
-            let [kind, x, y, z, replacement] = parts.as_slice() else {
-                return None;
-            };
-            if kind != "grid" {
-                return None;
-            }
-            let replacement = parse_state(self.registry, replacement)
-                .filter(|&r| state_name(self.registry, r) != "minecraft:air");
-            Some(GridMask {
-                x: x.parse().ok()?,
-                y: y.parse().ok()?,
-                z: z.parse().ok()?,
-                replacement,
-            })
-        })
-    }
-
-    /// `column` at `x z` (a `width`-wide square) cut as the mods' generator cuts its land.
-    fn cut(&self, column: &mut horizon_client::lod::Column, x: i32, z: i32, width: i32) {
-        if let Some(mask) = self.grid_mask() {
-            mask.cut(column, x, z, width);
-        }
     }
 
     /// The mod's generator's columns (ChunkGenerator.getBaseColumn) at `at`, with the mods'
@@ -980,7 +884,6 @@ impl LodSampler for JavaLod {
             custom: self.custom.clone(),
             registry: self.registry,
             materials: self.materials.clone(),
-            mask: self.mask.clone(),
             oracle: JavaBiomes {
                 dimension: self.oracle.dimension.clone(),
                 biomes: self.oracle.biomes.clone(),
@@ -1013,9 +916,6 @@ impl LodSampler for JavaLod {
                     .collect();
                 let mut refs: Vec<&mut horizon_client::lod::Column> = owned.iter_mut().collect();
                 self.remap(&mut refs, &at);
-                for (column, &(x, z)) in owned.iter_mut().zip(&at) {
-                    self.cut(column, x, z, 1);
-                }
                 *columns = Arc::new(owned);
             }
         }
@@ -1031,9 +931,7 @@ impl LodSampler for JavaLod {
             return self.own_columns(&[(x, z)]).pop().unwrap_or_default();
         }
         let column = self.land().column(x, z);
-        let mut column = self.remap_one(column, x, z);
-        self.cut(&mut column, x, z, 1);
-        column
+        self.remap_one(column, x, z)
     }
 
     fn reduced_column(&mut self, x: i32, z: i32, width: i32) -> horizon_client::lod::Column {
@@ -1044,9 +942,7 @@ impl LodSampler for JavaLod {
                 .unwrap_or_default();
         }
         let column = self.land().reduced_column(x, z, width);
-        let mut column = self.remap_one(column, x + width / 2, z + width / 2);
-        self.cut(&mut column, x, z, width);
-        column
+        self.remap_one(column, x + width / 2, z + width / 2)
     }
 
     fn grid(
@@ -1071,13 +967,6 @@ impl LodSampler for JavaLod {
         if self.modded() {
             let mut refs: Vec<&mut horizon_client::lod::Column> = columns.iter_mut().collect();
             self.remap(&mut refs, &at);
-            for (i, column) in columns.iter_mut().enumerate() {
-                let (cx, cz) = (
-                    x + (i % side) as i32 * stride,
-                    z + (i / side) as i32 * stride,
-                );
-                self.cut(column, cx, cz, stride);
-            }
         }
         columns
     }
@@ -1117,58 +1006,4 @@ fn state_name(registry: &BlockRegistry, state: horizon_world::registry::BlockSta
         .map(|(k, v)| format!("{k}={v}"))
         .collect();
     format!("{}[{}]", s.name, props.join(","))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::GridMask;
-    use horizon_client::lod::{Column, Span, Surface};
-    use horizon_world::registry::BlockStateId;
-
-    fn land() -> Column {
-        Column {
-            surface: Some(Surface {
-                height: 70,
-                state: BlockStateId(1),
-                water: None,
-                biome: 3,
-            }),
-            spans: vec![Span {
-                min: 60,
-                max: 70,
-                state: BlockStateId(1),
-                biome: 3,
-                light: 0,
-            }]
-            .into(),
-        }
-    }
-
-    #[test]
-    fn grid_mask_keeps_pillars_layers_and_nothing_else() {
-        let mask = GridMask {
-            x: 5,
-            y: 5,
-            z: 5,
-            replacement: None,
-        };
-        // A pillar: x and z on the grid.
-        let mut pillar = land();
-        mask.cut(&mut pillar, -5, 10, 1);
-        assert_eq!(pillar, land());
-        // A line: the layers at multiples of 5.
-        let mut line = land();
-        mask.cut(&mut line, 1, 10, 1);
-        let ys: Vec<(i16, i16)> = line.spans.iter().map(|s| (s.min, s.max)).collect();
-        assert_eq!(ys, [(60, 61), (65, 66)]);
-        assert_eq!(line.surface.map(|s| s.height), Some(66));
-        // Off both: gone.
-        let mut hole = land();
-        mask.cut(&mut hole, 1, 2, 1);
-        assert!(hole.spans.is_empty() && hole.surface.is_none());
-        // A wide square holds lines: its layers.
-        let mut far = land();
-        mask.cut(&mut far, 1, 2, 16);
-        assert_eq!(far.spans.len(), 2);
-    }
 }
