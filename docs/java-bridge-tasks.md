@@ -107,6 +107,11 @@ By area:
   Update: right-click does nothing **and thrown items don't go in either** (the depot takes
   item entities that land on it): so the item never gets in, not only a drawing gap. Mixins:
   the use on a mod block with an item in hand, and a mod block entity picking up item entities.
+- **Create's motor speed can't be set** (tester, batch 10: "motors lack GUI"). Create has no
+  screen for it: you look at the motor and **scroll the mouse wheel** (its value box, drawn as
+  a HUD overlay on the looked-at block). So: mods' injections on `MouseHandler.onScroll` while
+  playing (not in a screen) must run and may cancel the hotbar scroll, and the value box overlay
+  must draw. Client chat (`bridge-client-13`): generic, every mod with scroll-to-adjust gets it.
 - **A broken block's moving parts stay** (tester, batch 10): break a cogwheel and the hand
   crank's handle on it keeps floating, drawn. A removed mod block entity must drop its
   renderer's instance (gpu-13: the recorder's per-block-entity draws on removal).
