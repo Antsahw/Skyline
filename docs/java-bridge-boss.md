@@ -215,3 +215,11 @@ fast: prefer them to cloud runs for big packs.
   says invisible blocks are fixed on his PC.
 - Traps: `prism` needs `horizon-prepare --check` to pass (prepare with `--complete`, else the
   sounds are missing). `templates` timed out on 2 cores (1147 blocks away): its waits are longer now.
+
+## Plan from 2026-11-04 (usage at 87%, resets Saturday 00:00)
+
+Round 10 running (six chats: upstream sync 5, mixins-9, client-12, gpu-12, pack-9,
+worldgen-8; their tasks are in java-bridge-tasks.md). When they report: one new boss chat
+merges them all (merge-batch10). After that, nothing until Saturday: the user plays the pack
+on his PC and collects testers' bugs. Saturday: a boss chat queues those bugs, then the
+upstream prep chat (launcher switch, then the shared-file hooks), and the reply plan for Ludovic.
