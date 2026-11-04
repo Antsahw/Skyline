@@ -389,6 +389,12 @@ public final class HorizonServer {
                 else if (type == java.util.Set.class) empty = java.util.concurrent.ConcurrentHashMap.newKeySet();
                 else if (type == List.class || type == java.util.Collection.class) empty = new java.util.concurrent.CopyOnWriteArrayList<>();
                 else if (type == java.util.Queue.class || type == java.util.Deque.class) empty = new java.util.concurrent.ConcurrentLinkedDeque<>();
+                // A mod's atomic flag or counter (its mixin's field, made in the constructor the
+                // mirror skips: Chunky's housekeeping flag on MinecraftServer), at its default.
+                else if (type == java.util.concurrent.atomic.AtomicBoolean.class) empty = new java.util.concurrent.atomic.AtomicBoolean();
+                else if (type == java.util.concurrent.atomic.AtomicInteger.class) empty = new java.util.concurrent.atomic.AtomicInteger();
+                else if (type == java.util.concurrent.atomic.AtomicLong.class) empty = new java.util.concurrent.atomic.AtomicLong();
+                else if (type == java.util.concurrent.atomic.AtomicReference.class) empty = new java.util.concurrent.atomic.AtomicReference<>();
                 else if ((java.util.Collection.class.isAssignableFrom(type) || Map.class.isAssignableFrom(type))
                         && !type.isInterface() && !java.lang.reflect.Modifier.isAbstract(type.getModifiers())
                         && (type.getName().startsWith("java.util.") || type.getName().startsWith("it.unimi.dsi.fastutil."))) {
@@ -493,6 +499,11 @@ public final class HorizonServer {
                 f.setAccessible(true);
                 if (f.get(map) == null) f.set(map, type.getDeclaredConstructor().newInstance());
             }
+            // Its main thread is the server's (what is queued on it runs between Horizon's
+            // ticks: EventLoopMixin), as ServerChunkCache gives it its own.
+            java.lang.reflect.Field executor = net.minecraft.server.level.ChunkMap.class.getDeclaredField("mainThreadExecutor");
+            executor.setAccessible(true);
+            if (executor.get(map) == null) executor.set(map, server);
             java.lang.reflect.Field field = net.minecraft.server.level.ServerChunkCache.class.getDeclaredField("chunkMap");
             field.setAccessible(true);
             field.set(level.getChunkSource(), map);
@@ -1467,6 +1478,7 @@ public final class HorizonServer {
         phase = HorizonProfile.add("scheduled ticks", phase);
         HorizonBlockEntities.tick();
         phase = HorizonProfile.add("block entities", phase);
+        HorizonChunkLoads.tick();
         HorizonTickets.tick(new ArrayList<>(LEVELS.values()));
         HorizonSavedData.tick();
         HorizonDataFixer.check();
@@ -2304,14 +2316,21 @@ public final class HorizonServer {
         return false;
     }
 
-    /** A level event of a mirrored level: Horizon plays it. 2001's data is a state, sent by name. */
-    public static void levelEvent(ServerLevel level, int type, BlockPos pos, int data) {
+    /**
+     * A level event of a mirrored level: Horizon plays it. 2001's data is a state, sent by name.
+     * A mirrored player as its source (ServerLevel.levelEvent's broadcast leaves the source out:
+     * a routed break's 2001, which the breaker's game played already) is sent by UUID, and
+     * Horizon leaves that player out too.
+     */
+    public static void levelEvent(ServerLevel level, net.minecraft.world.entity.Entity source, int type, BlockPos pos, int data) {
         String state = null;
         if (type == 2001) { // LevelEvent.PARTICLES_DESTROY_BLOCK: data is Block.getId(state)
             state = net.minecraft.commands.arguments.blocks.BlockStateParser.serialize(
                     net.minecraft.world.level.block.Block.stateById(data));
         }
-        Natives.levelEvent(dimensionOf(level), type, pos.getX(), pos.getY(), pos.getZ(), data, state);
+        String except = source instanceof ServerPlayer player && BY_UUID.get(player.getUUID()) == player
+                ? player.getUUID().toString() : null;
+        Natives.levelEvent(dimensionOf(level), type, pos.getX(), pos.getY(), pos.getZ(), data, state, except);
     }
 
     /**
@@ -3122,6 +3141,11 @@ public final class HorizonServer {
 
     public static void schedule(Runnable task) {
         if (TASKS.size() < 65536) TASKS.add(task);
+    }
+
+    /** Horizon's server thread, once it ticked the mirror (MinecraftServer.getRunningThread). */
+    public static Thread serverThread() {
+        return serverThread;
     }
 
     public static boolean onServerThread() {

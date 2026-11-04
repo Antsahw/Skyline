@@ -2733,7 +2733,10 @@ impl Game<'_> {
                     // finished brushing or an eye inserted in a portal frame (these calls name no
                     // excluded player), nor the digger's own crack and hit
                     // sound (2019, 2020).
-                    let except = if matches!(
+                    let except = if let Some(source) = self.java_event_except() {
+                        // A Java mod's event with a player as its source: not to that player.
+                        Some(source)
+                    } else if matches!(
                         *id,
                         2015 | 1501
                             | 1503

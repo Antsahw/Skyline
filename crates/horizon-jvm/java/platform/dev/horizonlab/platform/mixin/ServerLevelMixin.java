@@ -31,7 +31,11 @@ public abstract class ServerLevelMixin {
         if (HorizonServer.isMirror(this)) ci.cancel();
     }
 
-    /** Level events (a block's break effects) go to Horizon, once, not once per player. */
+    /**
+     * Level events (a block's break effects) go to Horizon, once, not once per player. Their
+     * source player is passed on: vanilla's broadcast leaves it out (its own game made the
+     * effect already: a player's break sound and particles).
+     */
     @Inject(method = "levelEvent", at = @At("HEAD"), cancellable = true)
     private void horizon$levelEvent(net.minecraft.world.entity.Entity source, int type, net.minecraft.core.BlockPos pos, int data,
                                     org.spongepowered.asm.mixin.injection.callback.CallbackInfo ci) {
@@ -39,7 +43,7 @@ public abstract class ServerLevelMixin {
         ci.cancel();
         // A client half's own effects: the server's are played.
         if (HorizonServer.clientHalf == Thread.currentThread()) return;
-        HorizonServer.levelEvent((ServerLevel) (Object) this, type, pos, data);
+        HorizonServer.levelEvent((ServerLevel) (Object) this, source, type, pos, data);
     }
 
     /** A block's update for clients: Horizon sends its own. */

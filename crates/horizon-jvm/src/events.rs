@@ -207,6 +207,9 @@ pub enum Action {
         data: i32,
         /// For the events whose data is a block state (2001): that state, by name.
         state: Option<String>,
+        /// The player it leaves out (by UUID): its source, whose own game made the effect
+        /// (vanilla's `levelEvent(player, ...)` broadcast leaves it out).
+        except: Option<String>,
     },
     /// A mod changed slot `slot` of a player's inventory (vanilla's `Inventory` order, as in
     /// [`Player::inventory`]): the item stack in SNBT, None for empty.

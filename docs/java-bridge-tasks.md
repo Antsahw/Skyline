@@ -206,7 +206,8 @@ By area:
 - **A broken block's moving parts stay** (tester, batch 10): break a cogwheel and the hand
   crank's handle on it keeps floating, drawn. A removed mod block entity must drop its
   renderer's instance (gpu-13: the recorder's per-block-entity draws on removal).
-- **Breaking sounds twice** (a tester, 2026-11-04: "dirt goes brrbrr"). Mods: Biomes O' Plenty,
+- ~~**Breaking sounds twice**~~ and ~~**Chunky**~~: done in `bridge-mixins-10` (report below).
+  Was: **Breaking sounds twice** (a tester, 2026-11-04: "dirt goes brrbrr"). Mods: Biomes O' Plenty,
   TerraBlender, GlitchCore, Terralith, Geophilic, Lithostitched, FallingTree, WorldEdit, Create
   Fly, Fabric API. Likely a routed break (FallingTree and WorldEdit patch breaking) where Java's
   `destroyBlock` sends its level event 2001 (break sound and particles) and Horizon's own break
@@ -1628,3 +1629,23 @@ Fabric API 0.165.2. 2 cores, llvmpipe.
 Test: `regress.py --jars <folder with replaymod*, Flashback*, fabric-api*> replaymod flashback`;
 in-game: play a single-player world with ReplayMod, quit, then start Horizon with
 `--replay <game folder>/replay_recordings/recording/<date>.mcpr`.
+### Mixins 10: the double break sound, Chunky (2026-11-04, branch `bridge-mixins-10`; Claude for iaxivers)
+
+Jars (Modrinth, 26.3 Fabric): FallingTree 26.3-25, WorldEdit 7.4.6, Biomes O' Plenty
+26.3.0.0.16 (+TerraBlender, GlitchCore), Terralith 2.6.5 (+Lithostitched 2.0.6), Geophilic
+3.7, Chunky 1.5.66, Fabric API 0.165.2. Not Create Fly (CurseForge only; not fetched here).
+2 cores, llvmpipe.
+- **Double break sound**: each tester mod alone breaks dirt and a log with one sound each.
+  The double comes from a *routed* break (a mod patching the inside of breaking: vanilla's
+  `destroyBlock` on the mirror), whose level event 2001 reached the breaker too: vanilla's
+  `levelEvent(player, …)` leaves its source out, the mirror dropped the source. Reproduced with
+  the `mixinmod` fixture (2 sounds), fixed generically (the source player is left out: 1).
+  Create is the likely router in the tester's set (untested). Regress `breaksound`.
+- **Chunky**: `/chunky start` now pregenerates through Horizon (load-only tickets kept,
+  chunk futures completed when Horizon loaded the chunk, Horizon's region files read for
+  "already generated", the server's running thread). 81 chunks in 12 s, 1,089 in 1:57; all
+  saved full; a second run loads none. Regress `chunky`.
+- Seen on the way, not a bug: with BOP the client hears ~40 `wet_grass` breaks while the
+  first chunks generate, and sheep eating grass play `grass` breaks (vanilla's 2001 too).
+Test: `regress.py --java-only --jars <folder with Chunky*, fabric-api*> breaksound chunky`.
+

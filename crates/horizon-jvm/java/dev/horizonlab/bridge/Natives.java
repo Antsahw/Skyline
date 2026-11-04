@@ -141,9 +141,10 @@ public final class Natives {
 
     /**
      * A mod's level event (LevelEvent: 2001 a block's break particles and sound): {@code state}
-     * is the block state the data names, for the events whose data is one, else null.
+     * is the block state the data names, for the events whose data is one, else null;
+     * {@code except} the UUID of the player it leaves out (its source), else null.
      */
-    public static native void levelEvent(String dimension, int type, int x, int y, int z, int data, String state);
+    public static native void levelEvent(String dimension, int type, int x, int y, int z, int data, String state, String except);
 
     /**
      * A vanilla entity a mod's code added to a mirrored level (Carry On putting a carried mob

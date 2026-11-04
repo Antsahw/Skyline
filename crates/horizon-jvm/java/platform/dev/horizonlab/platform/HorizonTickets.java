@@ -26,6 +26,7 @@ public final class HorizonTickets {
 
     private static final Map<ServerLevel, String> SENT = new IdentityHashMap<>();
     private static java.lang.reflect.Field tickets;
+    private static int changes;
 
     /**
      * The level's ticket storage (in its saved data, made on first use). Saved tickets come back
@@ -47,13 +48,16 @@ public final class HorizonTickets {
             try {
                 TicketStorage storage = storage(level);
                 Long2ObjectOpenHashMap<List<Ticket>> all = map(storage);
-                if (all == null) continue;
+                if (all == null) all = new Long2ObjectOpenHashMap<>();
                 age(storage, all);
-                String chunks = chunks(storage, all);
-                if (!chunks.equals(SENT.getOrDefault(level, ""))) {
+                String chunks = chunks(storage, all, HorizonChunkLoads.wanted(level));
+                String before = SENT.getOrDefault(level, "");
+                if (!chunks.equals(before)) {
                     SENT.put(level, chunks);
                     Natives.chunkTickets(level.dimension().identifier().toString(), chunks);
-                    Natives.log("Java mods: chunk tickets keep " + (chunks.isEmpty() ? 0 : chunks.split(";").length)
+                    // Logged as tickets start and end, and now and then between (a
+                    // pregenerator changes them every tick).
+                    if (before.isEmpty() || chunks.isEmpty() || ++changes % 200 == 0) Natives.log("Java mods: chunk tickets keep " + (chunks.isEmpty() ? 0 : chunks.split(";").length)
                             + " chunk(s) of " + level.dimension().identifier());
                 }
             } catch (Throwable t) {
@@ -62,8 +66,42 @@ public final class HorizonTickets {
         }
     }
 
+    /**
+     * Whether the level's tickets keep chunk x z (as {@link #chunks} counts them): where
+     * vanilla's would have made its chunk holder, so a load asked without creating one
+     * (getChunkFutureMainThread's load false, after a ticket: Chunky) still waits for it.
+     */
+    static boolean keeps(ServerLevel level, int x, int z) {
+        try {
+            TicketStorage storage = storage(level);
+            Long2ObjectOpenHashMap<List<Ticket>> all = map(storage);
+            if (all == null) return false;
+            for (long key : all.keySet()) {
+                int reach = reach(storage, key);
+                ChunkPos at = ChunkPos.unpack(key);
+                if (reach >= 0 && Math.abs(at.x() - x) <= reach && Math.abs(at.z() - z) <= reach) return true;
+            }
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            return false;
+        }
+        return false;
+    }
+
+    /**
+     * How far around a ticketed chunk its tickets keep chunks (-1: none): the simulation
+     * level's reach (31 - level), or for load-only tickets the loading level's reach to FULL.
+     */
+    private static int reach(TicketStorage storage, long key) {
+        int level = storage.getTicketLevelAt(key, true);
+        if (level <= 32) return Math.max(0, 31 - level);
+        // Load-only tickets (no simulation): the chunks they load to FULL.
+        int loading = storage.getTicketLevelAt(key, false);
+        return loading > 33 ? -1 : 33 - loading;
+    }
+
     /** A new world: what was sent belongs to the last one. */
     static void reset() {
+        HorizonChunkLoads.reset();
         SENT.clear();
         ACTIVATED.clear();
     }
@@ -95,13 +133,18 @@ public final class HorizonTickets {
         for (int i = 0; i < expired.size(); i++) storage.removeTicket(expired.get(i)[0], which.get(i));
     }
 
-    /** The chunks kept, as "x,z;x,z", sorted (so an unchanged set compares equal). */
-    private static String chunks(TicketStorage storage, Long2ObjectOpenHashMap<List<Ticket>> all) {
-        TreeSet<Long> kept = new TreeSet<>();
+    /**
+     * The chunks kept, as "x,z;x,z", sorted (so an unchanged set compares equal): what the
+     * tickets' simulation levels tick; for load-only tickets (a pregenerator's), what their
+     * loading level loads to FULL (33 - level around it), kept as the others are, so Horizon
+     * generates and loads them (they tick while kept: Horizon has no load-only chunks); and the
+     * chunks a load waits for (HorizonChunkLoads, vanilla's short ticket).
+     */
+    private static String chunks(TicketStorage storage, Long2ObjectOpenHashMap<List<Ticket>> all, List<Long> wanted) {
+        TreeSet<Long> kept = new TreeSet<>(wanted);
         for (long key : all.keySet()) {
-            int level = storage.getTicketLevelAt(key, true);
-            if (level > 32) continue;
-            int reach = Math.max(0, 31 - level);
+            int reach = reach(storage, key);
+            if (reach < 0) continue;
             ChunkPos at = ChunkPos.unpack(key);
             for (int dx = -reach; dx <= reach; dx++) {
                 for (int dz = -reach; dz <= reach; dz++) kept.add(ChunkPos.pack(at.x() + dx, at.z() + dz));

@@ -783,7 +783,7 @@ fn boot(env: &mut JNIEnv, jars: &[PathBuf]) -> jni::errors::Result<String> {
             },
             NativeMethod {
                 name: "levelEvent".into(),
-                sig: "(Ljava/lang/String;IIIIILjava/lang/String;)V".into(),
+                sig: "(Ljava/lang/String;IIIIILjava/lang/String;Ljava/lang/String;)V".into(),
                 fn_ptr: native_level_event as *mut c_void,
             },
             NativeMethod {
@@ -1721,7 +1721,8 @@ extern "system" fn native_drop_item(
     }));
 }
 
-/// `Natives.levelEvent(String dimension, int type, int x, int y, int z, int data, String state)`.
+/// `Natives.levelEvent(String dimension, int type, int x, int y, int z, int data, String state,
+/// String except)`.
 #[allow(clippy::too_many_arguments)]
 extern "system" fn native_level_event(
     mut env: JNIEnv,
@@ -1733,6 +1734,7 @@ extern "system" fn native_level_event(
     z: sys::jint,
     data: sys::jint,
     state: JString,
+    except: JString,
 ) {
     let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let Ok(dimension) = env.get_string(&dimension).map(String::from) else {
@@ -1743,12 +1745,18 @@ extern "system" fn native_level_event(
         } else {
             env.get_string(&state).ok().map(String::from)
         };
+        let except = if except.is_null() {
+            None
+        } else {
+            env.get_string(&except).ok().map(String::from)
+        };
         events::push(events::Action::LevelEvent {
             dimension,
             id,
             position: [x, y, z],
             data,
             state,
+            except,
         });
     }));
 }
