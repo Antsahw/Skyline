@@ -59,6 +59,9 @@ both are fixed. The user's decision: **players play only through Horizon's launc
    what vanilla does there, so every mod gets it) or removed. Check each mod's licence and say
    it in the report. A mod that stops working is listed in java-bridge.md's status, not patched.
    Its regress cases stay and show what's broken.
+   Maps (JourneyMap, Xaero's, XaeroPlus, VoxelMap, MiniHUD/MaLiLib): done in
+   `bridge-generic-maps` (see Reports). Left for the other chat: REI, JEI, Jade, AppleSkin,
+   Better Combat, Architectury, GeckoLib, Create...
 
 ### Testers' Trello (2026-11-04, https://trello.com/b/2uhi4jkj)
 
@@ -1418,3 +1421,23 @@ chat's own `HorizonFlywheel` and debug flag were dropped for them).
 `create createwhole fluids skinlayers kinetic pot terminal ber placed hud` pass.
 Test: `regress.py --jars <folder with create-fly*.jar, skinlayers3d*, fabric-api*> create createwhole fluids skinlayers kinetic`;
 in-game: a creative motor with shafts and cogs, a honey bucket, third person with 3D Skin Layers.
+
+### generic maps (2026-11-04, branch `bridge-generic-maps`; Claude for iaxivers)
+
+Ludovic's condition 2 for the map mods. Removed: JourneyMap's four mixins
+(`mixin/mods/JourneyMap{MiniMap,Fullscreen,Files,Properties}Mixin`) and its fields in
+`ModsPlugin`; JourneyMap's and VoxelMap's per-player state in `HorizonClientState` (field list,
+waypoint reload, player-cache reset, VoxelMap image re-registering and thread stop);
+JourneyMap's settings holders in `HorizonClientConfig` (and `guestNow`/`playerNow`, used only
+by those mixins); Xaero's `currentSession` cleared at each join (`HorizonClient.joined`).
+XaeroPlus, MiniHUD, MaLiLib, Litematica: no code tied to them was there (their hooks are
+generic: GUI tail, key handlers, start points; they are only named in comments).
+Licences (Modrinth): JourneyMap, Xaero's Minimap, Xaero's World Map, VoxelMap Updated: All
+Rights Reserved. XaeroPlus: MIT. MiniHUD, MaLiLib, Litematica: LGPL-3.0-only.
+Regress (2 cores, llvmpipe): `maps journeymap voxelmap xaeroplus worldmap-lazy minihud
+litematica maps-server voxelmap-server server` pass. `maps-lan` fails (it passed before on the
+same box): its two per-player checks, and both players' minimaps black/empty with a guest in.
+Listed in java-bridge.md's Status. Generic fix to consider: a client per player.
+Test: `regress.py --java-only --jars <map jars, trinkets, jade, appleskin> maps journeymap
+voxelmap xaeroplus worldmap-lazy minihud litematica maps-server maps-lan`.
+

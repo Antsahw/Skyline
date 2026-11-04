@@ -1971,9 +1971,6 @@ public final class HorizonClient {
         }
         var connection = minecraft.player != null ? minecraft.player.connection : null;
         if (connection == null) return;
-        // Xaero keeps the session of the client that joined last in a static and ends it at the
-        // next join (one client a game): each player's client keeps its own here.
-        clearStatic("xaero.common.core.XaeroMinimapCore", "currentSession");
         // The login's chunk radius (handleLogin sets it on a real client): mods map that far
         // (JourneyMap: getEffectiveRenderDistance, 1 chunk without it).
         minecraft.options.setServerRenderDistance(LOGIN_RADIUS);
@@ -2007,16 +2004,6 @@ public final class HorizonClient {
         } catch (Throwable t) {
             Natives.log("Horizon's client: no login packet for the client's join: " + t);
             return null;
-        }
-    }
-
-    private static void clearStatic(String owner, String name) {
-        try {
-            var f = Class.forName(owner, false, HorizonClient.class.getClassLoader()).getDeclaredField(name);
-            f.setAccessible(true);
-            f.set(null, null);
-        } catch (ReflectiveOperationException | LinkageError e) {
-            // Not loaded: nothing to clear.
         }
     }
 

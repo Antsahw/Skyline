@@ -103,39 +103,7 @@ public final class HorizonClientConfig {
         } catch (ReflectiveOperationException | RuntimeException e) {
             fail("Jade", e);
         }
-        // JourneyMap: its properties objects (JourneymapClient's fields). On disk a guest's
-        // aren't saved (mixin.mods.JourneyMapPropertiesMixin): its files aren't under config/.
-        try {
-            Class<?> jm = Class.forName("journeymap.client.JourneymapClient", true, loader);
-            Object client = jm.getMethod("getInstance").invoke(null);
-            for (String name : JOURNEYMAP) {
-                Field f = jm.getDeclaredField(name);
-                f.setAccessible(true);
-                out.add(new Holder("journeymap:" + name, client, f));
-            }
-        } catch (ClassNotFoundException e) {
-            // No JourneyMap.
-        } catch (ReflectiveOperationException | RuntimeException e) {
-            fail("JourneyMap", e);
-        }
         return out;
-    }
-
-    private static final String[] JOURNEYMAP = {"coreProperties", "fullMapProperties", "miniMapProperties1",
-        "miniMapProperties2", "topoProperties", "webMapProperties", "renderingProperties", "waypointProperties"};
-
-    /**
-     * The player the client serves now isn't the one who owns config/ (the host): what they
-     * save goes elsewhere, or not to disk (JourneyMap's settings and waypoints).
-     */
-    public static boolean guestNow() {
-        UUID now = HorizonClientState.loaded();
-        return owner != null && now != null && !now.equals(owner);
-    }
-
-    /** The player the client serves now (null: nobody's yet). */
-    public static UUID playerNow() {
-        return HorizonClientState.loaded();
     }
 
     private static void staticField(List<Holder> out, ClassLoader loader, String className, String name) {

@@ -4,10 +4,6 @@
   "plugin": "dev.horizonlab.platform.mixin.mods.ModsPlugin",
   "compatibilityLevel": "JAVA_21",
   "mixins": [
-    "JourneyMapMiniMapMixin",
-    "JourneyMapFullscreenMixin",
-    "JourneyMapFilesMixin",
-    "JourneyMapPropertiesMixin",
     "ReiAsyncSearchMixin",
     "JeiConnectionMixin"
   ],
