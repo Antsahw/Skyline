@@ -229,6 +229,43 @@ impl Game<'_> {
         }
     }
 
+    /// A mouse button of the window while playing, for Java mods' key bindings set to it (TACZ's
+    /// shoot and aim) and mods' own button handlers (MouseHandler.onButton): sent as
+    /// `-100 - button` is bound ([`KEYS`]), released after it was sent down.
+    pub(super) fn java_bind_mouse(&mut self, button: winit::event::MouseButton, pressed: bool) {
+        use winit::event::MouseButton as B;
+        if self.java_binds.keys.is_empty() || self.remote.is_none() {
+            return;
+        }
+        // SDL's numbers, as 26.3's InputConstants.Type.MOUSE keys are (left 1, middle 2, right 3).
+        let number = match button {
+            B::Left => 1,
+            B::Middle => 2,
+            B::Right => 3,
+            B::Back => 4,
+            B::Forward => 5,
+            B::Other(n) => i32::from(n),
+        };
+        let code = -100 - number;
+        if !self.java_binds.keys.contains(&code) {
+            return;
+        }
+        let send = if pressed {
+            self.screen == Screen::Playing && self.java_binds.down.insert(code)
+        } else {
+            self.java_binds.down.remove(&code)
+        };
+        if send {
+            let data = json!({"kind": "bind", "mouse": number, "down": pressed})
+                .to_string()
+                .into_bytes();
+            self.send(S::CustomPayload(CustomPayload {
+                channel: INPUT.into(),
+                data,
+            }));
+        }
+    }
+
     /// A frame of the open window's mod screen ([`CHANNEL`]).
     pub(super) fn remote_java_screen(&mut self, data: &[u8]) {
         let Ok(frame) = serde_json::from_slice::<Value>(data) else {
@@ -786,10 +823,19 @@ impl Game<'_> {
         kept
     }
 
+    /// The Java image slot holding the image named `name`, with the image's size.
+    pub(super) fn java_image_slot(&self, name: &str) -> Option<(usize, u32, u32)> {
+        self.java_images
+            .slots
+            .iter()
+            .find(|s| s.0 == name)
+            .map(|s| (s.1, s.2, s.3))
+    }
+
     /// A mod's dynamic texture's pixels (`{"op":"image","name","width","height","rgba"}`):
     /// into an atlas slot (its own again, else a free one, else the least recently stored),
     /// shrunk to fit.
-    fn store_java_image(&mut self, o: &Value) {
+    pub(super) fn store_java_image(&mut self, o: &Value) {
         let (Some(name), Some(rgba)) = (
             o.get("name").and_then(Value::as_str),
             o.get("rgba")

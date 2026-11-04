@@ -8657,6 +8657,7 @@ impl Game<'_> {
     /// MouseHandler updates KeyMapping; handleKeybinds sends packets on a tick.
     pub(super) fn remote_mouse(&mut self, button: MouseButton, pressed: bool) -> Result<()> {
         use horizon_client::interaction_input::Button;
+        self.java_bind_mouse(button, pressed);
         let input = match button {
             MouseButton::Left => {
                 self.toggles

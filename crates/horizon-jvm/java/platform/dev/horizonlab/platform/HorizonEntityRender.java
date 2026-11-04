@@ -345,7 +345,7 @@ public final class HorizonEntityRender {
             if (FAILED.add("whole " + state.getBlock())) Natives.log("Java mods: " + state + "'s model in a world couldn't be read: " + t);
         }
         // Not kept until the models are loaded (the first ticks).
-        if (net.minecraft.client.Minecraft.getInstance().getModelManager() != null) WHOLE.put(state, result);
+        if (HorizonClient.modelsLoaded()) WHOLE.put(state, result);
         return result;
     }
 
@@ -377,7 +377,9 @@ public final class HorizonEntityRender {
             CameraRenderState camera = new CameraRenderState();
             camera.orientation = new org.joml.Quaternionf();
             camera.pos = net.minecraft.world.phys.Vec3.ZERO;
-            renderer.submit(state, new PoseStack(), collector(out), camera);
+            var c = collector(out);
+            renderer.submit(state, new PoseStack(), c, camera);
+            flush(c);
         } catch (Throwable t) {
             String key = BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(be.getType()) + " " + t;
             if (FAILURES.merge(key, 1, Integer::sum) == 1) {
@@ -629,6 +631,7 @@ public final class HorizonEntityRender {
         JsonArray keys = new JsonArray();
         for (var m : models) {
             if (m instanceof JsonObject mo && mo.has("key")) keys.add(mo.get("key"));
+            if (m instanceof JsonObject mo && mo.has("img")) keys.add(mo.get("img"));
         }
         return new Look(HorizonJson.write(o), keys.isEmpty() ? "" : HorizonJson.write(keys),
                 entity.getX(), entity.getY(), entity.getZ(), entity.getYRot(), entity.getXRot(), entity.getYHeadRot());
@@ -764,6 +767,24 @@ public final class HorizonEntityRender {
         return a;
     }
 
+    private static Boolean firstPersonHooked;
+
+    /** Whether mods' injections sit in FirstPersonHandsAndItemsRenderer's arm or hands drawing. */
+    private static boolean firstPersonHooked() {
+        if (firstPersonHooked == null) {
+            boolean any = false;
+            for (var m : net.minecraft.client.renderer.FirstPersonHandsAndItemsRenderer.class.getDeclaredMethods()) {
+                var merged = m.getAnnotation(org.spongepowered.asm.mixin.transformer.meta.MixinMerged.class);
+                if (merged != null && !merged.mixin().startsWith("dev.horizonlab.") && !merged.mixin().startsWith("net.fabricmc.")) {
+                    any = true;
+                    break;
+                }
+            }
+            firstPersonHooked = any;
+        }
+        return firstPersonHooked;
+    }
+
     /** First person: vanilla's renderer of the hands, whose arm submits mods hook (Carry On). */
     private static net.minecraft.client.renderer.FirstPersonHandsAndItemsRenderer hands;
     private static java.lang.reflect.Method submitArm;
@@ -783,7 +804,9 @@ public final class HorizonEntityRender {
             var a = avatar(p);
             var dispatcher = context().getEntityRenderDispatcher();
             if (!(dispatcher.getRenderer(a) instanceof net.minecraft.client.renderer.entity.LivingEntityRenderer renderer)) return null;
-            if (!modLayers(renderer) && !modelPartsPatched()) return null;
+            // Mods that draw the first-person arm or its item themselves (TACZ's guns, at
+            // submitArmWithItem's head) need its drawing whether or not they add layers.
+            if (!modLayers(renderer) && !modelPartsPatched() && !firstPersonHooked()) return null;
             JsonArray out = new JsonArray();
             JsonArray held = new JsonArray();
             EntityRenderState[] made = new EntityRenderState[1];
@@ -799,7 +822,9 @@ public final class HorizonEntityRender {
                 camera.pos = net.minecraft.world.phys.Vec3.ZERO;
                 capturePlayer = modelPartsPatched();
                 playerSubmit = null;
-                renderer.submit(made[0], pose, collector(out), camera);
+                var c = collector(out);
+                renderer.submit(made[0], pose, c, camera);
+                flush(c);
             } finally {
                 onlyMods = false;
                 capturePlayer = false;
@@ -819,7 +844,10 @@ public final class HorizonEntityRender {
             e.append(",\"owner\":");
             HorizonJson.string(p.getStringUUID(), e);
             JsonArray keys = new JsonArray();
-            for (var m : out) if (m instanceof JsonObject mo && mo.has("key")) keys.add(mo.get("key"));
+            for (var m : out) {
+                if (m instanceof JsonObject mo && mo.has("key")) keys.add(mo.get("key"));
+                if (m instanceof JsonObject mo && mo.has("img")) keys.add(mo.get("img"));
+            }
             if (!keys.isEmpty()) e.append(",\"keys\":").append(HorizonJson.write(keys));
             JsonObject o = new JsonObject();
             o.addProperty("id", id);
@@ -1011,9 +1039,13 @@ public final class HorizonEntityRender {
             firstPerson = true;
             handStack = stack;
             vanillaHand = false;
+            var c = collector(out);
             try {
-                HorizonClient.as(p, () -> submitArm.invoke(hands, level, fp, PARTIAL_TICK, a.getXRot(), hand, 0.0F, stack, 0.0F,
-                        new PoseStack(), collector(out), 0xF000F0));
+                HorizonClient.as(p, () -> {
+                    submitArm.invoke(hands, level, fp, PARTIAL_TICK, a.getXRot(), hand, 0.0F, stack, 0.0F,
+                            new PoseStack(), c, 0xF000F0);
+                    flush(c);
+                });
             } finally {
                 firstPerson = false;
                 handStack = null;
@@ -1026,6 +1058,13 @@ public final class HorizonEntityRender {
         JsonObject o = new JsonObject();
         o.add("models", out);
         if (!held.isEmpty()) o.add("items", held);
+        // The trees and textures its models use, which the server sends that player's game.
+        JsonArray keys = new JsonArray();
+        for (var m : out) {
+            if (m instanceof JsonObject mo && mo.has("key")) keys.add(mo.get("key"));
+            if (m instanceof JsonObject mo && mo.has("img")) keys.add(mo.get("img"));
+        }
+        if (!keys.isEmpty()) o.add("keys", keys);
         JsonArray h = new JsonArray();
         h.add(hide[0]);
         h.add(hide[1]);
@@ -1206,7 +1245,9 @@ public final class HorizonEntityRender {
             CameraRenderState camera = new CameraRenderState();
             camera.orientation = new org.joml.Quaternionf();
             camera.pos = net.minecraft.world.phys.Vec3.ZERO;
-            renderer.submit(state, pose, collector(out), camera);
+            var c = collector(out);
+            renderer.submit(state, pose, c, camera);
+            flush(c);
         } catch (Throwable t) {
             String key = BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()) + " " + t;
             if (FAILURES.merge(key, 1, Integer::sum) == 1) {
@@ -1224,7 +1265,27 @@ public final class HorizonEntityRender {
      * (GeckoLib's models: {@code submitCustomGeometry}, vertices written by the renderer).
      * Flames, leashes and the rest are not kept yet.
      */
+    /** The recording collector's custom geometry waiting for its submission's end. */
+    interface Deferred {
+        void flush() throws Throwable;
+    }
+
+    @FunctionalInterface
+    private interface Pending {
+        void run() throws ReflectiveOperationException;
+    }
+
+    /** Runs the custom geometry renderers a recording collector was given (collector). */
+    private static void flush(SubmitNodeCollector collector) {
+        try {
+            ((Deferred) collector).flush();
+        } catch (Throwable t) {
+            if (FAILED.add("flush " + t.getClass().getName())) Natives.log("Java mods: a renderer's custom geometry couldn't be read: " + t);
+        }
+    }
+
     private static SubmitNodeCollector collector(JsonArray out) {
+        List<Pending> pending = new java.util.ArrayList<>();
         InvocationHandler handler = new InvocationHandler() {
             @Override
             public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
@@ -1252,7 +1313,22 @@ public final class HorizonEntityRender {
                     }
                     case "submitCustomGeometry" -> {
                         if (!kept(null)) return null;
-                        mesh(out, (PoseStack) args[0], (RenderType) args[1], (SubmitNodeCollector.CustomGeometryRenderer) args[2]);
+                        // Run when the submission ends (flush), as vanilla's feature dispatcher
+                        // draws it after the submits: TACZ's buffer source submits first and
+                        // writes its guns' vertices after.
+                        PoseStack copy = new PoseStack();
+                        copy.last().pose().set(((PoseStack) args[0]).last().pose());
+                        copy.last().normal().set(((PoseStack) args[0]).last().normal());
+                        RenderType type = (RenderType) args[1];
+                        var renderer = (SubmitNodeCollector.CustomGeometryRenderer) args[2];
+                        pending.add(() -> mesh(out, copy, type, renderer));
+                        return null;
+                    }
+                    case "flush" -> {
+                        var now = new java.util.ArrayList<>(pending);
+                        pending.clear();
+                        for (var run : now) run.run();
+                        return null;
                     }
                     // Vanilla's (pose, render type, parts, tints, ...) and Fabric's (pose, render
                     // types, translucent, parts, mesh, tints, ...), whose default drops the mesh.
@@ -1286,7 +1362,7 @@ public final class HorizonEntityRender {
             }
         };
         return (SubmitNodeCollector) Proxy.newProxyInstance(HorizonEntityRender.class.getClassLoader(),
-                new Class<?>[] {SubmitNodeCollector.class}, handler);
+                new Class<?>[] {SubmitNodeCollector.class, Deferred.class}, handler);
     }
 
     /** One submitted model: posed as ModelFeatureRenderer does (setupAnim), then kept. */
@@ -1308,6 +1384,8 @@ public final class HorizonEntityRender {
         JsonObject o = new JsonObject();
         o.addProperty("key", key);
         o.addProperty("tex", texture);
+        String image = imageKey(texture);
+        if (image != null) o.addProperty("img", image);
         JsonArray matrix = new JsonArray();
         float[] m = new float[16];
         pose.last().pose().get(m);
@@ -1349,6 +1427,8 @@ public final class HorizonEntityRender {
         }
         JsonObject o = new JsonObject();
         o.addProperty("tex", texture);
+        String image = imageKey(texture);
+        if (image != null) o.addProperty("img", image);
         o.addProperty("overlay", recorder.overlay);
         if (glows(type)) o.addProperty("glow", true);
         // Written as text at once (thousands of numbers: a JsonArray boxed each).
@@ -1365,6 +1445,76 @@ public final class HorizonEntityRender {
         v.append(']');
         o.add("v", new HorizonJson.Raw(v.toString()));
         out.add(o);
+    }
+
+    /** Each texture's image key ({@code img:<texture>}), or "" when Horizon's atlas has it. */
+    private static final Map<String, String> IMAGE_KEYS = new ConcurrentHashMap<>();
+
+    /**
+     * The key of a texture's pixels for Horizon (sent once to each game as an {@code img:}
+     * tree, kept in a Java image slot), or null when Horizon's GUI atlas packs the texture
+     * itself: vanilla's, and the mods' jars' {@code textures/entity}, {@code block},
+     * {@code gui}, {@code particle}, {@code hud} and top-level textures (hud.rs). Others are read
+     * from the client's resources: textures a mod's own resource packs hold (TACZ's gun packs,
+     * read at run time), or a jar's other folders.
+     */
+    static String imageKey(String texture) {
+        String known = IMAGE_KEYS.get(texture);
+        if (known != null) return known.isEmpty() ? null : known;
+        String key = null;
+        try {
+            key = image(texture);
+        } catch (Throwable t) {
+            if (FAILED.add("image " + texture)) Natives.log("Java mods: the texture " + texture + " couldn't be read: " + t);
+        }
+        IMAGE_KEYS.put(texture, key == null ? "" : key);
+        return key;
+    }
+
+    private static String image(String texture) throws java.io.IOException {
+        var id = net.minecraft.resources.Identifier.tryParse(texture);
+        if (id == null || id.getNamespace().equals("minecraft") || !id.getPath().endsWith(".png")) return null;
+        String path = id.getPath();
+        String file = "assets/" + id.getNamespace() + "/" + path;
+        boolean packed = path.matches("textures/(entity|block|gui|particle|hud)/.*|textures/[^/]+\\.png");
+        var loader = HorizonEntityRender.class.getClassLoader();
+        if (packed && loader.getResource(file) != null) return null;
+        java.awt.image.BufferedImage image = null;
+        try (var in = loader.getResourceAsStream(file)) {
+            if (in != null) image = javax.imageio.ImageIO.read(in);
+        }
+        var resources = net.minecraft.client.Minecraft.getInstance().getResourceManager();
+        if (image == null && resources != null) {
+            var found = resources.getResource(id);
+            if (found.isPresent()) {
+                try (var in = found.get().open()) {
+                    image = javax.imageio.ImageIO.read(in);
+                }
+            }
+        }
+        if (image == null) return null;
+        int w = image.getWidth(), h = image.getHeight();
+        byte[] rgba = new byte[w * h * 4];
+        int i = 0;
+        for (int y = 0; y < h; y++) {
+            for (int x = 0; x < w; x++) {
+                int argb = image.getRGB(x, y);
+                rgba[i++] = (byte) (argb >> 16);
+                rgba[i++] = (byte) (argb >> 8);
+                rgba[i++] = (byte) argb;
+                rgba[i++] = (byte) (argb >>> 24);
+            }
+        }
+        JsonObject o = new JsonObject();
+        o.addProperty("width", w);
+        o.addProperty("height", h);
+        o.addProperty("rgba", java.util.Base64.getEncoder().encodeToString(rgba));
+        String key = "img:" + texture;
+        synchronized (NEW_TREES) {
+            NEW_TREES.put(key, o);
+        }
+        Natives.log("Java mods: " + texture + " (" + w + "x" + h + ") is sent to the players' games (Horizon's atlas hasn't it)");
+        return key;
     }
 
     /** Atlas UVs found to sprites (atlasMesh): by atlas and the quad's middle, to 1/65536. */
