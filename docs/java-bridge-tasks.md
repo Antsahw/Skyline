@@ -52,7 +52,10 @@ both are fixed. The user's decision: **players play only through Horizon's launc
    downloaded (Java runtime, server jar) before that sign-in; the server jar comes from the
    player's own install where possible. Developers' headless runs (`horizon-ctl`, regress) stay
    as Ludovic's own harnesses run.
-2. **No code tied to other mods' internals (one or two chats, `bridge-generic-N`).** Every
+2. ~~**No code tied to other mods' internals (one or two chats, `bridge-generic-N`).**~~ Done
+   2026-11-04 (`bridge-generic-maps`, `-ui`, `-entities`; merge-batch11). `regress.py` now fails
+   when a mod's package is in the bridge's code (`nomodcode`, java-bridge.md "The regression
+   run"); Mod Menu's API is the one allowed (ask Ludovic if that's fine). Was: Every
    mixin and reflection into a specific mod (JourneyMap's four mixins, Xaero's, VoxelMap, Better
    Combat, REI, JEI, Jade, Architectury, GeckoLib, Create...: `git grep -l` the mod ids in
    `crates/horizon-jvm`, `crates/horizon-client`) is replaced by a generic fix in the bridge (do
@@ -1736,3 +1739,24 @@ Jars (Modrinth, 26.3 Fabric): FallingTree 26.3-25, WorldEdit 7.4.6, Biomes O' Pl
   first chunks generate, and sheep eating grass play `grass` breaks (vanilla's 2001 too).
 Test: `regress.py --java-only --jars <folder with Chunky*, fabric-api*> breaksound chunky`.
 
+### Merge batch 11 (2026-11-04, boss; Claude for iaxivers)
+
+Merged: launcher-only, generic-maps, generic-ui, generic-entities, survey-1, gpu-13,
+neoforge-research, 112-research, client-13, replay-1, mixins-10, voice-1, entities-10, trello-1,
+crash-1. Conflicts: README's status table (batch 10's rows, launcher-only's launcher row);
+generic-maps and generic-ui each emptied the per-mod lists (`HorizonClientConfig.holders`,
+`HorizonClientState.FIELDS`, `ModsPlugin`, the mods mixin config: all empty now);
+client-13's move/drag throttle and entities-10's `as()` without `HorizonRecipeViewer`;
+replay-1's `fireMergedSkipping` on mixins' `Result`-returning `fireMerged`; entities-10's
+ChunkMap `getPlayers`/`isChunkTracked` beside `readChunk` (one `level` shadow); NeoForge's start
+used the game's Java download launcher-only removed: `find_java_home` now.
+New: `regress.py` fails when a mod's package root is in the bridge's code (`nomodcode`, every
+run; `--code-check` alone). Allowed: Mod Menu's API only.
+Regress (2 cores, llvmpipe), 39 cases: pass `nomodcode server pot placed create createmachines
+contraption createitems scaffold cloth join-lan join-server replaymod flashback breaksound
+chunky maps journeymap voxelmap xaeroplus worldmap-lazy minihud litematica maps-server rei jei
+pot-jei hud modsettings join skinlayers attack gecko kinetic worldgen`. Fail as their chats
+reported: `rei-lan` (per-player REI), `maps-lan` (per-player maps), `bettercombat`.
+`maps-server` failed in the long run (the player's client still loading) and passed alone.
+`reiscreen` fails here also on generic-ui's own tip (REI's search bar, no list): this box, or
+a flake; run it on the PC. Not run: TACZ (entities-10, no jar here).

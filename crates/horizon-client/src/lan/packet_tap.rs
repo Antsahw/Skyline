@@ -115,7 +115,10 @@ mod tests {
         assert!(take().is_none(), "undecided keeps, gives nothing yet");
         want(true);
         keep(b"b");
-        assert_eq!(take(), Some((7, vec![Vec::new(), b"a".to_vec(), b"b".to_vec()])));
+        assert_eq!(
+            take(),
+            Some((7, vec![Vec::new(), b"a".to_vec(), b"b".to_vec()]))
+        );
         assert!(take().is_none(), "taken once");
         begin(9);
         keep(b"c");

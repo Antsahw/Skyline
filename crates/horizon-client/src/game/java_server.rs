@@ -1617,7 +1617,11 @@ mod run {
                     .map(|h| h.keys)
                     .unwrap_or_default();
                 let hand_keys: Vec<&str> = hand_keys.iter().map(String::as_str).collect();
-                for keys in entries.iter().map(|e| &e.keys).chain(std::iter::once(&hand_keys)) {
+                for keys in entries
+                    .iter()
+                    .map(|e| &e.keys)
+                    .chain(std::iter::once(&hand_keys))
+                {
                     for key in keys {
                         if have.insert((*key).to_owned())
                             && let Some(tree) = sent.trees.get(*key)
@@ -1675,7 +1679,8 @@ mod run {
             for g in &host.hub.guests {
                 let entities = near(&g.dimension, g.position);
                 // (What mods draw in its first person counts: a gun held with no mod entity near.)
-                let drawn = !entities.is_empty() || hands.contains_key(uuid_string(g.uuid).as_str());
+                let drawn =
+                    !entities.is_empty() || hands.contains_key(uuid_string(g.uuid).as_str());
                 if !drawn && !sent.showing.contains(&g.conn) {
                     continue;
                 }

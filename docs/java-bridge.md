@@ -2281,7 +2281,18 @@ python3 tools/java_bridge/regress.py --jars ~/hz-test/jars             # all (~1
 python3 tools/java_bridge/regress.py --jars ~/hz-test/jars pot rei     # some
 python3 tools/java_bridge/regress.py --java-only --jars …             # after a Java-only change
 python3 tools/java_bridge/regress.py --list
+python3 tools/java_bridge/regress.py --code-check --jars …            # only the check below
 ```
+
+**No mod's packages in the bridge's code** (`nomodcode`, Ludovic's second condition): every
+run starts by looking through the bridge's code (`crates/horizon-jvm` without its test fixtures,
+the game's `java_*.rs`) for a mod's package root (`me.shedaniel`, `journeymap`, `com.simibubi`)
+outside comments, in strings too (`Class.forName`, mixin targets, `"xaero/common/…"`). One found
+fails the run. The roots: `KNOWN_PACKAGES` in regress.py, plus every jar in `--jars`/`--pack`
+(its `fabric.mod.json` entrypoints and mixin packages, nested jars too). A mod's public API the
+bridge stands in for when the mod isn't there goes in `ALLOWED_APIS` with a reason (today only
+Mod Menu's `com.terraformersmc.modmenu.api`, as the bridge stands in for Fabric API). A comment
+may name a mod; code may not: do it the vanilla way, for every mod.
 
 `--jars` is one folder of Modrinth jars (Farmer's Delight, Tom's Storage, Jade, AppleSkin, REI
 with Architectury and Cloth Config, Biomes O' Plenty with TerraBlender and GlitchCore, One

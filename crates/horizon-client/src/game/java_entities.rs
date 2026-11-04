@@ -640,15 +640,7 @@ impl Game<'_> {
     ) {
         if let Some(h) = &self.java_entities.hands {
             self.draw_look(
-                -1,
-                &h.models,
-                &h.meshes,
-                &h.items,
-                None,
-                to_world,
-                packed,
-                1.0,
-                out,
+                -1, &h.models, &h.meshes, &h.items, None, to_world, packed, 1.0, out,
             );
         }
     }

@@ -1017,10 +1017,11 @@ fn shape_state(by_key: &HashMap<String, u32>, name: &str) -> Option<u32> {
         .filter_map(|(k, &id)| {
             let pairs = k.strip_prefix(&prefix)?.strip_suffix(']')?;
             let pairs: Vec<&str> = pairs.split(',').filter(|p| !p.is_empty()).collect();
-            pairs
-                .iter()
-                .all(|p| named.contains(p))
-                .then_some((pairs.len(), std::cmp::Reverse(id), id))
+            pairs.iter().all(|p| named.contains(p)).then_some((
+                pairs.len(),
+                std::cmp::Reverse(id),
+                id,
+            ))
         })
         .max()
         .map(|(_, _, id)| id)
@@ -3151,8 +3152,14 @@ mod shape_state_tests {
     #[test]
     fn a_mods_extra_vanilla_property_falls_back_to_the_vanilla_state() {
         let by_key: HashMap<String, u32> = [
-            ("minecraft:acacia_leaves[distance=1,persistent=false,waterlogged=false]", 7),
-            ("minecraft:acacia_leaves[distance=2,persistent=false,waterlogged=false]", 8),
+            (
+                "minecraft:acacia_leaves[distance=1,persistent=false,waterlogged=false]",
+                7,
+            ),
+            (
+                "minecraft:acacia_leaves[distance=2,persistent=false,waterlogged=false]",
+                8,
+            ),
             ("minecraft:stone[]", 1),
         ]
         .into_iter()

@@ -1532,6 +1532,152 @@ def test_pack(folder):
                                         'incompatibleResourcePacks:[]\n')
 
 
+# ---- No code tied to mods' internals ---------------------------------------------------------
+# Ludovic's condition (2026-11-04): the bridge's code names no mod's classes. A mod's package
+# root (`me.shedaniel`, `journeymap`) in the bridge's code, outside comments, fails the run.
+# Roots come from KNOWN_PACKAGES and from every jar in --jars/--pack (their fabric.mod.json
+# entrypoints and mixin configs, nested jars too).
+
+# Mods tested so far (so the check works with no jars at hand).
+KNOWN_PACKAGES = [
+    "me.shedaniel", "mezz.jei", "snownee", "squeek", "dev.architectury", "journeymap", "xaero",
+    "xaeroplus", "com.mamiyaotaru", "fi.dy.masa", "com.simibubi", "vectorwing", "com.tom",
+    "dan200.computercraft", "mcjty", "com.zurrtum", "dev.tr7zw", "net.bettercombat",
+    "com.zigythebird", "dev.kosmx", "software.bernie", "biomesoplenty", "terrablender",
+    "glitchcore", "com.replaymod", "com.moulberry.flashback", "org.popcraft.chunky",
+    "dev.emi.trinkets", "com.tacz", "de.maxhenkel.voicechat", "com.unascribed",
+    "tschipp.carryon", "sereneseasons", "com.blamejared.clumps", "com.direwolf20",
+    "dev.lambdaurora", "com.terraformersmc", "net.puffish", "io.github.lgatodu47",
+]
+# Not mods: the platform the bridge implements, and its own code.
+PLATFORM_PACKAGES = ("net.minecraft", "com.mojang", "net.fabricmc", "org.spongepowered",
+                     "com.llamalad7", "net.neoforged", "dev.horizonlab", "java", "javax", "jdk",
+                     "sun", "kotlin", "org.jetbrains", "com.google", "org.apache", "it.unimi",
+                     "org.joml", "io.netty", "org.slf4j", "org.lwjgl", "org.objectweb")
+# Mods' public APIs the bridge stands in for when the mod isn't installed (as it does for Fabric
+# API): the API, never the mod's internals. Each needs a reason.
+ALLOWED_APIS = {
+    "com.terraformersmc.modmenu.api": "mods hand their settings screens to Mod Menu's API; Horizon's Mods page reads them",
+}
+TLDS = {"com", "net", "org", "dev", "io", "me", "de", "fi", "xyz", "uk", "ca", "top", "cn", "ru",
+        "it", "nl", "fr", "jp", "br", "pl", "se", "no", "eu", "us", "gg", "info", "tech", "earth",
+        "ml", "cc", "co", "tk", "at", "ch", "be", "dk", "au", "kr", "tw", "pro", "moe", "lol", "work"}
+# The bridge's code: the JVM crate (not its test fixtures) and the game's java_* files.
+BRIDGE_CODE = ["crates/horizon-jvm/src", "crates/horizon-jvm/build.rs", "crates/horizon-jvm/java/dev",
+               "crates/horizon-jvm/java/platform", "crates/horizon-jvm/java/neoforge",
+               "crates/horizon-client/src/**/java_*.rs", "crates/horizon-client-render/src/**/java_*.rs"]
+
+
+def package_root(name):
+    """`me.shedaniel.rei.Foo` -> `me.shedaniel`; `journeymap.client.X` -> `journeymap`;
+    `io.github.someone.mod.X` -> `io.github.someone`."""
+    parts = [p for p in re.split(r"[./$:]", name) if p]
+    if len(parts) < 2:
+        return None
+    n = 1
+    if parts[0] in TLDS:
+        n = 3 if parts[1] in ("github", "gitlab", "codeberg") else 2
+    if len(parts) <= n:  # a bare class in the root: keep what there is
+        n = len(parts) - 1
+    return ".".join(parts[:n]) if n else None
+
+
+def jar_packages(jar):
+    """Package roots of a mod jar's own code (entrypoints, mixin packages), nested jars too."""
+    import io
+    import zipfile
+    roots = set()
+
+    def walk(z):
+        names = set(z.namelist())
+        try:
+            meta = json.loads(z.read("fabric.mod.json").decode("utf-8", "replace"), strict=False)
+        except (KeyError, ValueError):
+            meta = {}
+        for points in (meta.get("entrypoints") or {}).values():
+            for p in points if isinstance(points, list) else [points]:
+                value = p.get("value") if isinstance(p, dict) else p
+                if isinstance(value, str):
+                    roots.add(package_root(value.split("::")[0]))
+        for m in meta.get("mixins") or []:
+            cfg = m.get("config") if isinstance(m, dict) else m
+            if isinstance(cfg, str) and cfg in names:
+                try:
+                    pkg = json.loads(z.read(cfg).decode("utf-8", "replace"), strict=False).get("package")
+                except ValueError:
+                    pkg = None
+                if pkg:
+                    roots.add(package_root(pkg + ".X"))
+        for n in names:
+            if n.startswith("META-INF/jars/") and n.endswith(".jar"):
+                try:
+                    walk(zipfile.ZipFile(io.BytesIO(z.read(n))))
+                except zipfile.BadZipFile:
+                    pass
+
+    try:
+        walk(zipfile.ZipFile(jar))
+    except (zipfile.BadZipFile, OSError):
+        pass
+    return {r for r in roots if r and not any(r == p or r.startswith(p + ".") for p in PLATFORM_PACKAGES)}
+
+
+def strip_comments(text):
+    """Java/Rust source without its comments (strings kept)."""
+    out, i, n = [], 0, len(text)
+    while i < n:
+        c = text[i]
+        if text.startswith("//", i):
+            j = text.find("\n", i)
+            i = n if j < 0 else j
+        elif text.startswith("/*", i):
+            j = text.find("*/", i + 2)
+            out.append("\n" * text.count("\n", i, n if j < 0 else j))  # keep line numbers
+            i = n if j < 0 else j + 2
+        elif c == '"':
+            j = i + 1
+            while j < n and text[j] != '"':
+                j += 2 if text[j] == "\\" else 1
+            out.append(text[i:j + 1])
+            i = j + 1
+        elif c == "'" and re.match(r"'(\\.|[^\\'\n])'", text[i:i + 4]):  # a char literal ('"')
+            m = re.match(r"'(\\.|[^\\'\n])'", text[i:i + 4])
+            out.append(m.group(0))
+            i += len(m.group(0))
+        else:
+            out.append(c)
+            i += 1
+    return "".join(out)
+
+
+def mod_code_check(jar_folders):
+    """(ok, lines): every place the bridge's code names a mod's package, outside comments."""
+    roots = set(KNOWN_PACKAGES)
+    for folder in jar_folders:
+        for jar in sorted(Path(folder).glob("*.jar")) if folder else []:
+            roots |= jar_packages(jar)
+    pattern = re.compile(r"(?<![\w.$/])(" + "|".join(
+        re.escape(r).replace(r"\.", "[./]") for r in sorted(roots, key=len, reverse=True)) + r")[./][A-Za-z_][\w./$]*")
+    files = set()
+    for spec in BRIDGE_CODE:
+        for p in ROOT.glob(spec):
+            files |= {p} if p.is_file() else {f for f in p.rglob("*") if f.is_file()}
+    hits = []
+    for f in sorted(files):
+        if f.suffix not in (".java", ".rs", ".json", ".kt", ".txt", ".cfg", ".properties"):
+            continue
+        text = f.read_text(errors="replace")
+        code = strip_comments(text) if f.suffix in (".java", ".rs", ".kt") else text
+        for no, line in enumerate(code.splitlines(), 1):
+            for m in pattern.finditer(line):
+                full = m.group(0).replace("/", ".")
+                if any(full == a or full.startswith(a + ".") for a in ALLOWED_APIS):
+                    continue
+                hits.append(f"{f.relative_to(ROOT)}:{no}: {m.group(1)}: {line.strip()[:140]}")
+                break
+    return not hits, hits, len(roots)
+
+
 def find_jars(folder, names):
     """The jar of each name in `folder`; None when one is missing."""
     found = []
@@ -1689,6 +1835,8 @@ def main():
     ap.add_argument("--out", default="/tmp/hz-regress")
     ap.add_argument("--java-only", action="store_true", help="rebuild only the Java side (java.sh)")
     ap.add_argument("--list", action="store_true")
+    ap.add_argument("--code-check", action="store_true",
+                    help="only check that the bridge's code names no mod's packages (no game run)")
     a = ap.parse_args()
     if a.list:
         for name, case in CASES.items():
@@ -1702,8 +1850,15 @@ def main():
     out_root.mkdir(parents=True, exist_ok=True)
     fixtures = out_root / "fixtures"
     fixtures.mkdir(exist_ok=True)
+    ok, hits, roots = mod_code_check([a.jars, a.pack])
+    print(f"---- nomodcode: the bridge's code names no mod's packages ({roots} package roots)")
+    for h in hits:
+        print(f"  FAIL {h}")
+    if a.code_check:
+        print("nomodcode:" + ("pass" if ok else "FAIL"))
+        return 0 if ok else 1
     extra_env = build(a.java_only)
-    summary = []
+    summary = [("nomodcode", ok)]
     for name in names:
         case = CASES[name]
         out = out_root / name

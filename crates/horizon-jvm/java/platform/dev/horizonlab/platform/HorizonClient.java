@@ -2231,7 +2231,10 @@ public final class HorizonClient {
         }
     }
 
-    /** The mods' injections into one of the connection's packet handlers, given the packet. */
+    /**
+     * The mods' injections into one of the connection's packet handlers, given the packet, in
+     * the order the handler's body reaches them: its HEAD's first, its RETURN's last.
+     */
     private static void fireConnection(net.minecraft.client.multiplayer.ClientPacketListener connection, Class<?> packet,
                                        Object value, String method) {
         var methods = new java.util.ArrayList<>(java.util.List.of(net.minecraft.client.multiplayer.ClientPacketListener.class.getDeclaredMethods()));

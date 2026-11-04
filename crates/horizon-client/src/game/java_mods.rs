@@ -354,7 +354,7 @@ fn start_once(root: &Path, dir: &Path, jars: Vec<PathBuf>, side: horizon_jvm::Si
     let started = std::time::Instant::now();
     let work = root.join(".local/bridge");
     if let Some(install) = neoforge_install() {
-        return start_neoforge(root, &work, &install, &jars, started);
+        return start_neoforge(&work, &install, &jars, started);
     }
     let fabric = fabric(root, dir, &work, &jars, side);
     let fabric = match fabric {
@@ -455,7 +455,6 @@ fn neoforge_install() -> Option<PathBuf> {
 /// NeoForge's start (prototype): FML's game folder is `.local/bridge/neoforge-game`, whose
 /// `mods/` holds copies of the jars in `mods-java/` and of the platform mod the setup built.
 fn start_neoforge(
-    root: &Path,
     work: &Path,
     install: &Path,
     jars: &[PathBuf],
@@ -478,23 +477,21 @@ fn start_neoforge(
         not_started(&format!("NeoForge's mods folder: {e}"));
         return false;
     }
-    let component = java_component(root);
-    let log = |line: String| log::info!("{line}");
-    let bridge =
-        match horizon_jvm::find_or_fetch_java_home(component.as_deref(), &log).and_then(|home| {
-            horizon_jvm::neoforge::start(&horizon_jvm::neoforge::NeoForge {
-                home,
-                work: work.to_path_buf(),
-                install: install.to_path_buf(),
-                game_dir: game_dir.clone(),
-            })
-        }) {
-            Ok(bridge) => bridge,
-            Err(e) => {
-                not_started(&format!("NeoForge: {e}"));
-                return false;
-            }
-        };
+    // The game downloads no Java (launcher only): the launcher's, or an installed JDK.
+    let bridge = match horizon_jvm::find_java_home().and_then(|home| {
+        horizon_jvm::neoforge::start(&horizon_jvm::neoforge::NeoForge {
+            home,
+            work: work.to_path_buf(),
+            install: install.to_path_buf(),
+            game_dir: game_dir.clone(),
+        })
+    }) {
+        Ok(bridge) => bridge,
+        Err(e) => {
+            not_started(&format!("NeoForge: {e}"));
+            return false;
+        }
+    };
     log::info!(
         "Java mods: JVM {} and NeoForge started in {} ms; loaded {}",
         bridge.java_version(),

@@ -34,7 +34,7 @@ Minecraft: Java Edition 26.3, rewritten in Rust. Same worlds, same rules, same t
 
 The Java bridge runs **real Fabric mods for 26.3** inside Horizon. **Horizon's world stays the real one:** Horizon (Rust) keeps running all of vanilla's logic (terrain, blocks, redstone, mobs, physics, the server, saving, rendering). A Java VM in the game's own process loads Fabric Loader and the real 26.3 jar and runs **only the mods' own code** (their mobs, machines, worldgen features, screens) against a mirror of Horizon's world, made lazily as mods read it; what the mods change is written back into Horizon's world. Without mod jars, Java never starts. The goal is big packs, SkyFactory-style, at Horizon's speed.
 
-**Status (2026-11-04):** an 81-jar pack (165 mods with the ones they bundle) plays on a real PC at about Horizon's own speed, and beta testers are playing their own packs on Linux and Windows. **Off by default:** Java mods only run when you turn on **"Fabric 26.3 mods (beta)"** for an instance in the launcher. Not released yet: build it yourself (below). Horizon's maintainer has asked for it upstream; it's being cleaned up for that first (launcher only, and no code tied to any one mod's internals).
+**Status (2026-11-04):** an 81-jar pack (165 mods with the ones they bundle) plays on a real PC at about Horizon's own speed, and beta testers are playing their own packs on Linux and Windows. **Off by default:** Java mods only run when you turn on **"Fabric 26.3 mods (beta)"** for an instance in the launcher. Not released yet: build it yourself (below). Horizon's maintainer has asked for it upstream; his two conditions are met (2026-11-04): launcher only, and no code tied to any one mod's internals (a regress check keeps it so).
 
 | Area | Status |
 |---|---|
@@ -52,7 +52,7 @@ The Java bridge runs **real Fabric mods for 26.3** inside Horizon. **Horizon's w
 | Multiplayer with mods | ✅ LAN and dedicated servers: each player's own maps, recipe viewers and mod settings |
 | The launcher | ✅ the only way to play: a **Fabric 26.3 mods (beta)** switch per instance and a **Java mods** tab (add, remove, which mods failed last game); fetches Java 25 after the Microsoft sign-in |
 | Renderer replacements (Sodium, Iris) | ➖ not needed: Horizon has its own renderer, so they have nothing to replace |
-| Known not working yet | 🐛 Cloth Config screens, Chat Heads, ReplayMod, Flashback, Simple Voice Chat, Chunky, TACZ, Better Combat; a block's break sound twice with some mods. Being worked on; testers track mods on [their Trello](https://trello.com/b/2uhi4jkj) |
+| Known not working yet | 🐛 Better Combat's attacks, Flashback's recording, Chat Heads' heads, Litematica's overlay in the world; on LAN and servers, each player's own REI/JEI search and filters and JourneyMap/VoxelMap state (gone with the mod-specific code). Testers track mods on [their Trello](https://trello.com/b/2uhi4jkj) |
 | Windows | ✅ builds and plays on Windows 11 (Windows support by [martipops](https://github.com/martipops)); macOS untested |
 
 How it works, the tick flow, 26.3 traps and the test tools: **[docs/java-bridge.md](docs/java-bridge.md)**. What each chat is fixing: [docs/java-bridge-tasks.md](docs/java-bridge-tasks.md).

@@ -16,7 +16,7 @@ import org.spongepowered.asm.mixin.extensibility.IMixinInfo;
  */
 public final class ModsPlugin implements IMixinConfigPlugin {
     /** Class (internal name) to its fields made non-final. */
-    static final Map<String, Set<String>> FIELDS = Map.of(
+    static final Map<String, Set<String>> FIELDS = Map.of();
 
     @Override
     public void onLoad(String mixinPackage) {}

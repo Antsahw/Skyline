@@ -250,3 +250,19 @@ upstream prep chat (launcher switch, then the shared-file hooks), and the reply 
   once (1) no offline play / no downloads before a Microsoft sign-in and (2) no code tied to other
   mods' internals. The user: launcher only, Prism and `horizon-play` go. Both queued first in
   java-bridge-tasks.md.
+
+## State after merge-batch11 (2026-11-04)
+
+- `java-bridge` = batch 11: Ludovic's two conditions done (launcher-only; generic-maps, -ui,
+  -entities), plus survey-1, gpu-13, neoforge-research, 112-research, client-13, replay-1,
+  mixins-10, voice-1, entities-10, trello-1, crash-1. Report and conflicts in
+  java-bridge-tasks.md ("Merge batch 11").
+- `regress.py` runs `nomodcode` first on every run (no mod's package in the bridge's code;
+  `--code-check` alone, no game). A worker who needs a mod's class fails it: do it the vanilla
+  way instead. Mod Menu's API is allowed (`ALLOWED_APIS`): ask Ludovic.
+- Traps: `setup_cloud.sh` from an older checkout builds `horizon-play`, which is gone: merge
+  first, then build. Two "keep both" merges that each emptied a list leave a dangling
+  `Map.of(`: compile Java (`java.sh`) before the long build. A leftover headless game after a
+  killed run eats 2.6 GB: the next build's rustc gets OOM-killed (`pgrep -x horizon-client`).
+  Never `pkill -f` a pattern that is in your own command line.
+
