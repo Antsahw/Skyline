@@ -15,6 +15,27 @@ use std::sync::{Arc, OnceLock};
 /// How long the first chunk waits for Java and Fabric to start (they start beside the world).
 const JAVA_START: std::time::Duration = std::time::Duration::from_secs(300);
 
+/// The Java mods' jars as data packs whose structure pieces Horizon's generator reads
+/// (templates, template pools, processor lists), lowest first in jar order: a mod replacing
+/// vanilla's templates (The Sift's ancient city centres) changes the structures Horizon
+/// generates as a data pack would. Fabric adds each mod's data as a pack below the world's.
+pub(super) fn mod_structure_packs() -> Vec<horizon_client::datapack::DataPack> {
+    let dir = super::Game::options_path().with_file_name(horizon_jvm::DIR);
+    horizon_jvm::jars(&dir)
+        .iter()
+        .filter_map(|jar| {
+            let name = jar.file_name()?.to_string_lossy();
+            match horizon_client::datapack::DataPack::archive(&format!("mod/{name}"), jar) {
+                Ok(pack) => Some(pack.structures_only()),
+                Err(e) => {
+                    log::warn!("Java mods: {name}'s data not read for structures: {e}");
+                    None
+                }
+            }
+        })
+        .collect()
+}
+
 /// What makes Horizon's generator over a world's data packs (`VanillaTerrain::for_world_with`),
 /// for far terrain with the mods' noise ([`NoiseLand`]).
 pub(super) struct NoiseWorld {

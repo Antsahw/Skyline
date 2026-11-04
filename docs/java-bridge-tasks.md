@@ -933,3 +933,21 @@ cut off and passed alone.
 - **worldgen 6.2, the quit through Java**: world quit 3 s (7 s writing the archive), title
   1.3 s, SIGTERM 3.4 s, SIGINT 2.4 s, SIGSEGV 9.4 s, dedicated `stop` 6.4 s: all end. Details
   in java-bridge.md.
+
+### Worldgen 7: mods' overrides of vanilla structure templates (2026-11-04, `bridge-worldgen-7`)
+
+Beta testers' bug: The Sift's ancient city centres were vanilla's in new worlds. Two causes:
+- Horizon's own structure code read templates only from the prepared vanilla data. Now data
+  packs' `structure/*.nbt` override them (world packs and the Java mods' jars; the jars give
+  Horizon's generator their templates, template pools and processor lists only).
+- None of The Sift's blocks loaded: its `ichorlogged` property on vanilla leaves made a
+  carried block's shape unknown and failed its content mod (pack area, `mod_content.rs`,
+  small: falls back to the vanilla state). So its sonorous deepslate came out as air.
+Regress `templates` (The Sift + Fabric API + GeckoLib): /locate an ancient city, go there,
+8 `the_sift:sonorous_deepslate` found at the centre (vanilla's centre has none); the
+overworld is Horizon's generator ("generates as vanilla's"). Unit tests in `overrides.rs`,
+`mod_content.rs`. Also: `research-lock.json` accepts Mojang's newest 26.3 JSON republish
+(same jars, asset index 331e5c8…). Not done: `/place template` from mods' data, mods' new
+structures/structure sets in Horizon's generator (a structures-only mod in an otherwise
+vanilla overworld still gets none).
+

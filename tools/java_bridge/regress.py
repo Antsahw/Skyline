@@ -83,6 +83,7 @@ MODS = {
     "ali": ["advancedlootinfo*"],
     "aci": ["advancedcoreinfo*"],
     "compressedblocks": ["compressedblocks*"],
+    "sift": ["mielon*the*sift*", "mielons-the-sift*"],
 }
 
 
@@ -382,6 +383,21 @@ CASES = {
                '$C command "summon experience_orb ~ ~0.5 ~ {Value:7}" >/dev/null; done; sleep 2; $C state > $S/state.json'],
         checks=[check_json("state.json", ["player", "xp", "total"], 42, "all six orbs' points (42)"),
                 check_log(r"experience_orbs(, \w+)* go to the mods", "orb pickup goes to the mods")],
+    ),
+    "templates": dict(
+        about="A mod's override of vanilla's structure templates (The Sift's ancient city centres) in the city Horizon generates",
+        mods=["sift", "fabric-api", "geckolib"], scene="none",
+        steps=['$C command "gamemode spectator" >/dev/null; $C command "locate structure minecraft:ancient_city" >/dev/null; '
+               'sleep 5; $C messages > $S/locate.json',
+               # "… is at [X, ~, Z]": the start's chunk, where the city centre is (start_height -27).
+               'xz=$(grep -o "at \\[-\\?[0-9]*, ~, -\\?[0-9]*\\]" $S/locate.json | tail -1 | tr -d "at[]~ " | tr "," " "); '
+               'set -- $xz; $C command "tp @s $1 -20 $2" >/dev/null; $C wait-for loaded --timeout 120 >/dev/null; sleep 15; '
+               '$C find-block the_sift:sonorous_deepslate 64 > $S/found.json; $C look-at $1 -40 $(($2 + 20)) >/dev/null'],
+        checks=[check_file("locate.json", r"ancient_city is at", "/locate found an ancient city"),
+                check_file("found.json", r"\"count\":([89]|[1-9][0-9]+)\b", "the city centre is The Sift's: its 8 sonorous deepslate")],
+        forbid=[r"panicked"],
+        look="the ancient city's centre, The Sift's frame",
+        timeout=900,
     ),
     "preset": dict(
         about="A mod's world type (One Block) picked in Create New World: its block, its gameplay",

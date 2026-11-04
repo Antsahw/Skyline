@@ -16,10 +16,12 @@ pub struct DataPack {
     /// `file/<name>` in `/datapack` and level.dat.
     pub id: String,
     source: Source,
+    /// The generator reads only its structures' files (`structures_only`).
+    structures_only: bool,
 }
 enum Source {
     Dir(PathBuf),
-    Zip(Box<Zip>),
+    Zip(std::sync::Arc<Zip>),
 }
 impl DataPack {
     /// Every file path under `prefix` (relative to the pack root).
@@ -116,6 +118,37 @@ impl DataPack {
         DataPack {
             id: id.into(),
             source: Source::Dir(dir.to_path_buf()),
+            structures_only: false,
+        }
+    }
+    /// A pack in an archive with `data/` at its root, under the id `id`: a
+    /// Fabric mod's jar, whose data the mod loader adds as a pack of its own
+    /// (no `pack.mcmeta` needed).
+    pub fn archive(id: &str, path: &Path) -> std::io::Result<Self> {
+        Ok(DataPack {
+            id: id.into(),
+            source: Source::Zip(std::sync::Arc::new(Zip::open(path)?)),
+            structures_only: false,
+        })
+    }
+    /// This pack with only its structures' files read by the generator:
+    /// templates, template pools and processor lists ([`STRUCTURE_FILES`]).
+    pub fn structures_only(mut self) -> Self {
+        self.structures_only = true;
+        self
+    }
+    /// How the generator reads this pack's files later (structure templates
+    /// are read when a structure places them).
+    fn reader(&self) -> overrides::PackReader {
+        match &self.source {
+            Source::Zip(z) => {
+                let z = z.clone();
+                std::sync::Arc::new(move |path: &str| z.read(path).ok())
+            }
+            Source::Dir(root) => {
+                let root = root.clone();
+                std::sync::Arc::new(move |path: &str| std::fs::read(root.join(path)).ok())
+            }
         }
     }
     /// The built-in `vanilla` pack: the game's own data directory.
@@ -123,6 +156,7 @@ impl DataPack {
         DataPack {
             id: "vanilla".into(),
             source: Source::Dir(root.to_path_buf()),
+            structures_only: false,
         }
     }
 }
@@ -143,6 +177,7 @@ pub fn discover_folder(dir: &Path) -> Vec<DataPack> {
             packs.push(DataPack {
                 id: format!("file/{name}"),
                 source: Source::Dir(path),
+                structures_only: false,
             });
         } else if name.ends_with(".zip")
             && let Ok(z) = Zip::open(&path)
@@ -150,7 +185,8 @@ pub fn discover_folder(dir: &Path) -> Vec<DataPack> {
         {
             packs.push(DataPack {
                 id: format!("file/{name}"),
-                source: Source::Zip(Box::new(z)),
+                source: Source::Zip(std::sync::Arc::new(z)),
+                structures_only: false,
             });
         }
     }
@@ -173,6 +209,7 @@ pub fn feature_packs(resources: &Path) -> Vec<DataPack> {
             packs.push(DataPack {
                 id: e.file_name().to_string_lossy().into_owned(),
                 source: Source::Dir(path),
+                structures_only: false,
             });
         }
     }
@@ -860,6 +897,19 @@ pub fn dimension_stems(packs: &[&DataPack]) -> BTreeMap<String, serde_json::Valu
 
 // ---- worldgen ----------------------------------------------------------------
 
+/// The folders of a pack's structure pieces, under `data/<ns>/`: what a
+/// structures-only pack gives the generator.
+pub const STRUCTURE_FILES: [&str; 3] = [
+    "structure/",
+    "worldgen/processor_list/",
+    "worldgen/template_pool/",
+];
+fn is_structure_file(file: &str) -> bool {
+    file.strip_prefix("data/")
+        .and_then(|r| r.split_once('/'))
+        .is_some_and(|(_, rest)| STRUCTURE_FILES.iter().any(|k| rest.starts_with(k)))
+}
+
 /// The worldgen entries of `packs` (lowest priority first, the built-in pack
 /// left out: the prepared bundles are it) for the chunk generator, and what
 /// it leaves out, for the log. `biomes` says which biomes the game has: a
@@ -872,7 +922,11 @@ pub fn worldgen_overrides(
     let mut not_read: BTreeMap<String, usize> = BTreeMap::new();
     let mut warnings = Vec::new();
     for pack in packs {
+        out.set_reader(&pack.id, pack.reader());
         for file in pack.list_kinds(&overrides::PACK_KINDS) {
+            if pack.structures_only && !is_structure_file(&file) {
+                continue;
+            }
             let read = || String::from_utf8(pack.read(&file)?).ok();
             match out.add_file(&pack.id, &file, read) {
                 PackFile::Read | PackFile::Other => {}

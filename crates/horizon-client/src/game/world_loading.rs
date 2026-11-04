@@ -604,11 +604,20 @@ fn worldgen_overrides_of(
 ) {
     let packs = horizon_client::datapack::discover_with_features(world_root, resources);
     let enabled = horizon_client::datapack::enabled_ids(world_root, &packs, enabled_features);
-    let enabled: Vec<_> = enabled
-        .iter()
-        .filter_map(|id| packs.iter().find(|p| &p.id == id))
-        .collect();
-    horizon_client::datapack::worldgen_overrides(&enabled, |b| biomes.contains(b))
+    let mut list: Vec<_> = Vec::new();
+    // The Java mods' data under the world's packs, as Fabric's mod packs sit below them:
+    // their structure templates, pools and processor lists (the rest of their worldgen
+    // runs on the Java side, java_worldgen.rs).
+    #[cfg(feature = "java-mods")]
+    let mods = super::java_worldgen::mod_structure_packs();
+    #[cfg(feature = "java-mods")]
+    list.extend(mods.iter());
+    list.extend(
+        enabled
+            .iter()
+            .filter_map(|id| packs.iter().find(|p| &p.id == id)),
+    );
+    horizon_client::datapack::worldgen_overrides(&list, |b| biomes.contains(b))
 }
 
 /// The shapes of the world's levels: their dimension types, the world's
