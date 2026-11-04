@@ -26,6 +26,7 @@ pub mod handoff;
 pub mod hub;
 mod io_pool;
 pub mod menu;
+pub mod packet_tap;
 pub mod playerdata;
 pub mod prediction;
 pub mod recipes;

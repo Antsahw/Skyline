@@ -726,6 +726,29 @@ fn contains(haystack: &[u8], needle: &[u8]) -> bool {
     haystack.windows(needle.len()).any(|w| w == needle)
 }
 
+/// `assets/<ns>/lang/<code>.json` for a legacy `assets/<ns>/lang/<code>.lang` (its code
+/// lowercased: `en_US.lang`).
+fn legacy_lang(name: &str) -> Option<String> {
+    let stem = name.strip_suffix(".lang")?;
+    let (dir, code) = stem.rsplit_once('/')?;
+    let parts: Vec<&str> = dir.split('/').collect();
+    (parts.len() == 3 && parts[0] == "assets" && parts[2] == "lang" && !code.is_empty())
+        .then(|| format!("{dir}/{}.json", code.to_ascii_lowercase()))
+}
+
+/// A `.lang` file's `key=value` lines (`#` comments, blank lines skipped) as a JSON object.
+fn lang_json(bytes: &[u8]) -> Vec<u8> {
+    let text = String::from_utf8_lossy(bytes);
+    let map: serde_json::Map<String, Value> = text
+        .lines()
+        .map(|l| l.trim_start_matches('\u{feff}'))
+        .filter(|l| !l.trim().is_empty() && !l.trim_start().starts_with('#'))
+        .filter_map(|l| l.split_once('='))
+        .map(|(k, v)| (k.to_owned(), Value::String(v.to_owned())))
+        .collect();
+    serde_json::to_vec_pretty(&Value::Object(map)).expect("strings serialize")
+}
+
 /// Why the game would refuse a file of the mod's own content, if it would.
 /// Vanilla skips such files one by one (an invalid resource path, a data
 /// file that does not parse); Horizon's content loader refuses the whole
@@ -896,9 +919,15 @@ pub fn carry(
     let owned: Vec<&str> = std::iter::once(id.as_str())
         .chain(report.namespaces.iter().map(String::as_str))
         .collect();
+    let names: BTreeSet<String> = zip.file_names().flatten().map(|n| n.into_owned()).collect();
     for i in 0..zip.len() {
         let mut entry = zip.by_index(i).map_err(|e| e.to_string())?;
         let name = entry.name().map_err(|e| e.to_string())?.into_owned();
+        // A legacy `.lang` file (`key=value` lines, the pre-1.13 format: ReplayMod keeps its
+        // translations so and makes JSON of them at runtime, in a resource pack of its own) is
+        // carried as the JSON vanilla reads, unless the jar has that JSON too.
+        let lang = legacy_lang(&name).filter(|json| !names.contains(json));
+        let name = lang.clone().unwrap_or(name);
         let Some(keep) = place(&name, &owned) else {
             continue;
         };
@@ -911,6 +940,9 @@ pub fn carry(
         entry
             .read_to_end(&mut bytes)
             .map_err(|e| format!("{name}: {e}"))?;
+        if lang.is_some() {
+            bytes = lang_json(&bytes);
+        }
         let unreadable = if keep {
             unreadable(&name, &mut bytes)
         } else {
@@ -1897,6 +1929,11 @@ mod tests {
                 "assets/gem/lang/de_de.json",
                 "\u{feff}{\"item.gem.gem\": \"Juwel\"}",
             ),
+            // A legacy one: carried as JSON.
+            (
+                "assets/gem/lang/fr_FR.lang",
+                "# comment\nitem.gem.gem=Gemme\n\ngem.chat=a=b\n",
+            ),
         ];
         for (name, text) in files {
             zip.start_file(*name, zip::write::SimpleFileOptions::default())
@@ -1925,7 +1962,7 @@ mod tests {
             &BTreeMap::new(),
         )
         .unwrap();
-        assert_eq!(report.copied, 16);
+        assert_eq!(report.copied, 17);
         let unreadable: Vec<&str> = report.unreadable.keys().map(String::as_str).collect();
         assert_eq!(
             unreadable,
@@ -1945,6 +1982,11 @@ mod tests {
         .unwrap();
         assert_eq!(replacing, json!({"replace": true, "values": []}));
         assert!(!out.join("carry/data/gem/tags/item/empty.json").exists());
+        let french: Value = serde_json::from_slice(
+            &fs::read(out.join("carry/assets/gem/lang/fr_fr.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(french, json!({"item.gem.gem": "Gemme", "gem.chat": "a=b"}));
         // A byte-order mark is dropped, the file kept.
         assert_eq!(
             fs::read(out.join("carry/assets/gem/lang/de_de.json")).unwrap()[0],

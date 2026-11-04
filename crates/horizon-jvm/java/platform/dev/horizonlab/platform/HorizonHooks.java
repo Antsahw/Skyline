@@ -638,6 +638,13 @@ public final class HorizonHooks {
         return point;
     }
 
+    /** "INVOKE target" for an injection at one INVOKE @At; else null. */
+    private static String invokePoint(Object at) {
+        List<?> ats = at instanceof List<?> l ? l : at == null ? List.of() : List.of(at);
+        if (ats.size() != 1 || !(ats.get(0) instanceof AnnotationNode node) || !"INVOKE".equals(get(node, "value"))) return null;
+        return get(node, "target") instanceof String target ? "INVOKE " + target : null;
+    }
+
     /** "name", "name(desc)", "Lowner;name(desc)" or "owner.name" as {name, desc or null}. */
     static String[] parseSpec(String spec) {
         String s = spec;
@@ -723,8 +730,12 @@ public final class HorizonHooks {
                 if (info == null || info.mixin().startsWith("dev.horizonlab.platform.")) continue;
                 for (String[] inject : mixinInjects(info.mixin())) {
                     if (!inject[0].equals(method) || !handlerNamed(m.getName(), inject[1])) continue;
+                    // An INVOKE point: the call named (a call the bridge makes in vanilla's place).
+                    boolean invoke = inject[2].startsWith("INVOKE ");
+                    if (invoke != at.startsWith("INVOKE ")) continue;
+                    if (invoke && !inject[2].contains(at.substring("INVOKE ".length()))) continue;
                     boolean head = "HEAD".equals(inject[2]);
-                    if (head != "HEAD".equals(at)) continue;
+                    if (!invoke && head != "HEAD".equals(at)) continue;
                     m.setAccessible(true);
                     found.add(m);
                     break;
@@ -751,6 +762,7 @@ public final class HorizonHooks {
                     for (AnnotationNode a : annotations(m.invisibleAnnotations, m.visibleAnnotations)) {
                         if (!"Lorg/spongepowered/asm/mixin/injection/Inject;".equals(a.desc)) continue;
                         String point = eventPoint(get(a, "at"));
+                        if (point == null) point = invokePoint(get(a, "at"));
                         if (point == null || !(get(a, "method") instanceof List<?> specs)) continue;
                         for (Object spec : specs) out.add(new String[] {parseSpec((String) spec)[0], m.name, point});
                     }
@@ -768,7 +780,13 @@ public final class HorizonHooks {
      * (zero), and a CallbackInfo. Failures are logged a few times each.
      */
     public static void fireMerged(Object self, Class<?> owner, String method, String at, Object... args) {
+        fireMergedSkipping(self, owner, method, at, false, args);
+    }
+
+    /** As {@link #fireMerged(Object, Class, String, String, Object...)}, Fabric API's own left out with {@code skipFabric}. */
+    public static void fireMergedSkipping(Object self, Class<?> owner, String method, String at, boolean skipFabric, Object... args) {
         for (Method handler : merged(owner, method, at)) {
+            if (skipFabric && handler.getAnnotation(MixinMerged.class).mixin().startsWith("net.fabricmc.")) continue;
             Class<?>[] params = handler.getParameterTypes();
             Object[] call = new Object[params.length];
             for (int i = 0; i < params.length; i++) {

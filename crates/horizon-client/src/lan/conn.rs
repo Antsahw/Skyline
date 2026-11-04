@@ -243,6 +243,9 @@ pub struct PlayerSender {
     pub pending: Arc<AtomicUsize>,
     held: Arc<Mutex<Vec<Vec<u8>>>>,
     to: To,
+    /// The window's own player (a memory connection): what it is sent is also kept for the
+    /// Java mods' client (`packet_tap`).
+    tapped: bool,
 }
 #[derive(Clone)]
 enum To {
@@ -258,6 +261,7 @@ impl PlayerSender {
             pending,
             held: Arc::default(),
             to: To::Channel(tx),
+            tapped: false,
         }
     }
     /// Whether the client has answered no keep-alive for too long.
@@ -274,6 +278,9 @@ impl PlayerSender {
         self.held.lock().unwrap_or_else(PoisonError::into_inner)
     }
     pub fn send(&self, body: Vec<u8>) {
+        if self.tapped {
+            super::packet_tap::keep(&body);
+        }
         self.pending.fetch_add(body.len(), Ordering::Relaxed);
         if HOLDING.get() {
             self.held().push(body);
@@ -294,6 +301,9 @@ impl PlayerSender {
         }
         let mut held = self.held();
         for body in bodies {
+            if self.tapped {
+                super::packet_tap::keep(&body);
+            }
             self.pending.fetch_add(body.len(), Ordering::Relaxed);
             held.push(body);
         }
@@ -844,18 +854,23 @@ fn login_and_configure(
             .map_err(e)?;
         c.set_compression(threshold);
     }
-    c.send(
-        &login::Clientbound::LoginFinished(login::LoginFinished {
-            profile: login::GameProfile {
-                uuid,
-                name: name.to_owned(),
-                properties: properties.clone(),
-            },
-            session: uuid,
-        })
-        .encode(),
-    )
-    .map_err(e)?;
+    let finished = login::Clientbound::LoginFinished(login::LoginFinished {
+        profile: login::GameProfile {
+            uuid,
+            name: name.to_owned(),
+            properties: properties.clone(),
+        },
+        session: uuid,
+    })
+    .encode();
+    // The window's own player: what it is sent from here is kept for the Java mods' client
+    // (`packet_tap`).
+    let memory = c.is_memory();
+    if memory {
+        super::packet_tap::begin(uuid);
+        super::packet_tap::keep(&finished);
+    }
+    c.send(&finished).map_err(e)?;
     // The client may send its settings before acknowledging the login.
     loop {
         let (id, payload) = c.recv().map_err(e)?;
@@ -869,7 +884,13 @@ fn login_and_configure(
     // Configuration.
     let sync_data = shared.sync();
     let sync: &SyncData = &sync_data;
-    let send = |c: &mut Connection, p: cfg::Clientbound| c.send(&p.encode()).map_err(e);
+    let send = |c: &mut Connection, p: cfg::Clientbound| {
+        let body = p.encode();
+        if memory {
+            super::packet_tap::keep(&body);
+        }
+        c.send(&body).map_err(e)
+    };
     send(
         c,
         cfg::Clientbound::CustomPayload(cfg::CustomPayload {
@@ -1248,6 +1269,7 @@ fn play(
         pending,
         held: Arc::default(),
         to: To::Pool(outbox.clone(), watch.clone()),
+        tapped: c.is_memory(),
     };
     let required_pack = shared
         .config
