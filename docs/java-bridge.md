@@ -1048,6 +1048,22 @@ Found in the upstream sync (2026-11-01):
 - **Some datapacks wait for a player on purpose.** Skyblock Infinite's island function checks
   `data get entity @p` and reschedules itself each tick until someone is online, so its island
   lands ~1 s after the first join, in vanilla too. Holding the join longer can't fix that.
+Found in upstream sync 5 (2026-11-04, upstream `73d3ee3d2`):
+- **A fixed pool of network threads** (`lan/io_pool.rs`) replaced the writer thread per player:
+  a connection is `detach`ed and framed with `conn::frame_body`, so `Stream::Memory` can no
+  longer be matched there. `ConnReader`/`ConnWriter` keep a `wide` flag from creation (an
+  in-memory pipe's frames may pass 21 bits: a big pack's join to the window's own player), and
+  `frame_body` uses `unbounded_contents` when it is set.
+- Upstream's `BakedFace` holds a whole `ModelQuad`; ours keeps the compact `BakedQuad` (no
+  sprite name: a big pack's 2.3 M faces), which now copies upstream's new quad fields (`light`,
+  `color`, `ambient_occlusion`, `render_type`, `shade`). `force_translucent` is
+  `render_type.is_none() && material.force_translucent`, as upstream's mesher reads it.
+- Item models: upstream does mods' own node types, tints and properties (`item_model/foreign.rs`,
+  custom `condition` properties a mod answers); our `ItemModelNode::modded` is gone.
+- Mod particles: upstream's `mod_sets` values are `(set, Option<ModBehaviour>)`; `add_mod`
+  takes the set.
+- `horizon-world`'s `level/data.rs` no longer imports `File` (`std::fs::File` in ours).
+
 - **Loot tables are parsed on first use** (`horizon_world::loot::LootTables`): the
   `native_loot_table_load` hook runs then, not at world load. Code that changes a table's file
   after reading it keeps the parsed copy.
