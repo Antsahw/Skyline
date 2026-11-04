@@ -1281,6 +1281,10 @@ Naturalist (mobs with ModelPart models, Fabric API only). The repo's own critter
 
 ## Status
 
+Testers' Trello retest (2026-11-04, bridge-trello-1): JEI, Farmer's Delight, Litematica's menu
+and Cloth Config's screens (`/modconfig`) work; Chunky, Simple Voice Chat, TACZ fail; Chat Heads,
+Flashback, ReplayMod load and do nothing. Log lines and areas: java-bridge-tasks.md, "Retest".
+
 Create (Create Fly's 26.3 port, 2026-11-04, bridge-gpu-12): kinetic networks run and their
 shafts, cogs and motors draw turning; OBJ items draw; mods' fluids use their own sprites; 3D Skin
 Layers draws its layers (see "Create, Flywheel, OBJ models, mods' fluids, 3D Skin Layers").
@@ -2477,6 +2481,10 @@ Horizon's generator (the element is skipped, the processor list fails).
   wasn't one of Horizon's: the whole content mod failed to load ("content mods not loaded"),
   and none of its blocks existed (an override template's mod blocks came out as air).
   `mod_content::shape_state` falls back to the vanilla state with the rest of the properties.
+- **The breaker's own client gets no 2001 (26.3).** `Block.playerWillDestroy` sends its break
+  sound and particles with `levelEvent(player, 2001, …)`, which skips that player: their client
+  plays them itself. A doubled break sound is a 2001 (or a sound packet) reaching the breaker;
+  count what the window's client receives, not what the server sends (bridge-trello-1).
 - **26.3's template palettes are `id`/`properties`**; templates from older DataVersions
   (mods', 4903 in The Sift) still say `Name`/`Properties`. `StructureTemplate::from_nbt` reads
   both; nothing datafixes a pack template's blocks (vanilla's STRUCTURE fix type isn't
