@@ -933,6 +933,36 @@ fn normal_state(name: &str) -> String {
     format!("{block}[{}]", pairs.join(","))
 }
 
+/// The game's state a carried block's shape names: `name` itself, else, when a Java mod gives
+/// the vanilla block properties of its own (The Sift's `ichorlogged` on every leaves block,
+/// through a mixin on its state definition), the state of that block with the most of the
+/// named properties and none other: the shape is the vanilla block's.
+fn shape_state(by_key: &HashMap<String, u32>, name: &str) -> Option<u32> {
+    let key = normal_state(name);
+    if let Some(&id) = by_key.get(&key) {
+        return Some(id);
+    }
+    let (block, props) = key.split_once('[')?;
+    let named: std::collections::HashSet<&str> = props
+        .trim_end_matches(']')
+        .split(',')
+        .filter(|p| !p.is_empty())
+        .collect();
+    let prefix = format!("{block}[");
+    by_key
+        .iter()
+        .filter_map(|(k, &id)| {
+            let pairs = k.strip_prefix(&prefix)?.strip_suffix(']')?;
+            let pairs: Vec<&str> = pairs.split(',').filter(|p| !p.is_empty()).collect();
+            pairs
+                .iter()
+                .all(|p| named.contains(p))
+                .then_some((pairs.len(), std::cmp::Reverse(id), id))
+        })
+        .max()
+        .map(|(_, _, id)| id)
+}
+
 fn read_json(path: &Path) -> Result<J> {
     Ok(serde_json::from_slice(&fs::read(path)?).map_err(|e| format!("{}: {e}", path.display()))?)
 }
@@ -1193,7 +1223,7 @@ impl<'a> Plan<'a> {
                     for st in &decl.states {
                         let shape = match &st.shape {
                             None => states.start,
-                            Some(name) => *by_key.get(&normal_state(name)).ok_or_else(|| {
+                            Some(name) => shape_state(by_key, name).ok_or_else(|| {
                                 format!("{}: shape {name} is not a block state", decl.id)
                             })?,
                         };
@@ -2948,3 +2978,24 @@ fn stamp(base: &Path, mods: &[ContentMod]) -> Result<String> {
 #[cfg(test)]
 #[path = "mod_content_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod shape_state_tests {
+    use super::*;
+
+    #[test]
+    fn a_mods_extra_vanilla_property_falls_back_to_the_vanilla_state() {
+        let by_key: HashMap<String, u32> = [
+            ("minecraft:acacia_leaves[distance=1,persistent=false,waterlogged=false]", 7),
+            ("minecraft:acacia_leaves[distance=2,persistent=false,waterlogged=false]", 8),
+            ("minecraft:stone[]", 1),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), v))
+        .collect();
+        let named = "minecraft:acacia_leaves[distance=1,ichorlogged=false,persistent=false,waterlogged=false]";
+        assert_eq!(shape_state(&by_key, named), Some(7));
+        assert_eq!(shape_state(&by_key, "minecraft:stone"), Some(1));
+        assert_eq!(shape_state(&by_key, "minecraft:dirt[snowy=false]"), None);
+    }
+}
