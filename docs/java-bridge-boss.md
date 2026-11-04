@@ -227,3 +227,21 @@ worldgen-8; their tasks are in java-bridge-tasks.md). When they report: one new 
 merges them all (merge-batch10). After that, nothing until Saturday: the user plays the pack
 on his PC and collects testers' bugs. Saturday: a boss chat queues those bugs, then the
 upstream prep chat (launcher switch, then the shared-file hooks), and the reply plan for Ludovic.
+
+## State after merge-batch10 (2026-11-04)
+
+- `java-bridge` = batch 10: upstream sync 5 (upstream main 73d3ee3d2), upstream-prep (the
+  launcher's "Fabric 26.3 mods (beta)" switch: off by default, `--java-mods` /
+  `HORIZON_JAVA_MODS=1` opt in), pack-9, mixins-9, client-12, worldgen-8, gpu-12 (Create draws
+  and turns, mods' fluids, 3D Skin Layers).
+- Conflicts: launcher strings and fields (both kept); `java_mods.rs` (the opt-in gate over
+  client-12's `run_jars`); `start.rs` (both methods); gpu-12's OBJ loader dropped for upstream's
+  (`RootAssets` reads the files); `HorizonClient` contextual bars (client-12's); two chats added
+  regress cases `create` and `fluids`: the second ones are `create-client` and `fluids-flow`.
+  Upstream's new glass home view needed the Java mods tab.
+- Checked here: 23 cases pass (the round's 16 new ones, pot, placed, hoppers, jei, templates,
+  server, rei-lan). Launcher `cargo check` clean.
+- Ludovic's agent (2026-11-04): Horizon links to the bridge as an unofficial community project
+  once (1) no offline play / no downloads before a Microsoft sign-in and (2) no code tied to other
+  mods' internals. The user: launcher only, Prism and `horizon-play` go. Both queued first in
+  java-bridge-tasks.md.
