@@ -18,7 +18,7 @@ saying something works.
 | Boot | `java/dev/horizonlab/bridge/Boot.java`, `fabric/FabricBoot.java` (Knot, entrypoints, headless client boot), `Natives.java` (Java→Rust) |
 | Server mirror | `java/platform/.../HorizonServer.java`: set-up (`setUp`, `level`), the tick (`tick`: players, events, hooks, menus, block entities, frames), menus shown in Horizon's window (`syncMenus`, `SHOWN`), payloads (`payload`), `syncInventories` (end of every call) |
 | Mod block entities | `HorizonBlockEntities.java`: `LIVE` (mods' own, ticked, saved in `horizon-java/block_entities/`), `COPIES` (Horizon's vanilla ones as lasting copies, refreshed each tick, written back on change), Fabric load/unload events |
-| Ticks, light, data, hooks | `HorizonTicks.java`, `HorizonLight.java`, `HorizonData.java` (data packs, recipes), `HorizonHooks.java` (mods' injections fired by name), `HorizonMixinTable.java` (every patch of every kind, where it runs, which actions go to the mirror) |
+| Ticks, light, data, hooks | `HorizonTicks.java`, `HorizonLight.java`, `HorizonData.java` (data packs, recipes), `HorizonHooks.java` (mods' injections fired by name), `HorizonMixinTable.java` (every patch of every kind, where it runs, which actions go to the mirror), `HorizonTickets.java` (mods' chunk tickets → Horizon's kept chunks), `HorizonChunkLoads.java` (chunks loaded through vanilla's chunk system: pregenerators) |
 | Headless client | `HorizonClient.java`: an allocated `Minecraft` (options, font, gui, window, language with mods' translations, sound/text-input managers, game mode), a `LocalPlayer` per player, screens (`openScreen`, client menus, `frame`, `input`, `tickScreen`), client-only screens (`setScreen` via `GuiMixin`, `CLIENT_ONLY`), the client half of item use (`useItem`), the client's tick (`clientTick`), `/modconfig`, `as(player, …)` swaps `minecraft.player` and `gui.screen` |
 | Screen drawing | `HorizonGraphics.java` records `GuiGraphicsExtractor` calls as JSON ops (blit, sprite, fill, gradient, text, item, decorations, tooltips, pose, `typing`) |
 | Mods' messages | `HorizonLoop.java`: server→client payloads queued and delivered after `syncMenus` (`flush`); client→server run at once. Mixins: `PlayNetworkingMixin` (server side), `ClientPlayNetworkingMixin` |
@@ -596,6 +596,40 @@ it does nothing unless Horizon fires it or hands the action to the mirror.
   template's fluid (a player in oil is in "lava": burns, swims slowly), and Horizon's water
   meets them as lava when it spreads. Mods with a `-` in their id (milk-lib) aren't carried at
   all (content).
+- **A routed break's sound played twice** (bridge-mixins-10; a tester: "dirt goes brrbrr").
+  The breaker's game plays its own break (sound and particles) as it predicts it; vanilla's
+  `ServerLevel.levelEvent(player, 2001, …)` broadcast leaves that player out. The mirror's
+  `ServerLevelMixin` dropped the source, so a routed break's 2001 (vanilla's whole
+  `destroyBlock` on the mirror) reached the breaker again. Now the source, when it is a
+  mirrored player, goes with the event (`Natives.levelEvent`'s `except`, a UUID →
+  `Action::LevelEvent.except` → its connection, `JAVA_CONNS`) and `lan_record_events` leaves
+  it out (`java_event_except`); other players still get it. Which tester mod routed it: none
+  of FallingTree, WorldEdit, Biomes O' Plenty (+TerraBlender, GlitchCore), Terralith
+  (+Lithostitched), Geophilic, Lithostitched alone does (one sound each, tested); Create Fly
+  (not tested here: no jar) is the likely one, or a combination. Any mod that patches the
+  inside of breaking did it: the `mixinmod` fixture does (2 sounds before, 1 now). Regress
+  `breaksound` (scene `dig`: dirt and a log broken by hand, `heard` counts).
+- **Loading chunks through vanilla's chunk system** (bridge-mixins-10: Chunky). A
+  pregenerator adds a load-only ticket (`TicketType` with the loading flag only) and asks
+  `ServerChunkCache.getChunkFutureMainThread(x, z, FULL, false)`, on the server thread, then
+  waits for the future. `HorizonChunkLoads` answers it on the mirror: Horizon's chunk at once
+  when loaded; else, when `load` or when the level's tickets keep the chunk (where vanilla's
+  ticket made a holder: `HorizonTickets.keeps`), a future completed on the server thread once
+  Horizon has it loaded (polled each tick; given up after 2 minutes). Waited-for chunks go to
+  Horizon with the tickets' chunks, and load-only tickets now keep the chunks their loading
+  level brings to FULL (`33 - level` around them): Horizon generates them, and when the ticket
+  goes they unload and are saved as any chunk. What is generated already: `ChunkMap.readChunk`
+  and `ServerChunkCache.chunkScanner()` read Horizon's own region files, read-only (vanilla's
+  format: header, length, compression; a loaded chunk is "full"). Also needed:
+  `MinecraftServer.getRunningThread()` is Horizon's server thread (Chunky hands itself to the
+  server unless on it: null made it hand itself over every tick, forever), the chunk map's
+  `mainThreadExecutor` is the server, `runDistanceManagerUpdates` answers false, and atomics a
+  mod's mixin adds to an allocated object (Chunky's `AtomicBoolean` on `MinecraftServer`) are
+  made at their defaults (`emptyCollections`). Tested: `/chunky center 2000 2000`, `radius 64`,
+  `start`: 81 chunks in 12 s, all saved full; a second start loads none; radius 256: 1,089
+  chunks in 1:57 on 2 cores (~9/s), tickets back to 0 after. Gap: Horizon has no load-only
+  chunks, so a ticketed chunk ticks while kept (a pregenerator holds a few dozen at a time).
+  Regress `chunky`; `HORIZON_JAVA_DEBUG=chunks` logs each chunk asked for and loaded.
 - The mirrored player's `tickCount` follows Horizon's ticks: Carry On refuses a second action
   on the tick of the last one, and the mirror's players aren't ticked.
 - `HORIZON_JAVA_DEBUG=entities` logs each attack on/use of Horizon's entities, a vanilla mob a
@@ -1281,6 +1315,10 @@ Naturalist (mobs with ModelPart models, Fabric API only). The repo's own critter
 
 ## Status
 
+Chunky (2026-11-04, bridge-mixins-10): `/chunky start` pregenerates through Horizon's streaming
+(81 chunks in 12 s, ~9 chunks/s on 2 cores), saved full; a routed break's sound plays once
+(see "Mods that change vanilla's behaviour"). Regress `chunky`, `breaksound`.
+
 Create (Create Fly's 26.3 port, 2026-11-04, bridge-gpu-12): kinetic networks run and their
 shafts, cogs and motors draw turning; OBJ items draw; mods' fluids use their own sprites; 3D Skin
 Layers draws its layers (see "Create, Flywheel, OBJ models, mods' fluids, 3D Skin Layers").
@@ -1511,8 +1549,10 @@ loadermod <jar>`, `/loader ticket|unticket <cx> <cz> <radius>`, `/loader force <
 (`HorizonTickets`, saved in `horizon-java/data/<dimension>/`, back on reopening). Horizon keeps
 the chunks they reach loaded and ticking, as forced chunks (`Streaming::set_ticketed`, not
 `/forceload`'s list), a level with only those ticking too. The ticket's levels are vanilla's:
-a radius-3 ticket entity-ticks 3x3 chunks, a forced chunk only itself. Gaps: load-only
-tickets (no simulation) don't load; a ticket at level 33 loads nothing.
+a radius-3 ticket entity-ticks 3x3 chunks, a forced chunk only itself. Load-only tickets (no
+simulation: a pregenerator's) keep the chunks their loading level brings to FULL, as kept
+chunks (they tick while kept; bridge-mixins-10, "Loading chunks through vanilla's chunk
+system").
 
 Block use has a client half too (`HorizonClient.useBlock`, mod blocks only, after the
 server's): Fabric's `UseBlockCallback`, the block's `useItemOn`/`useWithoutItem` with the level
@@ -2410,6 +2450,14 @@ Horizon's generator (the element is skipped, the processor list fails).
 - One task a branch (`bridge-<task>` off `java-bridge`); keep PR-sized steps.
 - Commit as the user (`iaxivers`) with the Co-Authored-By line; never commit `.local/`.
 - Write comments like the code around: what vanilla does and why the mirror does it.
+
+- **What the mirror's constructors skipped (trap).** The server, levels and chunk maps are
+  allocated: their final fields are null unless set. `MinecraftServer.getRunningThread()` was
+  null, so code that moves itself onto the server thread unless already on it (Chunky's
+  `getChunkAtAsync`: `supplyAsync` onto the server) moved itself again on every run, forever;
+  it answers Horizon's server thread now. `ChunkMap.mainThreadExecutor` is the server. Fields
+  mods' mixins add and initialise in a constructor are null too: `emptyCollections` makes
+  collections and atomics; anything else stays null.
 
 - **GeckoLib and partial tick 1.0 (26.3 trap).** GeckoLib treats a partial tick of exactly 1.0
   as a paused game and freezes every animation. The bridge renders at 0.999

@@ -46,6 +46,7 @@ MODS = {
     "fabric-api": ["fabric-api*"],
     "skinlayers": ["skinlayers3d*"],
     "veinminer": ["veinminer-fabric*"],
+    "chunky": ["Chunky-Fabric*", "chunky-fabric*"],
     "rch": ["rightclickharvest*"],
     "jamlib": ["jamlib*"],
     "carryon": ["carryon*"],
@@ -665,6 +666,38 @@ CASES = {
         steps=['$C mouse left click >/dev/null; sleep 1.5; $C entities 6 minecraft:cow > $S/cow.json'],
         checks=[check_file("cow.json", r'"health":[0-4]\.', "the cow lost 6 health"),
                 check_log(r"combat: Better Combat combo 0", "Better Combat's attack ran")],
+    ),
+    "breaksound": dict(
+        about="A routed break (mixinmod patches destroyBlock's inside): the breaker hears its dirt and its log break once, "
+              "not once from its own game and again from the mods' level event",
+        fixtures=["mixinmod"], scene="dig",
+        steps=['heard(){ $C status | python3 -c "import json,sys;h=json.load(sys.stdin).get(\'heard\',{});'
+               'print(h.get(\'minecraft:block.$1.break\',0))"; }; '
+               '$C mouse left down >/dev/null; sleep 2; $C mouse left up >/dev/null; sleep 2; heard gravel > $S/dirt.txt; '
+               'read a b c x y z < $S/dig.pos; $C look-at-block $x $y $z >/dev/null; sleep 0.5; '
+               '$C mouse left down >/dev/null; sleep 5; $C mouse left up >/dev/null; sleep 2; heard wood > $S/log.txt; '
+               '$C blocks $(cat $S/dig.pos) > $S/blocks.json'],
+        checks=[check_file("dirt.txt", r"^1$", "the dirt's break sound played once"),
+                check_file("log.txt", r"^1$", "the log's break sound played once"),
+                check_file("blocks.json", r'"counts":\{\}', "both broke"),
+                check_log(r"Breaking minecraft:dirt goes to the mods", "the break was the mods'")],
+        look="the dirt and the log gone",
+    ),
+    "chunky": dict(
+        about="Chunky pregenerates through the mirror's chunk system: its tickets and chunk futures load Horizon's "
+              "chunks (81 around 2000,2000, saved full); a second run reads Horizon's region files and loads none",
+        mods=["chunky", "fabric-api"], scene="none", env={"HORIZON_JAVA_DEBUG": "chunks"},
+        steps=['$C command "chunky center 2000 2000" >/dev/null; $C command "chunky radius 64" >/dev/null; '
+               '$C command "chunky start" >/dev/null; '
+               'for i in $(seq 90); do sleep 2; grep -q "Chunky\\] Task finished" $S/home/logs/latest.log && break; done; '
+               'sleep 8; python3 "$R/tools/java_bridge/region_check.py" $S/saves/W/dimensions/minecraft/overworld 121 121 129 129 > $S/region.txt; '
+               '$C command "chunky start" >/dev/null; sleep 10; grep -c "chunks: .* asked for" $S/home/logs/latest.log > $S/asked.txt'],
+        checks=[check_log(r"\[Chunky\] Task finished for minecraft:overworld\. Processed: 81 chunks \(100\.00%\)", "Chunky finished its 81 chunks"),
+                check_file("region.txt", r"saved 81 full 81 of 81", "all 81 are saved, full, in Horizon's region files"),
+                check_file("asked.txt", r"^81$", "the second run loaded none (they were generated)"),
+                check_log(r"chunk tickets keep 0 chunk", "its tickets were let go")],
+        forbid=[r"given up after", r"a chunk's load"],
+        timeout=600,
     ),
     "ride": dict(
         about="Entity.startRiding's head (mixinmod: no minecarts): the cart refuses, the boat takes the player",

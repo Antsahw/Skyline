@@ -55,6 +55,10 @@ pub(super) struct JavaServerState {
     /// Blocks Java mods set, by dimension, made before that level's next tick.
     #[cfg(feature = "java-mods")]
     block_writes: Vec<(String, [i32; 3], String)>,
+    /// The connection a Java mod's level event being played now leaves out (its source
+    /// player's: `Action::LevelEvent`'s `except`), for `lan_record_events`.
+    #[cfg(feature = "java-mods")]
+    event_except: Option<u32>,
 }
 
 /// A player on this game's server as the Java mods see them.
@@ -101,6 +105,26 @@ static JAVA_ROUTED_TICKS: std::sync::OnceLock<Vec<bool>> = std::sync::OnceLock::
 #[cfg(feature = "java-mods")]
 static JAVA_TICKETS: std::sync::Mutex<Option<std::collections::HashMap<String, Vec<(i32, i32)>>>> =
     std::sync::Mutex::new(None);
+
+/// The connection of each player the Java mods saw last (by UUID, as they name them): whom a
+/// Java action that names a player is about, where no hub is at hand.
+#[cfg(feature = "java-mods")]
+static JAVA_CONNS: std::sync::Mutex<Vec<(String, u32)>> = std::sync::Mutex::new(Vec::new());
+
+impl Game<'_> {
+    /// The connection the level event being played now leaves out, when a Java mod made it
+    /// with a player as its source (vanilla's broadcast leaves its source out).
+    pub(super) fn java_event_except(&self) -> Option<u32> {
+        #[cfg(feature = "java-mods")]
+        {
+            self.mods.java.event_except
+        }
+        #[cfg(not(feature = "java-mods"))]
+        {
+            None
+        }
+    }
+}
 
 /// The chunks Java mods' chunk loaders keep in `dimension` (none without Java mods).
 pub(super) fn java_tickets(dimension: &str) -> Vec<(i32, i32)> {
@@ -1111,6 +1135,14 @@ mod run {
                 .or(self.lan.as_ref())
                 .into_iter()
                 .flat_map(|h| &h.hub.guests);
+            let conns: Vec<(String, u32)> = guests
+                .clone()
+                .filter(|g| g.placed)
+                .map(|g| (uuid_string(g.uuid), g.conn))
+                .collect();
+            if !conns.is_empty() {
+                *super::JAVA_CONNS.lock().unwrap_or_else(|e| e.into_inner()) = conns;
+            }
             out.extend(guests.filter(|g| g.placed).map(|g| JavaPlayer {
                 id: uuid_string(g.uuid),
                 name: g.name.clone(),
@@ -3894,6 +3926,7 @@ mod run {
                     position,
                     data,
                     state,
+                    except,
                     ..
                 } = &drop
                 {
@@ -3910,7 +3943,19 @@ mod run {
                         }
                         None => *data,
                     };
+                    // Its source player's game made it already (a routed break's 2001):
+                    // vanilla's broadcast leaves that player out. The events queued before
+                    // are played first, with their own.
+                    let except = except.as_ref().and_then(|uuid| {
+                        let conns = super::JAVA_CONNS.lock().unwrap_or_else(|e| e.into_inner());
+                        conns.iter().find(|(u, _)| u == uuid).map(|(_, c)| *c)
+                    });
+                    if except.is_some() {
+                        let _ = self.process_level_events();
+                    }
+                    self.mods.java.event_except = except;
                     self.level_event_at(*id, *position, data);
+                    self.mods.java.event_except = None;
                     continue;
                 }
                 let horizon_jvm::events::Action::DropItem {

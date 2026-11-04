@@ -126,6 +126,13 @@ case "$SCENE" in
     'q "gamemode survival"' 'q "give @s chunkloaders:single_chunk_loader"' \
     '$C look-at-block $((X+2)) $((Y-1)) $Z >/dev/null' '$C mouse right click >/dev/null' \
     '$C look-at-block $((X+2)) $Y $Z >/dev/null' '$C mouse right click >/dev/null' 'sleep 3' ;;
+  # Breaking by hand: dirt two blocks east and an oak log beside it, survival, looking at the
+  # dirt; their places are written to $S/dig.pos (dirt, then the log).
+  dig) "$R/tools/java_bridge/around.sh" \
+    'q "gamemode survival"' 'q "setblock $((X+2)) $Y $Z minecraft:dirt"' \
+    'q "setblock $((X+2)) $Y $((Z+1)) minecraft:oak_log"' \
+    'echo "$((X+2)) $Y $Z $((X+2)) $Y $((Z+1))" > "$S/dig.pos"' \
+    '$C look-at-block $((X+2)) $Y $Z >/dev/null' ;;
   # Veinminer: a 7-ore iron vein three blocks east (a 3x2 wall and one on top), survival, a
   # diamond pickaxe, looking at the vein's middle; the region is written to $S/vein.pos.
   vein) "$R/tools/java_bridge/around.sh" \

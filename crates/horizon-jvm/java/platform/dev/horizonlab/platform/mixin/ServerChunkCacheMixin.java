@@ -82,6 +82,38 @@ public abstract class ServerChunkCacheMixin {
                 (net.minecraft.server.level.ServerLevel) horizon$level(), x, z));
     }
 
+    /**
+     * Loading a chunk through the chunk system (a pregenerator: Chunky): Horizon loads it
+     * (HorizonChunkLoads keeps it as a ticket keeps one) and the future completes when it has.
+     */
+    @Inject(method = "getChunkFutureMainThread", at = @At("HEAD"), cancellable = true)
+    private void horizon$chunkFutureMain(int x, int z, net.minecraft.world.level.chunk.status.ChunkStatus status, boolean load,
+                                         CallbackInfoReturnable<java.util.concurrent.CompletableFuture<net.minecraft.server.level.ChunkResult<net.minecraft.world.level.chunk.ChunkAccess>>> cir) {
+        if (HorizonServer.isMirror(this)) cir.setReturnValue(dev.horizonlab.platform.HorizonChunkLoads.future(
+                (net.minecraft.server.level.ServerLevel) horizon$level(), x, z, status, load));
+    }
+
+    @Inject(method = "getChunkFuture", at = @At("HEAD"), cancellable = true)
+    private void horizon$chunkFuture(int x, int z, net.minecraft.world.level.chunk.status.ChunkStatus status, boolean load,
+                                     CallbackInfoReturnable<java.util.concurrent.CompletableFuture<net.minecraft.server.level.ChunkResult<net.minecraft.world.level.chunk.ChunkAccess>>> cir) {
+        if (HorizonServer.isMirror(this)) cir.setReturnValue(dev.horizonlab.platform.HorizonChunkLoads.future(
+                (net.minecraft.server.level.ServerLevel) horizon$level(), x, z, status, load));
+    }
+
+    /** The distance manager is Horizon's streaming: nothing to update here. */
+    @Inject(method = "runDistanceManagerUpdates", at = @At("HEAD"), cancellable = true)
+    private void horizon$distanceUpdates(CallbackInfoReturnable<Boolean> cir) {
+        if (HorizonServer.isMirror(this)) cir.setReturnValue(false);
+    }
+
+    /** What is saved: Horizon's region files (read-only), or a loaded chunk's status. */
+    @Inject(method = "chunkScanner", at = @At("HEAD"), cancellable = true)
+    private void horizon$scanner(CallbackInfoReturnable<net.minecraft.world.level.chunk.storage.ChunkScanAccess> cir) {
+        if (!HorizonServer.isMirror(this)) return;
+        var level = (net.minecraft.server.level.ServerLevel) horizon$level();
+        cir.setReturnValue((pos, visitor) -> dev.horizonlab.platform.HorizonChunkLoads.scan(level, pos, visitor));
+    }
+
     @Inject(method = "getLoadedChunksCount", at = @At("HEAD"), cancellable = true)
     private void horizon$loaded(CallbackInfoReturnable<Integer> cir) {
         if (HorizonServer.isMirror(this)) cir.setReturnValue(0);

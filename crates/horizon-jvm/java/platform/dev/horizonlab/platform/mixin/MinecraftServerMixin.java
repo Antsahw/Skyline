@@ -18,6 +18,17 @@ public abstract class MinecraftServerMixin {
         if (HorizonServer.isMirror(this)) cir.setReturnValue(null);
     }
 
+    /**
+     * The server's thread is Horizon's server thread (the mirror is made without the
+     * constructor that keeps it): code that hands itself over to it when called elsewhere
+     * (Chunky: supplyAsync onto the server unless on getRunningThread()) ran there, saw null,
+     * and handed itself over again, every tick.
+     */
+    @Inject(method = "getRunningThread", at = @At("HEAD"), cancellable = true)
+    private void horizon$runningThread(CallbackInfoReturnable<Thread> cir) {
+        if (HorizonServer.isMirror(this) && HorizonServer.serverThread() != null) cir.setReturnValue(HorizonServer.serverThread());
+    }
+
     @Inject(method = "getWorldPath", at = @At("HEAD"), cancellable = true)
     private void horizon$worldPath(net.minecraft.world.level.storage.LevelResource resource,
                                    CallbackInfoReturnable<java.nio.file.Path> cir) {

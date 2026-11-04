@@ -20,4 +20,20 @@ public abstract class ChunkMapMixin {
     private void horizon$noChunks(Consumer<LevelChunk> action, CallbackInfo ci) {
         if (HorizonServer.isMirrorChunkMap(this)) ci.cancel();
     }
+
+    /** A chunk's save (a pregenerator's "is it generated?"): Horizon's region file, read-only. */
+    @Inject(method = "readChunk", at = @At("HEAD"), cancellable = true)
+    private void horizon$readChunk(net.minecraft.world.level.ChunkPos pos,
+                                   org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable<
+                                           java.util.concurrent.CompletableFuture<java.util.Optional<net.minecraft.nbt.CompoundTag>>> cir) {
+        if (HorizonServer.isMirrorChunkMap(this)) cir.setReturnValue(dev.horizonlab.platform.HorizonChunkLoads.read(
+                (net.minecraft.server.level.ServerLevel) horizon$level(), pos));
+    }
+
+    @org.spongepowered.asm.mixin.Shadow @org.spongepowered.asm.mixin.Final
+    net.minecraft.server.level.ServerLevel level;
+
+    private net.minecraft.server.level.ServerLevel horizon$level() {
+        return level;
+    }
 }
