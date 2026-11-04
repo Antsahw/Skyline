@@ -85,6 +85,10 @@ MODS = {
     "aci": ["advancedcoreinfo*"],
     "compressedblocks": ["compressedblocks*"],
     "sift": ["mielon*the*sift*", "mielons-the-sift*"],
+    "tt": ["t_and_t*", "towns*and*towers*"],
+    "cristellib": ["cristellib*", "cristel*lib*"],
+    "faf": ["friendsandfoes*"],
+    "resourcefullib": ["resourcefullib*"],
 }
 
 
@@ -447,6 +451,50 @@ CASES = {
                 check_file("found.json", r"\"count\":([89]|[1-9][0-9]+)\b", "the city centre is The Sift's: its 8 sonorous deepslate")],
         forbid=[r"panicked"],
         look="the ancient city's centre, The Sift's frame",
+        timeout=900,
+    ),
+    "newstructures": dict(
+        about="A structures-only mod (Towns and Towers) in an overworld Horizon generates: /locate finds its "
+              "village (Horizon's generator knows its structures and sets), the village is there (its bell)",
+        mods=["tt", "cristellib", "cloth", "fabric-api"], scene="none",
+        steps=['$C command "gamemode spectator" >/dev/null; $C command "locate structure #towns_and_towers:town" >/dev/null; '
+               'sleep 10; $C messages > $S/locate.json',
+               # "… is at [X, ~, Z]": the village's start chunk, its town centre (with its bell) near.
+               'xz=$(grep -o "at \\[-\\?[0-9]*, ~, -\\?[0-9]*\\]" $S/locate.json | tail -1 | tr -d "at[]~ " | tr "," " "); '
+               'set -- $xz; $C command "tp @s $1 130 $2" >/dev/null; $C wait-for loaded --timeout 400 >/dev/null; sleep 45; '
+               '$C find-block bell 64 > $S/found.json; '
+               'b=$(grep -o "\\"pos\\":\\[[^]]*" $S/found.json | head -1 | tr -d "\\"pos:[" | tr "," " "); '
+               '[ -n "$b" ] && set -- $b && $C command "tp @s $(($1 + 12)) $(($2 + 10)) $(($3 + 12))" >/dev/null '
+               '&& sleep 3 && $C look-at $1 $2 $3 >/dev/null; sleep 5'],
+        checks=[check_log(r"overworld generates as vanilla's \(Horizon's generator\)", "the overworld is Horizon's generator"),
+                check_file("locate.json", r'locate\.structure\.success","with":\[\{"text":"#towns_and_towers:town '
+                           r'\(towns_and_towers:village_', "/locate found a Towns and Towers village"),
+                check_file("found.json", r"\"count\":[1-9]", "the village is generated (its bell)")],
+        forbid=[r"panicked", r"worldgen: proto failed"],
+        look="a Towns and Towers village (Romanian birch, Swiss meadow...), its bell in view",
+        timeout=900,
+    ),
+    "structuretypes": dict(
+        about="A structures-only mod whose structures are of its own types (Friends & Foes' illusioner shack): "
+              "Horizon's generator can't make them, so the mods generate the overworld; the shack is there",
+        mods=["faf", "resourcefullib", "fabric-api"], scene="none",
+        steps=['$C command "gamemode spectator" >/dev/null; $C command "locate structure friendsandfoes:illusioner_shack" >/dev/null; '
+               'sleep 30; $C messages > $S/locate.json',
+               'xz=$(grep -o "at \\[-\\?[0-9]*, ~, -\\?[0-9]*\\]" $S/locate.json | tail -1 | tr -d "at[]~ " | tr "," " "); '
+               'set -- $xz; $C command "tp @s $1 140 $2" >/dev/null; $C wait-for loaded --timeout 400 >/dev/null; sleep 60; '
+               # The shack's brewing stand (its own processor fills it).
+               '$C find-block brewing_stand 64 > $S/found.json; '
+               'b=$(grep -o "\\"pos\\":\\[[^]]*" $S/found.json | head -1 | tr -d "\\"pos:[" | tr "," " "); '
+               '[ -n "$b" ] && set -- $b && $C command "tp @s $(($1 + 10)) $(($2 + 7)) $(($3 + 9))" >/dev/null '
+               '&& sleep 3 && $C look-at $1 $2 $3 >/dev/null; sleep 5'],
+        checks=[check_log(r"has friendsandfoes:illusioner_shack \(friendsandfoes:illusioner_shack_structure\), "
+                          r"a structure Horizon's generator can't make", "Horizon says it can't make the shack"),
+                check_log(r"overworld generates through the mods \(friendsandfoes\)", "so the mods generate the overworld"),
+                check_file("locate.json", r'locate\.structure\.success","with":\[\{"text":"friendsandfoes:illusioner_shack"',
+                           "/locate found a shack"),
+                check_file("found.json", r"\"count\":[1-9]", "the shack is generated (its brewing stand)")],
+        forbid=[r"panicked", r"Java mods' worldgen: chunk -?\d+ -?\d+ failed"],
+        look="Friends & Foes' illusioner shack (a dark oak hut, a scarecrow)",
         timeout=900,
     ),
     "preset": dict(

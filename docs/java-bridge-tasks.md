@@ -1073,3 +1073,22 @@ Not yet per player: JEI's bookmarks and settings. Regress `jei`, `jei-lan` (new)
 `reiscreen`, `pot`, `terminal`, `rei-lan`, `modsettings`, `config-rejoin`, `keys`, `failmsg`.
 Test: `regress.py --jars <jars with jei, fabric-api, Farmer's Delight> jei jei-lan`.
 
+### Worldgen 8: mods' new structures (2026-11-04, `bridge-worldgen-8`; Claude for iaxivers)
+
+The queued premise didn't hold: Towns and Towers alone (vanilla jigsaw types) already
+generated in Horizon's generator, through the content conversion's worldgen bundles; Dungeons
+and Taverns makes the overworld the mods' anyway (it overrides `minecraft:` placed features).
+The real gap: **structures of a mod's own type** (Friends & Foes' illusioner shack, citadel,
+iceologer cabin) never generated in an overworld Horizon made. Now Horizon's generator lists
+the structures it can't make and the mods generate such a dimension. Also: the jars give
+Horizon's generator their structures, sets, features and biome tags directly (a fallback when
+a content mod isn't carried over), and Java's "does a mod change this dimension" check reads
+26.3's `worldgen/feature` (it read 26.2's `configured_feature`). Regress `newstructures`
+(T&T), `structuretypes` (Friends & Foes + ResourcefulLib) pass; `fixer` passes; `templates`
+not run here (no The Sift jar). Unit tests: `datapack` (structures-only pack), `start.rs`
+(`unsupported`). Not done: Cristel Lib's placement config on Horizon's side; mod pool
+element/processor types in jigsaws. Unrelated, seen: Friends & Foes' moobloom drawing NPE
+(`blockModelResolver` null; entities area).
+Test on the PC: `regress.py --jars <jars with friendsandfoes, ResourcefulLib, t_and_t,
+cristellib, cloth-config, fabric-api> newstructures structuretypes`; or play a new world with
+Friends & Foes and `/locate structure friendsandfoes:illusioner_shack`.

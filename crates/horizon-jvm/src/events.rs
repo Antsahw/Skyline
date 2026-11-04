@@ -1994,26 +1994,39 @@ pub fn ready() -> bool {
 
 /// Readies the mods' world generation of `dimension` (`HorizonWorldgen.start`) for a world
 /// with this seed and structure setting, in the world folder `world`: whether mods change that dimension's generation (a
-/// mod's biomes in its biome source, a mod's features in its biomes), so its chunks are
-/// generated on the Java side. Call once a dimension, after [`ready`].
+/// mod's biomes in its biome source, a mod's features in its biomes, or `horizon_cannot`:
+/// structures there, of a mod's own type, that Horizon's generator can't make), so its
+/// chunks are generated on the Java side. Call once a dimension, after [`ready`].
 pub fn worldgen_start(
     dimension: &str,
     seed: i64,
     structures: bool,
     world: &std::path::Path,
+    horizon_cannot: &[(String, String)],
 ) -> Result<bool, String> {
     let modded = with_server(|env, class| {
         let dimension = env.new_string(dimension)?;
         let world = env.new_string(world.to_string_lossy())?;
+        // "structure type" for each structure Horizon's generator can't make there.
+        let cannot = env.new_object_array(
+            horizon_cannot.len() as i32,
+            "java/lang/String",
+            JObject::null(),
+        )?;
+        for (i, (structure, kind)) in horizon_cannot.iter().enumerate() {
+            let entry = env.new_string(format!("{structure} {kind}"))?;
+            env.set_object_array_element(&cannot, i as i32, entry)?;
+        }
         env.call_static_method(
             class,
             "worldgenStart",
-            "(Ljava/lang/String;JZLjava/lang/String;)Z",
+            "(Ljava/lang/String;JZLjava/lang/String;[Ljava/lang/String;)Z",
             &[
                 JValue::Object(&dimension),
                 JValue::Long(seed),
                 JValue::Bool(structures.into()),
                 JValue::Object(&world),
+                JValue::Object(&cannot),
             ],
         )?
         .z()

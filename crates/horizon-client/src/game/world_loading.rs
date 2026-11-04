@@ -606,8 +606,8 @@ fn worldgen_overrides_of(
     let enabled = horizon_client::datapack::enabled_ids(world_root, &packs, enabled_features);
     let mut list: Vec<_> = Vec::new();
     // The Java mods' data under the world's packs, as Fabric's mod packs sit below them:
-    // their structure templates, pools and processor lists (the rest of their worldgen
-    // runs on the Java side, java_worldgen.rs).
+    // their structures, structure sets and pieces (a dimension whose own generation they
+    // change runs on the Java side, java_worldgen.rs).
     #[cfg(feature = "java-mods")]
     let mods = super::java_worldgen::mod_structure_packs();
     #[cfg(feature = "java-mods")]

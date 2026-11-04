@@ -2138,8 +2138,34 @@ city_center_{1,2,3}.nbt`) was ignored. Now:
   and `worldgen/processor_list` go to Horizon's generator (the rest of their worldgen is the
   Java side's).
 Not done: `/place template` still reads only the world's `generated/` and the prepared
-templates (`commands/place.rs`); mods' own `worldgen/structure` and `structure_set` (a
-structures-only mod's new structures) aren't added to Horizon's generator.
+templates (`commands/place.rs`).
+
+### Mods' new structures in Horizon's generation (2026-11-04, bridge-worldgen-8)
+
+A mod that only adds structures leaves its dimension to Horizon's generator. Two paths:
+- **Vanilla structure types** (jigsaw: Towns and Towers' villages, Energized Power's
+  factories). They already generated: the content conversion merges the mods'
+  `worldgen/structure`, `structure_set`, pools, processors and biome tags into the content
+  root's bundles (`mod_content.rs`, `WORLDGEN_BUNDLES`). The jars-as-packs path of worldgen 7
+  now also gives `worldgen/structure`, `structure_set`, `feature`, `placed_feature` and
+  `tags/worldgen/biome` (`datapack::STRUCTURE_FILES`), so a mod whose content isn't carried
+  over (a failed content mod) still has its structures. Same ids, same JSON: no difference
+  when both are there.
+- **A mod's own structure type** (Friends & Foes' illusioner shack, citadel, iceologer
+  cabin; Ecologics' desert ruin) was the gap: Horizon's generator has no code for it
+  (`StructureKind::Unsupported`), so it never generated. Now the generator lists them
+  (`StructureRegistry::unsupported`: the dimension's possible sets' structures of unknown
+  types or placements; logged as "N structures can't generate here") and
+  `JavaTerrain::start` passes them to `HorizonWorldgen.start`: such a dimension is generated
+  by the mods (log: "has <structure> (<type>), a structure Horizon's generator can't make",
+  then "generates through the mods (friendsandfoes)"). Cost: Java worldgen for that
+  dimension (as with any mod's biomes or features).
+Regress `newstructures` (T&T: Horizon's generator, /locate, the village's bell) and
+`structuretypes` (Friends & Foes: the mods' generator, /locate, the shack's brewing stand).
+Not done: Cristel Lib's placement config (T&T's spacing 48/24 by default) changes the sets
+on the Java side only; Horizon's generator places T&T's sets as their JSON says (51/12 and
+48/12). Jigsaw structures using a mod's own pool element or processor types still go to
+Horizon's generator (the element is skipped, the processor list fails).
 
 ## Working on it
 

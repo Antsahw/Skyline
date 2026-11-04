@@ -823,7 +823,8 @@ public final class HorizonServer {
         return HorizonFunctions.ready();
     }
 
-    public static boolean worldgenStart(String dimension, long seed, boolean structures, String world) {
+    public static boolean worldgenStart(String dimension, long seed, boolean structures, String world,
+            String[] horizonCannot) {
         Thread.currentThread().setContextClassLoader(HorizonServer.class.getClassLoader());
         ensureServer();
         // Once a world: the Nether's and the End's starts come while the server ticks, and
@@ -833,7 +834,7 @@ public final class HorizonServer {
                 && !java.nio.file.Paths.get(world).toAbsolutePath().normalize().equals(worldDir)) {
             world(world);
         }
-        return HorizonWorldgen.start(dimension, seed, structures);
+        return HorizonWorldgen.start(dimension, seed, structures, horizonCannot);
     }
 
     public static String[] worldgenLodTops(String dimension, int[] xyz, int[] waterHeights) {
