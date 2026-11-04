@@ -215,6 +215,87 @@ By area:
   plays it too. Check: break dirt with each mod alone; the client must get one 2001 per break.
   mixins chat (`bridge-mixins-10`), first.
 
+#### Retest on java-bridge 3bae5c528 (bridge-trello-1, 2026-11-04)
+
+Every card's mod, newest 26.3 Fabric file from Modrinth (with its required deps and Fabric API
+0.165.2), alone, headless (`screen_test.sh SCENE=none` + steps). Create Fly not retested:
+CurseForge (site and CDN) answers 403 here, run it on a PC. The board itself wasn't read (the
+fetch tool refuses trello.com): cards added after the list above are missing.
+
+| Mod (version) | Result | Area |
+|---|---|---|
+| JEI 31.17.0.108 | works (regress `jei`, `pot-jei` pass) | – |
+| Farmer's Delight 3.6.30 | works (regress `pot`, `pot-jei`, `eat` pass) | – |
+| Litematica 0.29.1 + MaLiLib 0.30.2 | menu on M works (regress `litematica` passes) | – |
+| Cloth Config 26.3.159 | works: Better Combat's Cloth screen opens by `/modconfig bettercombat`, draws right | – |
+| Better Combat 3.2.2 | hits land and go through the mod ("Players' attacks go to the mods"); no errors. Its swing animations (PlayerAnimationLib) not seen on Horizon's player | entities/gpu |
+| Chat Heads 1.3.2 | loads, no error, no heads: Horizon draws its own chat | client |
+| Chunky 1.5.66 | fails: task starts, never generates | mixins |
+| Simple Voice Chat 2.6.27 | fails: client entrypoint dies; server starts | client + mixins |
+| TACZ Refabricated 0.8.6-beta1 | fails: gun invisible, client ticks throw | entities/gpu + client |
+| Flashback 0.43.6 | loads, does nothing visible: no recording, no UI | client (`bridge-replay-1`) |
+| ReplayMod 2.6.28 | loads, records nothing (no `replay_recordings/` after a walk) | client (`bridge-replay-1`) |
+| Double break (BOP, Terralith, Geophilic, Lithostitched, FallingTree, WorldEdit, each alone) | not reproduced (details below) | mixins |
+
+By area (log lines from `<scratch>/home/logs/latest.log`):
+- **mixins**
+  - **Chunky**: `/chunky radius 48`, `/chunky start`, 30 s later `/chunky progress`:
+    `[Chunky] Task running for minecraft:overworld. Processed: 0 chunks (0.00%) ... Rate: 0.0 cps`.
+    No error. Its chunk loads (`ServerChunkCache` futures/tickets) never complete: the mirror's
+    chunk source holds nothing (`ServerChunkCacheMixin`). Needs those loads routed to Horizon's
+    generation (or the Java worldgen path) and completed.
+  - **Simple Voice Chat, server half**: `Voice chat server started at port 43908`, then
+    `Mixin census: voicechat's onPlayerConnect at RETURN of PlayerList.placeNewPlayer takes
+    locals; Horizon can't give them`: the voice server never learns the player.
+  - **Lithostitched** (alone): every level tick `Lithostitched failed in
+    ServerTickEvents.START_LEVEL_TICK: NullPointerException: Cannot invoke
+    "net.minecraft.world.level.StructureManager.getStructureWithPieceAt(...)" because "manager"
+    is null` (`StructureAttributeHandler.tick:41`): the mirrored level's `structureManager()` is
+    null. (Not seen with Terralith beside it.)
+  - **Double break**: with a probe logging each `LevelEvent` 2001 the window's client gets
+    (`remote.rs`, not committed), a survival `break` of dirt gave **0** extra 2001 with each mod
+    alone (right: vanilla's `levelEvent(player, 2001, …)` skips the breaker, whose client plays
+    it itself). Not yet checked: sounds that come as sound packets (`HorizonPackets`), creative,
+    other blocks, FallingTree on a log, WorldEdit's wand, all the tester's mods together. Seen
+    instead: **with BOP (+TerraBlender, GlitchCore) the client got 43 2001s within 2 s of
+    joining, 25–35 blocks from the player** (y 56–62; WorldEdit's run: 1). Something in the
+    world is being broken near spawn (plants popping off?): may be the tester's "brrbrr".
+- **client**
+  - **Simple Voice Chat, client half**: `Could not execute entrypoint stage 'client' ...
+    'voicechat' at 'de.maxhenkel.voicechat.FabricVoicechatClientMod'!, caused by
+    java.lang.NullPointerException: Cannot invoke "...IPackRepository.voicechat$addSource(...)"
+    because "repository" is null` (`FabricClientCompatibilityManager.addResourcePackSource:136`):
+    the headless `Minecraft` has no resource pack repository. V opens nothing after that.
+    Audio (mic, OpenAL) is a research item after it.
+  - **Chat Heads**: 22 client mixins into `ChatComponent`/`GuiMessage` rendering; Horizon's chat
+    (`chat.rs`) never runs them. Nothing in the log.
+  - **TACZ, client half**: `A mod failed in ClientLifecycleEvents.CLIENT_STARTED
+    [cn.sh1rocu.tacz.client.TaCZFabricClient]: ... "ModelManager.entityModels()" because
+    "this.modelManager" is null`; then every client tick `... "LocalPlayerDraw.draw(...)" because
+    "this.tac$draw" is null` and `"LocalPlayerAim.isAim()" because "this.tac$aim" is null`
+    (TACZ's `LocalPlayer` mixin fields, set in its constructor injection: the bridge's
+    `LocalPlayer` is allocated without it). The gun's name shows as
+    `block.tacz.modern_kinetic_gun` (its translation key not found).
+  - **Flashback / ReplayMod**: both load with no error. Horizon's pause screen has neither's
+    buttons; neither writes a recording (they record from the client `Connection`'s packets,
+    which Horizon's window doesn't have). For `bridge-replay-1`'s research.
+  - Every run: `[Options/ERROR] Failed to load options ... "Options.forceUnicodeFont()" because
+    "this.options" is null` (`Minecraft.isEnforceUnicode` during `Options.<init>`): harmless so
+    far, but noise in every testers' log.
+- **entities/gpu**
+  - **TACZ**: `/give @s tacz:modern_kinetic_gun[custom_data={GunId:"tacz:glock_17",...}]`: held,
+    nothing drawn in hand or hotbar. 126× `[tacz/WARN] tacz:<gun> index file read fail!
+    java.lang.IllegalArgumentException: there is no corresponding display file` (its gun packs'
+    display files are client resources, loaded after the CLIENT_STARTED that failed above).
+    Fix the client half first, then its item renderer and animations.
+  - **Better Combat**: check its swing animations on the player (PlayerAnimationLib draws
+    through the player model's parts).
+
+Screenshots: `/tmp/trello/<mod>/none-N.png` of that run (cloth's screen, the invisible gun,
+chat with no head, Chunky's 0 chunks). The driver: one `screen_test.sh` per mod with steps
+(`/modconfig bettercombat`; `attack` a NoAI zombie; `chat`; `chunky start`; `key v`; give and
+use a gun; pause; `break` a dirt block in survival).
+
 ### Later: upstream's launcher redesign (noted 2026-11-04)
 
 Upstream redesigned the launcher (the "glass" views). Batch 10 only added the Java mods tab to
