@@ -73,6 +73,13 @@ Broken, first in every area's queue below:
 
 ### First beta testers (2026-11-03, Discord)
 
+- **(2026-11-04, Windows 11 tester, video) Farmer's Delight's cooking pot sometimes opens as
+  Horizon's stand-in screen** (one row of 9 slots titled "Cooking Pot", `mod_menu_type` in
+  `remote.rs`) instead of FD's own Java screen (grid, arrow, bowl slot, JEI beside it). The
+  same pot opens right on other clicks: a race between Horizon's stand-in and the Java screen
+  taking over. Client chat, first in its queue. Reproduce: open and close the pot 20 times
+  (regress `pot` opens it once); make the case open it repeatedly.
+
 Works for them: Bedrock Reloaded (small pack), Terralith ("runs better than normal Fabric"),
 Biomes O' Plenty; 800 FPS stable on a GTX 1060 3 GB / i5-9400F / 16 GB. Reported:
 - **A pack's resource packs aren't picked up**: a modpack's bundled resource packs had to be put
