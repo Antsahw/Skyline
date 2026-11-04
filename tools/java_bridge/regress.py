@@ -294,7 +294,7 @@ CASES = {
         forbid=[r"key press failed"],
         look="none-0.png: Litematica's main menu (Schematic Placements, Load Schematics...); none-1.png: its configuration screen",
     ),
-    "create": dict(
+    "create-client": dict(
         about="Create (Create Fly, unofficial 26.3 port): its client tick and HUD run on Horizon's client player "
               "(firstPersonHandsAndItems, its synced data by the player's class, the HUD's contextual bar and waypoints)",
         mods=["create"], scene="none",
@@ -1196,7 +1196,7 @@ CASES = {
                 check_file("cart_chest.json", r"count: 4, Slot: 0b, id: \\+\"minecraft:beef", "the hopper under the cart took its four beef")],
         forbid=[r"a hopper's (push|pull)"],
     ),
-    "fluids": dict(
+    "fluids-flow": dict(
         about="A Java mod's fluids flow by their own code in the mirror (a beta tester's Create honey spread as "
               "lava): BuildCraft's oil spreads as oil, its gaseous fuel rises to a glass ceiling and spreads under it, "
               "water beside the oil makes no cobblestone",
