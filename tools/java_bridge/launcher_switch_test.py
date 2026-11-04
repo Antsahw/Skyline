@@ -11,9 +11,12 @@ Checks, for the default instance:
 - on with a build (`java-mods use-build`): Play starts the version's java/ program with
   --java-mods, in the instance's folder;
 - off again: the plain program again.
-Play's checks need the owner gate passed: a scratch launcher home has no signed-in account, so
-they are skipped, and said so. The window's developer option (settings.json `dev_offline`) lets
-the window's Play through: docs/java-bridge.md, "The Fabric switch", has that check.
+Launcher only (bridge-launcher-only): with no signed-in owner, nothing for the mods is downloaded
+(no build in java/, no Java runtime in the launcher's runtime folder) and the switch and Play say
+"Sign in"; `use-build` needs no sign-in. Play's checks past the gate need a signed-in owner: a
+scratch launcher home has none, so they are skipped, and said so. The window's developer option
+(settings.json `dev_offline`) lets a plain instance's Play through but never a Fabric one:
+docs/java-bridge.md, "Launcher only", has that check (the window under Xvfb).
 
     python3 tools/java_bridge/launcher_switch_test.py --launcher launcher/target/debug/horizon-launcher
 """
@@ -97,15 +100,22 @@ def main():
         check(r.returncode == 0 and len(ran) == 1 and ran[0][0] == "plain" and "--java-mods" not in ran[0][1],
               "off: the plain program, no --java-mods, with jars in mods-java/")
 
+    runtime = work / "lh/minecraft/runtime"
+
+    def downloaded():
+        return (version / "java").exists() or (version / ".java.partial").exists() or runtime.exists()
+
     r = run("java-mods", "on")
-    check(status()["on"] is True and not status()["java_build_installed"], "on: saved, no build to download")
+    check(status()["on"] is True and not status()["java_build_installed"], "on: saved, no build")
+    check("Sign in" in r.stdout + r.stderr and not downloaded(),
+          "on with no signed-in owner: nothing downloaded (build, Java), says Sign in")
     r = run("play")
     ran = played()
-    check(r.returncode != 0 and not ran and "Fabric mods build" in r.stderr,
-          "on without a build: Play refuses and says why, the plain game not started")
+    check(r.returncode != 0 and not ran and "Sign in" in r.stderr and not downloaded(),
+          "on without a build or owner: Play refuses, says Sign in, downloads nothing, no game")
 
     r = run("java-mods", "use-build", str(java_build))
-    check(r.returncode == 0 and status()["java_build_installed"], "use-build: the version's java/ build")
+    check(r.returncode == 0 and status()["java_build_installed"], "use-build: the version's java/ build, no sign-in")
     check((version / "java/horizon-client").is_file(), "the build sits in the version's java/ folder")
     r = run("play", "--world", "W")
     ran = played()

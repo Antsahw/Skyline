@@ -26,8 +26,6 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "logg
 rustls-pki-types = { version = "1", features = ["std"] }
 webpki-roots = "0.26"
 sha2 = "0.10"
-# Mojang's Java runtime (runtime.rs), for a player with no Java 25: its files are checked by SHA-1.
-sha1 = "0.10"
 # Java discovery, shared with horizon-prepare: JAVA_HOME, the PATH, Minecraft's runtimes.
 horizon-prepare = { path = "../horizon-prepare" }
 # The headless client's GPU (src/gpu/): renderpearl's device carried out on wgpu, the

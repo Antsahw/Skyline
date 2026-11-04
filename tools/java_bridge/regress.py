@@ -1262,11 +1262,6 @@ CASES = {
         forbid=[r"far terrain's \S+ failed", r"worldgen: proto failed"],
         look="near: the grid; far: thin layers every 5 blocks, not solid land",
     ),
-    "prism": dict(
-        about="Prism Launcher's wrapper: an instance's mods linked, Fabric API left out, its resource "
-              "packs and their selection carried (no game)",
-        mods=["fd"], optional=["fabric-api"], prism=True,
-    ),
     "packs": dict(
         about="A pack's own resource packs (resourcepacks/ and options.txt beside mods-java) load: "
               "a checkered stone wall in the screenshot",
@@ -1355,34 +1350,6 @@ def build(java_only):
 
 def read(path):
     return path.read_text(errors="replace") if path.exists() else ""
-
-
-def run_prism(case, jars, out):
-    inst = Path(tempfile.mkdtemp(prefix="hz-prism."))
-    try:
-        mods = inst / ".minecraft" / "mods"
-        mods.mkdir(parents=True)
-        for jar in jars:
-            shutil.copy(jar, mods)
-        test_pack(inst / ".minecraft")
-        env = dict(os.environ, INST_MC_DIR=str(inst / ".minecraft"), HORIZON_PRISM_DRY="1")
-        play = TOOLS.parent.parent / "target" / "fast" / ("horizon-play.exe" if os.name == "nt" else "horizon-play")
-        r = subprocess.run([str(play)], input="param --username\nparam Steve\nlaunch\n",
-                           env=env, capture_output=True, text=True, timeout=60)
-        (out / "prism.txt").write_text(r.stdout + r.stderr)
-        linked = sorted(p.name for p in (inst / ".minecraft" / "horizon" / "mods-java").glob("*.jar"))
-        results = [(r.returncode == 0 and "horizon-client" in r.stdout, "the game's command is made"),
-                   (len(linked) == len([j for j in jars if not fnmatch.fnmatch(j.name.lower(), "fabric-api*")]),
-                    f"the mods are linked ({len(linked)})"),
-                   (not any(n.lower().startswith("fabric-api") for n in linked), "Fabric API is left out"),
-                   ((inst / ".minecraft" / "horizon" / "config").is_symlink(), "config/ is the instance's"),
-                   ((inst / ".minecraft" / "horizon" / "resourcepacks" / "Checkered.zip").is_file(),
-                    "the instance's resource packs are the game's"),
-                   ("file/Checkered.zip" in read(inst / ".minecraft" / "horizon" / "options.txt"),
-                    "the instance's pack selection is on")]
-        return results, []
-    finally:
-        shutil.rmtree(inst, ignore_errors=True)
 
 
 def run_game(case, name, jars, out, extra_env, pack=None, join_within=None):
@@ -1522,12 +1489,9 @@ def main():
         try:
             jars += [fixture(f, fixtures, list(jars)) for f in case.get("fixtures", [])]
             print(f"---- {name}: {case['about']}", flush=True)
-            if case.get("prism"):
-                results, errors = run_prism(case, jars, out)
-            else:
-                results, errors = run_game(case, name, jars, out, extra_env,
-                                           pack=Path(a.pack).resolve() if case.get("pack") else None,
-                                           join_within=a.join_within if case.get("pack") else None)
+            results, errors = run_game(case, name, jars, out, extra_env,
+                                       pack=Path(a.pack).resolve() if case.get("pack") else None,
+                                       join_within=a.join_within if case.get("pack") else None)
         except Exception as e:  # a case that cannot run fails, the others still run
             results, errors = [(False, f"the case could not run: {e}")], []
         for ok, what in results:

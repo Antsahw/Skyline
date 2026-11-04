@@ -50,8 +50,8 @@ The Java bridge runs **real Fabric mods for 26.3** inside Horizon. **Horizon's w
 | Mods that change vanilla behaviour (mixins) | ✅ Veinminer, Right Click Harvest, Carry On, Serene Seasons, Clumps |
 | Player look | ✅ 3D Skin Layers |
 | Multiplayer with mods | ✅ LAN and dedicated servers: each player's own maps, recipe viewers and mod settings |
-| The launcher | ✅ the "Fabric 26.3 mods (beta)" switch per instance and a **Java mods** tab (add, remove, which mods failed last game); fetches Java 25 itself |
-| Renderer replacements (Sodium, Iris) | ➖ not needed: Horizon has its own renderer; they're left out with a note |
+| The launcher | ✅ the only way to play: a **Fabric 26.3 mods (beta)** switch per instance and a **Java mods** tab (add, remove, which mods failed last game); fetches Java 25 after the Microsoft sign-in |
+| Renderer replacements (Sodium, Iris) | ➖ not needed: Horizon has its own renderer, so they have nothing to replace |
 | Known not working yet | 🐛 Cloth Config screens, Chat Heads, ReplayMod, Flashback, Simple Voice Chat, Chunky, TACZ, Better Combat; a block's break sound twice with some mods. Being worked on; testers track mods on [their Trello](https://trello.com/b/2uhi4jkj) |
 | Windows | ✅ builds and plays on Windows 11 (Windows support by [martipops](https://github.com/martipops)); macOS untested |
 
@@ -59,22 +59,15 @@ How it works, the tick flow, 26.3 traps and the test tools: **[docs/java-bridge.
 
 ### Try it
 
-You need Rust, Git, a JDK 25 and Minecraft: Java Edition 26.3 (played once in the official launcher). Build the game with Java mods, and the launcher:
+**Through the Horizon launcher only, signed in with a Microsoft account that owns Minecraft: Java Edition.** Nothing for the mods (the Fabric mods build, Java 25) is downloaded before that sign-in, and there is no offline way to play them. No release carries the Fabric mods build yet, so build the fork's game and launcher:
 
 ```sh
 git clone -b java-bridge https://github.com/iaxivers/horizon && cd horizon
 cargo build --profile fast -p horizon-client --features horizon-client/java-mods
-cd launcher && cargo build --release    # Fedora needs libxkbcommon-x11-devel
+cd launcher && cargo build --release && cd ..     # Fedora needs libxkbcommon-x11-devel
 ```
 
-Then, with the launcher (start it with `HORIZON_LAUNCHER_NO_SELF_UPDATE=1` so it doesn't replace itself with upstream's):
-
-1. Sign in with your Microsoft account and make a Horizon 26.3 instance.
-2. Use your build: `horizon-launcher java-mods use-build target/fast/horizon-client`.
-3. Turn on **Fabric 26.3 mods (beta)** (Launch… on Home, or `horizon-launcher java-mods on`).
-4. Add Fabric 26.3 mods in the **Java mods** tab (or `horizon-launcher java-mods add <jar>`) and press **Play**. The first start with new mods takes a few minutes.
-
-Found a bug? Post it with a screenshot, your mod list and `logs/latest.log`.
+Start `launcher/target/release/horizon-launcher` with `HORIZON_LAUNCHER_NO_SELF_UPDATE=1`, sign in, install and prepare a Horizon version, then `horizon-launcher java-mods use-build target/fast/horizon-client`, turn on **Fabric 26.3 mods (beta)** under **Launch…**, add jars in the **Java mods** tab and press **Play**. Every step: the **[testers' guide](docs/java-bridge-beta.md)**.
 
 **Tests:** `python3 tools/java_bridge/regress.py --jars <jars>` plays every scene that once worked, headless, with screenshots; `--pack <mods folder> bigpack` plays a whole pack. Add `HORIZON_JAVA_PROFILE=1` to see what the mods cost each tick.
 

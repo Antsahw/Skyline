@@ -125,8 +125,8 @@ impl Launcher {
             }));
         let about = text(theme::CAPTION).text_color(t.muted).child(tr(
             "Runs the Fabric mods in this instance's mods-java folder. Off, the game never starts \
-             Java. On, the launcher downloads Horizon's build with Java mods, and the game gets \
-             Java 25 the first time it starts them.",
+             Java. On, once you're signed in with an account that owns Minecraft, the launcher \
+             downloads Horizon's build with Java mods, and Java 25 if you have none.",
         ));
         let state = self.java_build.as_ref().map(|b| match &b.done {
             None => text(theme::CAPTION)

@@ -43,7 +43,7 @@ pub const JAVA_MAJOR: i64 = 25;
 /// the folder holding `bin/` and `lib/`.
 pub const JAVA_HOME_VAR: &str = "HORIZON_JAVA_HOME";
 
-/// The game's exit code when the player's Java mods can't start (`horizon-play` explains it).
+/// The game's exit code when the player's Java mods can't start (its log says why).
 pub const NOT_STARTED_EXIT: i32 = 78;
 
 /// The bridge's jar, built by build.rs.
@@ -257,27 +257,6 @@ pub fn find_java_home() -> Result<PathBuf, String> {
         .and_then(Path::parent)
         .map(Path::to_path_buf)
         .ok_or_else(|| format!("{} is not inside a Java home", java.display()))
-}
-
-/// [`find_java_home`], else Mojang's `component` runtime (the game version's, from its version
-/// JSON) downloaded into the launcher's runtime folder ([`runtime::ensure`]): a player with no
-/// Java 25 still gets their mods. `HORIZON_JAVA_NO_DOWNLOAD=1` only looks.
-pub fn find_or_fetch_java_home(
-    component: Option<&str>,
-    log: &dyn Fn(String),
-) -> Result<PathBuf, String> {
-    let missing = match find_java_home() {
-        Ok(home) => return Ok(home),
-        Err(e) => e,
-    };
-    let no_download = std::env::var("HORIZON_JAVA_NO_DOWNLOAD").is_ok_and(|v| v == "1");
-    let (Some(component), Some(dir), false) = (component, runtime::runtime_dir(), no_download)
-    else {
-        return Err(missing);
-    };
-    runtime::ensure(component, &dir, log)
-        .map_err(|e| format!("{missing}; Mojang's Java could not be downloaded either: {e}"))?;
-    find_java_home()
 }
 
 /// The JVM library inside a Java home.

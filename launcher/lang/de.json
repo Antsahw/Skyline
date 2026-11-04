@@ -1093,7 +1093,7 @@
   "Its mods made for Minecraft {from} stay in its folder; some may not load in {to}.": "Ihre Mods für Minecraft {from} bleiben in ihrem Ordner; manche laden in {to} vielleicht nicht.",
   "Its worlds were saved by Minecraft {from}: {to} upgrades them for good, and can't open them if it is older.": "Ihre Welten wurden von Minecraft {from} gespeichert: {to} aktualisiert sie endgültig und kann sie nicht öffnen, wenn es älter ist.",
   "Fabric 26.3 mods (beta)": "Fabric-26.3-Mods (Beta)",
-  "Runs the Fabric mods in this instance's mods-java folder. Off, the game never starts Java. On, the launcher downloads Horizon's build with Java mods, and the game gets Java 25 the first time it starts them.": "Startet die Fabric-Mods im Ordner mods-java dieser Instanz. Aus: Das Spiel startet nie Java. An: Der Launcher lädt Horizons Build mit Java-Mods herunter, und das Spiel holt sich Java 25, wenn es sie zum ersten Mal startet.",
+  "Runs the Fabric mods in this instance's mods-java folder. Off, the game never starts Java. On, once you're signed in with an account that owns Minecraft, the launcher downloads Horizon's build with Java mods, and Java 25 if you have none.": "Führt die Fabric-Mods im Ordner mods-java dieser Instanz aus. Aus: Das Spiel startet nie Java. An: Sobald du mit einem Konto angemeldet bist, das Minecraft besitzt, lädt der Launcher Horizons Build mit Java-Mods herunter und Java 25, falls du keins hast.",
   "Downloading the Fabric mods build…": "Build mit Fabric-Mods wird heruntergeladen…",
   "The Fabric mods build is ready.": "Der Build mit Fabric-Mods ist bereit.",
   "Added {names}: they load the next time the game starts.": "{names} hinzugefügt: Sie werden beim nächsten Spielstart geladen.",

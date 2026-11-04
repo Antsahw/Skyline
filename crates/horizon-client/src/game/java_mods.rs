@@ -148,21 +148,6 @@ fn install_root(args: impl Iterator<Item = String>) -> Option<PathBuf> {
         .map(Path::to_path_buf)
 }
 
-/// The Java runtime Mojang names for the pinned version (`javaVersion.component` of the version
-/// JSON the preparation imported), downloaded when the player has no Java 25.
-fn java_component(root: &Path) -> Option<String> {
-    let version = game_version(root).ok()?;
-    let manifest = root
-        .join(".local/minecraft")
-        .join(version)
-        .join("manifest.json");
-    let json: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(manifest).ok()?).ok()?;
-    json.pointer("/javaVersion/component")
-        .and_then(serde_json::Value::as_str)
-        .map(str::to_string)
-}
-
 /// The jars of `dir` (`mods-java/`) Fabric loads: all but the renderer mods Horizon doesn't
 /// need (Sodium, Iris: Horizon has its own renderer) and the mods that need them
 /// (`horizon_jvm::renderers`). Worked out once for a set of jars.
@@ -374,9 +359,16 @@ fn start_once(root: &Path, dir: &Path, jars: Vec<PathBuf>, side: horizon_jvm::Si
         fabric,
         class_archive: archive.clone(),
     };
-    let component = java_component(root);
-    let log = |line: String| log::info!("{line}");
-    let bridge = match horizon_jvm::find_or_fetch_java_home(component.as_deref(), &log)
+    // The game downloads no Java: the launcher fetches the version's own, after its sign-in.
+    let bridge = match horizon_jvm::find_java_home()
+        .map_err(|e| {
+            format!(
+                "{e}. Start the game from the Horizon launcher with Fabric 26.3 mods on (it gets \
+                 Java {} once you're signed in), or install a JDK {}",
+                horizon_jvm::JAVA_MAJOR,
+                horizon_jvm::JAVA_MAJOR
+            )
+        })
         .and_then(|home| horizon_jvm::start(&config(home)))
     {
         Ok(bridge) => bridge,

@@ -311,7 +311,6 @@ jobs:
         run: |
           set -euo pipefail
           cargo build --release --locked ${{ matrix.target && format('--target {0}', matrix.target) || '' }} -p horizon-client --features java-mods --bin horizon-client
-          cargo build --release --locked ${{ matrix.target && format('--target {0}', matrix.target) || '' }} -p horizon-play
           bin="target-java/${{ matrix.target && format('{0}/', matrix.target) || '' }}release"
           "$bin/horizon-client${{ matrix.exe }}" --help | grep -q -- '--resources'
           # The other programs are the plain build's (package takes them from beside the game).

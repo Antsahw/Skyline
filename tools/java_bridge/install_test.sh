@@ -2,14 +2,15 @@
 # The Java mods from a normal install, as the launcher starts the game: a scratch install laid
 # out like a launcher version (`<version>/horizon-client`, research-lock.json, the preparation's
 # `.local/minecraft/<v>` and `.local/horizon-client/<v>`, linked from this checkout), the game run
-# in a scratch game folder holding mods-java/, with only `--resources` pointing at the install:
-# no HORIZON_ROOT, HORIZON_JAVA_HOME, JAVA_HOME, HORIZON_JAVA_JARS, and no java on the PATH. The
-# bridge then finds the install, its game jar and libraries, fetches Fabric's libraries, and
-# downloads Mojang's Java runtime into the scratch launcher folder (HORIZON_LAUNCHER_HOME), as a
-# player with no Java 25 gets. Steps see G (horizon-ctl); a screenshot after each in OUT
-# (default /tmp): install-N.png.
+# in a scratch game folder holding mods-java/, with only `--resources` pointing at the install
+# and the Java the launcher passes (HORIZON_JAVA_HOME: this machine's Java 25): no HORIZON_ROOT,
+# JAVA_HOME, HORIZON_JAVA_JARS, and no java on the PATH. The bridge then finds the install, its
+# game jar and libraries, and fetches Fabric's libraries. Steps see G (horizon-ctl); a
+# screenshot after each in OUT (default /tmp): install-N.png.
 #   MODS=~/mods/fd tools/java_bridge/install_test.sh 'sleep 3'
 #   KEEP_JAVA=1 ...: leave the PATH's Java (only the install layout is tested)
+#   NO_JAVA=1 ...: no Java passed and none to find: the game downloads none (that's the
+#   launcher's, after its sign-in) and says why the mods didn't start
 #   OFF=1 ...: without --java-mods, as the launcher starts an instance with its Fabric switch off:
 #   no Java may start (or be downloaded), jars in mods-java/ or not
 R=$(cd "$(dirname "$0")/../.." && pwd)
@@ -42,10 +43,18 @@ fi
 # (HORIZON_JAVA_NO_SYSTEM: only Minecraft's and the launcher's runtimes).
 path=/usr/local/bin:/usr/bin:/bin; nosys=1
 [ -n "$KEEP_JAVA" ] && path=$PATH && nosys=0
+# The launcher's Java for the mods (java_variant::switch_command): this machine's Java 25.
+jh=${HORIZON_JAVA_HOME:-}
+if [ -z "$jh" ]; then
+  for c in "$JAVA_HOME" /usr/lib/jvm/java-25* "$(dirname "$(dirname "$(readlink -f "$(command -v java)")")")"; do
+    [ -x "$c/bin/javac" ] && grep -q 'JAVA_VERSION="25' "$c/release" 2>/dev/null && jh=$c && break
+  done
+fi
+[ -n "$NO_JAVA" ] && jh=
 # The game folder is HORIZON_HOME (the launcher starts the game there; horizon-ctl too).
 cd "$I/home"
 env -u HORIZON_ROOT -u HORIZON_JAVA_HOME -u JAVA_HOME -u HORIZON_JAVA_JARS -u JAVA_TOOL_OPTIONS \
-  PATH=$path HORIZON_JAVA_NO_SYSTEM=$nosys HORIZON_HOME=$I/home HORIZON_LAUNCHER_HOME=$I/lh XDG_DATA_HOME=$I/data XDG_CONFIG_HOME=$I/conf \
+  ${jh:+HORIZON_JAVA_HOME=$jh} PATH=$path HORIZON_JAVA_NO_SYSTEM=$nosys HORIZON_HOME=$I/home HORIZON_LAUNCHER_HOME=$I/lh XDG_DATA_HOME=$I/data XDG_CONFIG_HOME=$I/conf \
   HORIZON_LAUNCHER_NO_SELF_UPDATE=1 HORIZON_NO_AUDIO=1 HORIZON_CTL_LAUNCH_TIMEOUT=900 \
   "$CTL" --socket "$I/ctl.sock" launch --world W --seed "${SEED:-1234}" --creative --wait --offscreen $OPT_IN \
   --game "$I/version/horizon-client" --resources "$I/version/.local/horizon-client/$V" > "$I/ctl.out" 2>&1

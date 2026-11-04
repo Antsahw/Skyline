@@ -2,8 +2,7 @@
 //! own, so they have nothing to do in it, and their mixins into vanilla's renderer fail. They
 //! are left out of the mods Fabric loads, with the mods that need them (Fabric would refuse to
 //! start otherwise), and the players are told they aren't needed rather than shown a failure.
-//! The same list as horizon-play's (`crates/horizon-play/src/mods.rs`), for jars put in
-//! `mods-java/` by hand or by the launcher.
+//! For every jar in `mods-java/`, whoever put it there.
 
 use std::collections::BTreeSet;
 use std::io::Read;
