@@ -181,6 +181,11 @@ By area:
   needs its opening data on the client (Fabric's `ExtendedScreenHandlerType`/menu data
   sent with the open packet) or a screen that fails to make: check the log for the screen's
   error; client chat.
+  **Cardboard armor disguise** doesn't work (full set + sneaking: you look like a box and mobs
+  ignore you). Two halves: drawing a player as something else (a mod's player-renderer hook;
+  Horizon draws players itself: gpu) and mobs ignoring a disguised player (Horizon's mobs are
+  Rust: they'd have to ask the mods whether a player can be targeted, a hook on target
+  selection: entities). Lower priority.
 - **A broken block's moving parts stay** (tester, batch 10): break a cogwheel and the hand
   crank's handle on it keeps floating, drawn. A removed mod block entity must drop its
   renderer's instance (gpu-13: the recorder's per-block-entity draws on removal).
