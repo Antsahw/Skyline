@@ -186,6 +186,10 @@ By area:
   Horizon draws players itself: gpu) and mobs ignoring a disguised player (Horizon's mobs are
   Rust: they'd have to ask the mods whether a player can be targeted, a hook on target
   selection: entities). Lower priority.
+  **Sandpaper** does nothing (hold right-click with it, the off-hand item gets polished): a mod
+  item used over time that isn't food. Mixins-9 made food finish; the same must hold for any
+  mod item with a use duration (`getUseDuration`, `onUseTick`, `finishUsingItem`,
+  `releaseUsing`): mixins.
 - **A broken block's moving parts stay** (tester, batch 10): break a cogwheel and the hand
   crank's handle on it keeps floating, drawn. A removed mod block entity must drop its
   renderer's instance (gpu-13: the recorder's per-block-entity draws on removal).
