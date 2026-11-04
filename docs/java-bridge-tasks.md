@@ -127,6 +127,11 @@ By area:
   network get a speed?); the mechanical mixer over a basin is "just bugged" (ask what: no
   mixing, no animation, or a drawing gap; his screenshot has a block between mixer and basin,
   check his setup). Confirmed working on batch 10: eating FD meals.
+  Also: **crushing wheels** do nothing (they process item entities thrown between them: the
+  same item-entity path as the depot, mixins); **fluid pipes draw broken** in water (a pipe
+  through a water block: its middle segment missing, the outline bigger than the model;
+  check the pipe's connection states after neighbour updates in the mirror, and multipart
+  models of waterlogged mod blocks).
 - **A broken block's moving parts stay** (tester, batch 10): break a cogwheel and the hand
   crank's handle on it keeps floating, drawn. A removed mod block entity must drop its
   renderer's instance (gpu-13: the recorder's per-block-entity draws on removal).
