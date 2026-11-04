@@ -17,7 +17,7 @@ and talks with the user. Read this, then [java-bridge.md](java-bridge.md) and
 - **ChinoCappuchino (NeuHorizon fork, PR #5053):** NeoForge 1.21.1 mods compiled to native code
   with Cranelift. As of 2026-10-31 his own docs say mod behaviour code doesn't run and mixins
   don't apply; his claims of "deep mixin support" weren't true then. Friendly; worth sharing a
-  hook-table format and the Prism launch idea (we built a Fabric version: `prism.sh`). Don't
+  hook-table format and the Prism launch idea (we built a Fabric version: horizon-play). Don't
   merge his code into ours.
 
 ## The chats

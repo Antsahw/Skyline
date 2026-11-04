@@ -1,196 +1,202 @@
-# Fabric mods in Horizon: beta testers' guide
+# Fabric mods in Horizon: testers' guide
 
-Thanks for testing! This fork of [Horizon](https://github.com/horizon-rust/horizon) (Minecraft:
-Java Edition 26.3 rewritten in Rust) runs **real Fabric mods for 26.3**: the mods' own Java code,
-inside Horizon. This guide gets you from nothing to playing a modded world, and says what to
-send back when something breaks.
+This fork of [Horizon](https://github.com/horizon-rust/horizon) (Minecraft: Java Edition 26.3
+rewritten in Rust) runs **real Fabric mods for 26.3** inside Horizon.
 
-> **Beta: things will break.** Play in a separate folder (below), never in a world you care
-> about, and keep backups. This is an unofficial fork, not part of upstream Horizon, and not
-> made by Mojang or Microsoft.
+> **Beta: things will break.** Don't use a world you care about, and keep backups. This is an
+> unofficial fork, not part of upstream Horizon, and not made by Mojang or Microsoft.
+
+| System | Status |
+|---|---|
+| Windows 10/11 (64-bit) | Works: tested on Windows 11 with an NVIDIA GPU |
+| Linux | Works: the fork's main test system (Fedora, Ubuntu) |
+| macOS | **Untested.** It may work. Tell us what happens |
 
 ## What you need
 
-- **Linux** (tested on Fedora and Ubuntu). Windows and macOS: not yet.
-- **A copy of Minecraft: Java Edition** (a Microsoft account that owns it). Horizon contains no
-  Minecraft files: it builds what it needs from your own 26.3 install.
-- **A GPU with Vulkan** (any recent AMD, NVIDIA or Intel GPU).
-- About **10 GB** of disk for the build, and **16 GB of RAM** for a big pack (8 GB works for a
-  small one).
+- **Minecraft: Java Edition**, on a Microsoft account that owns it. Horizon contains no Minecraft
+  files: it makes what it needs from your own copy.
+- **Minecraft 26.3 played once**, to the title screen, in the official launcher or Prism Launcher.
+- A graphics card that can run modern games, about **10 GB of free disk** if you build from source,
+  and **8 GB of RAM** (16 GB for a big modpack).
 
-## 1. Install the tools (once)
+## Step 1: get Horizon
 
-Fedora:
+**If someone gave you a download** (`horizon-…-java.zip`): extract the whole folder somewhere you can
+write to, like Documents. Don't run it from inside the zip. Skip to step 2.
 
-```sh
-sudo dnf install git gcc python3 java-25-openjdk-devel alsa-lib-devel systemd-devel libxkbcommon-x11-devel
-```
+**Otherwise, build it** (once; about 15 minutes). Install the tools, then run the same three lines
+on every system:
 
-Ubuntu / Debian:
-
-```sh
-sudo apt install git build-essential python3 openjdk-25-jdk libasound2-dev libudev-dev libxkbcommon-x11-dev
-```
-
-Then Rust, from [rustup.rs](https://rustup.rs):
-
-```sh
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-```
-
-Check Java is 25: `java -version`. If it shows another version, point Horizon at 25:
-`export JAVA_HOME=/usr/lib/jvm/java-25-openjdk` (the folder name can differ: `ls /usr/lib/jvm`).
-
-## 2. Get Minecraft 26.3's files (once)
-
-1. In the **official Minecraft launcher**, play version **26.3** once (just reach the title
-   screen). That puts the game in `~/.minecraft`.
-2. Download the **26.3 server jar** from [minecraft.net](https://www.minecraft.net/en-us/download/server)
-   (Horizon reads the game's data from it). Save it as `~/Downloads/server.jar`.
-
-## 3. Build the game (about 5–15 minutes the first time)
+- **Windows**, in PowerShell. When the Rust installer asks about Visual Studio, accept its option:
+  ```powershell
+  winget install Git.Git Rustlang.Rustup EclipseAdoptium.Temurin.25.JDK
+  ```
+  Close the PowerShell window and open a new one afterwards.
+- **Fedora:** `sudo dnf install git gcc java-25-openjdk-devel alsa-lib-devel systemd-devel libxkbcommon-x11-devel`,
+  then Rust from [rustup.rs](https://rustup.rs).
+- **Ubuntu / Debian:** `sudo apt install git build-essential openjdk-25-jdk libasound2-dev libudev-dev libxkbcommon-x11-dev`,
+  then Rust from [rustup.rs](https://rustup.rs).
+- **macOS (untested):** `xcode-select --install`, Rust from [rustup.rs](https://rustup.rs), and a
+  JDK 25 from [adoptium.net](https://adoptium.net).
 
 ```sh
-git clone -b java-bridge https://github.com/iaxivers/horizon ~/horizon
-cd ~/horizon
-cargo run --release -p horizon-prepare -- --prepare --server-jar ~/Downloads/server.jar
-cargo build --profile fast -p horizon-client -p horizon-client-lib --features horizon-client/java-mods
+git clone -b java-bridge https://github.com/iaxivers/horizon
+cd horizon
+cargo run --profile fast -p horizon-play
 ```
 
-The `prepare` step turns your Minecraft files into Horizon's (about a minute, kept in
-`~/horizon/.local/`). The build makes the game, `~/horizon/target/fast/horizon-client`.
+That builds the game, prepares your Minecraft files and starts the game. Quit the game once it
+opens: next, add your mods.
 
-**Updating later:** `cd ~/horizon && git pull`, then run the `cargo build` line again (a minute
-or two).
+To play again later, run the last line from the same folder. To update, run `git pull` first.
 
-## 4. Get mods
+## Step 2: add mods and play
 
-Mods are **Fabric mods for Minecraft 26.3**, the same `.jar` files you'd use with Fabric
-(from [Modrinth](https://modrinth.com/mods?g=categories:fabric&v=26.3) or CurseForge). Put
-their required libraries too (Modrinth lists them as dependencies). Fabric API is optional: the
-game brings its own.
+Pick one. Both use **Fabric mods for Minecraft 26.3**, the same `.jar` files as normal Fabric, from
+[Modrinth](https://modrinth.com/mods?g=categories:fabric&v=26.3) or CurseForge. Remember the
+libraries a mod requires too; Modrinth lists them as dependencies.
 
-**Or start with our test pack** (about 80 mods: Biomes O' Plenty, Farmer's Delight, REI, Jade,
-Xaero's maps, JourneyMap, Naturalist, Friends & Foes, and more, with all their libraries):
+### Easiest: press Play in Prism Launcher
+
+Prism installs and updates the mods, and signs you in.
+
+1. In [Prism Launcher](https://prismlauncher.org), make an instance for Minecraft **26.3** with
+   **Fabric**, and add mods or a modpack as usual.
+2. Find `horizon-play` (`horizon-play.exe` on Windows). It's in the folder you extracted, or, if you
+   built it, in `target/fast` inside the `horizon` folder.
+3. Right-click the instance > **Edit** > **Settings** > **Custom commands**. Tick the box to enable
+   them, and paste the full path of `horizon-play` into **Wrapper command**, like
+   `C:\Users\you\Documents\horizon\target\fast\horizon-play.exe`. If the path has a space in it,
+   put quotes around it.
+4. Press **Play**.
+
+To go back to normal Minecraft, clear the wrapper command.
+
+### No Prism: drop jars in a folder
+
+- **Download:** double-click `horizon-play`. It makes a `fabric-mods` folder beside itself: put your jars
+  there and start it again.
+- **Built from source:** run `cargo run --profile fast -p horizon-play`. It prints where the
+  `fabric-mods` folder is (`.local/play/fabric-mods`): put your jars there and run it again.
+
+You can also point it at a Prism instance, without changing the instance's settings:
 
 ```sh
-python3 ~/horizon/tools/java_bridge/get_test_pack.py ~/hz-test/mods-java
+cargo run --profile fast -p horizon-play -- --instance "PATH/TO/PrismLauncher/instances/MyPack"
 ```
 
-## 5. Where mods go
+Or, with a download: `horizon-play --instance "PATH/TO/PrismLauncher/instances/MyPack"`. This way
+you play offline, because Prism isn't there to sign you in.
 
-Mods go in a folder called **`mods-java`** inside the **game folder**. The game folder is
-**the folder you start the game from** (your terminal's current folder).
+### What happens when you start
 
-Make one game folder for testing, and put (or link) your mods in it:
+- **The first start with a new set of mods takes a few minutes.** After that, usually under a
+  minute.
+- **`horizon-play` skips some jars, and says so:** Fabric API (Horizon brings its own), and renderer
+  replacements like Sodium and Iris, with any mod that requires them. Horizon has its own renderer.
+  Your files aren't changed or deleted.
+- **If your mods can't start, the game stops and names the problem,** instead of opening your world
+  without them, which could lose their blocks and items. Usually one mod is the cause: remove it and
+  try again.
+- **If one mod fails while you're playing,** a `[Java mods]` chat message says so, and the game goes
+  on without that part of it.
+
+**Check the mods loaded:** type `/give @s ` and press Tab. The list should include your mods' items.
+
+## What to test
+
+Do what you can, in any order, and tell us what happened. Each test has what you should see.
+
+| # | Test | You should see |
+|---|---|---|
+| 1 | Start the game with one content mod (Farmer's Delight is a good one) | The title screen, then its items in the Creative inventory |
+| 2 | Place a mod's block and use it (a cooking pot on a stove) | The block looks right, its screen opens, and it works |
+| 3 | Fill a mod's chest or machine, quit to the title screen, reopen the world, then restart the game and check again | Everything is where you left it |
+| 4 | Start the game a second time with the same mods | A much faster start |
+| 5 | Add a mod, remove a mod, and start again | The change takes effect, and the rest of the world is fine |
+| 6 | Your favourite modpack | It starts: tell us which mods work and which don't |
+| 7 | Play for an hour or two | It doesn't get slower or keep using more memory |
+| 8 | Explore far enough to find mod biomes and structures | They appear |
+| 9 | Esc > **Open to LAN**, and have a friend join | They join and can see and use mod blocks |
+| 10 | A dedicated server: see [below](#a-server-with-mods) | Players can join and use mods |
+| 11 | The FPS (F3), compared with the same mods in normal Minecraft | Tell us both numbers |
+| 12 | A Windows user name or folder with spaces or accents in it | The same as any other start |
+
+### A server with mods
+
+Run the game once first, so it's prepared, then quit. Put the mods in the `fabric-mods` folder as above. In
+the `game` folder (`.local/play/game` if you built from source), make a file called `eula.txt`
+holding `eula=true`, if you agree to [Minecraft's EULA](https://aka.ms/MinecraftEULA). Then:
 
 ```sh
-mkdir -p ~/hz-play
-ln -sfn ~/hz-test/mods-java ~/hz-play/mods-java     # or: mkdir ~/hz-play/mods-java and copy jars in
+horizon-play -- --dedicated --nogui
 ```
 
-The game folder ends up holding everything for that setup: `mods-java/` (your mods),
-`config/` (the mods' settings, made on the first start), `saves/` (worlds), `logs/` (the log
-you'll send with bug reports).
+From source, that's `cargo run --profile fast -p horizon-play -- -- --dedicated --nogui`. Players
+join with this same Horizon build and the same mods.
 
-## 6. Play
+## Known problems
 
-```sh
-cd ~/hz-play
-HORIZON_HOME=~/hz-play ~/horizon/target/fast/horizon-client --resources ~/horizon/.local/horizon-client/26.3
-```
+No need to report these, though tell us if you learn more about them:
 
-Add `--world MyWorld` to go straight into a world (made if it doesn't exist).
-
-- **The first start with a new set of mods takes a few minutes**: the game prepares the mods'
-  blocks, items and textures once. Later starts take about a minute.
-- **Starting the same way from the game folder matters:** run it from somewhere else and it
-  loads the mods of *that* folder (or none).
-- **Check the mods loaded:** `/give @s ` then Tab should list the mods' items; the log says
-  `Fabric Loader started: N mods`.
-
-### Or with the launcher
-
-The fork's launcher has a **Java mods** tab (add and remove jars, see which mods failed in the
-last game):
-
-```sh
-cd ~/horizon/launcher && cargo build --release
-./target/release/horizon-launcher import-build ~/horizon/target/fast/horizon-client --trust-unsigned
-for j in ~/hz-test/mods-java/*.jar; do ./target/release/horizon-launcher java-mods add "$j"; done
-HORIZON_LAUNCHER_NO_SELF_UPDATE=1 ./target/release/horizon-launcher
-```
-
-`import-build` needs one official Horizon version installed in the launcher first (it reuses its
-game files); install one from the launcher if it says there's none. Always start the fork's
-launcher with `HORIZON_LAUNCHER_NO_SELF_UPDATE=1`, or it replaces itself with the official one
-(which has no Java mods).
-
-## What works, what doesn't
-
-**Works:** mod blocks, items, recipes and machines; REI, Jade, AppleSkin; Xaero's Minimap and
-World Map, JourneyMap, MiniHUD; mod mobs and their AI; mod biomes, structures and terrain; mods
-that change vanilla behaviour (Veinminer, Carry On, Right Click Harvest...); LAN and dedicated
-servers with mods.
-
-**Known problems** (no need to report these, but tell us if you find more about them):
-
-- Some mod blocks are **invisible right after you place them**, until you restart the game; a
-  few invisible blocks in swamps.
+- Some mod blocks are **invisible right after you place them**, until you restart the game; a few
+  invisible blocks in swamps.
 - **Hoppers** don't work in packs with **Lithium**.
 - **Litematica**'s screens and its in-world overlay don't show.
 - **VoxelMap** fails beside Xaero's maps (both use the same network message). Use one map mod.
-- **Sodium and Iris don't work, and aren't needed**: they replace Minecraft's renderer, and
-  Horizon has its own. Leave them out. Same for other renderer replacements.
+- Mods that change how the game looks, made for Minecraft's renderer, can fail in part: they show a
+  `[Java mods]` chat message and the game goes on.
 - Some missing textures (a purple and black block) here and there.
-- In menus the game renders without a frame cap, so some GPUs whine: set **Max Framerate** in
-  Video Settings to your monitor's refresh rate.
+- In menus the game has no frame cap, so some GPUs whine: set **Max Framerate** in Video Settings to
+  your monitor's refresh rate.
 
 ## Reporting a bug
 
-Open an issue at **[github.com/iaxivers/horizon/issues](https://github.com/iaxivers/horizon/issues)**
-(one bug per issue) with:
+Open an issue at [iaxivers/horizon](https://github.com/iaxivers/horizon) if issues are on, or tell
+whoever gave you this guide. One bug per report, with:
 
-1. **What happened, and what you expected.** Steps to make it happen again, if you know them.
-2. **Your mods:** `ls ~/hz-play/mods-java` (paste the list), or "the test pack".
-3. **The log:** attach `~/hz-play/logs/latest.log` from the game where it happened (it's
-   replaced each start: copy it before you start again).
-4. **A crash?** Attach the newest file in `~/hz-play/crash-reports/`.
-5. **A screenshot** (F2 saves one in `~/hz-play/screenshots/`) for anything visual, and the
-   coordinates (F3) for anything in the world.
-6. Your **GPU** and **Linux** version (`lspci | grep -i vga`, `cat /etc/os-release`).
+1. **What happened, and what you expected**, and the steps to make it happen again if you know them.
+2. **Your mods:** the list of jars, or the modpack's name.
+3. **The log:** `logs/latest.log` in the game folder ([where](#where-things-are)). It's replaced at
+   each start, so copy it before you start again.
+4. **If it crashed:** the newest file in `crash-reports/` in the game folder, if there is one.
+5. **For anything visual:** a screenshot (F2 saves one in `screenshots/`) and the coordinates (F3).
+6. **Your system:** Windows, Linux or macOS and its version, and your graphics card.
 
-**The game froze?** Before closing it, run this in a terminal and attach both files: it shows
-exactly where it's stuck.
+**The game froze?** Before closing it, save where it's stuck. This needs a JDK, and uses the number
+of the running `horizon-client`: from Task Manager's Details tab on Windows, or `pgrep -x horizon-client`
+on Linux and macOS.
 
 ```sh
-P=$(pgrep -x horizon-client)
-jcmd $P Thread.print > ~/java-threads.txt
-gdb -p $P -batch -ex "thread apply all bt" > ~/rust-threads.txt 2>&1   # needs gdb
+jcmd PROCESS_NUMBER Thread.print > java-threads.txt
 ```
 
-**Is it the mod or the bridge?** If you can, try the same mod in normal Minecraft with Fabric:
-if it breaks there too, it's the mod.
-
-## What we'd most like tested
-
-- **Your favourite mods and packs**: which work, which don't.
-- **Saving**: play, quit, come back. Do your mod blocks, chests and machines keep what was in
-  them?
-- **Long sessions**: an hour or two. Does it get slower, or use more and more memory?
-- **Playing together**: a friend joining over LAN (Esc → Open to LAN), or a server.
-- **Performance**: your FPS (F3) compared with the same mods in normal Minecraft.
+**Is it the mod or Horizon?** If you can, try the same mod in normal Minecraft with Fabric. If it
+breaks there too, it's the mod.
 
 ## Where things are
 
-| What | Where |
-|---|---|
-| The game | `~/horizon/target/fast/horizon-client` |
-| Your mods | `<game folder>/mods-java/` |
-| Mod settings | `<game folder>/config/` |
-| Worlds | `<game folder>/saves/` |
-| Log | `<game folder>/logs/latest.log` |
-| Crash reports | `<game folder>/crash-reports/` |
-| Cached mod content (safe to delete; rebuilt on the next start) | `<game folder>/.horizon-cache/` and `~/horizon/.horizon-cache/` |
+| What | With Prism or `--instance` | Download | Built from source |
+|---|---|---|---|
+| The game folder | `<instance>/minecraft/horizon` | `game` beside `horizon-play` | `.local/play/game` |
+| The mods you add | `<instance>/minecraft/mods` | `fabric-mods` beside `horizon-play` | `.local/play/fabric-mods` |
+| Mods' settings | `<instance>/minecraft/config` | `config` in the game folder | `config` in the game folder |
 
-More about how it works: [java-bridge.md](java-bridge.md).
+Inside the game folder are `saves/` (worlds), `logs/latest.log`, `crash-reports/` and `screenshots/`.
+`mods-java/` and `.horizon-cache/` are made for you: they're safe to delete, and rebuilt on the next
+start.
+
+## If something goes wrong
+
+| It says | Do this |
+|---|---|
+| `Minecraft 26.3 isn't on this computer yet` | Play 26.3 once to the title screen in the official launcher or Prism, close it, and try again |
+| `Minecraft's files couldn't be prepared` | Do the same. In the official launcher, make sure the version is exactly 26.3 |
+| `Java 25 couldn't be downloaded` | Check your internet connection, or install Java 25 from [adoptium.net](https://adoptium.net) |
+| `Keep every file of the Horizon download together` | Extract the whole zip again, and run it from the extracted folder |
+| `your mods couldn't start` | Remove the mod it names. Check your mods are for 26.3 and have their libraries |
+| `couldn't run cargo` | Install Rust (step 1), then open a new terminal window |
+| Windows SmartScreen warns about the download | The builds aren't signed yet. Only run one from someone you trust: **More info > Run anyway** |
+
+More about how it all works: [java-bridge.md](java-bridge.md).

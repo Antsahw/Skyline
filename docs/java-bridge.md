@@ -1717,46 +1717,50 @@ the game folder, `--resources`); `mods-java/` goes in the game folder (HORIZON_H
 left: release builds with `java-mods` (the build needs a prepared game for the platform mod),
 and a Mods page in the launcher for `mods-java/`.
 
-### Play a Prism instance
+### horizon-play: one step, any system
 
-`tools/java_bridge/prism.sh` lets Prism Launcher install and update the mods while Horizon plays
-them: make a Minecraft 26.3 + Fabric instance in Prism, install mods or a modpack as usual, set
-the instance's *Settings > Custom commands > Wrapper command* to the script's full path, press
-Play. The instance gets a `horizon/` folder (options, worlds, and `mods-java/` linking the
-instance's jars, Fabric API left out: the bridge has its own); the mods' `config/` is the
-instance's; Prism's signed-in account goes to the game as a session file (read once, deleted).
-It runs this checkout's `target/fast` build with `.local/` prepared. `HORIZON_PRISM_DRY=1` sets
-up and prints the command; `HORIZON_PRISM_ARGS` adds game arguments. (Idea from the NeuHorizon
-fork's NeoForge wrapper.)
+`crates/horizon-play` is what players start, on every system (docs/java-bridge-beta.md). It finds
+the Horizon folder (beside the program, else the checkout it was built from), builds the game in
+a checkout, finds Java (the instance's, then Java's usual places, Minecraft's, the launcher's and
+Prism's runtimes, else it downloads Mojang's), prepares the player's own game files once (the
+official launcher's, Horizon launcher's or Prism's folders; the version JSON and server jar come
+from Mojang, as in the launcher's `backend.rs`, checked by SHA-1), and starts the game.
+
+Jars come from `fabric-mods/` (or an instance's `mods/`) into the game folder's `mods-java/` as hard links,
+which need no privilege, else copies. Left out, with the reason said: Fabric API, renderer
+replacements, and what requires those renderers (`mods.rs`). `.horizon-play-jars` lists what it
+manages; other jars in `mods-java/` stay.
+
+**Prism's wrapper command:** Prism sets `INST_MC_DIR` and starts the wrapper in place of Java, with
+the game's parameters on stdin (`param <value>` lines, then `launch`). The instance gets a `horizon/`
+folder (options, worlds, `mods-java/`); the mods' `config/` is the instance's, through a junction on
+Windows and a symlink elsewhere; Prism's signed-in account goes to the game as a session file (read
+once, deleted). `HORIZON_PRISM_DRY=1` sets up and prints the command; `HORIZON_PRISM_ARGS` adds game
+arguments. (Idea from the NeuHorizon fork's NeoForge wrapper.) `--instance FOLDER` does the same
+without Prism or its account.
+
+**When the mods can't start,** the game exits with code 78 (`NOT_STARTED_EXIT`) instead of going on
+without them, and `horizon-play` shows the reason: a player would take the world for modded, and a
+modded world opened without its mods loses their blocks and items. `HORIZON_JAVA_OPTIONAL=1` goes
+on without them, as it used to.
 
 ### Windows
 
-The bridge builds for Windows (`cargo check --target x86_64-pc-windows-gnu`, horizon-client and
-horizon-client-lib with `java-mods`: clean), and the JVM part runs there: `horizon-jvm`'s `boot`
-test (a Windows JDK 25's `jvm.dll`, natives both ways) passes under Wine. Two Windows fixes:
+Builds with MSVC Rust and plays on Windows 11: Farmer's Delight in a window, and a 40-mod pack
+headless. What's different there:
 - `jvm.dll` needs `vcruntime140.dll`, which sits in the Java home's `bin`, not beside the DLL:
   `create_vm` puts that `bin` first on the PATH before loading (`dll_search_path`).
 - build.rs runs javac with an argument file (`@javac-*.args`): the platform mod's class path and
   sources are ~28,000 characters on Linux with short paths, past Windows' 32,767-character command
   line with `C:\Users\…` ones.
+- `fs::canonicalize` gives `\\?\C:\…`, which Java's paths reject: paths going to Fabric use
+  `horizon_prepare::java::real_path`.
+- Linking a folder takes `mklink /J` (no privilege), which reads a forward slash as a switch.
 
-Not tested: Fabric past Mixin's start under Wine (Wine lacks a network call
-`NetworkInterface.getAll` makes; real Windows has it), the game window, the launcher. To try it on
-Windows (MSVC Rust, a JDK 25 as `JAVA_HOME`, Git for Windows):
-
-```powershell
-git checkout bridge-windows-1   # or java-bridge once merged
-cargo run --release -p horizon-prepare -- --prepare --server-jar <server-26.3.jar>
-cargo build --profile fast -p horizon-client -p horizon-client-lib --features horizon-client/java-mods
-$env:HORIZON_JAVA_HOME = "C:\Program Files\Eclipse Adoptium\jdk-25…"   # if JAVA_HOME isn't 25
-$env:HORIZON_ROOT = (Get-Location).Path      # where .local\bridge and .local\minecraft are
-# mods-java\ goes beside options.txt (the game's folder: HORIZON_HOME, else the default)
-target\fast\horizon-client.exe --resources .local\horizon-client\26.3 --world W
-```
-
-The `tools/java_bridge/*.sh` scripts are Linux-only (Xvfb, mktemp). A class path with
-non-ASCII characters (a user name like `Ivér`) may not reach the JVM right: JNI option
-strings are read in the system code page, not UTF-8.
+Not tested on Windows: the launcher's Java mods tab, and a class path with non-ASCII characters
+(a user name like `Ivér`) may not reach the JVM right: JNI option strings are read in the system
+code page, not UTF-8. The `tools/java_bridge/*.sh` scripts are developers' and Linux-only (Xvfb,
+mktemp).
 
 ### Profiling
 

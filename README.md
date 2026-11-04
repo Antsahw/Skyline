@@ -50,32 +50,24 @@ The Java bridge runs **real Fabric mods for 26.3** inside Horizon. **Horizon's w
 | The launcher | ✅ a **Java mods** tab (add, remove, which mods failed last game); runs from a normal install, fetches Java 25 itself |
 | Renderer replacements (Sodium, Iris) | ➖ not needed: Horizon has its own renderer, so they have nothing to replace |
 | Mods that draw in the world (Litematica's overlay) | 🚧 |
-| Windows, release builds | 🚧 builds cross-compile; untested on a Windows PC; no published build yet |
+| Windows | ✅ builds and plays on Windows 11; no published build yet |
 
 **Beta testers: start with the [testers' guide](docs/java-bridge-beta.md)** (install, where mods go, reporting bugs). How it works, the tick flow, 26.3 traps and the test tools: **[docs/java-bridge.md](docs/java-bridge.md)**.
 
 ### Try it
 
-You need the usual Horizon setup ([CONTRIBUTING.md](CONTRIBUTING.md): your own Minecraft 26.3 files prepared in `.local/`) and a JDK 25.
+On Windows, Linux or macOS (macOS is untested), with Rust, Git and a JDK 25 installed, and Minecraft 26.3 played once:
 
 ```sh
 git clone -b java-bridge https://github.com/iaxivers/horizon && cd horizon
-cargo build --profile fast -p horizon-client -p horizon-client-lib --features horizon-client/java-mods
-python3 tools/java_bridge/get_test_pack.py ~/hz-test/mods-java    # an ~80-jar test pack from Modrinth
+cargo run --profile fast -p horizon-play
 ```
 
-Fabric 26.3 mod jars go in a `mods-java/` folder in the **game folder: the folder you start the game in** (not `HORIZON_HOME`). To play the test pack in its own folder:
-
-```sh
-mkdir -p ~/hz-play && ln -sfn ~/hz-test/mods-java ~/hz-play/mods-java && cd ~/hz-play
-HORIZON_HOME=~/hz-play ~/horizon/target/fast/horizon-client --resources ~/horizon/.local/horizon-client/26.3 --world PackTest
-```
+That builds the game, prepares your own Minecraft files and starts it. It prints where to put your mods. Or use **Prism Launcher**: set `target/fast/horizon-play` as an instance's *Wrapper command*, then press Play. The **[testers' guide](docs/java-bridge-beta.md)** has every step and what to test.
 
 **From the launcher:** build it (`cd launcher && cargo build --release`; Fedora needs `libxkbcommon-x11-devel`), install your game build as a version with `horizon-launcher import-build target/fast/horizon-client --trust-unsigned`, add jars with `horizon-launcher java-mods add <jar>`, then the **Java mods** tab shows on Home. Start it with `HORIZON_LAUNCHER_NO_SELF_UPDATE=1` so it doesn't update itself to upstream's.
 
 **Tests:** `python3 tools/java_bridge/regress.py --jars <jars>` plays every scene that once worked, headless, with screenshots; `--pack <mods folder> bigpack` plays a whole pack. Add `HORIZON_JAVA_PROFILE=1` to see what the mods cost each tick.
-
-Or let **Prism Launcher** install the mods: make a 26.3 Fabric instance, install a modpack, and set its *Wrapper command* to `tools/java_bridge/prism.sh` ([how](docs/java-bridge.md#play-a-prism-instance)).
 
 ## Download
 
