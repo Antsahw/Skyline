@@ -1117,12 +1117,14 @@ chat's own `HorizonFlywheel` and debug flag were dropped for them).
   cog); shafts, cogs and the motor's shaft draw and turn, in their sprites' UVs (atlas meshes
   split by sprite); the still chunk models under them are gone (states "drawn whole", Rust
   mesher). OBJ models (`horizon-assets/src/obj.rs`) fix the blank cogwheel, large cogwheel and
-  water wheel items. Regress `createwhole`. Not done: the wrench item (custom renderer only),
+  water wheel items. Create's HUD hook no longer fails (empty contextual bars, a waypoint
+  manager). Regress `createwhole`. Not done: the wrench item (custom renderer only),
   contraptions, other machines untested.
 - **Mods' fluids**: honey and chocolate drawn with their own sprites, not as lava (Java's baked
   fluid models → mesher). Flow is still lava's (Horizon's ticks: mixins). Single player and LAN
   host only for now. Regress `fluids`.
 - **3D Skin Layers**: its voxel meshes are drawn on players (146-164 quads on default skins,
   front/back checked). Horizon's flat outer layers still draw under them. Regress `skinlayers`.
+`create createwhole fluids skinlayers kinetic pot terminal ber placed hud` pass.
 Test: `regress.py --jars <folder with create-fly*.jar, skinlayers3d*, fabric-api*> create createwhole fluids skinlayers kinetic`;
 in-game: a creative motor with shafts and cogs, a honey bucket, third person with 3D Skin Layers.

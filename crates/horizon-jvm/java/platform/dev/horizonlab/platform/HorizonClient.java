@@ -114,6 +114,21 @@ public final class HorizonClient {
         // (the hearts' jitter).
         set(net.minecraft.client.gui.Hud.class, hud, "minecraft", mc);
         set(net.minecraft.client.gui.Hud.class, hud, "random", net.minecraft.util.RandomSource.create());
+        // Its contextual bar above the hotbar (experience, locator, jump): an empty one for each
+        // (Horizon draws its own). extractHotbarAndDecorations picks one, which mods' hooks on it
+        // run (Create's HUD).
+        try {
+            Class<?> infoClass = Class.forName("net.minecraft.client.gui.Hud$ContextualInfo");
+            Object[] infos = infoClass.getEnumConstants();
+            Object empty = java.util.Arrays.stream(infos).filter(e -> ((Enum<?>) e).name().equals("EMPTY")).findFirst().orElse(infos[0]);
+            set(net.minecraft.client.gui.Hud.class, hud, "contextualInfoBar",
+                    com.mojang.datafixers.util.Pair.of(empty, net.minecraft.client.gui.contextualbar.ContextualBar.EMPTY));
+            java.util.Map<Object, java.util.function.Supplier<?>> bars = new java.util.HashMap<>();
+            for (Object info : infos) bars.put(info, () -> net.minecraft.client.gui.contextualbar.ContextualBar.EMPTY);
+            set(net.minecraft.client.gui.Hud.class, hud, "contextualInfoBars", bars);
+        } catch (ClassNotFoundException e) {
+            Natives.log("Horizon's client: no contextual bars: " + e);
+        }
         // Its overlays HUD mods ask about (Jade hides under an open tab list or a boss bar):
         // none showing.
         set(net.minecraft.client.gui.Hud.class, hud, "tabList",
@@ -898,6 +913,10 @@ public final class HorizonClient {
             // Xaero's sun brightness).
             set(net.minecraft.client.multiplayer.ClientPacketListener.class, connection, "clockManager",
                     new net.minecraft.client.ClientClockManager());
+            // Its waypoints (none: the locator bar's; Hud.nextContextualInfoState asks, which
+            // Create's HUD hook runs).
+            set(net.minecraft.client.multiplayer.ClientPacketListener.class, connection, "waypointManager",
+                    new net.minecraft.client.waypoints.ClientWaypointManager());
             players(connection);
             // Its scoreboard (ClientLevel.getScoreboard() is the connection's): an empty one, as
             // a client's is before the server sends any (Cardinal Components' client tick).
@@ -1694,6 +1713,14 @@ public final class HorizonClient {
      * backend stays off (it draws with OpenGL; the headless client's GPU is Horizon's), so
      * Create draws its parts through its block entity renderers, which the bridge records.
      */
+    /**
+     * Whether a client level's renderer reload ran (levelRendererReady): mods' block entity
+     * renderers draw from then on (Flywheel's helpers, the client's baked models).
+     */
+    static boolean levelRendered() {
+        return !RENDERED_LEVELS.isEmpty();
+    }
+
     private static void levelRendererReady() {
         if (!modelsLoaded || !(minecraft.level instanceof net.minecraft.client.multiplayer.ClientLevel level)
                 || !RENDERED_LEVELS.add(level)) return;
@@ -1832,6 +1859,8 @@ public final class HorizonClient {
                 }
                 set(net.minecraft.client.multiplayer.ClientPacketListener.class, copy, "clockManager",
                         new net.minecraft.client.ClientClockManager());
+                set(net.minecraft.client.multiplayer.ClientPacketListener.class, copy, "waypointManager",
+                        new net.minecraft.client.waypoints.ClientWaypointManager());
                 // Its Minecraft and network connection, as the shared one has (Architectury's and
                 // Puzzles Lib's join read minecraft.player and getConnection().getConnection()),
                 // and a scoreboard of its own (Cardinal Components' client tick reads

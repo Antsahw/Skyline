@@ -616,6 +616,10 @@ gets SPIR-V, vertex layouts and uniform lists.
   BlockState, RandomSource, List)` that gives nothing at its place (the mirror's client level);
   the player's game then leaves that state's chunk model out
   (`mesher::hide_model_drawn_by_block_entity`, all sections meshed again once).
+- Mods' block entity renderers draw only once a client level's renderer reload ran
+  (`HorizonClient.levelRendered`): a Create motor placed while the models loaded failed once.
+- Create's HUD hook runs `Hud.extractHotbarAndDecorations` to its contextual bar: the
+  allocated `Hud` gets empty contextual bars and the client connection a `ClientWaypointManager`.
 - **OBJ models** (`horizon-assets/src/obj.rs`): NeoForge's `"loader": "neoforge:obj"` (also
   `forge:obj`), which Create's cogs, wheels and many kinetic parts use (100 models): the `.obj`
   and its `.mtl` are read with the model (`model_library::with_obj`), faces become quads

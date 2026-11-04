@@ -202,7 +202,9 @@ public final class HorizonEntityRender {
     private static JsonArray blockEntities(ServerLevel level) {
         JsonArray out = new JsonArray();
         var players = level.players();
-        if (players.isEmpty()) return out;
+        // Not before the client's models and its level renderer's reload (a renderer drawing
+        // earlier fails once and its first look is lost).
+        if (players.isEmpty() || !HorizonClient.levelRendered()) return out;
         for (var be : HorizonBlockEntities.live(level)) {
             if (be.isRemoved()) continue;
             var pos = be.getBlockPos();
