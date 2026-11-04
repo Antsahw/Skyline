@@ -203,3 +203,15 @@ fast: prefer them to cloud runs for big packs.
   JSON thanks to gpu-10), `horizon-prepare` 44 s, game build 18 min, jars from Modrinth by slug
   (farmers-delight-refabricated, jade, appleskin, xaeros-minimap, rei, architectury-api,
   cloth-config, fabric-api). Five cases ~25 min.
+
+## State after merge-batch9 (2026-11-04)
+
+- `java-bridge` = batch 9: martipops' `windows/java-bridge` (an outside contributor's Windows
+  work, run on Windows by him; reviewed before merging: `horizon-play` replaces `prism.sh`,
+  downloads only Mojang files checked against `research-lock.json`; the game now exits with 78
+  when the Java mods can't start, `HORIZON_JAVA_OPTIONAL=1` for the old way), `bridge-gpu-11`,
+  `bridge-worldgen-7` (mods' structure templates), `bridge-client-11` (JEI). Conflicts: docs only.
+- Checked here: `prism jei jei-lan templates placed hoppers pot server rei-lan` pass. The user
+  says invisible blocks are fixed on his PC.
+- Traps: `prism` needs `horizon-prepare --check` to pass (prepare with `--complete`, else the
+  sounds are missing). `templates` timed out on 2 cores (1147 blocks away): its waits are longer now.

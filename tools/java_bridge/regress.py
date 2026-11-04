@@ -441,7 +441,7 @@ CASES = {
                'sleep 5; $C messages > $S/locate.json',
                # "… is at [X, ~, Z]": the start's chunk, where the city centre is (start_height -27).
                'xz=$(grep -o "at \\[-\\?[0-9]*, ~, -\\?[0-9]*\\]" $S/locate.json | tail -1 | tr -d "at[]~ " | tr "," " "); '
-               'set -- $xz; $C command "tp @s $1 -20 $2" >/dev/null; $C wait-for loaded --timeout 120 >/dev/null; sleep 15; '
+               'set -- $xz; $C command "tp @s $1 -20 $2" >/dev/null; $C wait-for loaded --timeout 400 >/dev/null; sleep 60; '
                '$C find-block the_sift:sonorous_deepslate 64 > $S/found.json; $C look-at $1 -40 $(($2 + 20)) >/dev/null'],
         checks=[check_file("locate.json", r"ancient_city is at", "/locate found an ancient city"),
                 check_file("found.json", r"\"count\":([89]|[1-9][0-9]+)\b", "the city centre is The Sift's: its 8 sonorous deepslate")],
