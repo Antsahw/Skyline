@@ -238,6 +238,11 @@ public final class HorizonServer {
         return clientConnection;
     }
 
+    /** Whether {@code connection} is the headless client's (connected, never sending: MirrorConnectionMixin). */
+    public static boolean isClientConnection(Object connection) {
+        return connection != null && connection == clientConnection;
+    }
+
     private static <T> T allocate(Class<T> type) {
         T object = type.cast(Natives.allocate(type));
         mirror(object);

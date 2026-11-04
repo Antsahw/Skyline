@@ -286,19 +286,6 @@ public final class HorizonClient {
                                 .suggests((c, b) -> net.minecraft.commands.SharedSuggestionProvider.suggest(configScreens().keySet(), b))
                                 .executes(c -> openConfig(c.getSource(),
                                         com.mojang.brigadier.arguments.StringArgumentType.getString(c, "mod"))))));
-        // /recipes [item] and /uses [item]: the recipe viewer's screen for an item (REI's, as
-        // its R and U keys open it over an inventory), or the held item without one.
-        net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback.EVENT.register((dispatcher, context, environment) -> {
-            for (String name : new String[] {"recipes", "uses"}) {
-                boolean uses = name.equals("uses");
-                dispatcher.register(net.minecraft.commands.Commands.literal(name)
-                        .executes(c -> HorizonRecipeViewer.open(c.getSource(), null, uses))
-                        .then(net.minecraft.commands.Commands.argument("item",
-                                        net.minecraft.commands.arguments.item.ItemArgument.item(context))
-                                .executes(c -> HorizonRecipeViewer.open(c.getSource(),
-                                        net.minecraft.commands.arguments.item.ItemArgument.getItem(c, "item").createItemStack(1), uses))));
-            }
-        });
     }
 
     /** Mods whose "modmenu" entrypoint failed (told once). */
@@ -1108,14 +1095,8 @@ public final class HorizonClient {
         var screen = SCREENS.get(player.getUUID());
         if (screen == null) screen = OVERLAYS.get(player.getUUID());
         if (screen != null) set(net.minecraft.client.gui.Gui.class, minecraft.gui, "screen", screen);
-        // REI's searches started in this call run at its end, with this player's settings.
-        var searches = HorizonRecipeViewer.queueSearches();
         try {
-            try {
-                run.run();
-            } finally {
-                HorizonRecipeViewer.runQueued(searches);
-            }
+            run.run();
         } finally {
             // Back to the outer run's player's state (as() within another player's as()).
             if (before != null) HorizonClientState.load(before.getUUID());
@@ -1190,14 +1171,11 @@ public final class HorizonClient {
             SENT.remove(player.getUUID());
             UNDER.remove(player.getUUID());
             // Vanilla's order (Minecraft.setScreen): the GUI's screen is the new one, added, then
-            // laid out; REI makes its overlay for the screen being opened there, once its
-            // displays are in (prepare: its first reload), and searches its list again.
+            // laid out (mods make their overlays for it there: Fabric's screen init events).
             as(player, () -> {
-                HorizonRecipeViewer.prepare();
                 set(net.minecraft.client.gui.Gui.class, minecraft.gui, "screen", screen);
                 screen.added();
                 screen.init(width, height);
-                HorizonRecipeViewer.refreshSearch();
             });
             SCREENS.put(player.getUUID(), screen);
             OWNERS.put(player.getUUID(), player);
@@ -1285,7 +1263,6 @@ public final class HorizonClient {
                 set(net.minecraft.client.gui.Gui.class, minecraft.gui, "screen", under.screen());
                 under.screen().added();
                 under.screen().init(width, height);
-                HorizonRecipeViewer.refreshSearch();
                 Natives.clientScreen(id.toString(), false);
                 return;
             }
@@ -1991,6 +1968,56 @@ public final class HorizonClient {
                 net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents.INIT, l -> l.onPlayInit(connection, minecraft));
         HorizonServer.fireEach("ClientPlayConnectionEvents.JOIN",
                 net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents.JOIN, l -> l.onPlayReady(connection, sender, minecraft));
+        recipesArrive(player, connection);
+        // A screen the player opened before their client joined (Horizon's world plays while
+        // the client loads its models) is laid out again, as one opened now would be: a vanilla
+        // client has no screen open before it joins, and mods make their parts for a screen as
+        // it is laid out (a recipe viewer's overlay, which it wouldn't make with no world).
+        var open = minecraft.gui.screen();
+        if (open != null) {
+            try {
+                open.init(width, height);
+            } catch (Throwable t) {
+                Natives.log("Horizon's client: the open screen couldn't be laid out again at the join: " + t);
+            }
+        }
+    }
+
+    /**
+     * What a joining client does with the server's recipes (PlayerList.placeNewPlayer sends them
+     * after the login): Fabric's recipe sync gives the client the server's recipes
+     * (ClientRecipeSynchronizedEvent: every serializer, the client being the server's own), then
+     * the recipe packet: the connection's recipes set as handleUpdateRecipes sets them, and the
+     * mods' injections into it run (recipe viewers start there). The server's tags too, as the
+     * configuration phase sends them (handleUpdateTags' injections).
+     */
+    private static void recipesArrive(net.minecraft.server.level.ServerPlayer player, net.minecraft.client.multiplayer.ClientPacketListener connection) {
+        var server = HorizonServer.server();
+        if (server == null) return;
+        try {
+            var tags = new net.minecraft.network.protocol.common.ClientboundUpdateTagsPacket(
+                    net.minecraft.tags.TagNetworkSerialization.serializeTagsToNetwork(server.registries()));
+            fireConnection(connection, net.minecraft.network.protocol.common.ClientboundUpdateTagsPacket.class, tags, "handleUpdateTags");
+        } catch (Throwable t) {
+            Natives.log("Horizon's client: no tags for the client's join: " + t);
+        }
+        try {
+            var manager = server.getRecipeManager();
+            var recipes = net.fabricmc.fabric.impl.recipe.sync.SynchronizedRecipesImpl.of(manager.getRecipes());
+            HorizonServer.fireEach("ClientRecipeSynchronizedEvent",
+                    net.fabricmc.fabric.api.client.recipe.v1.sync.ClientRecipeSynchronizedEvent.EVENT, l -> l.onRecipesSynchronized(minecraft, recipes));
+            var packet = new net.minecraft.network.protocol.game.ClientboundUpdateRecipesPacket(
+                    manager.getSynchronizedItemProperties(), manager.getSynchronizedStonecutterRecipes());
+            set(net.minecraft.client.multiplayer.ClientPacketListener.class, connection, "recipes",
+                    new net.minecraft.client.multiplayer.ClientRecipeContainer(packet.itemSets(), packet.stonecutterRecipes()));
+            long started = System.nanoTime();
+            fireConnection(connection, net.minecraft.network.protocol.game.ClientboundUpdateRecipesPacket.class, packet, "handleUpdateRecipes");
+            Natives.log("Horizon's client: " + player.getName().getString() + "'s client got the server's recipes ("
+                    + manager.getRecipes().size() + ", " + (System.nanoTime() - started) / 1_000_000 + " ms)");
+        } catch (Throwable t) {
+            Natives.log("Horizon's client: no recipes for the client's join: " + t);
+            HorizonFailures.report("the client's join", t);
+        }
     }
 
     /** The chunk radius of the login packet: Horizon's view distance. */
@@ -2020,10 +2047,16 @@ public final class HorizonClient {
         }
     }
 
-    /** The mods' injections into one of the connection's packet handlers, given the packet. */
+    /**
+     * The mods' injections into one of the connection's packet handlers, given the packet, in
+     * the order the handler's body reaches them: its HEAD's first, its RETURN's last (REI starts
+     * its reload at handleUpdateRecipes' head and Architectury ends it from its return).
+     */
     private static void fireConnection(net.minecraft.client.multiplayer.ClientPacketListener connection, Class<?> packet,
                                        Object value, String method) {
-        for (var m : net.minecraft.client.multiplayer.ClientPacketListener.class.getDeclaredMethods()) {
+        var methods = new java.util.ArrayList<>(java.util.List.of(net.minecraft.client.multiplayer.ClientPacketListener.class.getDeclaredMethods()));
+        methods.sort(java.util.Comparator.comparingInt(HorizonHooks::injectOrder));
+        for (var m : methods) {
             var merged = m.getAnnotation(org.spongepowered.asm.mixin.transformer.meta.MixinMerged.class);
             Class<?>[] params = m.getParameterTypes();
             // (Fabric's own needs the connection's networking add-on, which the headless
@@ -2776,9 +2809,11 @@ public final class HorizonClient {
             at = parent.getFocused();
         }
         if (at instanceof net.minecraft.client.gui.components.EditBox box && box.isFocused()) return true;
-        // REI's or JEI's search box, over a container screen: not one of the screen's widgets.
+        // A text field a mod draws beside the screen (a recipe viewer's search box, its own
+        // EditBox or a widget of its own): focused, as its focus chain or EditBox says.
+        if (at != screen && at.isFocused() && textInput(at.getClass())) return true;
         if (screen instanceof net.minecraft.client.gui.screens.inventory.AbstractContainerScreen<?>
-                && (HorizonRecipeViewer.searchFocused() || HorizonJei.searchFocused())) return true;
+                && (HorizonTextFields.focused() || HorizonScreenEvents.modTakesTyping(screen))) return true;
         if (screen instanceof net.minecraft.client.gui.screens.inventory.AbstractRecipeBookScreen<?>) {
             try {
                 var book = field(net.minecraft.client.gui.screens.inventory.AbstractRecipeBookScreen.class, screen, "recipeBookComponent");
@@ -2791,6 +2826,28 @@ public final class HorizonClient {
             }
         }
         return false;
+    }
+
+    private static final java.util.Map<Class<?>, Boolean> TEXT_INPUTS = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * A widget that takes typed characters itself: an EditBox, or a mod's class with its own
+     * charTyped (vanilla's own widgets other than EditBox don't type).
+     */
+    static boolean textInput(Class<?> type) {
+        return TEXT_INPUTS.computeIfAbsent(type, t -> {
+            if (net.minecraft.client.gui.components.EditBox.class.isAssignableFrom(t)) return true;
+            for (Class<?> c = t; c != null && c != Object.class; c = c.getSuperclass()) {
+                if (c.getName().startsWith("net.minecraft.")) return false;
+                for (var m : c.getDeclaredMethods()) {
+                    if (m.getName().equals("charTyped") && m.getParameterCount() == 1
+                            && m.getParameterTypes()[0] == net.minecraft.client.input.CharacterEvent.class) {
+                        return !net.minecraft.client.gui.components.events.ContainerEventHandler.class.isAssignableFrom(t);
+                    }
+                }
+            }
+            return false;
+        });
     }
 
     static Object field(Class<?> owner, Object target, String name) throws ReflectiveOperationException {
@@ -2814,21 +2871,6 @@ public final class HorizonClient {
     /** Each open mod screen's frame, to its player when it changed (the server's tick end). */
     public static void sendFrames() {
         tasks();
-        // REI reloaded on its own (a client's join): the server's displays back, its overlay
-        // renderer on each open screen again, lists searched.
-        if (HorizonRecipeViewer.keepSynced()) {
-            java.util.Set<java.util.UUID> ids = new java.util.HashSet<>(SCREENS.keySet());
-            ids.addAll(OVERLAYS.keySet());
-            for (var id : ids) {
-                var player = HorizonServer.player(id);
-                if (player == null) continue;
-                try {
-                    as(player, HorizonRecipeViewer::afterOwnReload);
-                } catch (Throwable t) {
-                    // The next screen opened has it.
-                }
-            }
-        }
         for (var id : new java.util.ArrayList<>(SCREENS.keySet())) {
             tickScreen(id);
             send(id);
@@ -2902,8 +2944,8 @@ public final class HorizonClient {
 
     /**
      * Input to a player's inventory overlay (window -3): {@code open} and {@code close} as
-     * Horizon's inventory opens and closes, {@code recipes} (R and U over one of Horizon's slots:
-     * the recipe viewer for {@code item}, SNBT), and the mouse and keys as a screen's.
+     * Horizon's inventory opens and closes, and the mouse and keys as a screen's (a key over one
+     * of Horizon's slots names it: the screen's slot there is hovered).
      */
     private static void overlayInput(java.util.UUID id, com.google.gson.JsonObject in) {
         var player = HorizonServer.player(id);
@@ -2920,13 +2962,11 @@ public final class HorizonClient {
                     }
                     if (OVERLAYS.containsKey(id)) return;
                     as(player, () -> {
-                        HorizonRecipeViewer.prepare();
                         var screen = new HorizonOverlayScreen(player.inventoryMenu, player.getInventory());
                         OVERLAYS.put(id, screen);
                         set(net.minecraft.client.gui.Gui.class, minecraft.gui, "screen", screen);
                         screen.added();
                         screen.init(width, height);
-                        HorizonRecipeViewer.refreshSearch();
                     });
                     OVERLAY_SENT.remove(id);
                 }
@@ -2936,10 +2976,6 @@ public final class HorizonClient {
                     if (screen != null) as(player, () -> HorizonScreenEvents.removed(screen));
                     // An empty frame: nothing left over the next inventory before it draws.
                     Natives.overlayFrame(id.toString(), "[]");
-                }
-                case "recipes" -> {
-                    var stack = parseStack(in.get("item").getAsString());
-                    if (stack != null) HorizonRecipeViewer.open(player.createCommandSourceStack(), stack, in.get("uses").getAsBoolean());
                 }
                 default -> {
                     var screen = OVERLAYS.get(id);
@@ -2964,13 +3000,18 @@ public final class HorizonClient {
                                     screen.resize(width, height);
                                 }
                                 case "move" -> screen.mouseMoved(x, y);
-                                case "press" -> HorizonScreenEvents.click(minecraft, screen, event, false);
+                                // (horizon: a press Horizon's inventory takes itself, on its slots.)
+                                case "press" -> HorizonScreenEvents.click(minecraft, screen, event, false,
+                                        !(in.has("horizon") && in.get("horizon").getAsBoolean()));
                                 case "release" -> HorizonScreenEvents.release(minecraft, screen, event);
                                 case "drag" -> HorizonScreenEvents.drag(minecraft, screen, event,
                                         in.has("dx") ? in.get("dx").getAsDouble() : 0, in.has("dy") ? in.get("dy").getAsDouble() : 0);
                                 case "scroll" -> HorizonScreenEvents.scroll(minecraft, screen, x, y, in.get("h").getAsDouble(), in.get("v").getAsDouble());
                                 case "key" -> {
                                     int key = in.get("key").getAsInt();
+                                    // Over one of Horizon's slots: the screen's slot there is the
+                                    // hovered one, as the mouse over it makes it in vanilla.
+                                    if (in.has("slot") && screen instanceof HorizonOverlayScreen overlay) overlay.hover(in.get("slot").getAsInt());
                                     HorizonScreenEvents.key(minecraft, screen, new net.minecraft.client.input.KeyEvent(key,
                                             in.has("keycode") ? in.get("keycode").getAsInt() : key, mods));
                                 }
@@ -2981,7 +3022,6 @@ public final class HorizonClient {
                     } finally {
                         acting = null;
                     }
-                    if (HorizonJei.DEBUG) as(player, HorizonJei::logList);
                     HorizonServer.afterScreenInput();
                     HorizonClientConfig.afterInput(id);
                     sendOverlay(id);
@@ -2993,17 +3033,6 @@ public final class HorizonClient {
             Natives.log("Horizon's client: the inventory overlay's " + kind + " failed: " + root);
             HorizonFailures.report("the inventory overlay", root);
             for (StackTraceElement frame : root.getStackTrace()) Natives.log("    at " + frame);
-        }
-    }
-
-    /** An item stack from SNBT (vanilla's item codec), or null. */
-    private static net.minecraft.world.item.ItemStack parseStack(String snbt) {
-        try {
-            var tag = net.minecraft.nbt.TagParser.parseCompoundFully(snbt);
-            var ops = HorizonServer.server().registryAccess().createSerializationContext(net.minecraft.nbt.NbtOps.INSTANCE);
-            return net.minecraft.world.item.ItemStack.CODEC.parse(ops, tag).result().orElse(null);
-        } catch (Exception e) {
-            return null;
         }
     }
 

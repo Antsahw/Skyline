@@ -1270,3 +1270,30 @@ chat's own `HorizonFlywheel` and debug flag were dropped for them).
 `create createwhole fluids skinlayers kinetic pot terminal ber placed hud` pass.
 Test: `regress.py --jars <folder with create-fly*.jar, skinlayers3d*, fabric-api*> create createwhole fluids skinlayers kinetic`;
 in-game: a creative motor with shafts and cogs, a honey bucket, third person with 3D Skin Layers.
+
+### generic-ui: no code tied to REI, JEI, Jade, AppleSkin, Architectury, Cloth Config (2026-11-04, `bridge-generic-ui`)
+
+- **Removed**: `HorizonRecipeViewer`, `HorizonJei`, `ReiGuiGraphicsMixin`, `ReiAsyncSearchMixin`,
+  `JeiConnectionMixin`, REI's fields in `HorizonClientState`, the AutoConfig/Jade/AppleSkin/REI
+  holders in `HorizonClientConfig` (and `loadKept`), REI's entry in `ModsPlugin`, Architectury's
+  events fired by name, `/recipes` and `/uses`, Rust's R/U special case.
+- **Generic instead**: the client's join gets the server's tags and recipes as a vanilla client
+  (`recipesArrive`: REI and JEI start there; REI's own display sync arrives as a payload); the
+  client connection is connected (`MirrorConnectionMixin`); mods' `@WrapOperation`s of
+  MouseHandler/KeyboardHandler's screen calls run (`HorizonHooks.wrapCall`: Architectury's
+  input events); a mod's own GuiGraphicsExtractor records (`PlatformPlugin`); keys the inventory
+  doesn't use go to the overlay with the hovered slot (R/U for any viewer); typing seen from any
+  focused EditBox (`EditBoxFocusMixin`) or a mod taking the typed characters; slot presses
+  reach the mods (`horizon: true`). Small Rust change in `game/java_screen.rs` (client area).
+- **Works**: regress `rei jei pot-jei reiscreen hud modsettings join` pass (rei, jei and
+  reiscreen rewritten for the key path, screenshot checks). Found on the way: a screen opened
+  before the client joined is laid out again at the join; a packet handler's injections run
+  HEAD first (REI's reload never ended when Architectury's RETURN came first).
+- **Broken, listed in java-bridge.md**: per-player settings/search of these mods on LAN and
+  servers (`rei-lan`, `jei-lan`, `config-rejoin` fail by design now; JEI's search box can't be
+  typed in while another player's inventory is open); REI's first typed character if it is an
+  inventory key.
+- Licences: REI MIT, JEI MIT, Jade CC-BY-NC-SA-4.0, AppleSkin Unlicense, Architectury and Cloth
+  Config LGPL-3.0.
+- Test: `regress.py --jars <fabric-api, FD, REI, Architectury, Cloth Config, JEI, Jade, AppleSkin>
+  rei jei pot-jei reiscreen hud modsettings join` (`--java-only` after the Rust build).

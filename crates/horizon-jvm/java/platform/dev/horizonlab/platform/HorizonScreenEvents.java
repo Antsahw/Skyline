@@ -1,11 +1,11 @@
 package dev.horizonlab.platform;
 
 import dev.horizonlab.bridge.Natives;
-import java.lang.reflect.Method;
 import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
 import net.fabricmc.fabric.api.client.screen.v1.ScreenKeyboardEvents;
 import net.fabricmc.fabric.api.client.screen.v1.ScreenMouseEvents;
 import net.minecraft.client.KeyboardHandler;
+import net.minecraft.client.MouseHandler;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.CharacterEvent;
@@ -14,68 +14,108 @@ import net.minecraft.client.input.MouseButtonEvent;
 
 /**
  * Input to a screen of the headless client as vanilla's MouseHandler and KeyboardHandler give it,
- * with the events their mixins fire around the screen's own handler: Architectury's
- * ClientScreenInputEvent (REI's overlay takes its clicks, keys and scrolls there, not from the
- * screen) and Fabric's ScreenMouseEvents/ScreenKeyboardEvents (JEI's overlay takes them there).
- * A PRE handler that interrupts, or a Fabric "allow" that says no, keeps the input from the
- * screen. Also the screen's tick, frame and removal with Fabric's events around them (Gui's).
+ * with what mods' mixins do around the screen's own handler there: their @WrapOperation of
+ * the handler's call (HorizonHooks.wrapCall: a wrap may skip it), and Fabric's
+ * ScreenMouseEvents/ScreenKeyboardEvents. A wrap that doesn't call on, or a Fabric "allow"
+ * that says no, keeps the input from the screen. Also the screen's tick, frame and removal with Fabric's events around them (Gui's).
  */
 final class HorizonScreenEvents {
     private HorizonScreenEvents() {}
 
+    private static final String SCREEN = "Lnet/minecraft/client/gui/screens/Screen;";
+    private static final String MOUSE_EVENT = "Lnet/minecraft/client/input/MouseButtonEvent;";
+
     static void click(Minecraft mc, Screen screen, MouseButtonEvent event, boolean doubleClick) {
-        if (fire("MOUSE_CLICKED_PRE", "MouseClicked", mc, screen, event, doubleClick)) return;
-        fabric(() -> {
-            if (!ScreenMouseEvents.allowMouseClick(screen).invoker().allowMouseClick(screen, event)) return;
-            ScreenMouseEvents.beforeMouseClick(screen).invoker().beforeMouseClick(screen, event);
-            boolean consumed = screen.mouseClicked(event, doubleClick);
-            ScreenMouseEvents.afterMouseClick(screen).invoker().afterMouseClick(screen, event, consumed);
-        }, () -> screen.mouseClicked(event, doubleClick));
-        fire("MOUSE_CLICKED_POST", "MouseClicked", mc, screen, event, doubleClick);
+        click(mc, screen, event, doubleClick, true);
+    }
+
+    /**
+     * A click; {@code screenToo} false: one Horizon's own screen handles (its slots, under the
+     * mods' overlay): the mods still see it as their wraps and Fabric's events do (a mod's
+     * search box lets go of the keyboard), the screen's own handler doesn't run.
+     */
+    static void click(Minecraft mc, Screen screen, MouseButtonEvent event, boolean doubleClick, boolean screenToo) {
+        // A click moves the keyboard: whether a mod takes the typing is seen again (typing).
+        TOOK_CHARS.remove(screen);
+        HorizonHooks.wrapCall(mc.mouseHandler, MouseHandler.class, "onButton", SCREEN + "mouseClicked(" + MOUSE_EVENT + "Z)Z",
+                new Object[] {screen, event, doubleClick}, a -> {
+                    Screen s = (Screen) a[0];
+                    MouseButtonEvent e = (MouseButtonEvent) a[1];
+                    boolean d = (boolean) a[2];
+                    boolean[] consumed = new boolean[1];
+                    fabric(() -> {
+                        if (!ScreenMouseEvents.allowMouseClick(s).invoker().allowMouseClick(s, e)) return;
+                        ScreenMouseEvents.beforeMouseClick(s).invoker().beforeMouseClick(s, e);
+                        consumed[0] = screenToo && s.mouseClicked(e, d);
+                        ScreenMouseEvents.afterMouseClick(s).invoker().afterMouseClick(s, e, consumed[0]);
+                    }, () -> consumed[0] = screenToo && s.mouseClicked(e, d));
+                    return consumed[0];
+                });
     }
 
     static void release(Minecraft mc, Screen screen, MouseButtonEvent event) {
-        if (fire("MOUSE_RELEASED_PRE", "MouseReleased", mc, screen, event)) return;
-        fabric(() -> {
-            if (!ScreenMouseEvents.allowMouseRelease(screen).invoker().allowMouseRelease(screen, event)) return;
-            ScreenMouseEvents.beforeMouseRelease(screen).invoker().beforeMouseRelease(screen, event);
-            boolean consumed = screen.mouseReleased(event);
-            ScreenMouseEvents.afterMouseRelease(screen).invoker().afterMouseRelease(screen, event, consumed);
-        }, () -> screen.mouseReleased(event));
-        fire("MOUSE_RELEASED_POST", "MouseReleased", mc, screen, event);
+        HorizonHooks.wrapCall(mc.mouseHandler, MouseHandler.class, "onButton", SCREEN + "mouseReleased(" + MOUSE_EVENT + ")Z",
+                new Object[] {screen, event}, a -> {
+                    Screen s = (Screen) a[0];
+                    MouseButtonEvent e = (MouseButtonEvent) a[1];
+                    boolean[] consumed = new boolean[1];
+                    fabric(() -> {
+                        if (!ScreenMouseEvents.allowMouseRelease(s).invoker().allowMouseRelease(s, e)) return;
+                        ScreenMouseEvents.beforeMouseRelease(s).invoker().beforeMouseRelease(s, e);
+                        consumed[0] = s.mouseReleased(e);
+                        ScreenMouseEvents.afterMouseRelease(s).invoker().afterMouseRelease(s, e, consumed[0]);
+                    }, () -> consumed[0] = s.mouseReleased(e));
+                    return consumed[0];
+                });
     }
 
     static void drag(Minecraft mc, Screen screen, MouseButtonEvent event, double dx, double dy) {
-        if (fire("MOUSE_DRAGGED_PRE", "MouseDragged", mc, screen, event, dx, dy)) return;
-        fabric(() -> {
-            if (!ScreenMouseEvents.allowMouseDrag(screen).invoker().allowMouseDrag(screen, event, dx, dy)) return;
-            ScreenMouseEvents.beforeMouseDrag(screen).invoker().beforeMouseDrag(screen, event, dx, dy);
-            boolean consumed = screen.mouseDragged(event, dx, dy);
-            ScreenMouseEvents.afterMouseDrag(screen).invoker().afterMouseDrag(screen, event, dx, dy, consumed);
-        }, () -> screen.mouseDragged(event, dx, dy));
-        fire("MOUSE_DRAGGED_POST", "MouseDragged", mc, screen, event, dx, dy);
+        HorizonHooks.wrapCall(mc.mouseHandler, MouseHandler.class, "handleAccumulatedMovement", SCREEN + "mouseDragged(" + MOUSE_EVENT + "DD)Z",
+                new Object[] {screen, event, dx, dy}, a -> {
+                    Screen s = (Screen) a[0];
+                    MouseButtonEvent e = (MouseButtonEvent) a[1];
+                    double x = (double) a[2], y = (double) a[3];
+                    boolean[] consumed = new boolean[1];
+                    fabric(() -> {
+                        if (!ScreenMouseEvents.allowMouseDrag(s).invoker().allowMouseDrag(s, e, x, y)) return;
+                        ScreenMouseEvents.beforeMouseDrag(s).invoker().beforeMouseDrag(s, e, x, y);
+                        consumed[0] = s.mouseDragged(e, x, y);
+                        ScreenMouseEvents.afterMouseDrag(s).invoker().afterMouseDrag(s, e, x, y, consumed[0]);
+                    }, () -> consumed[0] = s.mouseDragged(e, x, y));
+                    return consumed[0];
+                });
     }
 
     static void scroll(Minecraft mc, Screen screen, double x, double y, double h, double v) {
-        if (fire("MOUSE_SCROLLED_PRE", "MouseScrolled", mc, screen, x, y, h, v)) return;
-        fabric(() -> {
-            if (!ScreenMouseEvents.allowMouseScroll(screen).invoker().allowMouseScroll(screen, x, y, h, v)) return;
-            ScreenMouseEvents.beforeMouseScroll(screen).invoker().beforeMouseScroll(screen, x, y, h, v);
-            boolean consumed = screen.mouseScrolled(x, y, h, v);
-            ScreenMouseEvents.afterMouseScroll(screen).invoker().afterMouseScroll(screen, x, y, h, v, consumed);
-        }, () -> screen.mouseScrolled(x, y, h, v));
-        fire("MOUSE_SCROLLED_POST", "MouseScrolled", mc, screen, x, y, h, v);
+        HorizonHooks.wrapCall(mc.mouseHandler, MouseHandler.class, "onScroll", SCREEN + "mouseScrolled(DDDD)Z",
+                new Object[] {screen, x, y, h, v}, a -> {
+                    Screen s = (Screen) a[0];
+                    double ax = (double) a[1], ay = (double) a[2], ah = (double) a[3], av = (double) a[4];
+                    boolean[] consumed = new boolean[1];
+                    fabric(() -> {
+                        if (!ScreenMouseEvents.allowMouseScroll(s).invoker().allowMouseScroll(s, ax, ay, ah, av)) return;
+                        ScreenMouseEvents.beforeMouseScroll(s).invoker().beforeMouseScroll(s, ax, ay, ah, av);
+                        consumed[0] = s.mouseScrolled(ax, ay, ah, av);
+                        ScreenMouseEvents.afterMouseScroll(s).invoker().afterMouseScroll(s, ax, ay, ah, av, consumed[0]);
+                    }, () -> consumed[0] = s.mouseScrolled(ax, ay, ah, av));
+                    return consumed[0];
+                });
     }
 
     static void key(Minecraft mc, Screen screen, KeyEvent event) {
-        if (fire("KEY_PRESSED_PRE", "KeyPressed", mc, screen, event)) return;
-        fabric(() -> {
-            if (!ScreenKeyboardEvents.allowKeyPress(screen).invoker().allowKeyPress(screen, event)) return;
-            ScreenKeyboardEvents.beforeKeyPress(screen).invoker().beforeKeyPress(screen, event);
-            screen.keyPressed(event);
-            ScreenKeyboardEvents.afterKeyPress(screen).invoker().afterKeyPress(screen, event);
-        }, () -> screen.keyPressed(event));
-        fire("KEY_PRESSED_POST", "KeyPressed", mc, screen, event);
+        HorizonHooks.wrapCall(mc.keyboardHandler, KeyboardHandler.class, "keyPress", SCREEN + "keyPressed(Lnet/minecraft/client/input/KeyEvent;)Z",
+                new Object[] {screen, event}, a -> {
+                    Screen s = (Screen) a[0];
+                    KeyEvent e = (KeyEvent) a[1];
+                    boolean[] consumed = new boolean[1];
+                    fabric(() -> {
+                        if (!ScreenKeyboardEvents.allowKeyPress(s).invoker().allowKeyPress(s, e)) return;
+                        ScreenKeyboardEvents.beforeKeyPress(s).invoker().beforeKeyPress(s, e);
+                        consumed[0] = s.keyPressed(e);
+                        ScreenKeyboardEvents.afterKeyPress(s).invoker().afterKeyPress(s, e);
+                    }, () -> consumed[0] = s.keyPressed(e));
+                    return consumed[0];
+                });
     }
 
     /**
@@ -85,15 +125,25 @@ final class HorizonScreenEvents {
      */
     static void character(Minecraft mc, Screen screen, CharacterEvent event) {
         Object[] args = {windowHandle(mc), event};
-        if (HorizonHooks.fire(mc.keyboardHandler, KeyboardHandler.class, "charTyped", CHAR_TYPED, "HEAD", args, null, true).cancelled()) return;
-        if (fire("CHAR_TYPED_PRE", "KeyTyped", mc, screen, event)) return;
+        if (HorizonHooks.fire(mc.keyboardHandler, KeyboardHandler.class, "charTyped", CHAR_TYPED, "HEAD", args, null, true).cancelled()) {
+            TOOK_CHARS.add(screen);
+            return;
+        }
+        boolean[] reached = new boolean[1];
         fabric(() -> {
             if (!ScreenKeyboardEvents.allowCharType(screen).invoker().allowCharType(screen, event)) return;
             ScreenKeyboardEvents.beforeCharType(screen).invoker().beforeCharType(screen, event);
+            reached[0] = true;
             screen.charTyped(event);
             ScreenKeyboardEvents.afterCharType(screen).invoker().afterCharType(screen, event);
-        }, () -> screen.charTyped(event));
-        fire("CHAR_TYPED_POST", "KeyTyped", mc, screen, event);
+        }, () -> {
+            reached[0] = true;
+            screen.charTyped(event);
+        });
+        // A mod took the character before the screen saw it (a text field of its own beside
+        // the screen, focused): it is typed in until the next click.
+        if (reached[0]) TOOK_CHARS.remove(screen);
+        else TOOK_CHARS.add(screen);
         HorizonHooks.fire(mc.keyboardHandler, KeyboardHandler.class, "charTyped", CHAR_TYPED, "TAIL", args, null, true);
     }
 
@@ -149,37 +199,13 @@ final class HorizonScreenEvents {
         }
     }
 
-    private static final String EVENTS = "dev.architectury.event.events.client.ClientScreenInputEvent";
-    private static Class<?> events;
-    private static boolean none;
-    private static final java.util.Map<String, Method> METHODS = new java.util.concurrent.ConcurrentHashMap<>();
     private static final java.util.Set<String> FAILED = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
-    /** Architectury's event {@code field}, fired: whether a handler interrupted it. */
-    private static boolean fire(String field, String type, Object... args) {
-        if (none) return false;
-        try {
-            ClassLoader loader = HorizonScreenEvents.class.getClassLoader();
-            if (events == null) events = Class.forName(EVENTS, true, loader);
-            Method method = METHODS.get(type);
-            if (method == null) {
-                for (Method m : Class.forName(EVENTS + "$" + type, true, loader).getMethods()) {
-                    if (java.lang.reflect.Modifier.isAbstract(m.getModifiers())) method = m;
-                }
-                METHODS.put(type, method);
-            }
-            Object event = events.getField(field).get(null);
-            Object invoker = Class.forName("dev.architectury.event.Event", true, loader).getMethod("invoker").invoke(event);
-            Object result = method.invoke(invoker, args);
-            return result != null && (boolean) Class.forName("dev.architectury.event.EventResult", true, loader)
-                    .getMethod("interruptsFurtherEvaluation").invoke(result);
-        } catch (ClassNotFoundException e) {
-            none = true;
-            return false;
-        } catch (Throwable t) {
-            Throwable root = t instanceof java.lang.reflect.InvocationTargetException i && i.getCause() != null ? i.getCause() : t;
-            if (FAILED.add(field + root)) Natives.log("Horizon's client: a mod's " + field + " handler failed: " + root);
-            return false;
-        }
+    /** Screens whose typed characters a mod took last (a text field of its own has the keyboard). */
+    private static final java.util.Set<Screen> TOOK_CHARS = java.util.Collections.newSetFromMap(new java.util.WeakHashMap<>());
+
+    /** A mod takes what is typed on {@code screen} (its last character, since the last click). */
+    static boolean modTakesTyping(Screen screen) {
+        return TOOK_CHARS.contains(screen);
     }
 }

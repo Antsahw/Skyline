@@ -242,36 +242,64 @@ CASES = {
         look="Jade's box at the top: the block below, its mod in blue",
     ),
     "rei": dict(
-        about="REI's recipe view: vanilla and Farmer's Delight recipes",
+        about="REI's recipe view from its own keys over Horizon's inventory: R over a slot (the slot hovered in the screen "
+              "under the overlay), for a vanilla and a Farmer's Delight item; Escape back to the inventory",
         mods=["rei", "architectury", "cloth", "fd"], scene="none",
-        steps=['$C command "recipes minecraft:crafting_table" >/dev/null; sleep 8',
-               '$C key escape tap >/dev/null; $C command "recipes farmersdelight:beef_stew" >/dev/null; sleep 5'],
-        checks=[check_log(r"recipes of 1 minecraft:crafting_table: opened", "crafting table's recipe shows"),
-                check_log(r"recipes of 1 farmersdelight:beef_stew: opened", "beef stew's recipe shows")],
-        forbid=[r"recipe viewer failed"],
+        steps=['$C command "clear @s" >/dev/null; $C command "give @s minecraft:crafting_table" >/dev/null; '
+               '$C command "give @s farmersdelight:beef_stew" >/dev/null; $C command "gamemode survival" >/dev/null; '
+               'sleep 8; $C key e tap >/dev/null; sleep 8; $C ui > $S/ui.json',
+               # The mouse over hotbar slot 1 (a click picks the item up, the next puts it back), then R.
+               'P=$(python3 -c "import json,sys; b={w[\'id\']: w[\'bounds\'] for w in json.load(open(sys.argv[1]))[\'widgets\']}[\'slot-0\']; '
+               'print(int(b[0] + 8), int(b[1] + 8))" $S/ui.json); $C click-at $P >/dev/null; sleep 1; $C click-at $P >/dev/null; sleep 1; '
+               '$C key r tap >/dev/null; sleep 5; $C state > $S/table.json',
+               '$C key escape tap >/dev/null; sleep 3; $C state > $S/back.json; '
+               'P=$(python3 -c "import json,sys; b={w[\'id\']: w[\'bounds\'] for w in json.load(open(sys.argv[1]))[\'widgets\']}[\'slot-1\']; '
+               'print(int(b[0] + 8), int(b[1] + 8))" $S/ui.json); $C click-at $P >/dev/null; sleep 1; $C click-at $P >/dev/null; sleep 1; '
+               '$C key r tap >/dev/null; sleep 5; $C state > $S/stew.json'],
+        checks=[check_log(r"client got the server's recipes \([0-9]{4,}", "the client's join gets the server's recipes (REI reloads there)"),
+                check_file("table.json", r'"screen":"java-screen"', "R over the crafting table opens REI's recipes"),
+                check_file("back.json", r'"screen":"inventory"', "Escape goes back to the inventory"),
+                check_file("stew.json", r'"screen":"java-screen"', "R over beef stew opens its recipe")],
+        forbid=[r"wrap failed", r"no recipes for the client's join"],
+        look="none-1.png: the crafting table's recipe; none-2.png: beef stew's (Farmer's Delight's cooking pot)",
     ),
     "jei": dict(
-        about="JEI over Horizon's inventory: its item list (started with the server's recipes), its search box typed in, "
-              "a right click on an entry (its uses screen), Escape back to the inventory, /recipes and /uses (a mod's item)",
-        mods=["jei", "fd"], optional=["fabric-api"], scene="none", env={"HORIZON_JAVA_DEBUG": "jei"},
-        steps=['$C command "gamemode survival" >/dev/null; sleep 1; $C key e tap >/dev/null; sleep 12',
+        about="JEI over Horizon's inventory: started by the client's join (the server's recipes, as a joining client gets them), "
+              "its item list, its search box typed in (E too: a mod's text box has the keyboard), a right click on an entry "
+              "(its uses screen), Escape back to the inventory, its R and U over Horizon's slots (a vanilla and a mod's item)",
+        mods=["jei", "fd"], optional=["fabric-api"], scene="none",
+        steps=['$C command "gamemode survival" >/dev/null; $C command "clear @s" >/dev/null; '
+               '$C command "give @s minecraft:crafting_table" >/dev/null; $C command "give @s farmersdelight:tomato" >/dev/null; '
+               'sleep 8; $C key e tap >/dev/null; sleep 12; $C ui > $S/ui.json; $C screenshot $S/full.png >/dev/null',
                # JEI's search box (bottom right), then "beef" typed: the keys go to the overlay.
-               '$C click-at 357 223 >/dev/null; sleep 1; for k in b e e f; do $C key $k tap >/dev/null; sleep 0.3; done; sleep 3',
+               '$C click-at 357 223 >/dev/null; sleep 1; for k in b e e f; do $C key $k tap >/dev/null; sleep 0.4; done; sleep 3; '
+               '$C state > $S/typed.json; $C screenshot $S/beef.png >/dev/null; '
+               # Its list: item icons are sharp edges right of the inventory; few once filtered.
+               'python3 -c "import sys; from PIL import Image, ImageFilter; '
+               'e=lambda p: sum(Image.open(p).convert(\'L\').filter(ImageFilter.FIND_EDGES).crop((930, 90, 1280, 620)).getdata()); '
+               'f, b = e(sys.argv[1]), e(sys.argv[2]); print(\'full\', \'yes\' if f > 2700000 else \'no\', \'filtered\', \'yes\' if b * 5 < f * 3 else \'no\', f, b)" '
+               '$S/full.png $S/beef.png > $S/list.txt',
                # Each Backspace a key to the overlay too: the list full again; a right click on its first entry.
                'for k in 1 2 3 4; do $C key backspace tap >/dev/null; sleep 0.3; done; sleep 2; '
                '$C click-at 322 38 right >/dev/null; sleep 4; $C state > $S/uses.json',
                '$C key escape tap >/dev/null; sleep 3; $C state > $S/back.json',
-               '$C key escape tap >/dev/null; sleep 1; $C command "recipes minecraft:crafting_table" >/dev/null; sleep 4; '
-               '$C key escape tap >/dev/null; sleep 1; $C command "uses farmersdelight:tomato" >/dev/null; sleep 4'],
-        checks=[check_log(r"Horizon's JEI: started with [0-9]{4,} of the server's recipes", "JEI starts with the server's recipes (vanilla's and Farmer's Delight's)"),
-                check_log(r'JEI: the list of \S+: "": [0-9]{3,} items', "its item list over the inventory holds the items"),
-                check_log(r'JEI: the list of \S+: "beef": [1-9] items \(first 1 minecraft:beef\)', "typing in its search box filters it"),
+               'P=$(python3 -c "import json,sys; b={w[\'id\']: w[\'bounds\'] for w in json.load(open(sys.argv[1]))[\'widgets\']}[sys.argv[2]]; '
+               'print(int(b[0] + 8), int(b[1] + 8))" $S/ui.json slot-0); $C click-at $P >/dev/null; sleep 1; $C click-at $P >/dev/null; sleep 1; '
+               '$C key r tap >/dev/null; sleep 4; $C state > $S/table.json; $C key escape tap >/dev/null; sleep 3; '
+               'P=$(python3 -c "import json,sys; b={w[\'id\']: w[\'bounds\'] for w in json.load(open(sys.argv[1]))[\'widgets\']}[sys.argv[2]]; '
+               'print(int(b[0] + 8), int(b[1] + 8))" $S/ui.json slot-1); $C click-at $P >/dev/null; sleep 1; $C click-at $P >/dev/null; sleep 1; '
+               '$C key u tap >/dev/null; sleep 4; $C state > $S/tomato.json'],
+        checks=[check_log(r"client got the server's recipes \([0-9]{4,}", "the client's join gets the server's recipes"),
+                check_log(r"Registering recipes: farmersdelight:jei_plugin", "JEI starts with them (Farmer's Delight's plugin too)"),
+                check_file("list.txt", r"full yes", "its item list over the inventory holds the items"),
+                check_file("list.txt", r"filtered yes", "typing in its search box filters it"),
+                check_file("typed.json", r'"screen":"inventory"', "E typed in its search box doesn't close the inventory"),
                 check_file("uses.json", r'"screen":"java-screen"', "a right click on an entry opens its uses screen"),
                 check_file("back.json", r'"screen":"inventory"', "Escape there goes back to the inventory"),
-                check_log(r"recipe viewer \(JEI\): recipes of 1 minecraft:crafting_table: opened", "/recipes opens JEI's recipes"),
-                check_log(r"recipe viewer \(JEI\): uses of 1 farmersdelight:tomato: opened", "/uses opens a mod item's uses")],
-        forbid=[r"JEI: could not start", r"recipe viewer \(JEI\) failed", r"screen event handler failed"],
-        look="none-1.png: JEI's list right of the inventory; none-2.png: beef's 4 items; none-3.png: oak log's uses",
+                check_file("table.json", r'"screen":"java-screen"', "R over the crafting table opens JEI's recipes"),
+                check_file("tomato.json", r'"screen":"java-screen"', "U over a tomato opens a mod item's uses")],
+        forbid=[r"no recipes for the client's join", r"wrap failed", r"screen event handler failed"],
+        look="none-1.png: beef's items, 'beef' in the box; none-2.png: an entry's uses; none-4.png: the crafting table's recipe; none-5.png: tomato's uses",
     ),
     "sodium": dict(
         about="Sodium and Iris in mods-java: left out of Fabric's mods, the player told they aren't needed (no failure)",
@@ -318,23 +346,34 @@ CASES = {
     ),
     "jei-lan": dict(
         about="JEI per player: the host types in its search box; the guest's list stays full, its box empty and not typed in",
-        mods=["jei", "fd"], optional=["fabric-api"], scene="none", lan=True, env={"HORIZON_JAVA_DEBUG": "jei"},
+        mods=["jei", "fd"], optional=["fabric-api"], scene="none", lan=True,
         steps=['$H command "gamemode survival @a" >/dev/null; sleep 1; $H key e tap; sleep 12; $G key e tap; sleep 6',
                '$H click-at 357 223; sleep 1; for k in b e e f; do $H key $k tap >/dev/null; sleep 0.3; done; sleep 3; '
-               '$G scroll-at 340 100 -1; sleep 3'],
-        checks=[check_log(r'JEI: the list of Player\S*: "beef": [1-9] items', "the host's search filters the host's list"),
-                check_log(r'JEI: the list of Guest: "": [0-9]{3,} items', "the guest's list is still full")],
+               '$G scroll-at 340 100 -1; sleep 3; $H screenshot $S/h.png >/dev/null; $G screenshot $S/g.png >/dev/null; '
+               'python3 -c "import sys; from PIL import Image, ImageFilter; e=lambda p: sum(Image.open(p).convert(\'L\').filter(ImageFilter.FIND_EDGES).crop((930, 90, 1280, 620)).getdata()); h, g = e(sys.argv[1]), e(sys.argv[2]); '
+               'print(\'host\', \'filtered\' if h < 2700000 else \'full\', \'guest\', \'filtered\' if g < 2700000 else \'full\', h, g)" '
+               '$S/h.png $S/g.png > $S/lists.txt'],
+        checks=[check_file("lists.txt", r"host filtered", "the host's search filters the host's list"),
+                check_file("lists.txt", r"guest full", "the guest's list is still full (JEI's search text per player: not kept any more, see java-bridge.md)")],
         forbid=[r"JEI: could not start", r"search can't be kept per player"],
         look="lan-2-host.png: beef's items, 'beef' in the box; lan-2-guest.png: the whole list, the box empty",
     ),
     "reiscreen": dict(
-        about="REI's item list over a mod's screen (Farmer's Delight's pot) stays after REI's own reload (a client's join)",
+        about="REI's item list over a mod's screen (Farmer's Delight's pot), opened before the player's client joined "
+              "(it loads its models first): the screen is laid out again at the join, REI makes its overlay there and "
+              "searches again at its reload's end; opened again later, the list is there too",
         mods=["rei", "architectury", "cloth", "fd"], scene="pot",
-        steps=['sleep 12'],
-        checks=[check_log(r"REI reloaded on its own", "REI reloaded on its own (else nothing to check)"),
-                check_log(r"REI's overlay back on CookingPotScreen", "REI's overlay applied again to the pot's screen")],
-        forbid=[r"recipe viewer failed", r"overlay could not come back"],
-        look="REI's item list and search box beside the pot's screen",
+        steps=['sleep 14; $C screenshot $S/first.png >/dev/null; $C key escape tap >/dev/null; sleep 2; '
+               '$C mouse right click >/dev/null; sleep 5; $C state > $S/pot.json; $C screenshot $S/again.png >/dev/null; '
+               'python3 -c "import sys; from PIL import Image, ImageFilter; e=lambda p: sum(Image.open(p).convert(\'L\').filter(ImageFilter.FIND_EDGES).crop((930, 90, 1280, 620)).getdata()); '
+               'print(\'first\', \'yes\' if e(sys.argv[1]) > 2700000 else \'no\', \'again\', \'yes\' if e(sys.argv[2]) > 2700000 else \'no\')" '
+               '$S/first.png $S/again.png > $S/list.txt'],
+        checks=[check_log(r"client got the server's recipes \([0-9]{4,}", "the client's join gets the server's recipes (REI reloads there)"),
+                check_file("list.txt", r"first yes", "REI's item list beside the pot opened before the join"),
+                check_file("pot.json", r'"java_screen":[0-9]+', "the pot's own screen opens again"),
+                check_file("list.txt", r"again yes", "REI's item list beside it again")],
+        forbid=[r"wrap failed", r"laid out again at the join"],
+        look="pot-0.png: REI's item list and search box beside the pot's screen",
     ),
     "join": dict(
         about="Client join hooks (the joinmod fixture): handleLogin's injections and Fabric's JOIN run, with a connection",
@@ -1032,31 +1071,31 @@ CASES = {
     ),
     "rei-lan": dict(
         about="REI per player: a LAN guest with 4 oak logs turns on its craftable-only filter and sees what it can craft; the host's stays off, its list full",
-        mods=["rei", "architectury", "cloth", "fd"], scene="none", lan=True, env={"HORIZON_JAVA_DEBUG": "rei"},
+        mods=["rei", "architectury", "cloth", "fd"], scene="none", lan=True,
         steps=['$H command "gamemode survival @a" >/dev/null; $H command "give Guest minecraft:oak_log 4" >/dev/null; sleep 1; '
                '$G key e tap; sleep 20; $G key escape tap; sleep 2; $G key e tap; sleep 5',
                # The filter button beside REI's search box (GUI 270 227): green when on.
                '$G click-at 270 227; sleep 5; $G screenshot $S/g.png >/dev/null; $H key e tap; sleep 8; $H screenshot $S/h.png >/dev/null; '
-               'python3 -c "import sys; from PIL import Image; on=lambda p: (lambda c: c[1] > c[0] + 20)(Image.open(p).convert(\'RGB\').getpixel((812, 680))); '
-               'print(\'guest\', \'on\' if on(sys.argv[1]) else \'off\', \'host\', \'on\' if on(sys.argv[2]) else \'off\')" '
+               'python3 -c "import sys; from PIL import Image, ImageFilter; on=lambda p: (lambda c: c[1] > c[0] + 20)(Image.open(p).convert(\'RGB\').getpixel((812, 680))); '
+               'e=lambda p: sum(Image.open(p).convert(\'L\').filter(ImageFilter.FIND_EDGES).crop((930, 90, 1280, 620)).getdata()); print(\'guest\', \'on\' if on(sys.argv[1]) else \'off\', \'few\' if e(sys.argv[1]) < 2700000 else \'full\', '
+               '\'host\', \'on\' if on(sys.argv[2]) else \'off\', \'few\' if e(sys.argv[2]) < 2700000 else \'full\')" '
                '$S/g.png $S/h.png > $S/filters.txt'],
         checks=[check_file("filters.txt", r"guest on", "the guest's filter is on"),
                 check_file("filters.txt", r"host off", "the host's filter is off"),
-                check_log(r"REI's list of Guest: [1-9] entries", "the guest's list: what 4 oak logs craft"),
-                check_log(r"REI's list of Player\S*: [0-9]{3,} entries", "the host's list: everything")],
+                check_file("filters.txt", r"guest few", "the guest's list: what 4 oak logs craft"),
+                check_file("filters.txt", r"host full", "the host's list: everything")],
         forbid=[r"settings can't be kept per player", r"search failed"],
         look="lan-2-guest.png: the filter green, planks; lan-3-host.png: red, the whole list",
     ),
     "lootinfo": dict(
-        about="Advanced Loot Info's REI plugin asks the server for its loot data from REI's reload threads: the request is queued for the loop and answered while Horizon's REI reload waits",
+        about="Advanced Loot Info's REI plugin asks the server for its loot data from REI's reload threads (REI's reload at the client's join): the request is queued for the loop and answered",
         mods=["ali", "aci", "rei", "architectury", "cloth"], scene="none", env={"HORIZON_JAVA_DEBUG": "loop"},
-        steps=['$C command "recipes minecraft:diamond_ore" >/dev/null; sleep 20'],
+        steps=['sleep 20'],
         checks=[check_log(r"client to server ali:\S+ from \S+ \(off the loop's thread: queued\)", "the plugin's request from REI's thread is queued, not dropped"),
                 check_log(r"server to client ali:\S+ for ", "the server answers it"),
                 # Unanswered, the plugin waits 3 x 30 s and REI's reload with it.
-                check_log(r"REI's plugins reloaded in \d{1,4} ms", "REI's reload doesn't wait for the plugin's timeouts"),
-                check_log(r"recipes of 1 minecraft:diamond_ore: opened", "the recipe view opens")],
-        forbid=[r"was sent with no player's client running", r"Incomplete data", r"Missing chunk with index", r"recipe viewer failed"],
+                check_log(r"REIClientPlugin finished post-reload for END in [0-9.]+ m?s, totaling [0-9.]+ m?s", "REI's join reload ends, not held by the plugin's timeouts")],
+        forbid=[r"was sent with no player's client running", r"Incomplete data", r"Missing chunk with index"],
         look="diamond ore's recipes: Advanced Loot Info's block loot page among them",
     ),
     "modsettings2": dict(
@@ -1091,8 +1130,7 @@ CASES = {
                'e=lambda p, x0: sum(Image.open(p).convert(\'L\').filter(ImageFilter.FIND_EDGES).crop((x0, 100, x0 + 300, 600)).getdata()); '
                'side=lambda p: \'left\' if e(p, 0) > e(p, 980) else \'right\'; '
                'print(\'guest\', side(sys.argv[1]), \'host\', side(sys.argv[2]))" $S/g.png $S/h.png > $S/sides.txt'],
-        checks=[check_log(r"404198aa-cc64-3021-9fdf-8766c0d0096c's kept settings read \(1 file\(s\), [1-9]", "the guest's kept file is read at their join"),
-                check_file("sides.txt", r"guest left", "the guest's REI list is on the left (their setting)"),
+        checks=[check_file("sides.txt", r"guest left", "the guest's REI list is on the left (their setting)"),
                 check_file("sides.txt", r"host right", "the host's stays on the right")],
         forbid=[r"settings can't be kept per player", r"kept config files"],
         look="lan-2-guest.png: REI's list left of the inventory; lan-2-host.png: right",
