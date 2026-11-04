@@ -1023,7 +1023,8 @@ def run_prism(case, jars, out):
         for jar in jars:
             shutil.copy(jar, mods)
         env = dict(os.environ, INST_MC_DIR=str(inst / ".minecraft"), HORIZON_PRISM_DRY="1")
-        r = subprocess.run([str(TOOLS / "prism.sh")], input="param --username\nparam Steve\nlaunch\n",
+        play = TOOLS.parent.parent / "target" / "fast" / ("horizon-play.exe" if os.name == "nt" else "horizon-play")
+        r = subprocess.run([str(play)], input="param --username\nparam Steve\nlaunch\n",
                            env=env, capture_output=True, text=True, timeout=60)
         (out / "prism.txt").write_text(r.stdout + r.stderr)
         linked = sorted(p.name for p in (inst / ".minecraft" / "horizon" / "mods-java").glob("*.jar"))
