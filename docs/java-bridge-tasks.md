@@ -157,6 +157,9 @@ By area:
   and the item's `useOn` first, as vanilla). And a client tick error: `ParticleEngine.
   createParticle` on a null (Horizon's client has no vanilla `ParticleEngine`: a mod making a
   particle client-side must get one that hands the particle to Horizon's particles; client chat).
+  **Blaze burners** work but draw wrong: the blaze head looks doubled/overlapping and a pale
+  blue-white flat square under it (the same pale square as the press/mixer report: likely one
+  sprite or render type wrong for animated/emissive block-entity parts; gpu-13).
 - **A broken block's moving parts stay** (tester, batch 10): break a cogwheel and the hand
   crank's handle on it keeps floating, drawn. A removed mod block entity must drop its
   renderer's instance (gpu-13: the recorder's per-block-entity draws on removal).
