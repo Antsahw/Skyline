@@ -520,9 +520,50 @@ it does nothing unless Horizon fires it or hands the action to the mirror.
   API's own patch of `ejectItems`/`suckInItems` does (it wraps plain vanilla `Container`s
   too). One item a call, in the hopper's slot order; vanilla blocks stay Rust's. A block with
   no storage on that face isn't asked again for 40 ticks (`JAVA_NO_STORAGE`).
-  `HORIZON_JAVA_DEBUG=hoppers` logs each move. Not done: droppers into Java blocks, Java mods'
+  `HORIZON_JAVA_DEBUG=hoppers` logs each move. Not done: Java mods'
   hoppers/pipes pulling from Horizon's hoppers (those go through `COPIES` as before), native
   mods' `InventoryMoveItem` event for these moves.
+- **Droppers and mods' container entities** (bridge-mixins-9). A dropper with no Horizon
+  container in front asks Java (`java_item_storage`, an insert of nothing: is there storage?);
+  where there is, it does what Fabric Transfer API's `DropperBlockMixin` does at the default
+  dispense: `getRandomSlot` once more, one item of that slot into the storage, nothing
+  dispensed (`machines.rs` `java_drop`). Horizon's droppers also fill Horizon's own container
+  entities in front now (vanilla's `getContainerAt`; they didn't). A mod's entity that is a
+  `Container` (a mod's chest minecart) is found by `HorizonHoppers` when the block has no
+  storage (`containerEntity`: its box meets the block's, a random one of several;
+  `ContainerStorage` over it), so Horizon's hoppers, hopper minecarts and droppers move items
+  into and out of it. Rust asks only where one is: the entity snapshot lists the blocks their
+  boxes meet (`containers`, `JAVA_CONTAINER_BLOCKS`; no 40-tick wait there, carts move).
+  Fixture `cartmod` (a barrel cart: vanilla's chest minecart under the mod's type); regress
+  `droppers`. Its cart isn't drawn yet: vanilla's `MinecartRenderer` in the headless client
+  throws (`blockModelResolver` null), a client/gpu task.
+- **Mods' foods** (bridge-mixins-9). A mod item used in the air runs vanilla's `useItem` on
+  the mirror (mods' own items are theirs); for a food that *started* the use
+  (`Consumable.startConsuming` → `startUsingItem`) on the mirrored player, which is never
+  ticked, so it never finished, while Horizon was told "taken" and never ate: a Farmer's
+  Delight meal's animation ran on and on (beta tester). Now a mod's consumable the mirror
+  started using is stopped there and handed to Horizon (`handOverConsumable`), which eats it
+  with the components the content build carried (food, consume effects, the bowl as
+  `use_remainder`). Not routed: a mod item whose `finishUsingItem` does more than the
+  components (FD's hot cocoa clearing an effect: `affectConsumer`), and held uses that aren't
+  consumables (a mod's bow drawn: the mirror starts it and never ticks it). Regress `eat`;
+  `HORIZON_JAVA_DEBUG=use` logs each hand-over.
+- **Mods' fluids flow by their own code** (bridge-mixins-9). A mod's `LiquidBlock` is carried
+  with a vanilla template (water's or lava's), so Horizon's Rust fluid code ran it as that:
+  BuildCraft's oil (and the tester's Create honey) spread as `minecraft:lava`, set fire, and
+  water turned it to cobblestone. Now `LevelAccess::foreign_fluid` (horizon-world: a fluid
+  another engine runs) is true for the mods' fluid blocks (`HorizonServer.modFluidBlocks`,
+  `JAVA_FLUID_STATES`): Horizon's fluid ticks, lava's random ticks and lava's conversions leave
+  them, and where Horizon would schedule their fluid tick (placed, a neighbour changed) it
+  tells `foreign_fluid_changed` instead, which goes to Java with the blocks set
+  (`HorizonServer.blockEntities` schedules `getTickDelay`). The mirror's fluid ticks
+  (`HorizonTicks`, `getFluidTicks`) now hold mods' fluids and run `FluidState.tick` as
+  `ServerLevel.tickFluid` does: the mod's own delay, slope, drop-off and physics (BuildCraft's
+  gaseous fuels rise), its blocks written to Horizon's world as usual. Regress `fluids`.
+  Not done: their drawing (gpu chat), and entities in them: Horizon's physics still read the
+  template's fluid (a player in oil is in "lava": burns, swims slowly), and Horizon's water
+  meets them as lava when it spreads. Mods with a `-` in their id (milk-lib) aren't carried at
+  all (content).
 - The mirrored player's `tickCount` follows Horizon's ticks: Carry On refuses a second action
   on the tick of the last one, and the mirror's players aren't ticked.
 - `HORIZON_JAVA_DEBUG=entities` logs each attack on/use of Horizon's entities, a vanilla mob a
@@ -596,6 +637,17 @@ gets SPIR-V, vertex layouts and uniform lists.
   pipeline's SPIR-V, which `HORIZON_SPV_DIR=dir cargo test -p horizon-jvm gpu` reads back.
 
 ## 26.3 facts that cost time
+
+- **A use the mirror starts never finishes.** The mirrored players are never ticked, so
+  `LivingEntity.updatingUsingItem` never counts a use down: anything vanilla's `Item.use`
+  starts with `startUsingItem` (eating, drinking, drawing a bow) sits there forever. Hand it to
+  Horizon (consumables: `handOverConsumable`) or tick it yourself; never answer "taken" for it.
+- **A mod's fluid block carries lava's or water's template**, and every Rust path that reads
+  its `FluidState` sees that fluid: flow, random ticks, conversions, entity physics. The
+  `LevelAccess::foreign_fluid` hook covers flow, random ticks and conversions; entities still
+  read the template.
+- `$X.5` in a shell step is wrong for negative X (`-521.5` is block -522): use
+  `$(awk "BEGIN{print $X + 0.5}")` (around.sh says so too; it cost a run here).
 
 - "Hoppers don't work" with a big pack was not Lithium: Horizon's hoppers are Rust and move
   vanilla containers tick for tick as without mods (same counts after `tick step` 1/8/8/23,

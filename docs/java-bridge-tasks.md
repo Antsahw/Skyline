@@ -79,14 +79,16 @@ Broken, first in every area's queue below:
   same pot opens right on other clicks: a race between Horizon's stand-in and the Java screen
   taking over. Client chat, first in its queue. Reproduce: open and close the pot 20 times
   (regress `pot` opens it once); make the case open it repeatedly.
-- **(2026-11-04, same tester, video) A Farmer's Delight bowl meal never gets eaten**: hunger
+- ~~**(2026-11-04, same tester, video) A Farmer's Delight bowl meal never gets eaten**~~
+  (bridge-mixins-9: fixed, regress `eat`; see Reports): hunger
   9/10, he holds right-click with the meal (a bowl dish, count 1), the eating animation and
   particles run on and on, the item stays and hunger doesn't change. Check plain FD foods
   (cooked bacon) too. Likely the use's finish (`finishUsingItem`: FD's `ConsumableItem` gives
   the bowl back and applies its effects) isn't reached or applied for a Java mod's food
   (`consume.rs`, the mirror's use). Entities/mixins chat. New regress case: eat an FD meal and
   a plain FD food; check hunger, the stack and the bowl.
-- **(2026-11-04, same tester, Windows, screenshot) Mods' fluids don't work**: a honey bucket
+- **(2026-11-04, same tester, Windows, screenshot) Mods' fluids don't work** (flow: done in
+  bridge-mixins-9, regress `fluids`; drawing and entities in them still open): a honey bucket
   (Create) places a fluid drawn as lava. Mods' fluids need their textures/tint (Fabric's
   `FluidRenderHandlerRegistry`) in Horizon's fluid mesher, and their flow (Horizon's fluid
   ticks are Rust: a mod `FlowingFluid` must tick in the mirror or be ported per fluid). gpu
@@ -1034,7 +1036,7 @@ through Fabric's `ItemStorage.SIDED` (`HorizonHoppers`; java-bridge.md, the mixi
 Tested: hopper → cooking pot (beef in the pot's screen), hopper → FD oak cabinet → hopper →
 chest, in FD alone and in the full pack. Regress: new case `hoppers` and `pot` pass. Touches
 `machines.rs` (two hooks, ~40 lines: shared Horizon file). Not done: droppers into Java blocks;
-hoppers on Java mods' entities (minecarts of mods).
+hoppers on Java mods' entities (minecarts of mods). (Both done in mixins 9.)
 Test on the PC: pull, build, start the pack; a hopper with items on a cooking pot or an FD
 cabinet fills it; a hopper under the cabinet empties it. Other mods' machines (Energized
 Power) not tried yet: they work if they expose Fabric's item storage.
@@ -1073,3 +1075,38 @@ Not yet per player: JEI's bookmarks and settings. Regress `jei`, `jei-lan` (new)
 `reiscreen`, `pot`, `terminal`, `rei-lan`, `modsettings`, `config-rejoin`, `keys`, `failmsg`.
 Test: `regress.py --jars <jars with jei, fabric-api, Farmer's Delight> jei jei-lan`.
 
+### Mixins 9 (2026-11-04, branch `bridge-mixins-9`; Claude for iaxivers)
+
+1. **The FD meal never eaten** (beta tester): reproduced headless (hunger 0, beef stew and
+   cooked bacon held: nothing eaten, the stack stayed). Cause: a mod item's use in the air
+   runs vanilla's `useItem` on the mirror; a food *starts* the use on the mirrored player
+   (never ticked, so it never finishes) and the answer "taken" kept Horizon from eating. Now a
+   mod's consumable the mirror started is handed to Horizon, which eats it from the carried
+   components (food, effects, the bowl). Stew: hunger 0 → 12, bowl back; bacon feeds. Regress
+   `eat` (fails on the old jars). Not done: items whose `finishUsingItem` adds code beyond
+   the components (FD's hot cocoa, milk bottle), and non-food held uses of mod items (bows).
+2. **Droppers into Java mods' blocks** (Fabric's `DropperBlockMixin`: 3 carrots into an FD
+   cabinet) and **hoppers on mods' container entities** (a hopper fills a mod's cart, a hopper
+   under it empties it; hopper minecarts too). Horizon's droppers also fill Horizon's chest
+   minecarts in front now (vanilla's `getContainerAt`). Fixture `cartmod`, regress
+   `droppers`. Found: a mod's minecart isn't drawn (`MinecartRenderer` NPE,
+   `blockModelResolver` null in the headless client): client/gpu.
+3. **Mods' fluids flow** (the Create honey entry, flow half): reproduced with BuildCraft
+   Refabricated's oil (Create Fly has no 26.3 Modrinth build; CurseForge can't be fetched
+   here): the oil spread `minecraft:lava` and water made cobblestone. Now horizon-world has a
+   `LevelAccess::foreign_fluid` hook (shared file: `level/{mod,fluids,update}.rs`, ~30 lines,
+   defaults keep Horizon's behaviour) and the mirror runs mods' fluid ticks with their own
+   code: the oil spreads as oil (levels 1-7, radius 7), BuildCraft's gaseous fuel rises 8
+   blocks to a glass ceiling and spreads under it, water beside oil makes nothing. Regress
+   `fluids`. Should work the same for Create's honey and chocolate (their own FlowingFluids):
+   not tried (no jar here). Still open: drawing (gpu), entities in mod fluids (Horizon's physics
+   read the template: lava burns), Horizon's water spreading into them as into lava,
+   milk-lib not carried (its id has a `-`).
+
+Regress here: `eat droppers fluids hoppers pot placed` pass. horizon-world `level::` tests:
+fluids pass; 6 piston tests fail on java-bridge without this branch too.
+Test on the PC: pull `bridge-mixins-9`, build, then
+`python3 tools/java_bridge/regress.py --jars ~/hz-test/mods-java eat droppers fluids hoppers`
+(put `BCRefabricated-*.jar` from Modrinth in the folder for `fluids`); in-game: eat an FD meal
+at low hunger; a hopper/dropper into an FD cabinet; a Create honey bucket should flow as honey
+(still drawn wrong).
