@@ -174,6 +174,13 @@ By area:
   variable can't be set" (filters, speeds, thresholds): Create's value boxes (scroll) and
   filter slots (right-click with an item on the box): the scroll and use buckets above.
   **Drill works** (tester).
+  **Windmill bearing and super glue** do nothing: a bearing assembles its sails into a
+  contraption (an entity carrying blocks) on right-click, glue is applied by clicking two
+  corners: the use-order bug, then contraptions (not done: gpu-13 has them listed).
+  **Toolbox: the block opens (lid animates) but no screen shows**, "again": a mod menu that
+  needs its opening data on the client (Fabric's `ExtendedScreenHandlerType`/menu data
+  sent with the open packet) or a screen that fails to make: check the log for the screen's
+  error; client chat.
 - **A broken block's moving parts stay** (tester, batch 10): break a cogwheel and the hand
   crank's handle on it keeps floating, drawn. A removed mod block entity must drop its
   renderer's instance (gpu-13: the recorder's per-block-entity draws on removal).
