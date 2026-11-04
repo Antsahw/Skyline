@@ -58,6 +58,12 @@ both are fixed. The user's decision: **players play only through Horizon's launc
    it in the report. A mod that stops working is listed in java-bridge.md's status, not patched.
    Its regress cases stay and show what's broken.
 
+### Later: upstream's launcher redesign (noted 2026-11-04)
+
+Upstream redesigned the launcher (the "glass" views). Batch 10 only added the Java mods tab to
+its home view. Later: check the Fabric switch, the Java mods tab and its failures list look and
+work right in the new design (screenshots), after the launcher-only chat.
+
 ### Upstream (2026-11-04: Ludovic asked for the bridge in the main repo)
 
 The user's decisions: **off by default; the launcher has a switch to turn on Fabric 26.3 mods.**
