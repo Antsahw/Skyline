@@ -35,6 +35,7 @@ GS=$(mktemp -d /tmp/hz-guest.XXXX)
 echo "$GS" > /tmp/hz-bridge-guest
 mkdir -p "$GS/mods-java" "$GS/home" "$GS/lh" "$GS/data" "$GS/conf"
 cp "$MODS"/*.jar "$GS/mods-java/"
+"$R/tools/java_bridge/fps_cap.sh" "$GS"
 [ -z "$DISPLAY" ] && export DISPLAY=:77
 (cd "$GS" && HORIZON_HOME=$GS/home HORIZON_LAUNCHER_HOME=$GS/lh XDG_DATA_HOME=$GS/data XDG_CONFIG_HOME=$GS/conf \
   HORIZON_LAUNCHER_NO_SELF_UPDATE=1 HORIZON_NO_AUDIO=1 HORIZON_ROOT=$R \

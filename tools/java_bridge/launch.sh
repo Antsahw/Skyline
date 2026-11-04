@@ -29,6 +29,13 @@ cp -p "$MODS"/*.jar "$S/mods-java/"
 [ -n "$CACHE" ] && mkdir -p "$CACHE" && ln -s "$CACHE" "$S/.horizon-cache"
 [ -n "$OPTS" ] && cp "$OPTS" "$S/options.txt"
 [ -n "$GRAPHICS" ] && cp "$GRAPHICS" "$S/horizon-graphics.txt"
+"$R/tools/java_bridge/fps_cap.sh" "$S"
+# The pack's resource packs (resourcepacks/ beside MODS, as in a launcher instance), turned on as
+# its options.txt selects them.
+[ -d "$MODS/../resourcepacks" ] && ln -s "$(cd "$MODS/../resourcepacks" && pwd)" "$S/resourcepacks"
+if ! grep -q '^resourcePacks:' "$S/options.txt"; then
+  grep -sE '^(resourcePacks|incompatibleResourcePacks):' "$MODS/../options.txt" >> "$S/options.txt" || true
+fi
 # CONFIG: a folder copied over the game folder's config/ (mods' settings before they start).
 [ -n "$CONFIG" ] && mkdir -p "$S/config" && cp -r "$CONFIG"/. "$S/config/"
 echo "$S" > /tmp/hz-bridge-scratch

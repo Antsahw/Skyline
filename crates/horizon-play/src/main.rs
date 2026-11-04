@@ -10,6 +10,7 @@
 //! starts the game. In a checkout, it builds the game first.
 
 mod mods;
+mod packs;
 
 #[allow(dead_code)]
 #[path = "../../horizon-jvm/src/libs.rs"]
@@ -616,6 +617,8 @@ fn run(request: Request) -> Result<i32, String> {
                 say(format!("The mods get their own {name} folder ({e})"));
             }
         }
+        // A modpack's own resource packs, turned on as the pack ships them.
+        packs::carry(game, &places.home, &link_folder, &|l| say(l));
     }
 
     let who = account(&params);

@@ -1009,10 +1009,43 @@ CASES = {
         look="near: the grid; far: thin layers every 5 blocks, not solid land",
     ),
     "prism": dict(
-        about="Prism Launcher's wrapper: an instance's mods linked, Fabric API left out (no game)",
+        about="Prism Launcher's wrapper: an instance's mods linked, Fabric API left out, its resource "
+              "packs and their selection carried (no game)",
         mods=["fd"], optional=["fabric-api"], prism=True,
     ),
+    "packs": dict(
+        about="A pack's own resource packs (resourcepacks/ and options.txt beside mods-java) load: "
+              "a checkered stone wall in the screenshot",
+        mods=["fd"], optional=["fabric-api"], scene="none", resourcepacks=True,
+        steps=['$C command "fill ~3 ~ ~-3 ~3 ~3 ~3 stone" >/dev/null; $C command "tp @s ~ ~ ~ -90 10" >/dev/null; sleep 2',
+               'ls $S/.horizon-cache/resourcepacks/*/assets/minecraft/textures/block/stone.png > $S/packs.txt 2>&1; '
+               '$C options-get maxFps > $S/fps.json'],
+        checks=[check_file("packs.txt", r"resourcepacks/[0-9a-f]+/assets/minecraft/textures/block/stone\.png",
+                           "the pack's stone is in the loaded resources"),
+                check_json("fps.json", ["options", "maxFps", "value"], 30, "the test window is capped at 30 FPS")],
+    ),
 }
+
+
+def test_pack(folder):
+    """A pack's resource packs: `resourcepacks/Checkered.zip` (stone, dirt, sand... checkered
+    magenta and yellow) in `folder`, selected in its `options.txt` as a launcher instance's is."""
+    import struct, zipfile, zlib
+
+    def png(a, b, n=16, cell=4):
+        rows = b"".join(b"\0" + b"".join(bytes(a if (x // cell + y // cell) % 2 == 0 else b)
+                                           for x in range(n)) for y in range(n))
+        chunk = lambda t, d: struct.pack(">I", len(d)) + t + d + struct.pack(">I", zlib.crc32(t + d))
+        return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", n, n, 8, 6, 0, 0, 0))
+                + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b""))
+    (folder / "resourcepacks").mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(folder / "resourcepacks" / "Checkered.zip", "w") as z:
+        z.writestr("pack.mcmeta", json.dumps({"pack": {"description": "Horizon test: checkered ground",
+                                                       "min_format": 97, "max_format": 97}}))
+        for name in ["stone", "dirt", "grass_block_side", "sand", "deepslate", "gravel", "andesite", "granite"]:
+            z.writestr(f"assets/minecraft/textures/block/{name}.png", png((230, 0, 200, 255), (255, 220, 0, 255)))
+    (folder / "options.txt").write_text('version:5023\nresourcePacks:["vanilla","fabric","file/Checkered.zip"]\n'
+                                        'incompatibleResourcePacks:[]\n')
 
 
 def find_jars(folder, names):
@@ -1066,6 +1099,10 @@ def build(java_only):
     return {}
 
 
+def read(path):
+    return path.read_text(errors="replace") if path.exists() else ""
+
+
 def run_prism(case, jars, out):
     inst = Path(tempfile.mkdtemp(prefix="hz-prism."))
     try:
@@ -1073,6 +1110,7 @@ def run_prism(case, jars, out):
         mods.mkdir(parents=True)
         for jar in jars:
             shutil.copy(jar, mods)
+        test_pack(inst / ".minecraft")
         env = dict(os.environ, INST_MC_DIR=str(inst / ".minecraft"), HORIZON_PRISM_DRY="1")
         play = TOOLS.parent.parent / "target" / "fast" / ("horizon-play.exe" if os.name == "nt" else "horizon-play")
         r = subprocess.run([str(play)], input="param --username\nparam Steve\nlaunch\n",
@@ -1083,7 +1121,11 @@ def run_prism(case, jars, out):
                    (len(linked) == len([j for j in jars if not fnmatch.fnmatch(j.name.lower(), "fabric-api*")]),
                     f"the mods are linked ({len(linked)})"),
                    (not any(n.lower().startswith("fabric-api") for n in linked), "Fabric API is left out"),
-                   ((inst / ".minecraft" / "horizon" / "config").is_symlink(), "config/ is the instance's")]
+                   ((inst / ".minecraft" / "horizon" / "config").is_symlink(), "config/ is the instance's"),
+                   ((inst / ".minecraft" / "horizon" / "resourcepacks" / "Checkered.zip").is_file(),
+                    "the instance's resource packs are the game's"),
+                   ("file/Checkered.zip" in read(inst / ".minecraft" / "horizon" / "options.txt"),
+                    "the instance's pack selection is on")]
         return results, []
     finally:
         shutil.rmtree(inst, ignore_errors=True)
@@ -1091,7 +1133,13 @@ def run_prism(case, jars, out):
 
 def run_game(case, name, jars, out, extra_env, pack=None, join_within=None):
     mods = Path(tempfile.mkdtemp(prefix="hz-regress-mods."))
+    top = mods
     try:
+        if case.get("resourcepacks"):
+            # A pack's folder: mods-java/ with resourcepacks/ and options.txt beside it.
+            test_pack(top)
+            mods = top / "mods-java"
+            mods.mkdir()
         for jar in jars:
             shutil.copy(jar, mods)
         config = {}
@@ -1160,7 +1208,7 @@ def run_game(case, name, jars, out, extra_env, pack=None, join_within=None):
         results.append((log != "", f"the game ran ({time.time() - started:.0f} s)"))
         return results, errors
     finally:
-        shutil.rmtree(mods, ignore_errors=True)
+        shutil.rmtree(top, ignore_errors=True)
 
 
 def join_seconds(log):

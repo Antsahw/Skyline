@@ -69,7 +69,7 @@ Broken, first in every area's queue below:
 - **Litematica's UI** doesn't show (client; MaLiLib's MiniHUD does).
 - **Sodium** doesn't work: expected, it replaces vanilla's renderer, which Horizon doesn't use.
   Say so in-game (a "not needed in Horizon" line) rather than a failure (client).
-- The test's offscreen window renders uncapped (99% GPU, coil whine): cap it (tools).
+- ~~The test's offscreen window renders uncapped (99% GPU, coil whine)~~ (pack-9: capped).
 
 ### First beta testers (2026-11-03, Discord)
 
@@ -119,8 +119,8 @@ Broken, first in every area's queue below:
 
 Works for them: Bedrock Reloaded (small pack), Terralith ("runs better than normal Fabric"),
 Biomes O' Plenty; 800 FPS stable on a GTX 1060 3 GB / i5-9400F / 16 GB. Reported:
-- **A pack's resource packs aren't picked up**: a modpack's bundled resource packs had to be put
-  in the folder by hand (pack: imports and the pack screen).
+- ~~**A pack's resource packs aren't picked up**~~ (pack-9: Prism instances and a pack's
+  folder beside `mods-java`; see Reports).
 - **Mods' overrides of vanilla structure templates are ignored** when Horizon generates the
   structure itself: Mielon's The Sift replaces `data/minecraft/structure/ancient_city/city_center/
   city_center_{1,2,3}.nbt` (8 sonorous deepslate before the frame), new worlds get vanilla's
@@ -1072,4 +1072,25 @@ reload listeners added at `CLIENT_STARTED` run. Search text and keyboard focus p
 Not yet per player: JEI's bookmarks and settings. Regress `jei`, `jei-lan` (new), `rei`,
 `reiscreen`, `pot`, `terminal`, `rei-lan`, `modsettings`, `config-rejoin`, `keys`, `failmsg`.
 Test: `regress.py --jars <jars with jei, fabric-api, Farmer's Delight> jei jei-lan`.
+
+### Pack 9: a modpack's resource packs, the test window's frame rate (2026-11-04, branch `bridge-pack-9`; Claude for iaxivers)
+
+1. **A modpack's bundled resource packs are picked up.** Prism (wrapper and `--instance`):
+   `horizon-play` links the instance's `resourcepacks/` into the game folder (or links its packs
+   into an existing `horizon/resourcepacks/`, where a tester copied packs by hand) and turns on
+   the instance's selection from its `options.txt` (first start, and when the pack's selection
+   changes; the player's own choice in Horizon stays otherwise). A pack's folder for the test
+   scripts (`resourcepacks/` and `options.txt` beside `MODS`, e.g. `~/hz-test/`): `launch.sh`
+   does the same. A game folder that holds `mods-java/` with `resourcepacks/` and `options.txt`
+   (`~/hz-play`) already worked: the game reads both from its working folder.
+2. **The test window's frame rate is capped.** Test games get `maxFps:30` (`fps_cap.sh`, used
+   by launch/lan/server/install tests; `MAX_FPS=n` to change). And the offscreen loading screen,
+   which drew with no limit at all (a big pack's minutes of loading at 99% GPU), is held to
+   vanilla's 60 for a menu (small change in game.rs, `Loading::about_to_wait`, outside pack).
+   Headless check: the limiter holds offscreen (maxFps 10 → 10.0 FPS measured by `bench`).
+Regress (this sandbox, lavapipe; FD + Fabric API): `prism` (now checks the packs and their
+selection), `packs` (new: a stone wall in the pack's checkered texture; maxFps 30), `pot`, `ber`
+pass. Unit tests in `horizon-play` (`packs.rs`). Test on the PC:
+`regress.py --jars ~/hz-test/mods-java prism packs pot`, or Prism: put a resource pack in the
+instance (Prism's Resource packs tab, turn it on), press Play: it is on in Horizon.
 
