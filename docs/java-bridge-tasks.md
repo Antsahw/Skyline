@@ -76,6 +76,11 @@ every caller that turns `Unsupported` into a stop. Own small chat (`bridge-crash
 case placing it, then walking into/on it.
 The tester had to **remake the world** after it: also check that a world saved at such a stop
 opens again.
+**Done (bridge-crash-1):** the block is Create's `andesite_scaffolding` (template
+`minecraft:scaffolding`). The stop was the window's own motion (Render thread) and every other
+collision query: fixed at the source, `BlockCollisionRegistry` never answers `Unsupported` for a
+registry state (the template's rule, else a full cube). Regress `scaffold`; the tester's kind of
+save (made at the crash) opens and plays.
 
 Chats on it (2026-11-04): `bridge-client-13` (Cloth Config, Chat Heads, waypoint NPE,
 Litematica), `bridge-replay-1` (ReplayMod, Flashback), `bridge-mixins-10` (double break sound,

@@ -79,6 +79,8 @@ pub struct BlockCollisionRegistry<'r> {
     cached: Arc<CachedCollisionRegistry<'r>>,
     dynamic: HashMap<BlockStateId, DynamicSupport>,
     contextual: HashMap<BlockStateId, ContextualRule>,
+    /// States with neither a cached shape nor a rule (mod blocks only): a full cube.
+    fallback: HashMap<BlockStateId, VoxelShape>,
     scan_flags: Vec<u8>,
     /// Piston and piston-head states for moving-piston collision; None in
     /// registries without pistons.
@@ -93,37 +95,90 @@ impl<'r> BlockCollisionRegistry<'r> {
     pub fn new(cached: Arc<CachedCollisionRegistry<'r>>) -> io::Result<Self> {
         let mut dynamic = HashMap::new();
         let mut contextual = HashMap::new();
+        let mut fallback = HashMap::new();
         let mut scan_flags = Vec::with_capacity(cached.registry().len());
         for index in 0..cached.registry().len() {
             let id = BlockStateId(index as u32);
-            let state = cached.registry().state(id).unwrap();
-            let large = cached.cached_shape(id)?.is_none_or(|shape| {
+            let named = cached.registry().state(id).unwrap();
+            let cached_shape = cached.cached_shape(id)?;
+            let large = cached_shape.is_none_or(|shape| {
                 Axis::ALL
                     .into_iter()
                     .any(|axis| shape.min(axis) < 0.0 || shape.max(axis) > 1.0)
             });
-            if let Some(rule) = ScaffoldingCollision::from_state(state)? {
-                contextual.insert(id, ContextualRule::Scaffolding(rule));
-            } else if let Some(rule) = LiquidCollision::from_state(state)? {
-                contextual.insert(id, ContextualRule::Liquid(rule));
-            } else if state.name == "minecraft:powder_snow" {
-                contextual.insert(id, ContextualRule::PowderSnow);
+            // A mod block copying a vanilla template (a content root's) follows
+            // the template's rule: Create's scaffoldings are vanilla scaffolding
+            // (`ScaffoldingBlock` subclasses). Its own properties may not fit the
+            // rule: then it has none, rather than the registry failing.
+            let template = cached
+                .template(&named.name)
+                .map(|template| crate::chunk::BlockState {
+                    name: template.to_owned(),
+                    properties: named.properties.clone(),
+                });
+            let (state, lenient) = match &template {
+                Some(state) => (state, true),
+                None => (named, false),
+            };
+            let rule = |result: io::Result<Option<ContextualRule>>| match result {
+                Err(_) if lenient => Ok(None),
+                other => other,
+            };
+            if let Some(rule) = rule(
+                ScaffoldingCollision::from_state(state).map(|r| r.map(ContextualRule::Scaffolding)),
+            )?
+            .or(rule(
+                LiquidCollision::from_state(state).map(|r| r.map(ContextualRule::Liquid)),
+            )?)
+            .or((state.name == "minecraft:powder_snow").then_some(ContextualRule::PowderSnow))
+            {
+                contextual.insert(id, rule);
+            }
+            if cached_shape.is_none() {
+                match DynamicSupport::from_state(state) {
+                    Ok(Some(rule)) => {
+                        dynamic.insert(id, rule);
+                    }
+                    Err(_) if lenient => {}
+                    Err(error) => return Err(error),
+                    Ok(None) => {}
+                }
+            }
+            // No cached shape and no rule: a mod block whose shape depends on
+            // context in a way Horizon doesn't know. A full cube, never a stop
+            // (players walk on it and can't walk through it).
+            if cached_shape.is_none() && !dynamic.contains_key(&id) {
+                fallback.insert(id, VoxelShape::block());
             }
             // No contextual rule and an empty cached shape: empty everywhere.
-            let empty = !contextual.contains_key(&id)
-                && cached.cached_shape(id)?.is_some_and(VoxelShape::is_empty);
+            let empty =
+                !contextual.contains_key(&id) && cached_shape.is_some_and(VoxelShape::is_empty);
             scan_flags.push(
                 u8::from(large)
                     | (u8::from(state.name == "minecraft:moving_piston") << 1)
                     | (u8::from(empty) << 2)
                     | (u8::from(contextual.contains_key(&id)) << 3),
             );
-            if cached.cached_shape(id)?.is_none() {
-                if let Some(rule) =
-                    DynamicSupport::from_state(cached.registry().state(id).unwrap())?
-                {
-                    dynamic.insert(id, rule);
-                }
+        }
+        if !fallback.is_empty() {
+            let mut names: Vec<&str> = fallback
+                .keys()
+                .filter_map(|id| cached.registry().state(*id))
+                .map(|state| state.name.as_str())
+                .collect();
+            names.sort_unstable();
+            names.dedup();
+            // Once a process: the client, the server and worldgen each build a registry.
+            static LOGGED: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+            let message = format!(
+                "{} block states have no collision rule; they collide as full blocks: {}",
+                fallback.len(),
+                names.join(", ")
+            );
+            let mut logged = LOGGED.lock().unwrap_or_else(|e| e.into_inner());
+            if !logged.contains(&message) {
+                log::warn!("Horizon: {message}");
+                logged.push(message);
             }
         }
         let pistons = PistonBlockBindings::new(cached.registry()).ok();
@@ -131,6 +186,7 @@ impl<'r> BlockCollisionRegistry<'r> {
             cached,
             dynamic,
             contextual,
+            fallback,
             scan_flags,
             pistons,
         })
@@ -185,11 +241,15 @@ impl<'r> BlockCollisionRegistry<'r> {
         {
             return Ok(shape.clone());
         }
-        self.dynamic
+        if let Some(rule) = self.dynamic.get(&state) {
+            return rule
+                .collision_shape(world, position)
+                .map_err(CollisionQueryError::Dynamic);
+        }
+        self.fallback
             .get(&state)
-            .ok_or(CollisionQueryError::Unsupported(state))?
-            .collision_shape(world, position)
-            .map_err(CollisionQueryError::Dynamic)
+            .cloned()
+            .ok_or(CollisionQueryError::Unsupported(state))
     }
 
     /// Ordinary entity/position/placement contexts. The remaining pinned block

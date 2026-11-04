@@ -61,6 +61,10 @@ pub struct CachedCollisionRegistry<'r> {
     state_shapes: Vec<i32>,
     grid_count: usize,
     canonical_identities: bool,
+    /// Mod blocks (a content root's) by the vanilla template they copy: a
+    /// template state with no cached shape has a rule of its own (scaffolding,
+    /// bamboo...), which the mod block's states follow.
+    templates: HashMap<String, String>,
 }
 impl<'r> CachedCollisionRegistry<'r> {
     pub fn registry(&self) -> &'r BlockRegistry {
@@ -216,13 +220,31 @@ impl<'r> CachedCollisionRegistry<'r> {
         {
             return Err(invalid("invalid cached shape mapping"));
         }
+        let templates = match tag.get("templates") {
+            None => HashMap::new(),
+            Some(Tag::Compound(map)) => map
+                .iter()
+                .filter_map(|(block, template)| match template {
+                    Tag::String(template) => {
+                        Some((block.to_string_lossy(), template.to_string_lossy()))
+                    }
+                    _ => None,
+                })
+                .collect(),
+            Some(_) => return Err(invalid("invalid collision templates")),
+        };
         Ok(Self {
             registry,
             shapes,
             state_shapes: state_shapes.clone(),
             grid_count: grids.len(),
             canonical_identities,
+            templates,
         })
+    }
+    /// The vanilla block a mod block copies (its content root's template), if any.
+    pub fn template(&self, block: &str) -> Option<&str> {
+        self.templates.get(block).map(String::as_str)
     }
     /// Older exports omit native canonical identities. Such imports retain their
     /// local alias graph but cannot support identity-dependent world iteration.

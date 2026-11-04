@@ -2,7 +2,7 @@
 # Starts the game headless with the Java mods of MODS (a folder of jars), in a fresh scratch
 # folder (CLAUDE.md: never real player data), driven by horizon-ctl. Prints the scratch folder;
 # its ctl.sock is the socket. The world has seed SEED (default 1234: the same land each run).
-# Usage: MODS=~/mods [WORLD=name|none] [SEED=n] tools/java_bridge/launch.sh [game args...]
+# Usage: MODS=~/mods [WORLD=name|none] [SEED=n] [SAVE=world-folder] tools/java_bridge/launch.sh [game args...]
 set -e
 R=$(cd "$(dirname "$0")/../.." && pwd)
 : "${MODS:?MODS: a folder of mod jars}"
@@ -38,6 +38,8 @@ if ! grep -q '^resourcePacks:' "$S/options.txt"; then
 fi
 # CONFIG: a folder copied over the game folder's config/ (mods' settings before they start).
 [ -n "$CONFIG" ] && mkdir -p "$S/config" && cp -r "$CONFIG"/. "$S/config/"
+# SAVE: a world folder (a kept save) opened as WORLD instead of a new one.
+[ -n "$SAVE" ] && mkdir -p "$S/saves" && cp -r "$SAVE" "$S/saves/${WORLD:-W}" && rm -f "$S/saves/${WORLD:-W}/session.lock"
 echo "$S" > /tmp/hz-bridge-scratch
 # A display for the offscreen renderer when there is none.
 if [ -z "$DISPLAY" ]; then

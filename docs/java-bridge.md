@@ -990,6 +990,11 @@ Generic fixes found with Create Fly (no Create-specific code); regress `createma
   sync mutates the set it receives (`retainAll` on the client's immutable one failed).
 - **`HorizonMixinTable.patchedInside` ignores client patches** (actions the server routes);
   for how a client class draws use `patchedAnywhere`.
+- **Name-matched rules miss mod blocks.** Horizon picks contextual shapes and many behaviours by
+  block name (`"minecraft:scaffolding"`); a mod's copy of the block has its own name, so it got
+  no rule and its uncached collision shape was a hard error. Look a mod block's template up
+  (`CachedCollisionRegistry::template`) rather than adding mod names. `SAVE=<world folder>` in
+  `launch.sh` opens a kept save (a tester's crashed world) instead of a new one.
 
 - **A use the mirror starts never finishes.** The mirrored players are never ticked, so
   `LivingEntity.updatingUsingItem` never counts a use down: anything vanilla's `Item.use`
@@ -1637,6 +1642,17 @@ Chunky (2026-11-04, bridge-mixins-10): `/chunky start` pregenerates through Hori
 Testers' Trello retest (2026-11-04, bridge-trello-1): JEI, Farmer's Delight, Litematica's menu
 and Cloth Config's screens (`/modconfig`) work; Chunky, Simple Voice Chat, TACZ fail; Chat Heads,
 Flashback, ReplayMod load and do nothing. Log lines and areas: java-bridge-tasks.md, "Retest".
+Mod blocks with no collision rule never stop the game (2026-11-04, bridge-crash-1): placing
+Create's scaffolding and walking near it ended the game ("unsupported block collision state
+36126", on the window's thread, so the world saved beside it crashed again on the first step).
+A mod block copying a vanilla template whose states have no cached collision shape
+(scaffolding, bamboo, powder snow, liquids...) now follows the template's rule (the content
+root's `cached-collision.nbt` has `templates`, read by `CachedCollisionRegistry::template`);
+a state with no cached shape and no rule collides as a full cube, logged once ("N block
+states have no collision rule"). Regress `scaffold`; a world saved at that crash opens and plays.
+Left: Create's scaffolding with `bottom=true` collides as vanilla's (Create's own is
+`SCAFFOLD_HALF`); 2 `create:fluid_pipe` states are full cubes (their nearest vanilla shape is
+a contextual one).
 
 Create (Create Fly's 26.3 port, 2026-11-04, bridge-gpu-12): kinetic networks run and their
 shafts, cogs and motors draw turning; OBJ items draw; mods' fluids use their own sprites; 3D Skin
