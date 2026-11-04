@@ -79,6 +79,13 @@ Broken, first in every area's queue below:
   same pot opens right on other clicks: a race between Horizon's stand-in and the Java screen
   taking over. Client chat, first in its queue. Reproduce: open and close the pot 20 times
   (regress `pot` opens it once); make the case open it repeatedly.
+- **(2026-11-04, same tester, video) A Farmer's Delight bowl meal never gets eaten**: hunger
+  9/10, he holds right-click with the meal (a bowl dish, count 1), the eating animation and
+  particles run on and on, the item stays and hunger doesn't change. Check plain FD foods
+  (cooked bacon) too. Likely the use's finish (`finishUsingItem`: FD's `ConsumableItem` gives
+  the bowl back and applies its effects) isn't reached or applied for a Java mod's food
+  (`consume.rs`, the mirror's use). Entities/mixins chat. New regress case: eat an FD meal and
+  a plain FD food; check hunger, the stack and the bowl.
 
 Works for them: Bedrock Reloaded (small pack), Terralith ("runs better than normal Fabric"),
 Biomes O' Plenty; 800 FPS stable on a GTX 1060 3 GB / i5-9400F / 16 GB. Reported:
