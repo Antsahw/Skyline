@@ -127,7 +127,8 @@ By area:
   screen for it: you look at the motor and **scroll the mouse wheel** (its value box, drawn as
   a HUD overlay on the looked-at block). So: mods' injections on `MouseHandler.onScroll` while
   playing (not in a screen) must run and may cancel the hotbar scroll, and the value box overlay
-  must draw. Client chat (`bridge-client-13`): generic, every mod with scroll-to-adjust gets it.
+  must draw. Same bucket: **Create's goggles** show nothing (worn, looking at a machine draws a stress/
+  speed tooltip overlay: a HUD layer of the looked-at block). Client chat (`bridge-client-13`): generic, every mod with scroll-to-adjust gets it.
 - **Fluids drawn black in screens** (tester, batch 10): in JEI's list (and a mod's fluid slots)
   the fluid entries (water, lava, Create's honey/chocolate) are black or dark squares. Mods draw
   a fluid in a GUI from its still sprite in the block atlas, tinted (Fabric's
