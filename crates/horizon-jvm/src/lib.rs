@@ -22,6 +22,7 @@ pub mod events;
 pub mod facade;
 pub mod gpu;
 pub mod libs;
+pub mod neoforge;
 pub mod platform;
 pub mod renderers;
 pub mod runtime;
@@ -379,6 +380,7 @@ pub fn start(config: &Config) -> Result<&'static Bridge, String> {
         &class_path,
         config.class_archive.as_deref(),
         &log_config,
+        &[],
     )?;
     let mut env = vm
         .attach_current_thread_permanently()
@@ -527,6 +529,7 @@ fn create_vm(
     class_path: &[PathBuf],
     archive: Option<&Path>,
     log_config: &Path,
+    extra: &[String],
 ) -> Result<JavaVM, String> {
     let path = libjvm(home)?;
     #[cfg(windows)]
@@ -578,6 +581,8 @@ fn create_vm(
         options.push("-Xlog:cds=off".into());
         options.push("-Xlog:cds+dynamic=off".into());
     }
+    // The loader's own (NeoForge's `--add-opens`, its library folder).
+    options.extend(extra.iter().cloned());
     // A player's own options last, so they win over ours (`HORIZON_JVM_OPTIONS="-Xmx3g"`).
     if let Ok(extra) = std::env::var("HORIZON_JVM_OPTIONS") {
         options.extend(extra.split_whitespace().map(str::to_string));

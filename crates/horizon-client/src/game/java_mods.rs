@@ -205,7 +205,8 @@ fn left_out() -> Vec<horizon_jvm::renderers::LeftOut> {
 /// with Java and Fabric started for it (they stay up for the game).
 pub(super) fn java_content(base: &Path) -> Vec<PathBuf> {
     let (dir, jars) = mod_jars();
-    if jars.is_empty() {
+    if jars.is_empty() || neoforge_install().is_some() {
+        // NeoForge (prototype): no content conversion yet.
         return Vec::new();
     }
     let cache = super::mods::horizon_cache().join("java-content");
@@ -357,6 +358,9 @@ fn start_once(root: &Path, dir: &Path, jars: Vec<PathBuf>, side: horizon_jvm::Si
     }
     let started = std::time::Instant::now();
     let work = root.join(".local/bridge");
+    if let Some(install) = neoforge_install() {
+        return start_neoforge(root, &work, &install, &jars, started);
+    }
     let fabric = fabric(root, dir, &work, &jars, side);
     let fabric = match fabric {
         Ok(fabric) => Some(fabric),
@@ -431,6 +435,68 @@ fn start_once(root: &Path, dir: &Path, jars: Vec<PathBuf>, side: horizon_jvm::Si
             }
         }
     }
+    true
+}
+
+/// `HORIZON_NEOFORGE`: a folder NeoForge's installer ran in (`--installServer`), set up by
+/// `tools/java_bridge/neoforge/run_proto.sh`. The mods in `mods-java/` then load with
+/// NeoForge instead of Fabric: a prototype (docs/java-bridge-neoforge.md) that loads them and
+/// stops there, with no mirror, content or screens yet.
+fn neoforge_install() -> Option<PathBuf> {
+    std::env::var_os("HORIZON_NEOFORGE")
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+}
+
+/// NeoForge's start (prototype): FML's game folder is `.local/bridge/neoforge-game`, whose
+/// `mods/` holds copies of the jars in `mods-java/` and of the platform mod the setup built.
+fn start_neoforge(
+    root: &Path,
+    work: &Path,
+    install: &Path,
+    jars: &[PathBuf],
+    started: std::time::Instant,
+) -> bool {
+    let game_dir = work.join("neoforge-game");
+    let mods = game_dir.join("mods");
+    let linked = (|| -> std::io::Result<()> {
+        let _ = std::fs::remove_dir_all(&mods);
+        std::fs::create_dir_all(&mods)?;
+        let platform = install.join("horizon/horizon-neo-platform.jar");
+        for jar in jars.iter().chain(std::iter::once(&platform)) {
+            if let Some(name) = jar.file_name() {
+                std::fs::copy(jar, mods.join(name))?;
+            }
+        }
+        Ok(())
+    })();
+    if let Err(e) = linked {
+        not_started(&format!("NeoForge's mods folder: {e}"));
+        return false;
+    }
+    let component = java_component(root);
+    let log = |line: String| log::info!("{line}");
+    let bridge =
+        match horizon_jvm::find_or_fetch_java_home(component.as_deref(), &log).and_then(|home| {
+            horizon_jvm::neoforge::start(&horizon_jvm::neoforge::NeoForge {
+                home,
+                work: work.to_path_buf(),
+                install: install.to_path_buf(),
+                game_dir: game_dir.clone(),
+            })
+        }) {
+            Ok(bridge) => bridge,
+            Err(e) => {
+                not_started(&format!("NeoForge: {e}"));
+                return false;
+            }
+        };
+    log::info!(
+        "Java mods: JVM {} and NeoForge started in {} ms; loaded {}",
+        bridge.java_version(),
+        started.elapsed().as_millis(),
+        bridge.mods().join(", ")
+    );
     true
 }
 

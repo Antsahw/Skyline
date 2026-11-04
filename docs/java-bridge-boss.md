@@ -185,6 +185,9 @@ fast: prefer them to cloud runs for big packs.
 4. Draft the message to Ludovic (what the bridge does, how it could fit: opt-in feature,
    separate crate, or on top of native mods).
 5. NeoForge/Forge for 26.3 (same mirror; a different loader and events).
+   Research done (2026-11-04, `bridge-neoforge-research`): FML starts in the bridge's JVM and
+   loads mods (server half); the plan and first steps are in
+   [java-bridge-neoforge.md](java-bridge-neoforge.md). Next: split the platform (step 1 there).
 6. **1.12 (SkyFactory 4 and its packs): a committed goal, not a maybe** (the user, 2026-11-03:
    "it has to happen"; mods called too hard on day one run now). After NeoForge. The likely
    shape: Forge 1.12.2 mods on Cleanroom (a maintained 1.12.2 Forge on modern Java) in the

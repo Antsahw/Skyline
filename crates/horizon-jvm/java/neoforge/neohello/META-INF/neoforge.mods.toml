@@ -1,0 +1,16 @@
+modLoader = "javafml"
+loaderVersion = "[1,)"
+license = "MIT"
+
+[[mods]]
+modId = "neohello"
+version = "1.0.0"
+displayName = "Neo Hello (Horizon bridge fixture)"
+description = "A block, an item and a server tick listener: the smallest NeoForge mod the bridge loads."
+
+[[dependencies.neohello]]
+modId = "neoforge"
+type = "required"
+versionRange = "[26.3,)"
+ordering = "NONE"
+side = "BOTH"

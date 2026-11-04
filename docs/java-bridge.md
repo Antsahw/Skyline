@@ -28,6 +28,7 @@ saying something works.
 | Mods' worldgen | `HorizonWorldgen.java` (also the biome queries: `biomes`, `findBiome`), `HorizonChunks.java` (chunk copies for code that reads chunks: saplings), `HorizonTints.java` (mods' block tints for the mesher) (vanilla's chunk steps on the mirror's level, chunks back as vanilla saves them), mixin `WorldGenRegionMixin`; Rust: `game/java_worldgen.rs` (`JavaTerrain`, wraps `VanillaTerrain` in `world_loading::make_streaming`), mods' biomes in `biome.rs` (`mod_biomes`) and the biome registry (`lan/data.rs`) |
 | Content conversion | `crates/horizon-port-pack` (`oracle.rs`, `carry.rs`), `HorizonContent.java` (facts, creative tabs), `crates/horizon-client/src/mod_content.rs` (content root) |
 | Game side (Rust) | `crates/horizon-client/src/game/java_mods.rs` (start, content, creative), `java_server.rs` (actions from Java, menus, block entities, random ticks, `JAVA_STATES`, `JAVA_WINDOWS`), `java_screen.rs` (draws frames, sends input, key maps; `Screen::JavaMod` and `CLIENT_WINDOW` for client-only screens) |
+| NeoForge (prototype) | `java/dev/horizonlab/bridge/neo/NeoBoot.java`, `src/neoforge.rs`, `java_mods.rs` (`start_neoforge`, `HORIZON_NEOFORGE`), `java/neoforge/` (fixture, prototype platform), `tools/java_bridge/neoforge/`: see [java-bridge-neoforge.md](java-bridge-neoforge.md) |
 
 ## How a tick flows
 
@@ -1280,6 +1281,13 @@ Naturalist (mobs with ModelPart models, Fabric API only). The repo's own critter
 (`ENTITY=naturalist:bear` for another mod's).
 
 ## Status
+
+NeoForge (2026-11-04, bridge-neoforge-research): NeoForge 26.3.0.101 starts inside the bridge's
+JVM, server half only. `HORIZON_NEOFORGE=<install>` loads `mods-java/` with NeoForge instead of
+Fabric: the mods are constructed and registered, and common setup runs. Nothing else runs on them
+yet: no mirror, content or screens. Plan, the Fabric/NeoForge differences, NeoForge's start
+sequence and its traps: [java-bridge-neoforge.md](java-bridge-neoforge.md). **NeoForge and FML are
+LGPL: run them, never read their source** (that page says what's allowed).
 
 Create (Create Fly's 26.3 port, 2026-11-04, bridge-gpu-12): kinetic networks run and their
 shafts, cogs and motors draw turning; OBJ items draw; mods' fluids use their own sprites; 3D Skin
