@@ -1285,14 +1285,19 @@ in-game: a creative motor with shafts and cogs, a honey bucket, third person wit
   doesn't use go to the overlay with the hovered slot (R/U for any viewer); typing seen from any
   focused EditBox (`EditBoxFocusMixin`) or a mod taking the typed characters; slot presses
   reach the mods (`horizon: true`). Small Rust change in `game/java_screen.rs` (client area).
-- **Works**: regress `rei jei pot-jei reiscreen hud modsettings join` pass (rei, jei and
-  reiscreen rewritten for the key path, screenshot checks). Found on the way: a screen opened
+- **Works**: regress `rei jei pot-jei hud modsettings join` pass (rei, jei and reiscreen
+  rewritten for the key path, screenshot checks); `reiscreen` intermittent (REI's list beside a
+  pot opened at the join: 1 of 2 runs). Found on the way: a screen opened
   before the client joined is laid out again at the join; a packet handler's injections run
   HEAD first (REI's reload never ended when Architectury's RETURN came first).
 - **Broken, listed in java-bridge.md**: per-player settings/search of these mods on LAN and
   servers (`rei-lan`, `jei-lan`, `config-rejoin` fail by design now; JEI's search box can't be
   typed in while another player's inventory is open); REI's first typed character if it is an
   inventory key.
+- Full regress (`--java-only`, every case my jars allow: 51 ran): all pass but `reiscreen`
+  (intermittent, above), `keys` and `modsettings2` (fail with the old jars too here),
+  `jump2` and `lost` (known flaky), `eat` (passed on its rerun). `lootinfo` passes (ALI's
+  request from REI's join reload is queued and answered).
 - Licences: REI MIT, JEI MIT, Jade CC-BY-NC-SA-4.0, AppleSkin Unlicense, Architectury and Cloth
   Config LGPL-3.0.
 - Test: `regress.py --jars <fabric-api, FD, REI, Architectury, Cloth Config, JEI, Jade, AppleSkin>
