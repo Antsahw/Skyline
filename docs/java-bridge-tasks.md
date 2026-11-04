@@ -75,6 +75,12 @@ By area:
   Chat (its own UDP server and Java audio: research).
 - **entities/gpu**: TACZ (guns: models, animations, projectiles).
 - Better Combat and Create: in the generic-entities and gpu-13 chats.
+- **Breaking sounds twice** (a tester, 2026-11-04: "dirt goes brrbrr"). Mods: Biomes O' Plenty,
+  TerraBlender, GlitchCore, Terralith, Geophilic, Lithostitched, FallingTree, WorldEdit, Create
+  Fly, Fabric API. Likely a routed break (FallingTree and WorldEdit patch breaking) where Java's
+  `destroyBlock` sends its level event 2001 (break sound and particles) and Horizon's own break
+  plays it too. Check: break dirt with each mod alone; the client must get one 2001 per break.
+  mixins chat (`bridge-mixins-10`), first.
 
 ### Later: upstream's launcher redesign (noted 2026-11-04)
 
