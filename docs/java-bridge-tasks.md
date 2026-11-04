@@ -933,3 +933,28 @@ cut off and passed alone.
 - **worldgen 6.2, the quit through Java**: world quit 3 s (7 s writing the archive), title
   1.3 s, SIGTERM 3.4 s, SIGINT 2.4 s, SIGSEGV 9.4 s, dedicated `stop` 6.4 s: all end. Details
   in java-bridge.md.
+
+### gpu 10: invisible mod blocks (2026-11-03, branch `bridge-gpu-10`; Claude for iaxivers)
+
+Task: the user's PC run, "mod blocks invisible when placed until a relaunch, a few blocks in a
+swamp invisible". Here (2 cores, llvmpipe, the 81-jar pack, fresh and cached content):
+- **Found and fixed: a placed mod block turned into air in the player's game.** A mod's block
+  item places in the mirror; its `SetBlock` waited for the next tick while the click's
+  correction (air) and ack went out at once, so the predicted block was replaced by air (polled
+  every 50 ms: stove, air, stove). It came back a tick later here; it stayed gone wherever that
+  later update didn't arrive. Now the use's writes are applied before the click is answered
+  (`java_server.rs` `apply_java_use_writes`). Regress `placed` (Farmer's Delight; the same poll on the
+  old build read air). `pot ber terminal hud placed` pass.
+- **Ruled out:** missing models (`state_mesh_scan`: all 110,458 states mesh and light, no
+  panic; unbound states are only vanilla's own empty ones), state ids past 65,535 (FD 78,866,
+  Tom's 110,406 render), sprites in the 2nd texture array, GPU occlusion culling
+  (`HORIZON_GPU_CULL=1`), placing in empty sections, holding right-click (client == server).
+  Meshes here wait only while a neighbour column isn't loaded yet (vanilla's rule; slow here as
+  Java generates).
+- **Not reproduced:** a block staying invisible until a relaunch, and the swamp blocks (a
+  vanilla swamp at -183 1730, seed 1234, looked right). Needs the user's answer: which blocks,
+  can they be targeted (outline/Jade), which swamp; his `logs/latest.log` (`panicked`,
+  `missing block model`, `Java mods: a mod set`).
+- Also: `research-lock.json` accepts Mojang's newest republished 26.3 version JSON (a fresh
+  machine's `lab.py prepare` refused it).
+Test: `regress.py --jars ~/hz-test/mods-java placed`; in-game, place mod blocks by hand.
