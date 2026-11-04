@@ -1281,6 +1281,11 @@ Naturalist (mobs with ModelPart models, Fabric API only). The repo's own critter
 
 ## Status
 
+Forge 1.12.2 (SkyFactory 4), 2026-11-04, bridge-112-research: research only, nothing runs yet.
+Plan in [java-bridge-112.md](java-bridge-112.md) (Cleanroom in the bridge's JVM, the 1.12 ↔ 26.3
+mapping, drawing, phases). `tools/java_bridge/scan112.py <mods>` measures what a 1.12 mods
+folder needs (classes only, nothing run).
+
 Create (Create Fly's 26.3 port, 2026-11-04, bridge-gpu-12): kinetic networks run and their
 shafts, cogs and motors draw turning; OBJ items draw; mods' fluids use their own sprites; 3D Skin
 Layers draws its layers (see "Create, Flywheel, OBJ models, mods' fluids, 3D Skin Layers").
