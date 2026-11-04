@@ -96,6 +96,14 @@ By area:
   vanilla gives obsidian/cobblestone once. Without Create too. Then **Create's own fluid
   interactions** (honey + lava makes limestone, chocolate + lava makes scoria): what a mod adds
   to lava's interactions must happen once, through the mod's code.
+- **Items placed on stations don't show** (tester, batch 10): right-click with an item on
+  Create's depot puts nothing visible on top; "like Farmer's Delight" (its cutting board,
+  skillet, stove show items on top through their block-entity renderers). First find which
+  half fails: is the item in the block entity (Java's `LIVE`, `HORIZON_JAVA_DEBUG=ber`) and
+  gone from the hand? Then it's drawing: block-entity renderers that draw an item stack
+  (`ItemModelResolver`/`submitItem` inside a BER) need the item path in the bridge's recorder.
+  If it never got in, it's the use (mixins). gpu-13 checks first; FD's cutting board passed
+  `pot`-style cases, so compare with it.
 - **Breaking sounds twice** (a tester, 2026-11-04: "dirt goes brrbrr"). Mods: Biomes O' Plenty,
   TerraBlender, GlitchCore, Terralith, Geophilic, Lithostitched, FallingTree, WorldEdit, Create
   Fly, Fabric API. Likely a routed break (FallingTree and WorldEdit patch breaking) where Java's
