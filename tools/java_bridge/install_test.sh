@@ -10,7 +10,10 @@
 # (default /tmp): install-N.png.
 #   MODS=~/mods/fd tools/java_bridge/install_test.sh 'sleep 3'
 #   KEEP_JAVA=1 ...: leave the PATH's Java (only the install layout is tested)
+#   OFF=1 ...: without --java-mods, as the launcher starts an instance with its Fabric switch off:
+#   no Java may start (or be downloaded), jars in mods-java/ or not
 R=$(cd "$(dirname "$0")/../.." && pwd)
+OPT_IN=--java-mods; [ -n "$OFF" ] && OPT_IN=
 : "${MODS:?MODS: a folder of mod jars}" "${OUT:=/tmp}"
 mkdir -p "$OUT"
 CTL="$R/target/fast/horizon-ctl"
@@ -43,7 +46,7 @@ cd "$I/home"
 env -u HORIZON_ROOT -u HORIZON_JAVA_HOME -u JAVA_HOME -u HORIZON_JAVA_JARS -u JAVA_TOOL_OPTIONS \
   PATH=$path HORIZON_JAVA_NO_SYSTEM=$nosys HORIZON_HOME=$I/home HORIZON_LAUNCHER_HOME=$I/lh XDG_DATA_HOME=$I/data XDG_CONFIG_HOME=$I/conf \
   HORIZON_LAUNCHER_NO_SELF_UPDATE=1 HORIZON_NO_AUDIO=1 HORIZON_CTL_LAUNCH_TIMEOUT=900 \
-  "$CTL" --socket "$I/ctl.sock" launch --world W --seed "${SEED:-1234}" --creative --wait --offscreen \
+  "$CTL" --socket "$I/ctl.sock" launch --world W --seed "${SEED:-1234}" --creative --wait --offscreen $OPT_IN \
   --game "$I/version/horizon-client" --resources "$I/version/.local/horizon-client/$V" > "$I/ctl.out" 2>&1
 G="$CTL --socket $I/ctl.sock"
 n=0

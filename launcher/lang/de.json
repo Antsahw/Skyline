@@ -864,5 +864,12 @@
   "You haven't played this one yet. Press Play to start.": "Du hast diese noch nicht gespielt. Drück auf Spielen, um zu starten.",
   "You've played for {time}! Last played {when}.": "Du hast {time} gespielt! Zuletzt gespielt: {when}.",
   "Rust Edition": "Rust Edition",
-  "Java Edition": "Java Edition"
+  "Java Edition": "Java Edition",
+  "Fabric 26.3 mods (beta)": "Fabric-26.3-Mods (Beta)",
+  "Runs the Fabric mods in this instance's mods-java folder. Off, the game never starts Java. On, the launcher downloads Horizon's build with Java mods, and the game gets Java 25 the first time it starts them.": "Startet die Fabric-Mods im Ordner mods-java dieser Instanz. Aus: Das Spiel startet nie Java. An: Der Launcher lädt Horizons Build mit Java-Mods herunter, und das Spiel holt sich Java 25, wenn es sie zum ersten Mal startet.",
+  "Downloading the Fabric mods build…": "Build mit Fabric-Mods wird heruntergeladen…",
+  "The Fabric mods build is ready.": "Der Build mit Fabric-Mods ist bereit.",
+  "Added {names}: they load the next time the game starts.": "{names} hinzugefügt: Sie werden beim nächsten Spielstart geladen.",
+  "Java mods": "Java-Mods",
+  "No Java mods yet: add Fabric mods' jars, or drop them here.": "Noch keine Java-Mods: Füge JARs von Fabric-Mods hinzu oder ziehe sie hierher."
 }

@@ -755,7 +755,7 @@ pub(crate) fn download(
     })
 }
 
-fn unpack(archive: &Path, url: &str, to: &Path) -> Result<(), String> {
+pub(crate) fn unpack(archive: &Path, url: &str, to: &Path) -> Result<(), String> {
     let file = fs::File::open(archive).map_err(|e| e.to_string())?;
     if url.ends_with(".tar.gz") {
         tar::Archive::new(flate2::read::GzDecoder::new(file))
@@ -771,19 +771,26 @@ fn unpack(archive: &Path, url: &str, to: &Path) -> Result<(), String> {
 /// Downloads one release, checks it against its signed checksums and unpacks it; `progress` gets
 /// the fraction done.
 pub fn install(release: &Release, progress: impl Fn(f32)) -> Result<(), String> {
+    let sha256 = release_digest(release, ASSET.unwrap_or_default())?;
+    install_as(release, &release.tag, &sha256, progress)?;
+    crate::java_variant::follow(release, &release.tag);
+    Ok(())
+}
+
+/// The signed SHA-256 of `release`'s file `asset`, or why it must not be installed.
+pub(crate) fn release_digest(release: &Release, asset: &str) -> Result<String, String> {
     let tag = release.tag.as_str();
-    let sha256 = match &release.nightly {
+    match &release.nightly {
         // Signed for the Nightly channel, served under its own GitHub tag.
         Some(published) => crate::signed::nightly_digest(
             published,
-            ASSET.unwrap_or_default(),
+            asset,
             &horizon_release_sign::trusted_keys(),
             fetch_small,
-        )?,
-        None if is_game_tag(tag) => signed_digest(tag, ASSET.unwrap_or_default())?,
-        None => return Err(format!("{tag} is not a Horizon release.")),
-    };
-    install_as(release, tag, &sha256, progress)
+        ),
+        None if is_game_tag(tag) => signed_digest(tag, asset),
+        None => Err(format!("{tag} is not a Horizon release.")),
+    }
 }
 
 /// Downloads `release`'s archive for this platform, checks it against `sha256` (its signed
@@ -3128,6 +3135,8 @@ pub enum Msg {
     Native(Result<String, String>),
     /// An imported game build is installed (`build_import::import`): its version, or why not.
     Imported(Result<String, String>),
+    /// A version's Fabric mods build is installed (`java_variant::ensure`), or why not.
+    JavaBuild(String, Result<(), String>),
     /// A Java instance's game is ready to start (`java_game`, wrapped): the instance's id and
     /// game folder, and the command or why not.
     /// A Java instance's game ready to start, and its variables for the post-exit command.

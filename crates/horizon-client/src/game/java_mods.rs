@@ -1,4 +1,5 @@
-//! Java mods: the Java mod bridge (crate `horizon-jvm`), with the `java-mods` feature. When
+//! Java mods: the Java mod bridge (crate `horizon-jvm`), with the `java-mods` feature. Off
+//! unless the player opted in ([`opted_in`]). When they did and
 //! `mods-java/` beside `options.txt` holds jars, the game starts the JVM and Fabric Loader on
 //! a thread of their own, so the window never waits for them: Fabric loads the mods in
 //! `mods-java/` and Fabric API on the player's own game jar, applies their Mixins,
@@ -13,11 +14,49 @@ const PROBE_CLASSES: &[&str] = &[
     "net/fabricmc/fabric/api/event/lifecycle/v1/ServerTickEvents",
 ];
 
-impl Game<'_> {
-    /// Starts the JVM and Fabric if `mods-java/` holds jars. No jars, no JVM: one folder read.
-    pub(super) fn start_java_mods(&mut self) {
-        let dir = Self::options_path().with_file_name(horizon_jvm::DIR);
+/// The game argument that turns Fabric mods on for a run (the launcher passes it for an instance
+/// whose "Fabric 26.3 mods (beta)" switch is on).
+const OPT_IN_ARG: &str = "--java-mods";
+/// The same for developers' scripts and servers: `HORIZON_JAVA_MODS=1`.
+const OPT_IN_VAR: &str = "HORIZON_JAVA_MODS";
+
+/// Whether the player turned Fabric mods on for this run ([`OPT_IN_ARG`], [`OPT_IN_VAR`]). Off,
+/// a game built with Java mods plays as the plain one: no Java started (nor downloaded), whatever
+/// `mods-java/` holds.
+pub(super) fn opted_in() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| {
+        std::env::args().any(|a| a == OPT_IN_ARG)
+            || std::env::var(OPT_IN_VAR).is_ok_and(|v| v == "1")
+    })
+}
+
+/// `mods-java/` and its jars when the player opted in; its jars are none otherwise (said once in
+/// the log when it holds some).
+pub(super) fn mod_jars() -> (PathBuf, Vec<PathBuf>) {
+    let dir = Game::options_path().with_file_name(horizon_jvm::DIR);
+    if opted_in() {
         let jars = horizon_jvm::jars(&dir);
+        return (dir, jars);
+    }
+    static SAID: std::sync::Once = std::sync::Once::new();
+    SAID.call_once(|| {
+        let held = horizon_jvm::jars(&dir).len();
+        if held > 0 {
+            log::info!(
+                "Java mods: off ({held} jars in {}): start with {OPT_IN_ARG} to run them",
+                horizon_jvm::DIR
+            );
+        }
+    });
+    (dir, Vec::new())
+}
+
+impl Game<'_> {
+    /// Starts the JVM and Fabric if the player opted in and `mods-java/` holds jars. No jars,
+    /// no JVM: one folder read.
+    pub(super) fn start_java_mods(&mut self) {
+        let (dir, jars) = mod_jars();
         if jars.is_empty() {
             return;
         }
@@ -35,8 +74,7 @@ pub(super) fn start_early() {
     if std::env::var("HORIZON_JAVA_EARLY_START").is_ok_and(|v| v == "0") {
         return;
     }
-    let dir = Game::options_path().with_file_name(horizon_jvm::DIR);
-    let jars = horizon_jvm::jars(&dir);
+    let (dir, jars) = mod_jars();
     if !jars.is_empty() {
         spawn_start(dir, jars);
     }
@@ -130,8 +168,7 @@ fn java_component(root: &Path) -> Option<String> {
 /// read back from the cache when the jars are the ones they were made from, else made now,
 /// with Java and Fabric started for it (they stay up for the game).
 pub(super) fn java_content(base: &Path) -> Vec<PathBuf> {
-    let dir = Game::options_path().with_file_name(horizon_jvm::DIR);
-    let jars = horizon_jvm::jars(&dir);
+    let (dir, jars) = mod_jars();
     if jars.is_empty() {
         return Vec::new();
     }
@@ -234,7 +271,7 @@ pub(super) fn has_java_mods() -> bool {
     {
         return has;
     }
-    let has = !horizon_jvm::jars(&Game::options_path().with_file_name(horizon_jvm::DIR)).is_empty();
+    let has = !mod_jars().1.is_empty();
     *last = Some((std::time::Instant::now(), has));
     has
 }

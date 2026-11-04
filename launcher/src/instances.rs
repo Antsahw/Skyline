@@ -155,6 +155,9 @@ pub struct Meta {
     /// Set for a Minecraft: Java Edition instance: it plays the real game, not Horizon.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub java: Option<JavaGame>,
+    /// Fabric 26.3 mods (beta), off unless the player turns them on (`java_variant`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub java_mods: bool,
 }
 
 /// A Minecraft: Java Edition instance: the real game of one version, with the Java it runs on
@@ -247,6 +250,8 @@ pub struct Instance {
     pub launch: Launch,
     /// The Minecraft: Java Edition it plays, for a Java instance.
     pub java: Option<JavaGame>,
+    /// Fabric 26.3 mods (beta) on: it plays the version's Java mods build (`java_variant`).
+    pub java_mods: bool,
 }
 
 impl Instance {
@@ -349,6 +354,7 @@ fn list_in(game_home: &Path, data: &Path) -> Vec<Instance> {
                     .map(|s| UNIX_EPOCH + Duration::from_secs(s)),
                 launch: meta.launch,
                 java: meta.java,
+                java_mods: meta.java_mods,
                 id,
                 kind,
                 work,
@@ -661,6 +667,10 @@ pub fn play_time(played: Duration) -> String {
 /// launcher has them, and options.txt and the offline name when it has none yet.
 pub fn apply(cmd: &mut Command, instance: &Instance) -> Result<(), String> {
     instance.horizon()?;
+    // Fabric 26.3 mods on: the version's Java mods build, told to run them.
+    if instance.java_mods {
+        crate::java_variant::switch_command(cmd)?;
+    }
     match instance.kind {
         Kind::Default => return Ok(()),
         Kind::Own => {

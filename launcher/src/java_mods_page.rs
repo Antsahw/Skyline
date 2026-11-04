@@ -1,10 +1,12 @@
 //! The selected instance's Java mods on Home (`horizon_launcher::java_mods`): the Fabric jars
 //! in its `mods-java/`, which of them failed in the last game, Add (or drop jars on the tab),
 //! Open folder and Remove (to the trash, after a confirmation). The tab shows only for an
-//! instance that has a `mods-java/` folder: Java mods are opt-in (a game built with them).
+//! instance whose "Fabric 26.3 mods (beta)" switch is on (Launch…, `java_variant`): Java mods
+//! are opt-in, off by default.
 use super::*;
 use gpui::ExternalPaths;
 use horizon_launcher::java_mods::{self, Failure, JavaMod};
+use horizon_launcher::java_variant;
 use std::path::PathBuf;
 
 #[derive(Default)]
@@ -17,6 +19,13 @@ pub(super) struct JavaModsTab {
     confirm_remove: Option<String>,
     /// What the last action did, or why it failed.
     note: Option<Result<String, String>>,
+}
+
+/// The switch's download of a version's Java mods build: the version, and how it went once done.
+#[derive(Clone, Debug, Default)]
+pub(super) struct JavaBuild {
+    tag: String,
+    done: Option<Result<(), String>>,
 }
 
 impl JavaModsTab {
@@ -41,10 +50,103 @@ impl Launcher {
         }
     }
 
-    /// Whether the selected instance has a `mods-java/` folder (the tab shows).
+    /// Whether the selected instance plays Fabric 26.3 mods (the tab shows).
     pub(super) fn has_java_mods_tab(&self) -> bool {
-        self.selected_instance()
-            .is_some_and(|i| java_mods::dir(&i.home).is_dir())
+        self.selected_instance().is_some_and(|i| i.java_mods)
+    }
+
+    /// Turns the selected instance's Fabric 26.3 mods on or off, saved at once. On: its
+    /// `mods-java/` is made, and its version's Java mods build downloads unless it's there.
+    fn flip_java_mods(&mut self) {
+        let Some(i) = self.selected_instance().cloned() else {
+            return;
+        };
+        let on = !i.java_mods;
+        if let Err(e) = instances::edit(&i.id, |m| m.java_mods = on) {
+            self.java_build = Some(JavaBuild {
+                tag: String::new(),
+                done: Some(Err(e)),
+            });
+            return;
+        }
+        self.reload_instances();
+        self.java_build = None;
+        if !on {
+            return;
+        }
+        let _ = std::fs::create_dir_all(java_mods::dir(&i.home));
+        self.java_mods.stale();
+        let Some(tag) = self.selected().cloned() else {
+            return;
+        };
+        if java_variant::is_installed(&tag) {
+            return;
+        }
+        self.java_build = Some(JavaBuild {
+            tag: tag.clone(),
+            done: None,
+        });
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let result = java_variant::ensure(&tag, |_| {});
+            let _ = tx.send(Msg::JavaBuild(tag, result));
+        });
+    }
+
+    /// A switch's download ended.
+    pub(super) fn java_build_done(&mut self, tag: String, result: Result<(), String>) {
+        if let Some(build) = self.java_build.as_mut().filter(|b| b.tag == tag) {
+            build.done = Some(result);
+        }
+    }
+
+    /// Launch…'s Fabric 26.3 mods switch, for a Horizon instance on a system with the build.
+    pub(super) fn java_mods_switch(&self, cx: &mut Context<Self>) -> Option<Div> {
+        let t = self.theme;
+        let i = self.selected_instance()?;
+        if i.java.is_some() || !java_variant::available() {
+            return None;
+        }
+        let row = div()
+            .id("launch-switch-java-mods")
+            .flex()
+            .items_center()
+            .gap(px(10.))
+            .cursor_pointer()
+            .child(switch("launch-switch-java-mods-s", i.java_mods, &t))
+            .child(
+                text(theme::LABEL)
+                    .text_color(t.ink_soft)
+                    .child(tr("Fabric 26.3 mods (beta)")),
+            )
+            .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                this.flip_java_mods();
+                cx.notify();
+            }));
+        let about = text(theme::CAPTION).text_color(t.muted).child(tr(
+            "Runs the Fabric mods in this instance's mods-java folder. Off, the game never starts \
+             Java. On, the launcher downloads Horizon's build with Java mods, and the game gets \
+             Java 25 the first time it starts them.",
+        ));
+        let state = self.java_build.as_ref().map(|b| match &b.done {
+            None => text(theme::CAPTION)
+                .text_color(t.muted)
+                .child(tr("Downloading the Fabric mods build…").to_string()),
+            Some(Ok(())) => text(theme::CAPTION)
+                .text_color(t.muted)
+                .child(tr("The Fabric mods build is ready.").to_string()),
+            Some(Err(e)) => text(theme::CAPTION).text_color(t.danger).child(e.clone()),
+        });
+        Some(
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(8.))
+                .child(caps(tr("Mods")).text_color(t.muted))
+                .child(row)
+                .child(about)
+                .children(state),
+        )
     }
 
     /// How many Java mods the selected instance has.
