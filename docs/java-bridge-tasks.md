@@ -135,6 +135,11 @@ By area:
   And **mechanical pumps** "non functional" (a pump moves fluid between pipes and takes water
   source blocks from the world: Java removing and reading Horizon's fluids through the mirror;
   check with pump + pipes into a tank, his screenshot's setup may lack pipes).
+  **Mechanical saw** works (it fells the tree) but its blade doesn't draw (the saw's moving part,
+  a block-entity renderer part like the shafts; a black hole where it should be). **Ponder**
+  (Create's tutorial: hold W over an item's tooltip) is missing: its keybind on tooltips, then
+  a screen that draws small 3D scenes of a fake level through vanilla's renderer. Research
+  after the rest (gpu): likely the hardest Create piece.
 - **A broken block's moving parts stay** (tester, batch 10): break a cogwheel and the hand
   crank's handle on it keeps floating, drawn. A removed mod block entity must drop its
   renderer's instance (gpu-13: the recorder's per-block-entity draws on removal).
