@@ -1757,9 +1757,10 @@ headless. What's different there:
   `horizon_prepare::java::real_path`.
 - Linking a folder takes `mklink /J` (no privilege), which reads a forward slash as a switch.
 
-Not tested on Windows: the launcher's Java mods tab, and a class path with non-ASCII characters
-(a user name like `Ivér`) may not reach the JVM right: JNI option strings are read in the system
-code page, not UTF-8. The `tools/java_bridge/*.sh` scripts are developers' and Linux-only (Xvfb,
+- JNI reads JVM options in the system's code page, not UTF-8: `create_vm` converts them, and a class
+  path entry with a character the code page lacks goes by its short name (a user name like `Ivér`).
+
+Not tested on Windows: the launcher's Java mods tab. The `tools/java_bridge/*.sh` scripts are developers' and Linux-only (Xvfb,
 mktemp).
 
 ### Profiling

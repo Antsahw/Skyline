@@ -9,8 +9,41 @@ rewritten in Rust) runs **real Fabric mods for 26.3** inside Horizon.
 | System | Status |
 |---|---|
 | Windows 10/11 (64-bit) | Works: tested on Windows 11 with an NVIDIA GPU |
-| Linux | Works: the fork's main test system (Fedora, Ubuntu) |
+| Linux | The bridge works: it's the fork's main test system (Fedora, Ubuntu). `horizon-play` is new there, so tell us how it goes |
 | macOS | **Untested.** It may work. Tell us what happens |
+
+## Quick start: press Play in Prism Launcher
+
+The easiest way. Prism has a setting that says "run this program instead of Java". Point it at
+`horizon-play`, and pressing Play starts Horizon instead of Minecraft, with that instance's mods and
+your signed-in account. Prism keeps handling the mods as usual.
+
+**You need:** [Prism Launcher](https://prismlauncher.org) with your Microsoft account signed in, and
+Horizon ([get it](#get-horizon): you only do this once).
+
+1. In Prism, make an instance for Minecraft **26.3** with **Fabric**, and add a mod. Farmer's Delight
+   is a good first test.
+2. **Right-click the instance** and choose **Edit**.
+3. Click **Settings** on the left.
+4. Find **Custom commands** and **tick its checkbox**.
+5. In the **Wrapper command** box, paste the full path of `horizon-play`:
+   - **Downloaded Horizon:** it's in the folder you extracted. Example:
+     `C:\Users\you\Documents\horizon\horizon-play.exe`
+   - **Built Horizon:** it's in `target/fast` inside the `horizon` folder. Example:
+     `C:\Users\you\horizon\target\fast\horizon-play.exe`, or on Linux or macOS,
+     `/home/you/horizon/target/fast/horizon-play`
+   - If the path has a space in it, put quotes around it.
+6. Close that window.
+7. Press **Play**.
+
+**The first start takes a few minutes**, and it may look like nothing is happening for a while. It
+sets up the game files once, then builds the mods' content. Prism's log window shows lines starting
+with `Horizon:`.
+
+**Check it worked:** Horizon opens instead of normal Minecraft. Make a Creative world and type
+`/give @s ` then press Tab: your mods' items should be in the list.
+
+**To go back to normal Minecraft:** untick **Custom commands**.
 
 ## What you need
 
@@ -20,10 +53,11 @@ rewritten in Rust) runs **real Fabric mods for 26.3** inside Horizon.
 - A graphics card that can run modern games, about **10 GB of free disk** if you build from source,
   and **8 GB of RAM** (16 GB for a big modpack).
 
-## Step 1: get Horizon
+## Get Horizon
 
 **If someone gave you a download** (`horizon-…-java.zip`): extract the whole folder somewhere you can
-write to, like Documents. Don't run it from inside the zip. Skip to step 2.
+write to, like Documents. Don't run it from inside the zip. That's all: go to the
+[quick start](#quick-start-press-play-in-prism-launcher).
 
 **Otherwise, build it** (once; about 15 minutes). Install the tools, then run the same three lines
 on every system:
@@ -47,31 +81,17 @@ cargo run --profile fast -p horizon-play
 ```
 
 That builds the game, prepares your Minecraft files and starts the game. Quit the game once it
-opens: next, add your mods.
+opens, then go to the [quick start](#quick-start-press-play-in-prism-launcher).
 
 To play again later, run the last line from the same folder. To update, run `git pull` first.
 
-## Step 2: add mods and play
+## Add mods and play
 
-Pick one. Both use **Fabric mods for Minecraft 26.3**, the same `.jar` files as normal Fabric, from
+Both ways use **Fabric mods for Minecraft 26.3**, the same `.jar` files as normal Fabric, from
 [Modrinth](https://modrinth.com/mods?g=categories:fabric&v=26.3) or CurseForge. Remember the
 libraries a mod requires too; Modrinth lists them as dependencies.
 
-### Easiest: press Play in Prism Launcher
-
-Prism installs and updates the mods, and signs you in.
-
-1. In [Prism Launcher](https://prismlauncher.org), make an instance for Minecraft **26.3** with
-   **Fabric**, and add mods or a modpack as usual.
-2. Find `horizon-play` (`horizon-play.exe` on Windows). It's in the folder you extracted, or, if you
-   built it, in `target/fast` inside the `horizon` folder.
-3. Right-click the instance > **Edit** > **Settings** > **Custom commands**. Tick the box to enable
-   them, and paste the full path of `horizon-play` into **Wrapper command**, like
-   `C:\Users\you\Documents\horizon\target\fast\horizon-play.exe`. If the path has a space in it,
-   put quotes around it.
-4. Press **Play**.
-
-To go back to normal Minecraft, clear the wrapper command.
+**With Prism:** see the [quick start](#quick-start-press-play-in-prism-launcher).
 
 ### No Prism: drop jars in a folder
 
@@ -121,7 +141,7 @@ Do what you can, in any order, and tell us what happened. Each test has what you
 | 9 | Esc > **Open to LAN**, and have a friend join | They join and can see and use mod blocks |
 | 10 | A dedicated server: see [below](#a-server-with-mods) | Players can join and use mods |
 | 11 | The FPS (F3), compared with the same mods in normal Minecraft | Tell us both numbers |
-| 12 | A Windows user name or folder with spaces or accents in it | The same as any other start |
+| 12 | A user name or folder with spaces, accents or non-Latin letters in it | The same as any other start |
 
 ### A server with mods
 
@@ -196,7 +216,7 @@ start.
 | `Java 25 couldn't be downloaded` | Check your internet connection, or install Java 25 from [adoptium.net](https://adoptium.net) |
 | `Keep every file of the Horizon download together` | Extract the whole zip again, and run it from the extracted folder |
 | `your mods couldn't start` | Remove the mod it names. Check your mods are for 26.3 and have their libraries |
-| `couldn't run cargo` | Install Rust (step 1), then open a new terminal window |
+| `couldn't run cargo` | Install Rust ([get Horizon](#get-horizon)), then open a new terminal window |
 | Windows SmartScreen warns about the download | The builds aren't signed yet. Only run one from someone you trust: **More info > Run anyway** |
 
 More about how it all works: [java-bridge.md](java-bridge.md).

@@ -52,18 +52,25 @@ The Java bridge runs **real Fabric mods for 26.3** inside Horizon. **Horizon's w
 | Mods that draw in the world (Litematica's overlay) | 🚧 |
 | Windows | ✅ builds and plays on Windows 11; no published build yet |
 
-**Beta testers: start with the [testers' guide](docs/java-bridge-beta.md)** (install, where mods go, reporting bugs). How it works, the tick flow, 26.3 traps and the test tools: **[docs/java-bridge.md](docs/java-bridge.md)**.
+**Beta testers: start with [Try it](#try-it) and the [testers' guide](docs/java-bridge-beta.md).** How it works, the tick flow, 26.3 traps and the test tools: **[docs/java-bridge.md](docs/java-bridge.md)**.
 
 ### Try it
 
-On Windows, Linux or macOS (macOS is untested), with Rust, Git and a JDK 25 installed, and Minecraft 26.3 played once:
+**Easiest: press Play in Prism Launcher.** On Windows or Linux (macOS is untested), with Rust, Git and a JDK 25 installed:
 
 ```sh
 git clone -b java-bridge https://github.com/iaxivers/horizon && cd horizon
-cargo run --profile fast -p horizon-play
+cargo run --profile fast -p horizon-play    # builds the game once; quit it when it opens
 ```
 
-That builds the game, prepares your own Minecraft files and starts it. It prints where to put your mods. Or use **Prism Launcher**: set `target/fast/horizon-play` as an instance's *Wrapper command*, then press Play. The **[testers' guide](docs/java-bridge-beta.md)** has every step and what to test.
+Then in [Prism Launcher](https://prismlauncher.org):
+
+1. Make a Minecraft **26.3** + **Fabric** instance and add a mod.
+2. Right-click it > **Edit** > **Settings** > tick **Custom commands**.
+3. Paste the full path of `target/fast/horizon-play` (`horizon-play.exe` on Windows) into **Wrapper command**, and close the window.
+4. Press **Play**. The first start takes a few minutes.
+
+To go back to normal Minecraft, untick **Custom commands**. The **[testers' guide](docs/java-bridge-beta.md)** has every step, other ways to play, and what to test.
 
 **From the launcher:** build it (`cd launcher && cargo build --release`; Fedora needs `libxkbcommon-x11-devel`), install your game build as a version with `horizon-launcher import-build target/fast/horizon-client --trust-unsigned`, add jars with `horizon-launcher java-mods add <jar>`, then the **Java mods** tab shows on Home. Start it with `HORIZON_LAUNCHER_NO_SELF_UPDATE=1` so it doesn't update itself to upstream's.
 
