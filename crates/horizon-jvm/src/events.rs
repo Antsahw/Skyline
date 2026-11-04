@@ -2120,6 +2120,53 @@ pub fn functions_ready() -> bool {
     .unwrap_or(true)
 }
 
+/// Whether the Java mods' client reads its network connection's packets (a mod hooks how a
+/// client's `Connection` reads them: ReplayMod, Flashback): `HorizonPacketTap.wanted`. Then
+/// the game keeps what the server sends the window's own player and passes it each tick
+/// ([`client_packets`]).
+pub fn wants_packets() -> bool {
+    with_server(|env, class| {
+        env.call_static_method(class, "wantsPackets", "()Z", &[])?
+            .z()
+    })
+    .ok()
+    .flatten()
+    .unwrap_or(false)
+}
+
+/// What the server sent player `uuid` (the window's own) since the last call, in order: each
+/// packet's body (id and data, as on the wire before framing) after its length as an int.
+/// Java runs them through the client connection's own pipeline (`HorizonPacketTap.feed`).
+pub fn client_packets(uuid: &str, bodies: &[Vec<u8>]) -> Result<(), String> {
+    let mut flat = Vec::with_capacity(bodies.iter().map(|b| b.len() + 4).sum());
+    for body in bodies {
+        flat.extend_from_slice(&(body.len() as i32).to_be_bytes());
+        flat.extend_from_slice(body);
+    }
+    with_server(|env, class| {
+        let uuid = env.new_string(uuid)?;
+        let array = env.byte_array_from_slice(&flat)?;
+        env.call_static_method(
+            class,
+            "clientPackets",
+            "(Ljava/lang/String;[B)V",
+            &[JValue::Object(&uuid), JValue::Object(&array)],
+        )?;
+        Ok(())
+    })?;
+    Ok(())
+}
+
+/// The integrated world closes: the mods' client connection is closed as a client's is when
+/// its server stops, and what mods do then (a recording saved) is waited for, up to 30 s.
+pub fn client_closed() -> Result<(), String> {
+    with_server(|env, class| {
+        env.call_static_method(class, "clientClosed", "()V", &[])?;
+        Ok(())
+    })?;
+    Ok(())
+}
+
 /// Brings chunk `x z` of `dimension` to vanilla's TERRAIN status on the Java side and holds
 /// it: a token for [`worldgen_finish`] and [`worldgen_forget`], None when it failed.
 pub fn worldgen_proto(dimension: &str, x: i32, z: i32) -> Result<Option<i64>, String> {

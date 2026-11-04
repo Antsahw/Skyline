@@ -87,6 +87,9 @@ fn spawn_start(dir: PathBuf, jars: Vec<PathBuf>) {
     if SPAWNED.swap(true, std::sync::atomic::Ordering::SeqCst) {
         return;
     }
+    // The window's own player's packets are kept until Java says whether its client reads
+    // them (a join's configuration may come before Java's start ends).
+    horizon_client::lan::packet_tap::undecided();
     let root = checkout();
     let side = bridge_side();
     let spawned = std::thread::Builder::new()
@@ -249,6 +252,13 @@ pub(super) fn java_creative(out: &Path) {
 /// they run.
 fn start(root: &Path, dir: &Path, jars: Vec<PathBuf>, side: horizon_jvm::Side) -> bool {
     let started = start_once(root, dir, jars, side);
+    let wanted = started && horizon_jvm::events::wants_packets();
+    horizon_client::lan::packet_tap::want(wanted);
+    if wanted {
+        log::info!(
+            "Java mods: the client reads its connection's packets (a recording mod): the window's player's are passed"
+        );
+    }
     SETTLED.store(true, std::sync::atomic::Ordering::SeqCst);
     started
 }
@@ -411,7 +421,9 @@ fn start_once(root: &Path, dir: &Path, jars: Vec<PathBuf>, side: horizon_jvm::Si
             .collect();
         log::info!("Java mods: Fabric loaded {}", mods.join(", "));
         // Renderer mods left out: noted, and told to the players as they join.
-        let left: Vec<String> = left_out().iter().map(|l| l.line()).collect();
+        let mut left: Vec<String> = left_out().iter().map(|l| l.line()).collect();
+        // Mods that load but only partly work here (Flashback).
+        left.extend(horizon_jvm::renderers::partial_lines(bridge.mods()));
         for line in &left {
             log::info!("Java mods: {line}");
         }

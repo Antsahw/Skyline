@@ -11,6 +11,23 @@ use std::path::{Path, PathBuf};
 /// Fabric ids of mods that replace the renderer.
 pub const RENDERERS: [&str; 5] = ["sodium", "iris", "canvas", "nvidium", "vulkanmod"];
 
+/// Mods Fabric loads that only partly work in Horizon, with the line players read at their
+/// join (told as the left-out ones are).
+pub const PARTIAL: [(&str, &str); 1] = [(
+    "flashback",
+    "Flashback can't record or replay in Horizon yet: it needs Minecraft's own client world and renderer \
+     (ReplayMod records, and Horizon plays its recordings: --replay <file>)",
+)];
+
+/// The [`PARTIAL`] lines for the mods loaded (`mods`: Fabric's "id version" list).
+pub fn partial_lines(mods: &[String]) -> Vec<String> {
+    PARTIAL
+        .iter()
+        .filter(|(id, _)| mods.iter().any(|m| m.split(' ').next() == Some(id)))
+        .map(|(_, line)| (*line).to_string())
+        .collect()
+}
+
 /// A jar left out, and why.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LeftOut {

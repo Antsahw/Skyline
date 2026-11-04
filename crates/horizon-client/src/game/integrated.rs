@@ -877,6 +877,8 @@ impl Game<'_> {
                 std::thread::sleep(Duration::from_millis(50));
             }
         }
+        // The Java mods' client connection ends as the server stops.
+        self.java_world_closing();
         // ServerPlayer.disconnect: nobody is left in a bed.
         self.free_player_beds()?;
         self.save_game()?;

@@ -177,7 +177,23 @@ public final class HorizonClient {
             Natives.log("Horizon's client: no toast manager: " + e);
         }
         // Screens click through the game mode (handleContainerInput): GameModeClientMixin.
-        set(Minecraft.class, mc, "gameMode", Natives.allocate(net.minecraft.client.multiplayer.MultiPlayerGameMode.class));
+        var gameMode = Natives.allocate(net.minecraft.client.multiplayer.MultiPlayerGameMode.class);
+        // What its constructor sets (no block being broken: recording mods read destroyBlockPos).
+        set(net.minecraft.client.multiplayer.MultiPlayerGameMode.class, gameMode, "destroyBlockPos", new net.minecraft.core.BlockPos(-1, -1, -1));
+        set(net.minecraft.client.multiplayer.MultiPlayerGameMode.class, gameMode, "destroyingItem", net.minecraft.world.item.ItemStack.EMPTY);
+        set(net.minecraft.client.multiplayer.MultiPlayerGameMode.class, gameMode, "localPlayerMode", net.minecraft.world.level.GameType.DEFAULT_MODE);
+        set(Minecraft.class, mc, "gameMode", gameMode);
+        // The server's resource packs the client took (none: Horizon's game takes them):
+        // recording mods list them in their snapshots.
+        try {
+            var packs = Natives.allocate(net.minecraft.client.resources.server.ServerPackManager.class);
+            set(net.minecraft.client.resources.server.ServerPackManager.class, packs, "packs", new java.util.ArrayList<>());
+            var source = Natives.allocate(net.minecraft.client.resources.server.DownloadedPackSource.class);
+            set(net.minecraft.client.resources.server.DownloadedPackSource.class, source, "manager", packs);
+            set(Minecraft.class, mc, "downloadedPackSource", source);
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            Natives.log("Horizon's client: no server pack source: " + e);
+        }
         // Text boxes' typing area, for a window it has none of (TextInputManagerMixin).
         set(Minecraft.class, mc, "textInputManager", Natives.allocate(com.mojang.blaze3d.platform.TextInputManager.class));
         // Buttons click with a sound: a manager without an engine (SoundManagerMixin).
@@ -250,7 +266,10 @@ public final class HorizonClient {
                     try (var namespaces = java.nio.file.Files.list(assets)) {
                         for (java.nio.file.Path ns : (Iterable<java.nio.file.Path>) namespaces::iterator) {
                             java.nio.file.Path file = ns.resolve("lang/" + lang + ".json");
-                            if (!java.nio.file.Files.isRegularFile(file)) continue;
+                            if (!java.nio.file.Files.isRegularFile(file)) {
+                                legacyLang(ns, lang, storage);
+                                continue;
+                            }
                             try (var in = java.nio.file.Files.newInputStream(file)) {
                                 net.minecraft.locale.Language.loadFromJson(in, storage::put);
                             } catch (Exception e) {
@@ -269,6 +288,31 @@ public final class HorizonClient {
             net.minecraft.locale.Language.inject(make.newInstance(storage, false));
         } catch (ReflectiveOperationException e) {
             Natives.log("Horizon's client: no language with mods' translations: " + e);
+        }
+    }
+
+    /**
+     * A mod's legacy {@code lang/xx_YY.lang} ({@code key=value} lines, the pre-1.13 format),
+     * when it has no JSON for the language: ReplayMod keeps its translations so, made into
+     * JSON at runtime by a resource pack of its own that the headless client never opens.
+     */
+    private static void legacyLang(java.nio.file.Path ns, String lang, java.util.Map<String, String> storage) {
+        int at = lang.indexOf('_');
+        String code = at < 0 ? lang : lang.substring(0, at) + "_" + lang.substring(at + 1).toUpperCase(java.util.Locale.ROOT);
+        for (String name : new String[] {code, lang}) {
+            java.nio.file.Path file = ns.resolve("lang/" + name + ".lang");
+            if (!java.nio.file.Files.isRegularFile(file)) continue;
+            try {
+                for (String line : java.nio.file.Files.readAllLines(file, java.nio.charset.StandardCharsets.UTF_8)) {
+                    String l = line.startsWith("\uFEFF") ? line.substring(1) : line;
+                    int eq = l.indexOf('=');
+                    if (l.isBlank() || l.trim().startsWith("#") || eq < 0) continue;
+                    storage.put(l.substring(0, eq), l.substring(eq + 1));
+                }
+            } catch (java.io.IOException e) {
+                Natives.log("Horizon's client: " + file + " could not be read: " + e);
+            }
+            return;
         }
     }
 
@@ -1112,6 +1156,7 @@ public final class HorizonClient {
      * state), so a player joining later with their name starts afresh.
      */
     static void left(java.util.UUID id) {
+        HorizonPacketTap.left(id);
         JOINED.remove(id);
         CLIENT_CHUNKS.remove(id);
         HorizonClientState.forget(id);
@@ -1511,6 +1556,8 @@ public final class HorizonClient {
             try {
                 inWorld(player, () -> withKeys(player.getUUID(), () -> {
                     joined(player);
+                    // What the server sent them, through their client connection (recording mods).
+                    HorizonPacketTap.pump(player);
                     levelRendererReady();
                     // Once, with a player (mods' item models read it: Create's sand paper).
                     if (modelsLoaded) HorizonItemModels.exportOnce();

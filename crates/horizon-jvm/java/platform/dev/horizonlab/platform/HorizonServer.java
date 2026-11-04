@@ -74,7 +74,7 @@ public final class HorizonServer {
     /** MIRRORS as read: a copy, made again when one is added (rarely: a level, a player). */
     private static volatile Set<Object> MIRROR_VIEW = Set.of();
 
-    private static void mirror(Object object) {
+    static void mirror(Object object) {
         synchronized (MIRRORS) {
             MIRRORS.add(object);
             Set<Object> view = Collections.newSetFromMap(new IdentityHashMap<>());
@@ -640,6 +640,21 @@ public final class HorizonServer {
     /** Horizon's mobs near its players this tick, for the mods' mobs (HorizonNeighbours.update). */
     public static void horizonMobs(String json) {
         HorizonNeighbours.update(json);
+    }
+
+    /** Whether the mods' client reads its connection's packets (HorizonPacketTap.wanted). */
+    public static boolean wantsPackets() {
+        return HorizonPacketTap.wanted();
+    }
+
+    /** What the server sent the window's own player (Rust's packet tap), for its client connection. */
+    public static void clientPackets(String uuid, byte[] framed) {
+        HorizonPacketTap.feed(uuid, framed);
+    }
+
+    /** The integrated world closes: the client connection ends, what mods do then is waited for. */
+    public static void clientClosed() {
+        HorizonPacketTap.close(true);
     }
 
     /** Mods Horizon left out of Fabric's (Sodium, Iris), one line each: told at the players' join. */
@@ -1794,7 +1809,13 @@ public final class HorizonServer {
     public static String[] commandNames() {
         var dispatcher = dispatcher();
         if (dispatcher == null) return new String[0];
-        return dispatcher.getRoot().getChildren().stream().map(n -> n.getName()).sorted().toArray(String[]::new);
+        var names = new java.util.TreeSet<String>();
+        dispatcher.getRoot().getChildren().forEach(n -> names.add(n.getName()));
+        // The mods' client commands too: the players' games are Horizon's, which send every
+        // command here (HorizonClientCommands).
+        var client = HorizonClientCommands.dispatcher();
+        if (client != null) client.getRoot().getChildren().forEach(n -> names.add(n.getName()));
+        return names.toArray(String[]::new);
     }
 
     /**
@@ -1809,8 +1830,22 @@ public final class HorizonServer {
         root.addProperty("type", "root");
         com.google.gson.JsonObject children = new com.google.gson.JsonObject();
         if (dispatcher != null) {
+            var client = HorizonClientCommands.dispatcher();
             for (String name : names) {
                 var node = dispatcher.getRoot().getChild(name);
+                if (node == null && client != null && client.getRoot().getChild(name) != null) {
+                    try {
+                        com.google.gson.JsonObject json = net.minecraft.commands.synchronization.ArgumentUtils.serializeNodeToJson(
+                                client, client.getRoot().getChild(name));
+                        vanillaParsers(json);
+                        children.add(name, json);
+                    } catch (Throwable t) {
+                        // An argument type of the mod's own (Flashback's colour): the command
+                        // with one greedy argument, the line checked when it runs.
+                        children.add(name, anyArguments());
+                    }
+                    continue;
+                }
                 if (node == null) continue;
                 try {
                     com.google.gson.JsonObject json = net.minecraft.commands.synchronization.ArgumentUtils.serializeNodeToJson(dispatcher, node);
@@ -1823,6 +1858,24 @@ public final class HorizonServer {
         }
         root.add("children", children);
         return root.toString();
+    }
+
+    /** A literal that runs alone or with anything after it (a greedy string). */
+    private static com.google.gson.JsonObject anyArguments() {
+        var literal = new com.google.gson.JsonObject();
+        literal.addProperty("type", "literal");
+        literal.addProperty("executable", true);
+        var argument = new com.google.gson.JsonObject();
+        argument.addProperty("type", "argument");
+        argument.addProperty("parser", "brigadier:string");
+        var properties = new com.google.gson.JsonObject();
+        properties.addProperty("type", "greedy");
+        argument.add("properties", properties);
+        argument.addProperty("executable", true);
+        var children = new com.google.gson.JsonObject();
+        children.add("arguments", argument);
+        literal.add("children", children);
+        return literal;
     }
 
     private static void vanillaParsers(com.google.gson.JsonObject node) {
@@ -1880,6 +1933,11 @@ public final class HorizonServer {
         ServerPlayer player = KNOWN.get(UUID.fromString(uuid));
         HorizonData.Loaded data = HorizonData.loaded;
         if (player == null || data == null || !BY_UUID.containsKey(player.getUUID())) return false;
+        if (HorizonClientCommands.owns(line, data.reloadable().getCommands().getDispatcher())) {
+            HorizonClientCommands.run(player, line);
+            syncInventories();
+            return true;
+        }
         try {
             if (DEBUG_COMMANDS) debugCommand(data, player, line);
             data.reloadable().getCommands().performPrefixedCommand(player.createCommandSourceStack(), line);

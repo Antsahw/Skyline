@@ -82,6 +82,22 @@ public final class HorizonFailures {
         tell(o);
     }
 
+    /** A gray "[Java mods]" line to one player. */
+    static void note(String uuid, String text) {
+        JsonObject o = new JsonObject();
+        o.addProperty("text", "");
+        JsonArray extra = new JsonArray();
+        extra.add(part("[Java mods] ", "gold"));
+        extra.add(part(text, "gray"));
+        o.add("extra", extra);
+        Natives.tell(uuid, o.toString());
+    }
+
+    /** A mod's name by its id. */
+    static String modName(String mod) {
+        return name(mod);
+    }
+
     private static String trim(String message) {
         String m = message.replace('\n', ' ');
         return m.length() > 120 ? m.substring(0, 117) + "..." : m;

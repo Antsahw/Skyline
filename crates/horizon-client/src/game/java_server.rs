@@ -640,6 +640,7 @@ impl Game<'_> {
     }
     pub(super) fn java_screen_input(&mut self, _host: &mut LanHost, _conn: u32, _data: &[u8]) {}
     pub(super) fn save_java_mods(&mut self) {}
+    pub(super) fn java_world_closing(&mut self) {}
     pub(super) fn java_entity_attack(&mut self, _host: &mut LanHost, _conn: u32, _id: i32) -> bool {
         false
     }
@@ -1370,6 +1371,14 @@ mod run {
                 // Horizon's mobs near players, for the mods' mobs to see (HorizonNeighbours).
                 if let Err(e) = horizon_jvm::events::horizon_mobs(&neighbours) {
                     log::warn!("Java mods: Horizon's mobs not passed: {e}");
+                }
+                // What the server sent the window's own player, for the mods' client
+                // connection (recording mods read it there): before the tick, whose client
+                // tick records the player's own moves after them.
+                if let Some((uuid, bodies)) = horizon_client::lan::packet_tap::take()
+                    && let Err(e) = horizon_jvm::events::client_packets(&uuid_string(uuid), &bodies)
+                {
+                    log::warn!("Java mods: the client's packets not passed: {e}");
                 }
                 let ticked = horizon_jvm::events::game_time(game_time, seed).and_then(|()| {
                     horizon_jvm::events::server_tick(ticks, dedicated, &root, &players, &events)
@@ -2922,6 +2931,16 @@ mod run {
                 }
                 self.apply_java_actions(Some(host));
                 true
+            }
+        }
+
+        /// The integrated world closes: the mods' client connection ends as a client's does
+        /// when its server stops (recording mods save their recording then).
+        pub(in crate::game) fn java_world_closing(&mut self) {
+            if java_mods_on()
+                && let Err(e) = horizon_jvm::events::client_closed()
+            {
+                log::warn!("Java mods: the client's connection didn't close: {e}");
             }
         }
 

@@ -90,6 +90,8 @@ MODS = {
     "iris": ["iris-fabric*"],
     "create": ["create-fly*"],
     "litematica": ["litematica*"],
+    "replaymod": ["replaymod*"],
+    "flashback": ["flashback*"],
 
     "tt": ["t_and_t*", "towns*and*towers*"],
     "cristellib": ["cristellib*", "cristel*lib*"],
@@ -357,6 +359,43 @@ CASES = {
                 check_json("state.json", ["screen"], "container", "the other mods run (the pot's screen opens)")],
         forbid=[r"Your Java mods couldn't start", r"Mixin apply .* failed"],
         look="sodium-0.png: the pot's screen; the chat's gray [Java mods] lines",
+    ),
+    "replaymod": dict(
+        about="ReplayMod records through the client's connection (HorizonPacketTap: the window's player's packets "
+              "through a vanilla client pipeline); the .mcpr saved as the world closes plays in Horizon's replay "
+              "viewer (--replay: spectating, the gold blocks, the pig and sheep, the recorder's body)",
+        mods=["replaymod"], scene="none",
+        steps=['$C command "tp @s ~ ~ ~ 0 20" >/dev/null; for i in 1 2 3 4 5; do '
+               '$C command "setblock ~$i ~ ~4 minecraft:gold_block" >/dev/null; sleep 1; done; '
+               '$C command "summon minecraft:pig ~2 ~ ~3" >/dev/null; $C command "summon minecraft:sheep ~4 ~ ~3" >/dev/null; '
+               'sleep 4; $C messages 30 > $S/messages.json',
+               # Save and quit: the recording is saved as the world closes.
+               '$C quit >/dev/null; for i in $(seq 90); do ls $S/replay_recordings/*/*.mcpr >/dev/null 2>&1 && break; sleep 1; done; '
+               'ls $S/replay_recordings/*/ > $S/files.txt',
+               'S=$S OUT=$OUT $R/tools/java_bridge/replay_view.sh "" '
+               '"sleep 8; \\$V entities > \\$S/view-entities.json; \\$V state > \\$S/view.json" '
+               '"sleep 4" '
+               '"sleep 6; \\$V command pause >/dev/null; sleep 1; \\$V messages 30 > \\$S/view-messages.json"'],
+        checks=[check_file("messages.json", r"Recording started", "ReplayMod tells the player it records (its .lang translated)"),
+                check_file("files.txt", r"\.mcpr", "the recording is saved as the world closes"),
+                check_json("view.json", ["gamemode"], "spectator", "the viewer spectates"),
+                check_file("view-entities.json", r"minecraft:pig", "the recorded pig is in the replay"),
+                check_file("view-entities.json", r"minecraft:sheep", "the recorded sheep is in the replay"),
+                check_file("view-messages.json", r"Replay paused", "chat lines control the replay")],
+        forbid=[r"the client's connection goes on", r"failed in the client's"],
+        timeout=900,
+        look="none-1.png: RECORDING on the HUD, the gold blocks; view-2.png: the replay from behind the recorder's body",
+    ),
+    "flashback": dict(
+        about="Flashback: its client command runs (/flashback: mods' client commands), and the player is told it "
+              "can't record or replay here yet (its snapshot reads the vanilla client's own world)",
+        mods=["flashback"], scene="none",
+        steps=['sleep 3; $C messages 30 > $S/messages.json; $C command "flashback config" > $S/command.json'],
+        checks=[check_file("messages.json", r"Flashback can't record or replay in Horizon yet", "the player is told Flashback's limits"),
+                check_file("command.json", r'"ok":true', "its client command is known and runs"),
+                check_log(r"mods' client commands: \[/flashback\]", "the client commands are registered")],
+        forbid=[r"Your Java mods couldn't start"],
+        look="none-1.png: the gray [Java mods] lines",
     ),
     "litematica": dict(
         about="Litematica's main menu on M (MaLiLib's hotkeys: every key while playing goes to the mods' KeyboardHandler.keyPress handlers)",

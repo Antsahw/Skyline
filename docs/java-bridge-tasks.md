@@ -1610,3 +1610,21 @@ Litematica 0.29.1 + MaLiLib 0.30.2 (LGPL-3.0), Fabric API 0.165.2. 2 cores, llvm
   extended), jei, pot, hud, rei, reiscreen, modsettings, litematica, server: all pass.
 Test on the PC: `regress.py --jars <jars with cloth-config, modmenu, fabric-api> cloth join-lan`,
 or play: Options → Mods → Cloth Config, scroll and move the mouse fast.
+### Replay 1: ReplayMod records, Horizon plays .mcpr, Flashback told (2026-11-04, branch `bridge-replay-1`; Claude for iaxivers)
+Jars (Modrinth): replaymod 26.3-2.6.28 (GPL-3.0), Flashback 0.43.6 (All Rights Reserved),
+Fabric API 0.165.2. 2 cores, llvmpipe.
+- **ReplayMod records**: the window's player's packets go through a real vanilla client
+  pipeline in Java (`HorizonPacketTap`, Rust `lan/packet_tap.rs`); its recording starts at the
+  login's end, saves on world close (`replay_recordings/`). Chat and HUD lines translated (its
+  legacy `.lang`).
+- **Playback**: ReplayMod's viewer needs vanilla's renderer, so Horizon plays the files itself:
+  `--replay FILE.mcpr` (`lan/replay.rs`), a spectator watching from behind the recorder, chat
+  `pause` / `play` / `speed <x>` / `skip <s>`.
+- **Flashback**: client commands work now (generic), but its recording snapshot needs the vanilla
+  client's own world: told at join, not supported.
+- Shared files touched (small): `lan/conn.rs` (tap), `lan/mod.rs`, `integrated.rs` (one call),
+  `game.rs` (`--replay`), `horizon-port-pack/src/carry.rs` (`.lang` → JSON), the horizon lang file.
+`replaymod flashback hud join modsettings failmsg pot rei keys` pass.
+Test: `regress.py --jars <folder with replaymod*, Flashback*, fabric-api*> replaymod flashback`;
+in-game: play a single-player world with ReplayMod, quit, then start Horizon with
+`--replay <game folder>/replay_recordings/recording/<date>.mcpr`.
