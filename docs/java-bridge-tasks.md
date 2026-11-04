@@ -86,6 +86,17 @@ Broken, first in every area's queue below:
   the bowl back and applies its effects) isn't reached or applied for a Java mod's food
   (`consume.rs`, the mirror's use). Entities/mixins chat. New regress case: eat an FD meal and
   a plain FD food; check hunger, the stack and the bowl.
+- **(2026-11-04, same tester, Windows, screenshot) Mods' fluids don't work**: a honey bucket
+  (Create) places a fluid drawn as lava. Mods' fluids need their textures/tint (Fabric's
+  `FluidRenderHandlerRegistry`) in Horizon's fluid mesher, and their flow (Horizon's fluid
+  ticks are Rust: a mod `FlowingFluid` must tick in the mirror or be ported per fluid). gpu
+  chat (drawing) + mixins (flow). Test with Create's honey and chocolate, and a plain fluid mod.
+- **(same) Create ("Create Fly", unofficial 26.3 port) is broken**: kinetic machines don't
+  work. Create draws its shafts, cogs and contraptions with **Flywheel** (instanced rendering
+  on top of vanilla's renderer, which Horizon doesn't run) and its contraptions are entities.
+  First a research round (gpu chat): does the kinetic network turn and process in Java (logic)
+  and only not draw, or is the logic broken too? Then Flywheel's instances drawn through the
+  GPU path, as the bridge does for block-entity renderers. Big: Create is the most-asked mod.
 
 Works for them: Bedrock Reloaded (small pack), Terralith ("runs better than normal Fabric"),
 Biomes O' Plenty; 800 FPS stable on a GTX 1060 3 GB / i5-9400F / 16 GB. Reported:
