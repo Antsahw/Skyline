@@ -706,6 +706,31 @@ fn extra_namespaces(
         owned.insert(ns.clone());
         claimed.push(ns);
     }
+    // A namespace holding only the mod's own client textures (no data, no models or block
+    // states: GUI sheets its code draws by name, Cloth Config's `cloth-config2`) is its too:
+    // nothing names those ids in JSON, but its screens need them.
+    for ns in candidates {
+        let (data, assets) = (format!("data/{ns}/"), format!("assets/{ns}/"));
+        let mut textures = false;
+        let only_looks = zip.file_names().filter_map(Result::ok).all(|name| {
+            if name.starts_with(&data) {
+                return false;
+            }
+            match name.strip_prefix(&assets) {
+                Some(rest) if rest.starts_with("textures/") => {
+                    textures = true;
+                    true
+                }
+                Some(rest) => {
+                    rest.starts_with("lang/") || rest.starts_with("sounds") || rest.is_empty()
+                }
+                None => true,
+            }
+        });
+        if only_looks && textures {
+            claimed.push(ns);
+        }
+    }
     claimed.sort();
     claimed
 }
@@ -869,12 +894,16 @@ pub fn carry(
         || id.len() > 64
         || !id
             .bytes()
-            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"_-.".contains(&b))
     {
         return Err(format!(
-            "mod id {id:?} is not [a-z0-9_]{{1,64}}: rename it before carrying over"
+            "mod id {id:?} is not [a-z0-9_-.]{{1,64}}: rename it before carrying over"
         ));
     }
+    // Fabric's ids may hold `-` and `.` (`cloth-config`, `fabric-api`); a content mod's id may
+    // not. Its manifest takes the id with `_` for them and owns the original as a namespace
+    // (its files keep their names).
+    let content_id = id.replace(['-', '.'], "_");
     let file = fs::File::open(jar).map_err(|e| format!("{}: {e}", jar.display()))?;
     let mut zip = zip::ZipArchive::new(file).map_err(|e| format!("{}: {e}", jar.display()))?;
     let (inside, outside) = (out.join("carry"), out.join("outside"));
@@ -1377,7 +1406,7 @@ pub fn carry(
     let name = if info.name.is_empty() { id } else { &info.name };
     let mut manifest = format!(
         "# Carried over from {jar} by horizon-port-pack, for local use only.\n# Licence: {license}\nid = {}\nname = {}\nversion = {}\napi = \"0.2\"\nside = \"both\"\ncapabilities = [\"registries\"]\n",
-        q(id),
+        q(&content_id),
         q(name),
         q(&info.version),
         jar = jar.file_name().unwrap_or_default().to_string_lossy(),
@@ -1387,8 +1416,13 @@ pub fn carry(
             &info.license
         },
     );
-    if !report.namespaces.is_empty() {
-        let list: Vec<String> = report.namespaces.iter().map(|n| q(n)).collect();
+    let namespaces: Vec<&String> = (content_id != *id)
+        .then_some(id)
+        .into_iter()
+        .chain(report.namespaces.iter())
+        .collect();
+    if !namespaces.is_empty() {
+        let list: Vec<String> = namespaces.iter().map(|n| q(n)).collect();
         manifest.push_str(&format!("namespaces = [{}]\n", list.join(", ")));
     }
     write(&inside.join("horizon-mod.toml"), manifest.as_bytes())?;
@@ -1993,6 +2027,60 @@ mod tests {
         assert_eq!(blocks, ["gem:gem_block", "gem:gem_door"]);
         assert_eq!(content.items.len(), 1);
         assert_eq!(content.items[0].id, "gem:gem");
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A Fabric id with `-` (Cloth Config's `cloth-config`) is carried: the content mod's id
+    /// has `_`, the original stays its namespace; a namespace of textures its code draws by
+    /// name (`cloth-config2`, named by no JSON) is its too, and Horizon's reader accepts it.
+    #[test]
+    fn carries_a_hyphenated_id_and_its_texture_namespace() {
+        let dir =
+            std::env::temp_dir().join(format!("horizon-port-pack-dash-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let jar = dir.join("cloth-config-1.0.jar");
+        let mut zip = zip::ZipWriter::new(fs::File::create(&jar).unwrap());
+        let files: &[(&str, &str)] = &[
+            (
+                "fabric.mod.json",
+                r#"{"schemaVersion": 1, "id": "cloth-config", "version": "1.0", "license": "LGPL-3.0"}"#,
+            ),
+            ("assets/cloth-config2/textures/gui/cloth_config.png", "png"),
+            (
+                "assets/cloth-config2/lang/en_us.json",
+                r#"{"text.cloth-config.reset": "Reset"}"#,
+            ),
+            // A namespace with data stays outside unless its files are named.
+            ("data/other_lib/loot_table/x.json", r#"{"pools": []}"#),
+        ];
+        for (name, text) in files {
+            zip.start_file(*name, zip::write::SimpleFileOptions::default())
+                .unwrap();
+            zip.write_all(text.as_bytes()).unwrap();
+        }
+        zip.finish().unwrap();
+        let info = crate::jar::read(&jar).unwrap();
+        let out = dir.join("work/mods/cloth-config");
+        let pack = Pack {
+            loaded: &|_| true,
+            mods: &|_| false,
+        };
+        let report = carry(&jar, &info, &out, None, &|_| true, &pack, &BTreeMap::new()).unwrap();
+        assert_eq!(report.namespaces, ["cloth-config2"]);
+        assert_eq!(report.outside, ["data/other_lib/loot_table/x.json"]);
+        let carried = out.join("carry");
+        assert!(
+            carried
+                .join("assets/cloth-config2/textures/gui/cloth_config.png")
+                .is_file()
+        );
+        let package = horizon_mods::Package::read(&carried).unwrap();
+        assert_eq!(package.manifest.id, "cloth_config");
+        assert_eq!(
+            package.manifest.namespaces,
+            ["cloth-config", "cloth-config2"]
+        );
         fs::remove_dir_all(&dir).unwrap();
     }
 

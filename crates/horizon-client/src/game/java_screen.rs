@@ -52,6 +52,22 @@ pub(super) const OVERLAY_CHANNEL: &str = "horizon:java_overlay";
 /// Horizon's inventory opens and closes, mouse and keys (a key over a slot names the slot).
 pub(super) const OVERLAY_WINDOW: i32 = -3;
 
+/// Mouse moves over a Java screen go to the server at most this often (the last one always
+/// goes): each draws the screen there, and a fast mouse at a high frame rate sent hundreds a
+/// second (Cloth Config's screens lagged the server).
+const MOVE_EVERY: std::time::Duration = std::time::Duration::from_millis(20);
+
+/// Whether a move to `mouse` goes now: the mouse moved since it was last sent, and the last
+/// move went at least [`MOVE_EVERY`] ago.
+fn move_due(
+    sent: Option<(i32, i32)>,
+    at: Option<std::time::Instant>,
+    mouse: (i32, i32),
+    now: std::time::Instant,
+) -> bool {
+    sent != Some(mouse) && at.is_none_or(|at| now.duration_since(at) >= MOVE_EVERY)
+}
+
 /// The mods' overlay on Horizon's inventory (HorizonClient's vanilla inventory screen under it).
 #[derive(Default)]
 pub(super) struct JavaOverlay {
@@ -61,6 +77,8 @@ pub(super) struct JavaOverlay {
     open: bool,
     ops: Vec<Value>,
     sent_mouse: Option<(i32, i32)>,
+    /// When the last mouse move went (moves go at most every [`MOVE_EVERY`]).
+    sent_mouse_at: Option<std::time::Instant>,
     sent_size: Option<(i32, i32)>,
     typing: bool,
     /// A press went to the overlay: its drags and release go there too.
@@ -91,8 +109,9 @@ pub(super) struct JavaHud {
 pub(super) struct JavaScreen {
     window: i32,
     ops: Vec<Value>,
-    /// What the server last heard: the mouse, and the GUI's size.
+    /// What the server last heard: the mouse (and when), and the GUI's size.
     sent_mouse: Option<(i32, i32)>,
+    sent_mouse_at: Option<std::time::Instant>,
     sent_size: Option<(i32, i32)>,
     /// A text box of the screen has the keyboard (the frame's `typing`): it takes the
     /// inventory key's letter too.
@@ -310,10 +329,14 @@ impl Game<'_> {
         let overlay = &mut self.java_overlay;
         let open = !overlay.open;
         let send_size = !open && overlay.sent_size != Some(size);
-        let send_mouse = overlay.sent_mouse != Some(mouse);
+        let now = std::time::Instant::now();
+        let send_mouse = move_due(overlay.sent_mouse, overlay.sent_mouse_at, mouse, now);
         overlay.open = true;
         overlay.sent_size = Some(size);
-        overlay.sent_mouse = Some(mouse);
+        if send_mouse {
+            overlay.sent_mouse = Some(mouse);
+            overlay.sent_mouse_at = Some(now);
+        }
         if open {
             self.send_java_screen_input(
                 OVERLAY_WINDOW,
@@ -463,12 +486,16 @@ impl Game<'_> {
         let size = (batch.width as i32, batch.height as i32);
         let mouse = (self.cursor.0 as i32, self.cursor.1 as i32);
         let screen = self.java_screen.as_mut().expect("checked");
+        let now = std::time::Instant::now();
         let (send_size, send_mouse) = (
             screen.sent_size != Some(size),
-            screen.sent_mouse != Some(mouse),
+            move_due(screen.sent_mouse, screen.sent_mouse_at, mouse, now),
         );
         screen.sent_size = Some(size);
-        screen.sent_mouse = Some(mouse);
+        if send_mouse {
+            screen.sent_mouse = Some(mouse);
+            screen.sent_mouse_at = Some(now);
+        }
         if send_size {
             self.send_java_screen_input(
                 window,
@@ -1172,4 +1199,33 @@ fn sdl_key(key: KeyCode) -> Option<i32> {
         K::SuperRight => 231,
         _ => return None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    /// A fast mouse sends a move at most every MOVE_EVERY; where it stops always goes.
+    #[test]
+    fn moves_are_spaced_and_the_last_goes() {
+        let t0 = Instant::now();
+        assert!(move_due(None, None, (1, 1), t0));
+        // Moved again 5 ms later: held back.
+        assert!(!move_due(
+            Some((1, 1)),
+            Some(t0),
+            (2, 2),
+            t0 + Duration::from_millis(5)
+        ));
+        // The mouse stopped at (2, 2): it goes once the interval passed.
+        assert!(move_due(Some((1, 1)), Some(t0), (2, 2), t0 + MOVE_EVERY));
+        // Unmoved: nothing to send however long ago.
+        assert!(!move_due(
+            Some((2, 2)),
+            Some(t0),
+            (2, 2),
+            t0 + Duration::from_secs(5)
+        ));
+    }
 }

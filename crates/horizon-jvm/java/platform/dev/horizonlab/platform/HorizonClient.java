@@ -1118,6 +1118,7 @@ public final class HorizonClient {
         var overlay = OVERLAYS.remove(id);
         OVERLAY_SENT.remove(id);
         OVERLAY_MOUSE.remove(id);
+        DRAWN.remove(id);
         if (overlay != null) {
             try {
                 overlay.removed();
@@ -1198,6 +1199,7 @@ public final class HorizonClient {
         OWNERS.remove(player);
         SENT.remove(player);
         MOUSE.remove(player);
+        DRAWN.remove(player);
     }
 
     /** Players whose open screen is a client-only one (no menu under it: Gui.setScreen's). */
@@ -2806,6 +2808,22 @@ public final class HorizonClient {
     }
 
     /** One frame of a player's mod screen, as Horizon draws it (HorizonGraphics' operations). */
+    /** When each screen was last drawn (System.nanoTime), for {@link #deltaTicks}. */
+    private static final java.util.Map<Object, Long> EXTRACTED =
+            java.util.Collections.synchronizedMap(new java.util.WeakHashMap<>());
+
+    /**
+     * The ticks since {@code screen} was last drawn, as vanilla's Gui passes a screen
+     * (DeltaTracker.getGameTimeDeltaTicks: a frame's time, in ticks). Screens animate by it:
+     * Cloth Config's lists scroll toward their target by it, and never moved with 0.
+     */
+    static float deltaTicks(Object screen) {
+        long now = System.nanoTime();
+        Long last = EXTRACTED.put(screen, now);
+        if (last == null) return 1f;
+        return (float) Math.min(5.0, (now - last) / 50_000_000.0);
+    }
+
     public static String frame(java.util.UUID player, int mouseX, int mouseY) {
         var screen = SCREENS.get(player);
         if (screen == null) return null;
@@ -2814,7 +2832,7 @@ public final class HorizonClient {
         try {
             as(OWNERS.get(player), () -> {
                 mouseAt(mouseX, mouseY);
-                HorizonScreenEvents.extract(screen, graphics, mouseX, mouseY, 0);
+                HorizonScreenEvents.extract(screen, graphics, mouseX, mouseY, deltaTicks(screen));
             });
         } catch (Throwable t) {
             Throwable root = t;
@@ -2895,9 +2913,53 @@ public final class HorizonClient {
 
     /** HORIZON_JAVA_DEBUG=screens: each input to a mod's screen is logged. */
     private static final boolean DEBUG_INPUT = String.valueOf(System.getenv("HORIZON_JAVA_DEBUG")).contains("screens");
+    /** HORIZON_JAVA_DEBUG=frames: each new screen frame's textures and text, in one line (regress checks read it). */
+    private static final boolean DEBUG_FRAMES = String.valueOf(System.getenv("HORIZON_JAVA_DEBUG")).contains("frames");
+
+    /** A frame in one line: the screen, its ops, the textures it blits and its text (text@y), in drawing order. */
+    private static void logFrame(Object screen, String frame) {
+        var ops = com.google.gson.JsonParser.parseString(frame).getAsJsonArray();
+        var textures = new java.util.TreeSet<String>();
+        var texts = new java.util.ArrayList<String>();
+        for (var e : ops) {
+            var o = e.getAsJsonObject();
+            if (o.has("texture")) textures.add(o.get("texture").getAsString());
+            String at = o.has("y") ? "@" + Math.round(o.get("y").getAsDouble()) : "";
+            if (o.has("text")) texts.add(o.get("text").getAsString() + at);
+            else if (o.has("json")) {
+                StringBuilder text = new StringBuilder();
+                plainText(com.google.gson.JsonParser.parseString(o.get("json").getAsString()), text);
+                texts.add(text + at);
+            }
+        }
+        Natives.log("frame of " + (screen == null ? "?" : screen.getClass().getName()) + ": " + ops.size()
+                + " ops; textures " + textures + "; text " + String.join(" | ", texts));
+    }
+
+    /** The "text" values of a component's JSON, in order. */
+    private static void plainText(com.google.gson.JsonElement json, StringBuilder out) {
+        if (json.isJsonPrimitive()) out.append(json.getAsString());
+        else if (json.isJsonArray()) json.getAsJsonArray().forEach(e -> plainText(e, out));
+        else if (json.isJsonObject()) {
+            var o = json.getAsJsonObject();
+            if (o.has("text")) out.append(o.get("text").getAsString());
+            if (o.has("extra")) plainText(o.get("extra"), out);
+        }
+    }
+
+    /** HORIZON_JAVA_DEBUG=screentime: how long each screen frame and input takes. */
+    private static final boolean DEBUG_TIME = String.valueOf(System.getenv("HORIZON_JAVA_DEBUG")).contains("screentime");
 
     /** Each player's mouse over their screen, in GUI pixels. */
     private static final java.util.Map<java.util.UUID, double[]> MOUSE = new java.util.concurrent.ConcurrentHashMap<>();
+    /** When each player's screen was last drawn (System.nanoTime). */
+    private static final java.util.Map<java.util.UUID, Long> DRAWN = new java.util.concurrent.ConcurrentHashMap<>();
+    /**
+     * A mouse move draws the screen again only when it was drawn longer ago than this; else the
+     * tick's frame shows the hover. A fast mouse sent a move every frame, and each was drawn at
+     * once with the settings files looked over (Cloth Config's screens lagged the server).
+     */
+    private static final long MOVE_FRAME_NANOS = 40_000_000L;
     /** The last frame sent to each player. */
     private static final java.util.Map<java.util.UUID, String> SENT = new java.util.concurrent.ConcurrentHashMap<>();
     /** The player whose input runs now (their screen's clicks are theirs). */
@@ -2950,7 +3012,7 @@ public final class HorizonClient {
         try {
             as(player, () -> {
                 mouseAt(mouse[0], mouse[1]);
-                HorizonScreenEvents.extract(screen, graphics, (int) mouse[0], (int) mouse[1], 0);
+                HorizonScreenEvents.extract(screen, graphics, (int) mouse[0], (int) mouse[1], deltaTicks(screen));
             });
         } catch (Throwable t) {
             if (TICK_FAILED.add(String.valueOf(t))) {
@@ -3057,6 +3119,17 @@ public final class HorizonClient {
                     } finally {
                         acting = null;
                     }
+                    if (kind.equals("move") || kind.equals("drag")) {
+                        // As a screen's: no settings files looked over; the tick draws it.
+                        if (kind.equals("drag")) HorizonServer.afterScreenInput();
+                        Long drawn = DRAWN.get(id);
+                        long now = System.nanoTime();
+                        if (drawn == null || now - drawn >= MOVE_FRAME_NANOS) {
+                            DRAWN.put(id, now);
+                            sendOverlay(id);
+                        }
+                        return;
+                    }
                     HorizonServer.afterScreenInput();
                     HorizonClientConfig.afterInput(id);
                     sendOverlay(id);
@@ -3120,11 +3193,16 @@ public final class HorizonClient {
     }
 
     private static void send(java.util.UUID id) {
+        DRAWN.put(id, System.nanoTime());
         syncClientMenu(id);
         double[] mouse = MOUSE.getOrDefault(id, new double[] {-1, -1});
+        long start = System.nanoTime();
         String frame = frame(id, (int) mouse[0], (int) mouse[1]);
+        if (DEBUG_TIME) Natives.log("screen frame: " + (System.nanoTime() - start) / 1000 + " us, "
+                + (frame == null ? 0 : frame.length()) + " chars" + (frame != null && frame.equals(SENT.get(id)) ? " (same)" : ""));
         if (frame == null || frame.equals(SENT.get(id))) return;
         SENT.put(id, frame);
+        if (DEBUG_FRAMES) logFrame(SCREENS.get(id), frame);
         if (DEBUG_INPUT) Natives.log("screen frame " + (frame.length() > 4000 ? frame.substring(0, 4000) + "..." : frame));
         Natives.screenFrame(id.toString(), frame);
     }
@@ -3240,9 +3318,20 @@ public final class HorizonClient {
         } finally {
             acting = null;
         }
+        long handled = System.nanoTime();
+        if (kind.equals("move") || kind.equals("drag")) {
+            // A move saves nothing and moves no item, a drag saves nothing (the window sends
+            // one per mouse event: hundreds a second): no settings files looked over, drawn
+            // now only if the last frame is old (else the tick's frame shows it).
+            if (kind.equals("drag")) HorizonServer.afterScreenInput();
+            Long drawn = DRAWN.get(id);
+            if (drawn == null || handled - drawn >= MOVE_FRAME_NANOS) send(id);
+            return;
+        }
         HorizonServer.afterScreenInput();
         // Settings a player other than the owner saved go to their own folder (HorizonClientConfig).
         HorizonClientConfig.afterInput(id);
+        if (DEBUG_TIME) Natives.log("screen input " + kind + ": after it " + (System.nanoTime() - handled) / 1000 + " us");
         send(id);
     }
 

@@ -399,6 +399,47 @@ inventory through what a vanilla client does for any mod. Tested with REI 26.3.8
   folder: on a dedicated server Horizon's own log, whose lines were overwritten.
   Regress `server-log`.
 
+## Cloth Config's screens, client waypoints, Litematica and Chat Heads (bridge-client-13)
+
+- **Mods with a `-` in their id were never carried** ("mod id \"cloth-config\" is not
+  [a-z0-9_]"): their assets never reached Horizon, so Cloth Config's arrows and +/- icons
+  (`cloth-config2:textures/gui/cloth_config.png`) were blank. The content mod's id now takes
+  `_` (`cloth_config`) and owns the original id as a namespace; a namespace holding only
+  textures/lang/sounds that no JSON names (`cloth-config2`) is the mod's too
+  (`horizon-port-pack` `carry.rs`; content FORMAT 15).
+- **Screens get the frame's delta ticks** (`HorizonClient.deltaTicks`: time since that
+  screen's last frame, in ticks), as vanilla's Gui passes `DeltaTracker.getGameTimeDeltaTicks()`.
+  It was 0: Cloth's lists (and anything animating by it) never moved toward their scroll target.
+- **Mouse moves no longer lag the server.** Every move (one per rendered frame the GUI pixel
+  changed: hundreds a second on a fast PC) drew a whole frame (Cloth's demo: 4-18 ms, 48 KB)
+  and walked `config/` (`HorizonClientConfig.afterInput`). Now moves and drags skip the
+  settings walk and draw at most every 40 ms (the tick's frame shows the rest); the window
+  sends moves at most every 20 ms, the last position always (`java_screen.rs`, `move_due`).
+  Same for the inventory overlay (REI/JEI).
+- `HORIZON_JAVA_DEBUG=frames`: each new screen frame in one line (screen class, textures,
+  `text@y` in drawing order): regress checks read it. `=screentime`: each frame's and input's
+  time. Regress `cloth` (opens, icons, a list expanded, scrolled, searched, 150 fast moves).
+- **Client waypoints**: every client connection (host, LAN guest, dedicated server's player)
+  has a `ClientWaypointManager` (client-12/gpu-12). The testers' "ClientWaypointManager
+  .hasWaypoints()" NPE predates that. Regress `join`, `join-lan`, `join-server` (the joinmod
+  fixture reads it at JOIN and from a HUD element; they fail without it).
+- **Litematica**: its menus (M) and its HUD (tool mode, placement) work. Its schematic overlay
+  in the world does not: Litematica draws it inside vanilla's level renderer
+  (`MixinLevelRenderer`: injections into `LevelRenderer.render`/`addMainPass` with its own
+  chunk sections, GPU buffer slices and the camera's matrices; MaLiLib's `renderWorldLast`
+  likewise), which Horizon never runs. A generic path would fire mods' world-render hooks per
+  player with a recording backend and send the geometry (world coordinates, sprites) to the
+  player's game to draw in its world pass: gpu work, not started.
+- **Chat Heads** (MPL-2.0) loads and chat works with it (a tester's "does not display
+  messages" is the heads). No heads yet: Chat Heads changes vanilla's client chat
+  (`ChatListener` → `ChatComponent`), which Horizon replaces with its own. Two halves, both
+  generic: (1) every message a player's game shows also goes through their headless client's
+  `ClientPacketListener.handleSystemChat`/`handlePlayerChat`, the component that reaches
+  `ChatComponent.addMessage` sent in its place (Chat Heads' "Before Name" puts a player-head
+  object component in it, which Horizon's text already draws); (2) its default "Before Line"
+  draws the head from `ChatComponent`'s own drawing: only vanilla's chat drawn by Java (when a
+  mod injects into it) would show it. Not started.
+
 ## Mods that change vanilla's behaviour (the mixin table, routed actions)
 
 Most of vanilla's code never runs on the Java side: Horizon does it in Rust. A mod's Mixin into
@@ -796,6 +837,10 @@ Generic fixes found with Create Fly (no Create-specific code); regress `createma
 - **A click's packets can come ticks apart** on a busy server (2 cores, llvmpipe): the off
   hand's `UseItemOn` of a click came after the main hand's had been answered, past a one-tick
   window (`CLICK_TAKEN` waits 4).
+- **A screen's last argument is a frame's delta in ticks, not a partial tick**
+  (`Gui` passes `DeltaTracker.getGameTimeDeltaTicks()`): 0 freezes mods' animations
+  (Cloth's smooth scrolling).
+- **Fabric mod ids may hold `-`**; a content mod's id may not (its namespaces may).
 - `$X.5` in a shell step is wrong for negative X (`-521.5` is block -522): use
   `$(awk "BEGIN{print $X + 0.5}")` (around.sh says so too; it cost a run here).
 

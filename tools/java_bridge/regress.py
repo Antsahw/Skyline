@@ -427,8 +427,28 @@ CASES = {
         fixtures=["joinmod"], mods=["fd"], scene="none",
         steps=['sleep 2; $C messages > $S/messages.json'],
         checks=[check_file("messages.json", r"horizon_join: handleLogin .* network true", "handleLogin's injection ran, getConnection().getConnection() there"),
-                check_file("messages.json", r"horizon_join: fabric JOIN .* connection true", "Fabric's ClientPlayConnectionEvents.JOIN ran")],
-        forbid=[r"failed at the client's"],
+                check_file("messages.json", r"horizon_join: fabric JOIN .* connection true", "Fabric's ClientPlayConnectionEvents.JOIN ran"),
+                check_file("messages.json", r"horizon_join: fabric JOIN .* waypoints true", "the connection has a waypoint manager (none tracked)"),
+                check_file("messages.json", r"horizon_join: hud waypoints \S+ true", "the HUD reads the connection's waypoints")],
+        forbid=[r"failed at the client's", r"ClientWaypointManager", r"HUD's \S+ failed"],
+    ),
+    "join-lan": dict(
+        about="A LAN guest's client connection as the host's: its join hooks run, it has a waypoint manager its HUD reads "
+              "(a tester's \"ClientWaypointManager.hasWaypoints()\" NPE)",
+        fixtures=["joinmod"], mods=["fd"], scene="none", lan=True,
+        steps=['sleep 4; $H messages > $S/host.json; $G messages > $S/guest.json'],
+        checks=[check_file("host.json", r"horizon_join: hud waypoints \S+ true", "the host's HUD reads its waypoints"),
+                check_file("guest.json", r"horizon_join: fabric JOIN Guest connection true waypoints true", "the guest's JOIN: its connection, its waypoints"),
+                check_file("guest.json", r"horizon_join: hud waypoints Guest true", "the guest's HUD reads its waypoints")],
+        forbid=[r"failed at the client's", r"ClientWaypointManager", r"HUD's \S+ failed"],
+    ),
+    "join-server": dict(
+        about="A dedicated server's player: its client connection has a waypoint manager its HUD reads",
+        fixtures=["joinmod"], mods=["fd"], scene="none", server=True,
+        steps=['sleep 4; $G messages > $S/player.json'],
+        checks=[check_file("player.json", r"horizon_join: fabric JOIN Player connection true waypoints true", "the player's JOIN: its connection, its waypoints"),
+                check_file("player.json", r"horizon_join: hud waypoints Player true", "the player's HUD reads its waypoints")],
+        forbid=[r"failed at the client's", r"ClientWaypointManager", r"HUD's \S+ failed"],
     ),
     "modsettings": dict(
         about="Options > Mods lists Java mods' settings screens (Mod Menu's API made without Mod Menu); Jade's opens",
@@ -1146,6 +1166,36 @@ CASES = {
                 check_log(r"REIClientPlugin finished post-reload for END in [0-9.]+ m?s, totaling [0-9.]+ m?s", "REI's join reload ends, not held by the plugin's timeouts")],
         forbid=[r"was sent with no player's client running", r"Incomplete data", r"Missing chunk with index"],
         look="diamond ore's recipes: Advanced Loot Info's block loot page among them",
+    ),
+    "cloth": dict(
+        about="Cloth Config's own settings screen (its demo, from Options > Mods): its icons drawn (a hyphenated mod id's "
+              "textures carried), a list expanded, the list scrolled (screens get the frame's delta ticks, as vanilla's Gui "
+              "passes), its search box filtering; a fast mouse's moves draw at most every 40 ms",
+        mods=["cloth"], optional=["fabric-api"], scene="none", env={"HORIZON_JAVA_DEBUG": "frames"},
+        steps=['$C options mods >/dev/null; sleep 1; $C click cloth-config-v26-3 >/dev/null; sleep 5; $C state > $S/open.json',
+               # "A list of Doubles"' arrow: the list opens (1.0, 2.0, 3.0 under it).
+               '$C click-at 45 152 >/dev/null; sleep 2',
+               '$C scroll-at 200 150 -10 >/dev/null; sleep 3',
+               '$C scroll-at 200 150 40 >/dev/null; sleep 2; $C click-at 200 49 >/dev/null; sleep 0.5; '
+               '$C type color >/dev/null; sleep 2',
+               # 150 moves in ~1.5 s (drag-at moves through each point): the server keeps up.
+               'pts=$(for i in $(seq 150); do echo -n "$((100 + i)) $((120 + i % 7)) "; done); '
+               't0=$(date +%s%N); $C drag-at $pts >/dev/null; t1=$(date +%s%N); '
+               'echo "moves took $(( (t1 - t0) / 1000000 )) ms" > $S/moves.txt'],
+        checks=[check_json("open.json", ["screen"], "java-screen", "Cloth Config's settings screen opens"),
+                check_log(r"content: cloth-config: [1-9][0-9]* files", "its textures are carried (mod id cloth-config)"),
+                check_log(r"frame of me\.shedaniel\.clothconfig2\.\S+: [^\n]*cloth-config2:textures/gui/cloth_config\.png",
+                          "its icons are drawn from its own texture"),
+                check_log(r"frame of me\.shedaniel\.clothconfig2\.\S+: [^\n]*A list of Doubles@\d+[ |@\d]*1\.0@\d+[ |@\d]*2\.0@",
+                          "the list opens"),
+                check_log(r"frame of me\.shedaniel\.clothconfig2\.\S+: [^\n]*Config Demo@-\d+",
+                          "scrolled: its top went up out of the list"),
+                check_log(r"(?m)frame of me\.shedaniel\.clothconfig2\.\S+: [^\n]*text color@(?:(?!Cool Key)[^\n])*A color field(?:(?!Cool Key)[^\n])*$",
+                          "its search box filters the entries"),
+                check_file("moves.txt", r"moves took ([0-9]|[0-9]{2}|[0-9]{3}|[0-4][0-9]{3}) ms", "150 mouse moves pass in under 5 s")],
+        forbid=[r"settings screen failed", r"a screen failed to draw", r"a screen's \S+ failed"],
+        look="none-0.png: Cloth's demo with its arrows and +/- icons; none-1.png: a list open; none-2.png: scrolled; "
+             "none-3.png: searching \"color\" (the colour fields)",
     ),
     "modsettings2": dict(
         about="Options > Mods: a mod's own settings screen and one it gives another mod (getProvidedConfigScreenFactories, as Forge Config API Port does) open with a parent and go back to the Mods page on Done; a broken \"modmenu\" entrypoint (Compressed Blocks') is skipped, as Mod Menu does",
