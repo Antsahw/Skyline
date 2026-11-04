@@ -132,6 +132,9 @@ By area:
   through a water block: its middle segment missing, the outline bigger than the model;
   check the pipe's connection states after neighbour updates in the mirror, and multipart
   models of waterlogged mod blocks).
+  And **mechanical pumps** "non functional" (a pump moves fluid between pipes and takes water
+  source blocks from the world: Java removing and reading Horizon's fluids through the mirror;
+  check with pump + pipes into a tank, his screenshot's setup may lack pipes).
 - **A broken block's moving parts stay** (tester, batch 10): break a cogwheel and the hand
   crank's handle on it keeps floating, drawn. A removed mod block entity must drop its
   renderer's instance (gpu-13: the recorder's per-block-entity draws on removal).
