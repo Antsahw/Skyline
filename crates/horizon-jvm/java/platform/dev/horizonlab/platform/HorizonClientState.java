@@ -78,21 +78,6 @@ final class HorizonClientState {
         "me.shedaniel.rei.impl.client.REIRuntimeImpl#getInstance()#lastDisplayScreen",
         "me.shedaniel.rei.impl.client.gui.ScreenOverlayImpl#entryListWidget",
         "me.shedaniel.rei.impl.client.gui.ScreenOverlayImpl#favoritesListWidget",
-        // JourneyMap: its minimap's and full-screen map's state and renderer (made non-final:
-        // mixin.mods.ModsPlugin), each player's own, centred on them. (Its MiniMap object is
-        // shared: a new one asks UIManager for the minimap while it is made, and recurses.)
-        "journeymap.client.ui.minimap.MiniMap#state=journeymap.client.model.map.MapState()",
-        "journeymap.client.ui.minimap.MiniMap#mapRenderer=journeymap.client.render.map.MapRenderer(journeymap.client.ui.UI.Minimap)",
-        "journeymap.client.ui.fullscreen.Fullscreen#state=journeymap.client.model.map.MapState()",
-        "journeymap.client.ui.fullscreen.Fullscreen#mapRenderer=journeymap.client.render.map.MapRenderer(journeymap.client.ui.UI.Fullscreen)",
-        // JourneyMap: its waypoints (handler: DAO and backend; the stores of waypoints and
-        // groups). A new player's are made when asked for, from their own waypoint folder
-        // (mixin.mods.JourneyMapFilesMixin), and loaded (loadedNow).
-        "journeymap.client.waypoint.WaypointHandler#instance",
-        "journeymap.common.waypoint.WaypointStore#INSTANCE",
-        "journeymap.common.waypoint.WaypointGroupStore#INSTANCE",
-        // VoxelMap: its minimap (the map image it shifts as its player moves, its zoom).
-        "com.mamiyaotaru.voxelmap.VoxelConstants#getVoxelMapInstance()#map=com.mamiyaotaru.voxelmap.Map()",
     };
 
     private static List<Slot> slots;
@@ -170,7 +155,6 @@ final class HorizonClientState {
                 SAVED.put(loaded, values);
             }
             Object[] values = SAVED.get(player);
-            boolean first = values == null;
             for (int i = 0; i < all.size(); i++) {
                 Slot slot = all.get(i);
                 Object value = values != null ? values[i] : null;
@@ -181,9 +165,7 @@ final class HorizonClientState {
                 }
                 slot.field().set(slot.target(), value);
             }
-            boolean newGuest = first && loaded != null;
             loaded = player;
-            loadedNow(first, newGuest);
         } catch (Exception e) {
             Throwable root = e;
             while (root.getCause() != null && root.getCause() != root) root = root.getCause();
@@ -193,130 +175,19 @@ final class HorizonClientState {
 
     /** A player left: their values go (and the fields', when theirs are in them). */
     static synchronized void forget(UUID player) {
-        Object[] gone = SAVED.remove(player);
+        SAVED.remove(player);
         HorizonClientConfig.forget(player);
         HorizonJei.forget(player);
         List<Slot> all = slots();
         if (player.equals(loaded)) {
-            gone = new Object[all.size()];
-            for (int i = 0; i < all.size(); i++) {
-                Slot slot = all.get(i);
+            for (Slot slot : all) {
                 try {
-                    gone[i] = slot.field().get(slot.target());
                     slot.field().set(slot.target(), slot.first());
                 } catch (Exception e) {
                     // Left as it is.
                 }
             }
             loaded = null;
-        }
-        if (gone != null) stopped(gone, all);
-    }
-
-    /**
-     * What a player who left had that runs on its own: VoxelMap's map's thread (each Map
-     * starts one as it's made) is stopped, unless another player's values hold that map.
-     */
-    private static void stopped(Object[] gone, List<Slot> all) {
-        for (int i = 0; i < gone.length; i++) {
-            Object value = gone[i];
-            if (value == null || !value.getClass().getName().equals("com.mamiyaotaru.voxelmap.Map")) continue;
-            boolean kept = false;
-            for (Object[] other : SAVED.values()) kept |= other.length > i && other[i] == value;
-            try {
-                Slot slot = all.get(i);
-                kept |= slot.field().get(slot.target()) == value;
-            } catch (ReflectiveOperationException | RuntimeException e) {
-                kept = true;
-            }
-            if (kept) continue;
-            try {
-                value.getClass().getMethod("shutdown").invoke(value);
-                Natives.log("Horizon's client: VoxelMap's map of a player who left stopped its thread");
-            } catch (ReflectiveOperationException | RuntimeException e) {
-                Natives.log("Horizon's client: VoxelMap's map of a player who left couldn't stop: " + e);
-            }
-        }
-    }
-
-    /**
-     * What a mod needs after its state changed player: JourneyMap's cached player and labels
-     * (its coordinates) are read again; VoxelMap's map images are the texture manager's again
-     * (it draws them by name), and a new map knows the world and computes on the client's
-     * thread (its own thread reads Minecraft.player, which is the first player between ticks).
-     */
-    private static void loadedNow(boolean first, boolean newGuest) {
-        ClassLoader loader = HorizonClientState.class.getClassLoader();
-        if (newGuest) {
-            // A new player's JourneyMap waypoints: their stores made and filled from their DAO.
-            try {
-                Object groups = Class.forName("journeymap.common.waypoint.WaypointGroupStore", false, loader).getMethod("getInstance").invoke(null);
-                groups.getClass().getMethod("reset").invoke(groups);
-                Object store = Class.forName("journeymap.common.waypoint.WaypointStore", false, loader).getMethod("getInstance").invoke(null);
-                store.getClass().getMethod("reset", boolean.class).invoke(store, false);
-                Object all = store.getClass().getMethod("getAll").invoke(store);
-                Natives.log("Horizon's client: a new player's JourneyMap waypoints, from their own folder: "
-                        + ((java.util.Collection<?>) all).size());
-            } catch (ClassNotFoundException e) {
-                // No JourneyMap.
-            } catch (ReflectiveOperationException | RuntimeException e) {
-                Throwable root = e;
-                while (root.getCause() != null && root.getCause() != root) root = root.getCause();
-                Natives.log("Horizon's client: a new player's JourneyMap waypoints couldn't load: " + root);
-            }
-        }
-        try {
-            Class<?> cache = Class.forName("journeymap.client.data.DataCache", false, loader);
-            Object instance = cache.getField("INSTANCE").get(null);
-            Field player = cache.getDeclaredField("player");
-            player.setAccessible(true);
-            if (player.get(instance) instanceof com.google.common.cache.Cache<?, ?> loading) loading.invalidateAll();
-            // Its labels (coordinates...) are cached for a while: made again for this player.
-            Class.forName("journeymap.client.ui.theme.ThemeLabelSource", false, loader).getMethod("resetCaches").invoke(null);
-        } catch (ClassNotFoundException e) {
-            // No JourneyMap.
-        } catch (ReflectiveOperationException | RuntimeException e) {
-            Natives.log("Horizon's client: JourneyMap's player couldn't be read again: " + e);
-        }
-        try {
-            Class<?> constants = Class.forName("com.mamiyaotaru.voxelmap.VoxelConstants", false, loader);
-            Object voxel = constants.getMethod("getVoxelMapInstance").invoke(null);
-            Object map = voxel.getClass().getMethod("getMap").invoke(voxel);
-            if (map == null) return;
-            Class<?> mapClass = map.getClass();
-            var textures = net.minecraft.client.Minecraft.getInstance().getTextureManager();
-            for (String[] pair : new String[][] {{"resourceMapImageFiltered", "mapImagesFiltered"}, {"resourceMapImageUnfiltered", "mapImagesUnfiltered"}}) {
-                Field ids = mapClass.getDeclaredField(pair[0]);
-                Field images = mapClass.getDeclaredField(pair[1]);
-                ids.setAccessible(true);
-                images.setAccessible(true);
-                Object[] idArray = (Object[]) ids.get(map);
-                Object[] imageArray = (Object[]) images.get(map);
-                for (int i = 0; i < idArray.length; i++) {
-                    if (idArray[i] != null && imageArray[i] != null) {
-                        textures.register((net.minecraft.resources.Identifier) idArray[i],
-                                (net.minecraft.client.renderer.texture.AbstractTexture) imageArray[i]);
-                    }
-                }
-            }
-            if (!SAVED.isEmpty()) {
-                // More than one player: no map computes on its own thread.
-                Field threading = mapClass.getDeclaredField("threading");
-                threading.setAccessible(true);
-                if (threading.getBoolean(map)) threading.setBoolean(map, false);
-            }
-            Field world = mapClass.getDeclaredField("world");
-            world.setAccessible(true);
-            Field voxelWorld = voxel.getClass().getDeclaredField("world");
-            voxelWorld.setAccessible(true);
-            Object level = voxelWorld.get(voxel);
-            if (world.get(map) == null && level != null) {
-                mapClass.getMethod("newWorld", net.minecraft.client.multiplayer.ClientLevel.class).invoke(map, level);
-            }
-        } catch (ClassNotFoundException e) {
-            // No VoxelMap.
-        } catch (ReflectiveOperationException | RuntimeException e) {
-            Natives.log("Horizon's client: VoxelMap's map couldn't change player: " + e);
         }
     }
 

@@ -1049,9 +1049,11 @@ gets SPIR-V, vertex layouts and uniform lists.
   injections into `handleLogin` (no packet) and `handleSetSpawn` (the level's spawn) on it.
   On a dedicated server it has a `ServerData` ("horizon"), as a multiplayer client's.
 - Xaero's minimap: its session starts in `ClientPacketListener.handleLogin` and lives on the
-  connection (`HudSession.getForPlayer`); the static `XaeroMinimapCore.currentSession` (the
-  last joined) is cleared before each join, or the next join ends the previous player's
-  session. It names its world by `Minecraft.getSingleplayerServer()` (the mirror, set at the
+  connection (`HudSession.getForPlayer`); the static `XaeroMinimapCore.currentSession` holds the
+  last joined, and the next join ends it (one client, one session in the real game). With
+  several players on the one headless client, a join ends the previous player's session (not
+  patched since bridge-generic-maps: no code into mods' internals). Its
+session. It names its world by `Minecraft.getSingleplayerServer()` (the mirror, set at the
   join when it is an `IntegratedServer`), or on a dedicated server by the `ServerData` and the
   spawn from `handleSetSpawn`, follows the world from `Player.tick` HEAD, writes its map chunks from
   `GameRenderer.extract` HEAD and draws in a picture in picture (`MinimapPipRenderer`), reading
@@ -1673,6 +1675,16 @@ Map mods (2026-11-01, `bridge-gpu2`, headless, llvmpipe):
   and read through its stream codec as the network would; before, their screens got the
   server's menu (CC's: "Cannot update terminal on the server"). Scene `computer`, regress
   case `computer`.
+- **Map mods with more than one player: broken** (bridge-generic-maps, 2026-11-04). The
+  per-mod patches that kept JourneyMap's, VoxelMap's and Xaero's client state per player were
+  removed (no code into other mods' internals; licences: JourneyMap, Xaero's Minimap and World
+  Map, VoxelMap Updated are All Rights Reserved; XaeroPlus MIT; MiniHUD, MaLiLib, Litematica
+  LGPL-3.0). Single player and a dedicated server's single player are unchanged (regress
+  `maps journeymap voxelmap xaeroplus worldmap-lazy minihud litematica maps-server
+  voxelmap-server server` pass). On a LAN with a guest (`maps-lan`, JourneyMap + VoxelMap),
+  the host's and the guest's minimap are both black/empty: one headless client holds every
+  player's map in the mods' statics. Xaero's with a second player: its `currentSession` is
+  ended at the next join (not tested on LAN). The generic fix is a client per player.
 - Dedicated servers (`bridge-gpu-8`, `server_test.sh`): their players get the map mods as a
   LAN host's do: JourneyMap (minimap; J's About screen, then its full-screen map), VoxelMap,
   Xaero's minimap and World Map, XaeroPlus, Diorama, MiniHUD. The mirror's `ChunkMap` now has
@@ -1710,21 +1722,16 @@ Map mods (2026-11-01, `bridge-gpu2`, headless, llvmpipe):
   `ToastManager`) but aren't drawn. Its category backgrounds don't show. The Default Skill
   Trees data pack needs Pufferfish's Attributes, which has no 26.3 build. Regress `skills`
   (a small tree written as config).
-- Per player (host and LAN guest): Xaero's minimap is each player's own (`bridge-gpu3`);
-  JourneyMap's and VoxelMap's too since `bridge-gpu-2` (`HorizonClientState`): JourneyMap's
-  minimap and full-screen `MapState`/`MapRenderer` per player (static finals, made non-final as
-  the class loads by `mixin/mods/ModsPlugin`), its player cache and labels read again at each
-  switch; VoxelMap's `Map` per player (a new one for each, its images re-registered by name at
-  each switch, computed on the client's thread when there are several players). JourneyMap's
-  `MiniMap` object stays shared (a new one recurses through `UIManager`). Regress case
-  `maps-lan` (regress.py runs `lan=True` cases with lan_test.sh).
-- JourneyMap's settings and waypoints per player (`bridge-gpu-5`): its eight properties objects
-  (`JourneymapClient`'s fields) are swapped with the other mods' settings
-  (`HorizonClientConfig`; a guest's aren't saved to disk: `mixin/mods/JourneyMapPropertiesMixin`);
-  its waypoint handler and stores (`WaypointHandler.instance`, `WaypointStore.INSTANCE`,
-  `WaypointGroupStore.INSTANCE`) are per player (`HorizonClientState`), a guest's read from and
-  saved to `waypoints/horizon-players/<uuid>/` (`mixin/mods/JourneyMapFilesMixin`). A player
-  who leaves: their VoxelMap `Map`'s thread is stopped (`Map.shutdown`).
+- Per player (host and LAN guest): **not any more** (bridge-generic-maps, 2026-11-04). The
+  patches that gave each player their own JourneyMap (`MapState`/`MapRenderer` made non-final
+  by `ModsPlugin`, its waypoint stores, its eight properties objects, a guest's waypoint folder
+  and unsaved settings: four mixins into JourneyMap), VoxelMap (a `Map` per player, its images
+  re-registered, its thread stopped) and Xaero's minimap (`currentSession` cleared before each
+  join) are gone: Ludovic's condition, no code tied to another mod's internals. These mods keep
+  one client's state in statics; one headless client serves every player, so on a LAN or a
+  dedicated server with more than one player they share it (see Status). A generic fix would
+  be a client per player (a class loader per player's client), not per-mod lists. Regress case
+  `maps-lan` stays and shows it.
 
 Left: the client tick is ~35 ms with the minimap on llvmpipe (the frame's start ~25: Xaero's
 writer, the HUD ~10: the picture drawn and read back at 10 Hz).

@@ -10,16 +10,13 @@ import org.spongepowered.asm.mixin.extensibility.IMixinConfigPlugin;
 import org.spongepowered.asm.mixin.extensibility.IMixinInfo;
 
 /**
- * Mods' static final fields that hold one client's state (JourneyMap's minimap and full-screen
- * map: their MapState and MapRenderer), made non-final as their classes load, so each player's
- * client gets its own (HorizonClientState swaps them). A final static field may be folded into
+ * Mods' static final fields that hold one client's state, made non-final as their classes
+ * load, so each player's client gets its own (HorizonClientState swaps them). A final static field may be folded into
  * compiled code, so it can't be swapped while final. The mixins here are empty, one per class.
  */
 public final class ModsPlugin implements IMixinConfigPlugin {
     /** Class (internal name) to its fields made non-final. */
     static final Map<String, Set<String>> FIELDS = Map.of(
-            "journeymap/client/ui/minimap/MiniMap", Set.of("state", "mapRenderer"),
-            "journeymap/client/ui/fullscreen/Fullscreen", Set.of("state", "mapRenderer"),
             // REI's search executor (HorizonRecipeViewer.searchPerPlayer).
             "me/shedaniel/rei/impl/client/search/AsyncSearchManager", Set.of("EXECUTOR_SERVICE"));
 
