@@ -987,13 +987,23 @@ pub fn java_item_models_from_json(json: &str) -> HashMap<String, BakedItemModel>
     };
     let floats = |v: Option<&Value>| -> Vec<f32> {
         v.and_then(Value::as_array)
-            .map(|a| a.iter().filter_map(Value::as_f64).map(|f| f as f32).collect())
+            .map(|a| {
+                a.iter()
+                    .filter_map(Value::as_f64)
+                    .map(|f| f as f32)
+                    .collect()
+            })
             .unwrap_or_default()
     };
     let mut out = HashMap::new();
     for (item, o) in items {
         let mut quads = Vec::new();
-        for q in o.get("quads").and_then(Value::as_array).into_iter().flatten() {
+        for q in o
+            .get("quads")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
             let (p, uv) = (floats(q.get("p")), floats(q.get("uv")));
             let Some(sprite) = q.get("s").and_then(Value::as_str) else {
                 continue;
@@ -1001,7 +1011,11 @@ pub fn java_item_models_from_json(json: &str) -> HashMap<String, BakedItemModel>
             if p.len() != 12 || uv.len() != 8 {
                 continue;
             }
-            let dir = |k: &str| q.get(k).and_then(Value::as_str).and_then(Direction::by_name);
+            let dir = |k: &str| {
+                q.get(k)
+                    .and_then(Value::as_str)
+                    .and_then(Direction::by_name)
+            };
             let emission = q.get("e").and_then(Value::as_u64).unwrap_or(0).min(15) as u8;
             quads.push(ModelQuad {
                 positions: std::array::from_fn(|i| [p[i * 3], p[i * 3 + 1], p[i * 3 + 2]]),
@@ -1046,7 +1060,10 @@ pub fn java_item_models_from_json(json: &str) -> HashMap<String, BakedItemModel>
             item,
             BakedItemModel {
                 quads,
-                uses_block_light: o.get("block_light").and_then(Value::as_bool).unwrap_or(false),
+                uses_block_light: o
+                    .get("block_light")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
                 particle: Material {
                     sprite: particle,
                     force_translucent: false,
@@ -1567,5 +1584,42 @@ mod tests {
             }
             assert_eq!(got, transform_normal(m, direction_vector(d)), "{d:?}");
         }
+    }
+
+    /// The bridge's item models: a quad's corners, its sprite's own UVs, colour, translucency
+    /// and emission as Java sent them; each context's display transform by its name; a quad
+    /// that isn't four corners is left out, an item with none is left out.
+    #[test]
+    fn java_item_models_keep_their_quads_and_transforms() {
+        let json = r#"{"mod:tool": {"block_light": true, "particle": "mod:item/tool",
+            "quads": [
+              {"p": [0,0,0, 1,0,0, 1,1,0, 0,1,0], "uv": [0,1, 1,1, 1,0, 0,0], "s": "mod:item/tool",
+               "d": "north", "c": -16711936, "t": true, "e": 7},
+              {"p": [0,0,0], "uv": [0,0], "s": "mod:item/tool", "d": "up"}],
+            "display": {"gui": [30,225,0, 0,0.0625,0, 0.625,0.625,0.625]}},
+            "mod:empty": {"quads": []}}"#;
+        let models = java_item_models_from_json(json);
+        assert_eq!(models.len(), 1);
+        let tool = &models["mod:tool"];
+        assert_eq!(tool.quads.len(), 1);
+        let q = &tool.quads[0];
+        assert_eq!(q.positions[2], [1.0, 1.0, 0.0]);
+        assert_eq!(q.uv[3], [0.0, 0.0]);
+        assert_eq!(q.facing, Direction::North);
+        assert_eq!(q.material.sprite, "mod:item/tool");
+        assert!(q.material.force_translucent);
+        assert_eq!(
+            (q.color, q.tint_index, q.light_emission),
+            (Some(-16711936), -1, 7)
+        );
+        assert!(tool.uses_block_light);
+        let gui = tool
+            .transform(DisplayContext::Gui)
+            .expect("its GUI transform");
+        assert_eq!(
+            (gui.rotation, gui.translation[1], gui.scale[0]),
+            ([30.0, 225.0, 0.0], 0.0625, 0.625)
+        );
+        assert!(tool.transform(DisplayContext::Ground).is_none());
     }
 }

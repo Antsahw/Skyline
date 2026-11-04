@@ -640,7 +640,10 @@ mod loader_tests {
         // for is still a sprite (minecraft:<name>).
         let files = [
             ("t:models/x.obj", OBJ),
-            ("t:models/o.mtl", "newmtl top\nmap_Kd 0\nnewmtl side\nmap_Kd plain\n"),
+            (
+                "t:models/o.mtl",
+                "newmtl top\nmap_Kd 0\nnewmtl side\nmap_Kd plain\n",
+            ),
         ];
         let model = r#"{"loader":"neoforge:obj","model":"t:models/x.obj","mtl_override":"t:models/o.mtl",
             "textures":{"0":"t:block/tank"}}"#;
