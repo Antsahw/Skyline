@@ -81,7 +81,7 @@ impl ParsedModels {
             let text = horizon_core::prepared_files::read_to_string(path).ok()?;
             CuboidModel::from_json(&text)
                 .ok()
-                .map(|m| Arc::new(with_obj(root, m)))
+                .map(Arc::new)
         });
         let models = files
             .into_iter()
@@ -131,7 +131,7 @@ impl ParsedModels {
                         let text = horizon_core::prepared_files::read_to_string(
                             &root.join(format!("assets/{namespace}/models/{path}.json")),
                         )?;
-                        Ok(with_obj(root, CuboidModel::from_json(&text)?))
+                        Ok(CuboidModel::from_json(&text)?)
                     };
                     match read() {
                         Ok(model) => Arc::new(model),
@@ -155,31 +155,6 @@ impl ParsedModels {
             .map(|library| Arc::new(library.with_assets(Arc::new(RootAssets(root)))))
             .map_err(|e| format!("item models: {e:?}"))
     }
-}
-
-/// A model's OBJ geometry (a Java mod's `"loader": "neoforge:obj"`) read from the same root:
-/// the `.obj` its `model` names and the material libraries beside it. A file that doesn't read
-/// leaves the model without faces (logged), as a missing texture would.
-fn with_obj(root: &Path, mut model: CuboidModel) -> CuboidModel {
-    let Some(obj) = model.obj.as_mut() else {
-        return model;
-    };
-    let Some((namespace, path)) = obj.file() else {
-        return model;
-    };
-    let file = root.join("assets").join(&namespace).join(&path);
-    match horizon_core::prepared_files::read_to_string(&file) {
-        Ok(text) => {
-            let folder = file.parent().map(Path::to_path_buf).unwrap_or_default();
-            obj.load(&text, |name| {
-                (!name.contains("..")).then(|| {
-                    horizon_core::prepared_files::read_to_string(&folder.join(name)).ok()
-                })?
-            });
-        }
-        Err(e) => log::warn!("Horizon: OBJ model {} doesn't read: {e}", obj.model),
-    }
-    model
 }
 
 #[cfg(test)]

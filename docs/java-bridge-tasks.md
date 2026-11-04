@@ -38,6 +38,26 @@ sync 4). A case that fails only in a full regress run is a bug in the case: make
 you meet one (on a slow box: `jump2` saw an extra refused jump, `worldmap-lazy`'s World Map
 count stayed under its 10k mark while the map was still filling in). Worldgen is still on round 6.
 
+### Before anything else: Ludovic's two conditions, and launcher only (2026-11-04)
+
+Ludovic's agent read the branch: Horizon will link to it as an unofficial community project once
+both are fixed. The user's decision: **players play only through Horizon's launcher; Prism and
+`horizon-play` go.**
+1. **Ownership (one chat, `bridge-launcher-only`).** Remove `horizon-play` (crate, docs, CI,
+   packaging, regress `prism`) and Prism's wrapper path; the testers' guide becomes launcher
+   only. No offline play anywhere a player can reach: the game with Java mods starts only from
+   the launcher with its Microsoft sign-in (the switch's `--java-mods`), and nothing is
+   downloaded (Java runtime, server jar) before that sign-in; the server jar comes from the
+   player's own install where possible. Developers' headless runs (`horizon-ctl`, regress) stay
+   as Ludovic's own harnesses run.
+2. **No code tied to other mods' internals (one or two chats, `bridge-generic-N`).** Every
+   mixin and reflection into a specific mod (JourneyMap's four mixins, Xaero's, VoxelMap, Better
+   Combat, REI, JEI, Jade, Architectury, GeckoLib, Create...: `git grep -l` the mod ids in
+   `crates/horizon-jvm`, `crates/horizon-client`) is replaced by a generic fix in the bridge (do
+   what vanilla does there, so every mod gets it) or removed. Check each mod's licence and say
+   it in the report. A mod that stops working is listed in java-bridge.md's status, not patched.
+   Its regress cases stay and show what's broken.
+
 ### Upstream (2026-11-04: Ludovic asked for the bridge in the main repo)
 
 The user's decisions: **off by default; the launcher has a switch to turn on Fabric 26.3 mods.**
