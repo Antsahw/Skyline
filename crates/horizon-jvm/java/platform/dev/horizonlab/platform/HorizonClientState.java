@@ -13,11 +13,10 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * Mods' client state kept per player. One headless client runs every player's client in turn
  * (HorizonClient.as), so what a mod keeps in a static field or a singleton is shared by them
- * all: the host typed "iron" in REI's search box and the guest's showed it. The fields listed
+ * all: the host typed "iron" in a mod's search box and the guest's showed it. The fields listed
  * here are swapped as the client changes player: each player's values are put away when another
  * player's client runs, and come back with theirs. A player new to the client starts from the
- * field's empty value (null, false, 0), which these mods fill in lazily (REI makes a fresh
- * search box, overlay and item list).
+ * field's empty value (null, false, 0), which these mods fill in lazily .
  */
 final class HorizonClientState {
     private HorizonClientState() {}
@@ -69,15 +68,6 @@ final class HorizonClientState {
      * instance a static method returns). A class that isn't there (its mod isn't) is skipped.
      */
     private static final String[] FIELDS = {
-        // REI: its search box, overlay (with its list and favourites), the screens it remembers.
-        "me.shedaniel.rei.impl.client.REIRuntimeImpl#isWithinRecipeViewingScreen",
-        "me.shedaniel.rei.impl.client.REIRuntimeImpl#getInstance()#overlay",
-        "me.shedaniel.rei.impl.client.REIRuntimeImpl#getInstance()#searchField",
-        "me.shedaniel.rei.impl.client.REIRuntimeImpl#getInstance()#previousContainerScreen",
-        "me.shedaniel.rei.impl.client.REIRuntimeImpl#getInstance()#previousScreen",
-        "me.shedaniel.rei.impl.client.REIRuntimeImpl#getInstance()#lastDisplayScreen",
-        "me.shedaniel.rei.impl.client.gui.ScreenOverlayImpl#entryListWidget",
-        "me.shedaniel.rei.impl.client.gui.ScreenOverlayImpl#favoritesListWidget",
     };
 
     private static List<Slot> slots;
@@ -135,11 +125,8 @@ final class HorizonClientState {
     /** The fields hold {@code player}'s values (put away whose were there). */
     static synchronized void load(UUID player) {
         if (player == null || player.equals(loaded)) return;
-        // A second player: REI's searches run inside their player's as() (its settings in).
-        if (loaded != null) HorizonRecipeViewer.searchPerPlayer();
-        // Their mods' settings too (HorizonClientConfig), and JEI's search text.
+        // Their mods' settings too (HorizonClientConfig).
         HorizonClientConfig.swap(loaded, player);
-        HorizonJei.swap(loaded, player);
         List<Slot> all = slots();
         if (all.isEmpty()) {
             loaded = player;
@@ -177,7 +164,6 @@ final class HorizonClientState {
     static synchronized void forget(UUID player) {
         SAVED.remove(player);
         HorizonClientConfig.forget(player);
-        HorizonJei.forget(player);
         List<Slot> all = slots();
         if (player.equals(loaded)) {
             for (Slot slot : all) {

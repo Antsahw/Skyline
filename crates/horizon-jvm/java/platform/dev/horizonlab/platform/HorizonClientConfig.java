@@ -21,11 +21,10 @@ import java.util.stream.Stream;
 /**
  * Mods' client settings per player. One headless client serves every player, so a mod's
  * settings (one object in memory, one file in config/) were everyone's: a LAN guest changing
- * Jade's settings changed the host's. Two halves:
+ * a mod's settings changed the host's. Two halves:
  *
  * <ul>
- *   <li>In memory: the objects holding mods' settings (cloth-config's AutoConfig holders, and
- *       mods with a holder of their own: Jade, AppleSkin, REI) are swapped per player as the
+ *   <li>In memory: the objects holding mods' settings listed in holders() are swapped per player as the
  *       client changes player (HorizonClientState.load calls {@link #swap}). A player new to the
  *       client starts with a copy of the settings of the player before them (the host's first).
  *   <li>On disk: the first player the client serves owns config/ (the host, in a LAN world).
@@ -33,8 +32,8 @@ import java.util.stream.Stream;
  *       under config/ go to config/horizon-players/&lt;uuid&gt;/ and the owner's are put back.
  * </ul>
  *
- * A guest's saved settings last their session in memory; at their next join (a new session)
- * the files kept for them are read back ({@link #loadKept}).
+ * A guest's saved settings last their session in memory; their kept files aren't read back at
+ * their next join (no generic way to make a mod read its settings again).
  */
 public final class HorizonClientConfig {
     private HorizonClientConfig() {}
@@ -48,74 +47,7 @@ public final class HorizonClientConfig {
     /** The settings holders there are now (AutoConfig's grow as mods register). */
     private static List<Holder> holders() {
         List<Holder> out = new ArrayList<>();
-        ClassLoader loader = HorizonClientConfig.class.getClassLoader();
-        // cloth-config's AutoConfig: every registered config's holder (its `config` object).
-        try {
-            Class<?> auto = Class.forName("me.shedaniel.autoconfig.AutoConfig", true, loader);
-            Field holdersField = auto.getDeclaredField("holders");
-            holdersField.setAccessible(true);
-            Class<?> manager = Class.forName("me.shedaniel.autoconfig.ConfigManager", true, loader);
-            Field config = manager.getDeclaredField("config");
-            config.setAccessible(true);
-            for (Object holder : ((Map<?, ?>) holdersField.get(null)).values()) {
-                if (manager.isInstance(holder)) out.add(new Holder("autoconfig:" + System.identityHashCode(holder), holder, config));
-            }
-        } catch (ClassNotFoundException e) {
-            // No cloth-config.
-        } catch (ReflectiveOperationException | RuntimeException e) {
-            fail("AutoConfig", e);
-        }
-        // AppleSkin: ModConfig.INSTANCE.
-        staticField(out, loader, "squeek.appleskin.ModConfig", "INSTANCE");
-        // REI: its config manager's object (also AutoConfig's: one copy for both, see swap) and
-        // its craftable-only switch. Its entry stacks inside are shared (see shared()).
-        try {
-            Class<?> api = Class.forName("me.shedaniel.rei.api.client.config.ConfigManager", true, loader);
-            Object instance = api.getMethod("getInstance").invoke(null);
-            for (String name : new String[] {"object", "craftableOnly"}) {
-                Field f = instance.getClass().getDeclaredField(name);
-                f.setAccessible(true);
-                out.add(new Holder("rei:" + name, instance, f));
-            }
-        } catch (ClassNotFoundException e) {
-            // No REI.
-        } catch (ReflectiveOperationException | RuntimeException e) {
-            fail("REI", e);
-        }
-        // Jade: each JsonConfig's cached value (configGetter.value).
-        try {
-            Class<?> jade = Class.forName("snownee.jade.Jade", true, loader);
-            Field configs = jade.getDeclaredField("configs");
-            configs.setAccessible(true);
-            Class<?> json = Class.forName("snownee.jade.util.JsonConfig", true, loader);
-            Field getter = json.getDeclaredField("configGetter");
-            getter.setAccessible(true);
-            if (configs.get(null) instanceof List<?> list) {
-                for (Object config : list) {
-                    Object supplier = getter.get(config);
-                    Field value = supplier.getClass().getDeclaredField("value");
-                    value.setAccessible(true);
-                    out.add(new Holder("jade:" + System.identityHashCode(config), supplier, value));
-                }
-            }
-        } catch (ClassNotFoundException e) {
-            // No Jade.
-        } catch (ReflectiveOperationException | RuntimeException e) {
-            fail("Jade", e);
-        }
         return out;
-    }
-
-    private static void staticField(List<Holder> out, ClassLoader loader, String className, String name) {
-        try {
-            Field f = Class.forName(className, true, loader).getDeclaredField(name);
-            f.setAccessible(true);
-            out.add(new Holder(className + "#" + name, null, f));
-        } catch (ClassNotFoundException e) {
-            // The mod isn't here.
-        } catch (ReflectiveOperationException | RuntimeException e) {
-            fail(className, e);
-        }
     }
 
     private static final java.util.Set<String> FAILED = ConcurrentHashMap.newKeySet();
@@ -140,9 +72,7 @@ public final class HorizonClientConfig {
             // The first player keeps the settings as they are (nobody's were put away before).
             if (from == null && !SAVED.containsKey(to)) return;
             Map<String, Object> theirs = SAVED.get(to);
-            // New to this session, with files kept from an earlier one: those are theirs.
-            if (theirs == null && !to.equals(owner)) theirs = loadKept(to, all);
-            // One copy for an object two holders hold (REI's config: its manager's and AutoConfig's).
+            // One copy for an object two holders hold.
             IdentityHashMap<Object, Object> done = new IdentityHashMap<>();
             for (Holder h : all) {
                 Object current = h.field().get(h.target());
@@ -152,90 +82,6 @@ public final class HorizonClientConfig {
         } catch (ReflectiveOperationException | RuntimeException e) {
             fail("swap", e);
         }
-    }
-
-    /**
-     * A guest's settings from the files kept for them (config/horizon-players/&lt;uuid&gt;/):
-     * their files are laid over config/, the mods read them (AutoConfig's holders: load()),
-     * and config/ is put back as it was. Null when nothing is kept for them. The holders end
-     * up holding the guest's objects; the caller's swap keeps them.
-     */
-    private static synchronized Map<String, Object> loadKept(UUID player, List<Holder> all) {
-        Path dir = dir();
-        Path mine = dir.resolve(PLAYERS).resolve(player.toString());
-        if (!Files.isDirectory(mine)) return null;
-        List<Path> kept;
-        try (var walk = Files.walk(mine)) {
-            kept = walk.filter(Files::isRegularFile).toList();
-        } catch (IOException e) {
-            fail("kept config files", e);
-            return null;
-        }
-        if (kept.isEmpty()) return null;
-        Map<Path, byte[]> before = new HashMap<>();
-        Map<Path, FileTime> beforeTimes = new HashMap<>();
-        Map<String, Object> theirs = new HashMap<>();
-        int read = 0;
-        try {
-            for (Path k : kept) {
-                Path p = dir.resolve(mine.relativize(k).toString());
-                if (Files.isRegularFile(p)) {
-                    before.put(p, Files.readAllBytes(p));
-                    beforeTimes.put(p, Files.getLastModifiedTime(p));
-                } else {
-                    before.put(p, null);
-                }
-                Files.createDirectories(p.getParent());
-                Files.copy(k, p, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-            }
-            ClassLoader loader = HorizonClientConfig.class.getClassLoader();
-            Class<?> manager = null;
-            try {
-                manager = Class.forName("me.shedaniel.autoconfig.ConfigManager", true, loader);
-            } catch (ClassNotFoundException e) {
-                // No cloth-config: nothing reads them back yet.
-            }
-            IdentityHashMap<Object, Object> loaded = new IdentityHashMap<>();
-            for (Holder h : all) {
-                if (manager == null || !manager.isInstance(h.target()) || loaded.containsKey(h.target())) continue;
-                try {
-                    manager.getMethod("load").invoke(h.target());
-                    loaded.put(h.target(), h.field().get(h.target()));
-                    read++;
-                } catch (ReflectiveOperationException | RuntimeException e) {
-                    fail("AutoConfig load", e);
-                }
-            }
-            for (Holder h : all) {
-                Object value = h.field().get(h.target());
-                if (loaded.containsKey(h.target())) theirs.put(h.key(), value);
-            }
-            // REI's manager holds AutoConfig's object too: the guest's, as AutoConfig loaded it.
-            for (Holder h : all) {
-                if (!h.key().equals("rei:object")) continue;
-                for (Object v : loaded.values()) {
-                    if (h.field().getType().isInstance(v)) theirs.put(h.key(), v);
-                }
-            }
-        } catch (IOException | ReflectiveOperationException | RuntimeException e) {
-            fail("kept config files", e);
-        } finally {
-            // config/ is the owner's again, as it was (its times too: no change to divert).
-            for (var e : before.entrySet()) {
-                try {
-                    if (e.getValue() == null) {
-                        Files.deleteIfExists(e.getKey());
-                    } else {
-                        Files.write(e.getKey(), e.getValue());
-                        Files.setLastModifiedTime(e.getKey(), beforeTimes.get(e.getKey()));
-                    }
-                } catch (IOException ex) {
-                    fail("config files put back", ex);
-                }
-            }
-        }
-        Natives.log("Horizon's client: " + player + "'s kept settings read (" + kept.size() + " file(s), " + read + " config(s))");
-        return theirs.isEmpty() ? null : theirs;
     }
 
     static void forget(UUID player) {
@@ -403,14 +249,6 @@ public final class HorizonClientConfig {
         return name.startsWith("net.minecraft.") || name.startsWith("com.mojang.") || name.startsWith("com.google.")
                 || name.startsWith("it.unimi.") || name.startsWith("org.joml.") || name.startsWith("net.fabricmc.")
                 || name.startsWith("org.slf4j.") || name.startsWith("org.apache.") || name.startsWith("dev.horizonlab.")
-                || java.util.function.Function.class.isAssignableFrom(type) || type.isSynthetic() || type.isHidden()
-                // REI's entry stacks, favourites and filtering rules in its config: its registries
-                // and caches know them by identity (a copy stopped its overlay drawing). The
-                // lists holding them are copied: a favourite added is the player's own.
-                || name.startsWith("me.shedaniel.rei.impl.common.entry.") || name.startsWith("me.shedaniel.rei.api.common.entry.")
-                || name.startsWith("me.shedaniel.rei.impl.common.util.") || name.contains(".rei.api.client.favorites.")
-                || name.contains(".rei.impl.client.favorites.") || name.contains(".rei.api.client.entry.filtering.")
-                || name.contains(".rei.impl.client.entry.filtering.") || name.contains(".rei.api.client.config.entry.")
-                || name.contains(".rei.impl.client.config.entries.");
+                || java.util.function.Function.class.isAssignableFrom(type) || type.isSynthetic() || type.isHidden();
     }
 }

@@ -44,12 +44,12 @@ pub(super) const HUD_CHANNEL: &str = "horizon:java_hud";
 /// The HUD's "window" for [`INPUT`]: its GUI size, which the mods' HUD lays out in.
 pub(super) const HUD_WINDOW: i32 = -2;
 
-/// What Java mods draw over Horizon's inventory (REI's item list and search box), server to
+/// What Java mods draw over Horizon's inventory (a recipe viewer's item list and search box), server to
 /// client: a frame's operations (`[...]`), sent when they change. The first, empty, frame as the
 /// player joins says the server has the overlay.
 pub(super) const OVERLAY_CHANNEL: &str = "horizon:java_overlay";
 /// The inventory overlay's "window" for [`INPUT`]: `open` (with the GUI size) and `close` as
-/// Horizon's inventory opens and closes, `recipes` (R and U over a slot), mouse and keys.
+/// Horizon's inventory opens and closes, mouse and keys (a key over a slot names the slot).
 pub(super) const OVERLAY_WINDOW: i32 = -3;
 
 /// The mods' overlay on Horizon's inventory (HorizonClient's vanilla inventory screen under it).
@@ -65,7 +65,7 @@ pub(super) struct JavaOverlay {
     typing: bool,
     /// A press went to the overlay: its drags and release go there too.
     pressed: bool,
-    /// A client-only screen opened over the inventory (REI's recipes): closing it goes back.
+    /// A client-only screen opened over the inventory (a recipe view): closing it goes back.
     back: bool,
     /// A mod's settings screen opened from the Mods page: closing it (Done) goes back there,
     /// as Mod Menu's list is the screen's parent.
@@ -370,26 +370,27 @@ impl Game<'_> {
         take.then_some(OVERLAY_WINDOW)
     }
 
-    /// R and U over one of the inventory's slots: the recipe viewer's recipes and uses of its
-    /// item (REI's, in the server's headless client). False when the key isn't that.
-    fn java_overlay_recipes(&mut self, key: KeyCode) -> bool {
-        let uses = match key {
-            KeyCode::KeyR => false,
-            KeyCode::KeyU => true,
-            _ => return false,
-        };
-        let Some(slot) = self.inventory_target().0 else {
-            return false;
-        };
-        let Some(stack) = self.slot_view(slot) else {
-            return false;
-        };
-        let item = horizon_client::snbt::to_snbt(&horizon_items::item_nbt::item_to_nbt(&stack));
-        self.send_java_screen_input(
-            OVERLAY_WINDOW,
-            json!({"kind": "recipes", "item": item, "uses": uses}),
-        );
-        true
+    /// A key Horizon's inventory screen uses itself (vanilla's AbstractContainerScreen keys:
+    /// Escape, the inventory key, drop, the hotbar's and the off hand's swaps). The others go
+    /// to the mods' overlay, as a vanilla screen gets every key (a recipe viewer's R and U).
+    fn inventory_screen_key(&self, key: KeyCode) -> bool {
+        use KeyCode as K;
+        key == K::Escape
+            || matches!(
+                self.settings.keys.translate(key),
+                Some(Ok(K::KeyE
+                    | K::KeyQ
+                    | K::KeyF
+                    | K::Digit1
+                    | K::Digit2
+                    | K::Digit3
+                    | K::Digit4
+                    | K::Digit5
+                    | K::Digit6
+                    | K::Digit7
+                    | K::Digit8
+                    | K::Digit9))
+            )
     }
 
     /// Draws what Java mods draw on the HUD, over Horizon's own HUD; tells the server the HUD's
@@ -836,11 +837,20 @@ impl Game<'_> {
 
     /// Mouse and keys over the open mod screen go to it: false when none is open.
     pub(super) fn java_screen_mouse(&mut self, kind: &str, right: bool) -> bool {
-        let Some(window) = self.java_mouse_window(kind) else {
-            return false;
-        };
         let (x, y) = self.cursor;
         let mods = if self.has_shift_down() { SHIFT } else { 0 };
+        let Some(window) = self.java_mouse_window(kind) else {
+            // A press the inventory takes itself (its slots): the mods' overlay hears it too, as
+            // mods hear every click on a vanilla screen (a search box lets go of the keyboard).
+            if kind == "press" && self.java_screen_window().is_none() && self.java_overlay_on() {
+                self.send_java_screen_input(
+                    OVERLAY_WINDOW,
+                    json!({"kind": kind, "x": x, "y": y, "button": if right { 3 } else { 1 },
+                           "mods": mods, "horizon": true}),
+                );
+            }
+            return false;
+        };
         self.send_java_screen_input(
             window,
             // 26.3's buttons count from one (InputConstants.MOUSE_BUTTON_LEFT, _RIGHT).
@@ -867,13 +877,14 @@ impl Game<'_> {
     /// stay Horizon's (they close the menu) unless one of its text boxes is typed in, and none
     /// while Horizon's own recipe book search is.
     pub(super) fn java_screen_takes(&self, key: KeyCode) -> bool {
-        // The inventory overlay: every key but Escape while its search box is typed in; R and
-        // U (recipes and uses, over a slot or the overlay's entries) when not.
+        // The inventory overlay: every key but Escape while a text box of the mods is typed
+        // in; when not, the keys the inventory screen doesn't use itself (a recipe viewer's,
+        // over a slot or its entries).
         if self.java_screen_window().is_none() && self.java_overlay_on() {
             return if self.java_overlay.typing {
                 key != KeyCode::Escape
             } else {
-                matches!(key, KeyCode::KeyR | KeyCode::KeyU) && !self.recipe_search_focused()
+                !self.inventory_screen_key(key) && !self.recipe_search_focused()
             };
         }
         let Some(screen) = &self.java_screen else {
@@ -893,12 +904,16 @@ impl Game<'_> {
     /// A key press on a mod screen: `Screen.keyPressed` with 26.3's key code, then the
     /// typed characters (`charTyped`), as vanilla's keyboard handler sends both.
     pub(super) fn java_screen_key(&mut self, key: KeyCode, text: Option<&str>) -> bool {
+        let mut slot = None;
         let window = match self.java_screen_window() {
             Some(window) => window,
             None if self.java_overlay_on() => {
-                if !self.java_overlay.typing && self.java_overlay_recipes(key) {
-                    return true;
-                }
+                // Over one of Horizon's slots: the slot (the inventory menu's index), which the
+                // screen under the overlay has hovered, as vanilla's mouse over it would.
+                slot = self
+                    .inventory_target()
+                    .0
+                    .and_then(|i| Self::menu_slot_index("inventory", i));
                 OVERLAY_WINDOW
             }
             None => return false,
@@ -911,10 +926,11 @@ impl Game<'_> {
             mods |= CONTROL;
         }
         if let Some(code) = sdl_key(key) {
-            self.send_java_screen_input(
-                window,
-                json!({"kind": "key", "key": code, "keycode": sdl_keycode(key, code), "mods": mods}),
-            );
+            let mut input = json!({"kind": "key", "key": code, "keycode": sdl_keycode(key, code), "mods": mods});
+            if let Some(slot) = slot {
+                input["slot"] = json!(slot);
+            }
+            self.send_java_screen_input(window, input);
         }
         for ch in text.unwrap_or("").chars().filter(|c| !c.is_control()) {
             self.send_java_screen_input(window, json!({"kind": "char", "char": ch as u32}));

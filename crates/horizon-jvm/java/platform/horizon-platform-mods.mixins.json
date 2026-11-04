@@ -4,8 +4,6 @@
   "plugin": "dev.horizonlab.platform.mixin.mods.ModsPlugin",
   "compatibilityLevel": "JAVA_21",
   "mixins": [
-    "ReiAsyncSearchMixin",
-    "JeiConnectionMixin"
   ],
   "injectors": {
     "defaultRequire": 0

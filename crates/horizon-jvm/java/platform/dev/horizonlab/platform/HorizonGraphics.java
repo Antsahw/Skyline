@@ -62,6 +62,11 @@ public final class HorizonGraphics extends GuiGraphicsExtractor {
         return fields;
     }
 
+    /** The HorizonGraphics that records into {@code state}, or null (another render state). */
+    static HorizonGraphics ownerOf(Object state) {
+        return state instanceof Capture capture ? capture.owner : null;
+    }
+
     private static final class Capture extends GuiRenderState {
         HorizonGraphics owner;
 
@@ -662,9 +667,9 @@ public final class HorizonGraphics extends GuiGraphicsExtractor {
                 var frame = it.next();
                 Class<?> owner = frame.getDeclaringClass();
                 String name = owner.getName();
-                // HorizonGraphicsWrappers' generated wrappers of mods' graphics (REI's) pass the
-                // draw on: the mod is further up.
-                if (name.startsWith("dev.horizonlab.platform.HorizonGraphics") || name.startsWith("dev.horizonlab.platform.generated.")
+                // GuiGraphicsExtractor's methods hand a mod's own extractor's draws on
+                // (HorizonGraphicsWrappers): the mod is further up.
+                if (name.startsWith("dev.horizonlab.platform.HorizonGraphics")
                         || owner == GuiGraphicsExtractor.class || name.startsWith("net.minecraft.client.gui.ActiveTextCollector")) {
                     continue;
                 }

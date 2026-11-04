@@ -1,6 +1,7 @@
 {
   "required": true,
   "package": "dev.horizonlab.platform.mixin",
+  "plugin": "dev.horizonlab.platform.mixin.PlatformPlugin",
   "compatibilityLevel": "JAVA_21",
   "mixins": [
     "EntityAccess",
@@ -75,8 +76,8 @@
     "ClientCommonPacketListenerMixin",
     "ItemModelResolverMixin",
     "ItemStackRenderStateMixin",
-    "ReiGuiGraphicsMixin",
     "GuiGraphicsMixin",
+    "EditBoxFocusMixin",
     "LevelExtractorMixin",
     "ModelBakeryMixin",
     "ModelManagerMixin"

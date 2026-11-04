@@ -701,6 +701,108 @@ public final class HorizonHooks {
         return found;
     }
 
+    // ---- Mods' @WrapOperation around a call inside a vanilla method ----------------------------
+
+    private static final Map<String, List<Method>> WRAPS = new ConcurrentHashMap<>();
+
+    /**
+     * The mods' MixinExtras {@code @WrapOperation} handlers merged into {@code owner} that wrap
+     * the call to {@code target} (a descriptor, "Lowner;name(desc)R") inside {@code method}:
+     * handlers taking the call's receiver, its arguments and an Operation. Fabric API's and
+     * Horizon's own are left out (Horizon fires Fabric's events itself).
+     */
+    static List<Method> wraps(Class<?> owner, String method, String target, int callArgs) {
+        return WRAPS.computeIfAbsent(owner.getName() + "." + method + "|" + target, k -> {
+            List<Method> found = new ArrayList<>();
+            Map<String, ClassNode> mixins = new HashMap<>();
+            for (Method m : owner.getDeclaredMethods()) {
+                MixinMerged merged = m.getAnnotation(MixinMerged.class);
+                if (merged == null || merged.mixin().startsWith("net.fabricmc.") || merged.mixin().startsWith("dev.horizonlab.")) continue;
+                Class<?>[] p = m.getParameterTypes();
+                if (p.length != callArgs + 1 || !p[callArgs].getName().equals("com.llamalad7.mixinextras.injector.wrapoperation.Operation")) continue;
+                ClassNode node = mixins.computeIfAbsent(merged.mixin(), HorizonHooks::mixinNode);
+                if (node == null) continue;
+                boolean targets = false;
+                for (MethodNode handler : node.methods) {
+                    if (!handlerNamed(m.getName(), handler.name)) continue;
+                    for (AnnotationNode a : annotations(handler.invisibleAnnotations, handler.visibleAnnotations)) {
+                        if (!a.desc.equals("Lcom/llamalad7/mixinextras/injector/wrapoperation/WrapOperation;")) continue;
+                        boolean inMethod = false;
+                        if (get(a, "method") instanceof List<?> specs) {
+                            for (Object spec : specs) if (parseSpec((String) spec)[0].equals(method)) inMethod = true;
+                        }
+                        Object at = get(a, "at");
+                        for (Object o : at instanceof List<?> l ? l : at == null ? List.of() : List.of(at)) {
+                            if (inMethod && o instanceof AnnotationNode node2 && target.equals(get(node2, "target"))) targets = true;
+                        }
+                    }
+                }
+                if (!targets) continue;
+                m.setAccessible(true);
+                found.add(m);
+            }
+            if (!found.isEmpty()) {
+                Natives.log("Horizon's client: " + found.size() + " mod wrap(s) of " + target + " in " + owner.getSimpleName() + "." + method);
+            }
+            return found;
+        });
+    }
+
+    private static ClassNode mixinNode(String name) {
+        try (var in = HorizonHooks.class.getClassLoader().getResourceAsStream(name.replace('.', '/') + ".class")) {
+            if (in == null) return null;
+            ClassNode n = new ClassNode();
+            new ClassReader(in.readAllBytes()).accept(n, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+            return n;
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /**
+     * A call vanilla's {@code owner.method} makes to {@code target} with {@code call} (the
+     * receiver, then the arguments), as Mixin's wrapping turns it: through the mods' wraps of it
+     * ({@link #wraps}), the innermost calling {@code original}. What the outermost returns (a
+     * wrap may skip the call: Architectury's input events cancelling a screen's click).
+     */
+    public static Object wrapCall(Object self, Class<?> owner, String method, String target, Object[] call,
+                                  java.util.function.Function<Object[], Object> original) {
+        List<Method> wraps = wraps(owner, method, target, call.length);
+        if (wraps.isEmpty()) return original.apply(call);
+        return wrapStep(self, wraps, 0, call, original, method);
+    }
+
+    private static Object wrapStep(Object self, List<Method> wraps, int i, Object[] call,
+                                   java.util.function.Function<Object[], Object> original, String method) {
+        if (i == wraps.size()) return original.apply(call);
+        Method handler = wraps.get(i);
+        Class<?> operation = handler.getParameterTypes()[call.length];
+        Object next = java.lang.reflect.Proxy.newProxyInstance(operation.getClassLoader(), new Class<?>[] {operation}, (proxy, m, a) -> {
+            if (m.getName().equals("call")) {
+                Object[] args = a == null || a.length == 0 ? new Object[0] : (Object[]) a[0];
+                return wrapStep(self, wraps, i + 1, args.length == call.length ? args : call, original, method);
+            }
+            return switch (m.getName()) {
+                case "toString" -> "Horizon's operation " + method;
+                case "hashCode" -> System.identityHashCode(proxy);
+                case "equals" -> proxy == a[0];
+                default -> null;
+            };
+        });
+        Object[] args = java.util.Arrays.copyOf(call, call.length + 1);
+        args[call.length] = next;
+        try {
+            return handler.invoke(Modifier.isStatic(handler.getModifiers()) ? null : self, args);
+        } catch (Throwable t) {
+            Throwable cause = t instanceof java.lang.reflect.InvocationTargetException ite && ite.getCause() != null ? ite.getCause() : t;
+            if (FAILURES.merge(handler.toString(), 1, Integer::sum) <= 3) {
+                Natives.log("A mod's wrap failed in " + method + " (" + handler.getName() + "): " + cause);
+                HorizonFailures.report(method, cause, handler);
+            }
+            return wrapStep(self, wraps, i + 1, call, original, method);
+        }
+    }
+
     // ---- A client method's injections, read from the merged class ---------------------------
 
     /** The mixin classes read for fireMerged, by name: their injections (method, handler, at). */
@@ -737,6 +839,20 @@ public final class HorizonHooks {
             }
             return found;
         });
+    }
+
+    /**
+     * Where a merged handler injects, for running a method's injections in the order its body
+     * reaches them: 0 at its HEAD, 2 at a RETURN or its TAIL, 1 anywhere else (or unknown).
+     */
+    public static int injectOrder(Method merged) {
+        MixinMerged info = merged.getAnnotation(MixinMerged.class);
+        if (info == null) return 1;
+        for (String[] inject : mixinInjects(info.mixin())) {
+            if (!handlerNamed(merged.getName(), inject[1])) continue;
+            return "HEAD".equals(inject[2]) ? 0 : 2;
+        }
+        return 1;
     }
 
     /** A mixin class's event-like @Injects: (target method, handler, HEAD/TAIL/RETURN). */

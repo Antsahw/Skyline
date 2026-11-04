@@ -170,11 +170,12 @@ saying something works.
 - `tools/java_bridge/lan_test.sh`: a host with MODS opened to LAN and a guest joining it (its
   own scratch folder), steps with `$H`/`$G`, screenshots of both. Guests get mod screens, HUD
   mods (Jade shows what each player looks at) and REI over their inventory.
-- One headless client runs every player's client in turn (`as`), so a mod's static state was
-  shared: the host typed in REI's search box and the guest's showed it. `HorizonClientState`
-  swaps listed fields per player as `as` changes player (REI's search field, overlay, entry
-  list, favourites, remembered screens); a player new to the client starts from the field's
-  empty value, which these mods fill lazily. Add a mod's fields there when its client state
+- One headless client runs every player's client in turn (`as`), so a mod's static state is
+  shared: the host types in a recipe viewer's search box and the guest's shows it.
+  `HorizonClientState` swaps listed fields per player as `as` changes player; a player new to
+  the client starts from the field's empty value, which mods fill lazily. Since
+  `bridge-generic-ui` the list holds no recipe viewer's fields (REI's were there: code tied to
+  REI's internals); only the map mods' remain (their own chat's). Add a mod's fields there when its client state
   leaks between players. A player leaving drops theirs (`HorizonClient.left`: state, overlay,
   screen, join).
 - Client joins run per player (`joined(uuid)`, the first tick each player's client is in the
@@ -203,41 +204,24 @@ saying something works.
   given before): shown again on Done, it closes the screen and the window goes back to
   Options → Mods (`JavaOverlay.mods_page`). Regress `modsettings2` (fixture `configmod`;
   `fixture_mod.sh` compiles a fixture's `compile-only/` APIs beside the jar, not into it).
-- Settings per player (`HorizonClientConfig`): the objects holding mods' settings (every
-  cloth-config AutoConfig holder, Jade's JsonConfig values, AppleSkin's `ModConfig.INSTANCE`) are
-  swapped with the rest of a player's client state; a player new to
-  the client gets a deep copy (the mod's own objects copied; the game's, the JDK's and
-  libraries' shared). On disk, the first player the client serves (the host) owns `config/`:
-  after another player's screen input, files changed under `config/` move to
-  `config/horizon-players/<uuid>/` and the owner's are put back. Tested on LAN: the guest turns
-  AppleSkin's tooltip off and saves; the host's screen and file still say on, the guest's say
-  off. At a guest's next join (`swap` with no settings of theirs in memory) their kept files are
-  laid over `config/`, every AutoConfig holder `load()`s, and `config/` is put back with its
-  times (`loadKept`): their settings start from their files, not the host's. Regress
-  `config-rejoin` (REI's list on the guest's left, the host's right). Only AutoConfig's
-  holders read files back so far (Jade's and AppleSkin's own holders start from a copy of the
-  host's, as before). Not yet: mods holding settings elsewhere (Farmer's Delight's
-  ConfigValues) are still shared. Add a mod's holder in `holders()`. REI's settings are per
-  player too (its config object, which AutoConfig also holds: one copy for both holders,
-  made in one pass; and its craftable-only switch); the copy shares REI's entry stacks,
-  favourites and filtering rules (its registries know them by identity) while the lists
-  holding them are copied. Regress `rei-lan`: the guest's craftable filter on, the host's off
-  with its list. (The earlier "a copy stopped the overlay drawing" was REI's own reload, fixed
-  by `afterOwnReload`.) REI's search for several players (`bridge-client-8`): REI's one search manager ran on its own
-  threads and read the craftable switch when it ran, often another player's. Once the client
-  serves a second player, a search started inside a player's `as()` is queued and run at that
-  call's end, their settings still in (`HorizonRecipeViewer.searchPerPlayer`: REI's
-  `AsyncSearchManager.EXECUTOR_SERVICE` made non-final by `ModsPlugin` and wrapped; searches
-  started elsewhere still go to REI's threads; one player: as before). That became possible
-  once lookups got fast: REI's "cache display lookup" option is off by default, so every
-  lookup by input or output scanned every display, and the craftable filter took over 30 s on
-  2 cores. The headless client turns it on and indexes all displays after each sync
-  (`reindex`, ~0.4–0.6 s for 11,721 displays); a craftable search is now ~0.3 s.
-  `HORIZON_JAVA_DEBUG=rei` logs each player's list size after a search. Regress `rei-lan`: the
-  guest with 4 oak logs sees 2 entries with its filter on, the host its full list.
+- Settings per player (`HorizonClientConfig`): the objects holding mods' settings listed in
+  `holders()` are swapped with the rest of a player's client state; a player new to the client
+  gets a deep copy (the mod's own objects copied; the game's, the JDK's and libraries' shared).
+  On disk, the first player the client serves (the host) owns `config/`: after another
+  player's screen input, files changed under `config/` move to
+  `config/horizon-players/<uuid>/` and the owner's are put back. Since `bridge-generic-ui`
+  `holders()` names no recipe viewer or HUD mod: cloth-config's AutoConfig holders, Jade's
+  JsonConfigs, AppleSkin's `ModConfig.INSTANCE` and REI's config manager were reached by
+  reflection into those mods and are gone. Their settings are one for every player of a
+  server again (a guest's change shows for the host too), and a guest's kept files are no
+  longer read back at their next join (`loadKept` called AutoConfig's `load()`). REI's
+  per-player searches went too (its search executor wrapped through a mixin, its display
+  index rebuilt by reflection): REI searches on its own threads as in any client, with the
+  one set of settings. Regress `rei-lan`, `jei-lan`, `config-rejoin` show it. The way back for
+  every mod at once is one headless client per player (a class loader each), not a list of
+  mods' fields.
 - `HorizonClientState` gives a player new to the client a fresh empty collection for a
-  collection field (null before): REI's own reload cleared `lastDisplayScreen` and threw on
-  null.
+  collection field (null before): a mod's own reload clears it and throws on null.
 - Dedicated servers: `tools/java_bridge/server_test.sh` starts `horizon-client --dedicated
   --nogui` with MODS in its `mods-java/` (console through a FIFO: `sv "op Player"`) and a game
   that joins it; steps with `$G`, screenshots of the player's game. Its players get mod screens
@@ -253,94 +237,102 @@ saying something works.
   are held. Regress `server` (server=True cases run `server_test.sh`: a dedicated server and a
   joining player; checks read the server's log). Tested there: Jade, AppleSkin, Xaero's
   minimap and its settings (Y), Nature's Compass's biome screen, Options → Mods' Java mods.
-- **REI reloads on its own** at a client's join (Architectury's join event, now that joins
-  run; on REI's thread): that empties the client's display registry of the server's displays,
-  and REI's reload removes the overlay renderer it applied to the open screen (the renderer
-  provider applied at INIT_POST), so its list vanished from a mod screen a few seconds after it
-  opened. `HorizonRecipeViewer.keepSynced` (each server tick) syncs the displays again when
-  the registry shrank, and `afterOwnReload` applies the renderer again per open screen (and
-  queues the overlay's reload and the list's search). Regress `reiscreen`.
+- **The client's join gets the server's recipes** as a vanilla client does
+  (`HorizonClient.recipesArrive`, after `handleLogin` and Fabric's `JOIN`): the server's tags
+  (`handleUpdateTags`' injections), Fabric's recipe sync (`ClientRecipeSynchronizedEvent`
+  with the server's recipes), then the recipe packet `PlayerList.placeNewPlayer` sends
+  (`ClientboundUpdateRecipesPacket`: the connection's `recipes` set as `handleUpdateRecipes`
+  sets them, and the mods' injections into it run). Recipe viewers start there: REI's reload
+  (its `handleUpdateRecipes` HEAD), JEI's runtime (its RETURN). REI's server then sends its
+  displays through its own payload (`[REI Server Display Sync] Received server's request to
+  set N recipes`), which reaches REI's client as any mod's payload does.
+- **A screen opened before the client joined is laid out again at the join** (`joined`: its
+  `init`). Horizon's world plays while the headless client still loads its models, so a pot
+  could be open before the client joined; REI made no overlay for it then (no world) and its
+  list stayed empty. A vanilla client has no screen open before it joins. Regress `reiscreen`.
+- **A packet handler's injections run in the order its body reaches them**
+  (`fireConnection`, `HorizonHooks.injectOrder`): HEAD first, RETURN/TAIL last. REI starts its
+  reload at `handleUpdateRecipes`' head and Architectury's recipe event (REI's END stage) fires
+  from its return; in the class's method order the END could come first and REI's reload
+  never ended.
+- **The headless client's connection is connected** (`MirrorConnectionMixin`): its memory
+  connection to the server in this process, as single player's is (`isConnected` true, the
+  address `local`; raw sends, flushes and ticks go nowhere). JEI keeps a client's recipes only
+  for the connection they came from; before, a JEI mixin answered its connection id.
 
-## Mods' overlay on Horizon's inventory (REI)
+## Mods' overlay on Horizon's inventory (recipe viewers)
 
-- **A client message sent off the loop's thread is queued** (`HorizonLoop.toServer`): REI runs
-  its plugins on threads of its own, and Advanced Loot Info's asks the server for its loot
-  data there (no player's client runs on that thread: it was dropped, and the plugin waited 3
-  x 30 s). It goes to `INBOX` as the player whose client ran last (`HorizonClient.lastPlayer`)
-  and runs at the next `flush`, on the loop's thread; Horizon's own REI reload waits on that
-  thread, so it `pump()`s the messages while it waits. ALI's block drops show; REI's reload
-  ~3 s. Regress `lootinfo`.
+Nothing here names a recipe viewer (`bridge-generic-ui`): REI and JEI work over Horizon's
+inventory through what a vanilla client does for any mod. Tested with REI 26.3.824 and JEI
+31.17.0.108 (regress `rei`, `jei`, `pot-jei`, `reiscreen`).
 
-- Mod container screens open in vanilla's order (`openScreen`: REI prepared, the GUI's screen
-  set, `added`, `init`, the search refreshed), so REI makes its overlay for them too: its list
-  draws beside a Tech Reborn machine. `refreshSearch` does nothing while REI has no overlay
-  (a recipe view opened first: `getEntryListWidget` threw "No value present").
+- **A client message sent off the loop's thread is queued** (`HorizonLoop.toServer`): mods run
+  code on threads of their own (REI's reload threads: Advanced Loot Info asks the server for
+  its loot data there; no player's client runs on that thread). It goes to `INBOX` as the
+  player whose client ran last (`HorizonClient.lastPlayer`) and runs at the next `flush`, on
+  the loop's thread; code that waits on that thread for a mod's thread `pump()`s them.
+- Mod container screens open in vanilla's order (`openScreen`: the GUI's screen set, `added`,
+  `init`), so mods make their overlays for them there (Fabric's screen init events): REI's
+  list draws beside a Tech Reborn machine, JEI's beside the cooking pot.
 - **With the headless GPU, atlases are real GPU textures** (render attachments, filled with
   the missing texture). `HorizonGpu.Texture.atlas` marks those made by `TextureAtlas`; Capture
-  treats their quads as sprites by UV square, never as GPU images (REI's buttons and Tech
-  Reborn's nine-slices drew magenta and black after the GPU merge).
-
+  treats their quads as sprites by UV square, never as GPU images.
 - While Horizon's own inventory (or a container screen of its own) is open with no mod screen
   in its place, the game sends window `-3` input: `open` (GUI size), mouse moves, `close`. Java
   keeps a `HorizonOverlayScreen` per player (an `AbstractContainerScreen` of the player's
-  inventory menu that draws nothing itself; vanilla's InventoryScreen needs the player model
-  and recipe book) and draws it `modsOnly` each frame (`sendOverlay`, only when changed) to
-  `horizon:java_overlay`. The game draws it over the inventory (`draw_java_overlay`).
-- Presses outside the inventory's window with nothing carried go to the overlay (and their
-  drags and release), as does the wheel there; keys while REI's search box is focused
-  (`HorizonRecipeViewer.searchFocused` makes `typing`). R and U over one of Horizon's slots
-  send `recipes` with the slot's item (SNBT): REI's recipes/uses view, a client-only screen.
-  Escape there goes back to the inventory (`setScreen(HorizonOverlayScreen)` = close, and
-  the game returns to its inventory: `JavaOverlay.back`).
-- The server sends an empty overlay frame as a player joins: the game only talks to `-3` once
-  it knows the server has Java mods.
-- Screen input fires Architectury's `ClientScreenInputEvent` PRE/POST around the screen's
-  handler (`HorizonScreenEvents`; vanilla's MouseHandler/KeyboardHandler mixins fire them):
-  REI takes its clicks, keys and scrolls there, not from the screen.
-- REI's item list searched once as its overlay was made, before the displays were in: empty
-  (0/1). After its reload `HorizonRecipeViewer.refreshSearch` searches again.
-- `modsOnly`'s stack walk skips `dev.horizonlab.platform.generated.*` (the REI graphics
-  wrappers), or every REI draw counted as Horizon's.
-- The headless Minecraft has a `KeyboardHandler` (allocated): a focused text box resubmits
-  its IME preedit through it.
-
-## JEI (Just Enough Items) over Horizon's inventory
-
-JEI's item list, search box, bookmarks and recipe screens work over Horizon's inventory, as
-REI's do (2026-11-04, `bridge-client-11`). `HorizonJei.java` (reflection: JEI is optional).
-- **Why it never appeared**: JEI registers its `CLIENT_STARTED` listener (which registers the
-  listeners that start it) from its injection into `Minecraft.<init>` at the first
-  `ResourceLoadStateTracker.startReload`; the headless Minecraft is allocated, so that never
-  ran. `HorizonHooks.startPoint` now fires injections there with the constructor's end
-  (`START_END`, before `CLIENT_STARTED`). Client reload listeners that mods register at
-  `CLIENT_STARTED` (JEI's GUI colours) run right after it (`reloadAddedListeners`).
-- **Its start** (`HorizonJei.prepare`, from `HorizonRecipeViewer.prepare`: before an overlay
-  or a mod screen is laid out, in the player's `as()`): what a joining client does, Fabric's
-  `ClientRecipeSynchronizedEvent` with the mirror's recipes (all of them, ~2,400 vanilla + FD),
-  then JEI's `AFTER_RECIPES_UPDATED` (its `handleUpdateRecipes` mixin's event), which starts
-  its runtime (~3 s). JEI keeps client recipes only for the connection they came from
-  (`Internal.getRemoteConnectionId`: null, the connection has no channel): `JeiConnectionMixin`
-  (mods config, `@Pseudo`) gives one id.
-- **Input**: JEI takes clicks, keys and scrolls through Fabric's `ScreenMouseEvents` /
-  `ScreenKeyboardEvents` (fired by Fabric's MouseHandler/KeyboardHandler mixins in a real
-  client) and characters through its own injection at `KeyboardHandler.charTyped`'s head.
-  `HorizonScreenEvents` fires all of them now (allow/before/after around the screen's handler;
-  `charTyped`'s HEAD/TAIL injections through `HorizonHooks.fire`), for mod screens too. Its
-  search box focused makes the overlay `typing` (`HorizonJei.searchFocused`).
+  inventory menu that draws nothing itself) and draws it `modsOnly` each frame (`sendOverlay`,
+  only when changed) to `horizon:java_overlay`. The game draws it over the inventory.
+- **Input as a vanilla screen gets it.** Presses outside the inventory's window with nothing
+  carried go to the overlay (and their drags and release), as does the wheel there. Presses
+  the inventory takes itself (its slots) go to the overlay too, with `horizon: true`: the mods
+  see them (their wraps, Fabric's events: a search box lets go of the keyboard), the screen's
+  own handler doesn't run. Keys: every key the inventory screen doesn't use itself (Escape,
+  the inventory key, drop, the hotbar's and off hand's swaps: `inventory_screen_key`) goes to
+  the overlay; over one of Horizon's slots it names the slot (the inventory menu's index:
+  `menu_slot_index`), and `HorizonOverlayScreen.hover` makes it the screen's hovered slot, as
+  the mouse over it does in vanilla. So R and U over a slot open REI's or JEI's recipes and
+  uses through their own key handling (REI's keys are its own config's, not KeyMappings: a
+  list of the mods' KeyMappings would have missed them). A client-only screen opened from
+  there: Escape goes back to the inventory (`JavaOverlay.back`).
+- **While a mod's text box has the keyboard, every key but Escape goes to it** (the frame's
+  `typing`, `HorizonClient.typing`): a focused EditBox in the screen's focus chain, the last
+  EditBox focused anywhere (`EditBoxFocusMixin`, `HorizonTextFields`: JEI's search box isn't
+  one of the screen's widgets), or a screen whose last typed character a mod took before the
+  screen saw it (`HorizonScreenEvents.modTakesTyping`, until the next click: REI's search box
+  is a widget of its own). So in REI's box the very first character, when it is one of the
+  inventory screen's keys (E, Q, F, a digit), still acts on the inventory; the rest type.
+- **The mods' wraps of the screen's handlers run** (`HorizonScreenEvents`,
+  `HorizonHooks.wrapCall`): vanilla's MouseHandler/KeyboardHandler call `Screen.mouseClicked`,
+  `mouseReleased`, `mouseDragged`, `mouseScrolled` and `keyPressed`; mods wrap those calls
+  with MixinExtras' `@WrapOperation` (Architectury fires its `ClientScreenInputEvent` there:
+  REI takes its clicks, keys and scrolls through it). `wrapCall` finds the wrap handlers
+  merged into the vanilla class (by their mixin's annotation: method and target) and chains
+  them, the innermost calling the screen inside Fabric's screen events (JEI takes its input
+  there). Characters: the mods' injections at `KeyboardHandler.charTyped`'s head and tail,
+  then Fabric's char events (Architectury's `KEY_TYPED` rides on them).
 - **Frames and ticks**: `HorizonScreenEvents.extract`/`tick`/`removed` fire Fabric's
   `beforeExtract`/`afterExtract`, `beforeTick`/`afterTick` and `remove` (Gui's mixin fires them
-  in a real client): JEI updates what the mouse is over before each frame and ticks its list after
-  the screen's tick.
-- `/recipes` and `/uses` (and R/U over Horizon's slots) open JEI's `RecipesGui` when REI isn't
-  there (`HorizonJei.open`: a focus, its categories looked up first): a client-only screen; Escape
-  goes back to the inventory (its parent is the overlay screen). Clicks on its list (left:
-  recipes, right: uses) and R/U over its entries open it too.
-- **Per player**: JEI's search text and keyboard focus are kept per player
-  (`HorizonJei.swap`, from `HorizonClientState.load`). Its keyboard focus lets go of a control
-  whose screen isn't the open one, so a guest's frame took the host's search box from them
-  mid-word. Not per player yet: bookmarks, JEI's settings, the recipe screen's history.
-- `HORIZON_JAVA_DEBUG=jei` logs each player's list (search text, item count) after overlay
-  input. Regress `jei` (list, search, uses, Escape, /recipes, /uses) and `jei-lan`.
+  in a real client): JEI updates what the mouse is over before each frame.
+- **A mod's own extractor records too.** Mods draw through a `GuiGraphicsExtractor` of their
+  own built on the one they were given (REI's `compat.GuiGraphics.of`: a subclass made from
+  its fields, on the same render state). `PlatformPlugin` (the platform mixin config's plugin)
+  starts every `GuiGraphicsExtractor` method `HorizonGraphics` records, and `pose()`, with a
+  hand-off to the `HorizonGraphics` whose render state the extractor draws on
+  (`HorizonGraphicsWrappers.forward`), so any such extractor records into Horizon's frame.
+  `GuiGraphicsMixin` does the same for the private `innerBlit` mods widen.
+- **Mods' `CLIENT_STARTED`**: JEI registers its `CLIENT_STARTED` listener from its injection
+  into `Minecraft.<init>` at the first `ResourceLoadStateTracker.startReload`; the headless
+  Minecraft is allocated, so `HorizonHooks.startPoint` fires injections there with the
+  constructor's end (`START_END`, before `CLIENT_STARTED`). Client reload listeners mods
+  register at `CLIENT_STARTED` (JEI's GUI colours) run right after it (`reloadAddedListeners`).
+- The server sends an empty overlay frame as a player joins: the game only talks to `-3` once
+  it knows the server has Java mods.
+- `modsOnly`'s stack walk skips Horizon's own frames and `GuiGraphicsExtractor`'s, so a mod's
+  draw through its own extractor counts as the mod's.
+- The headless Minecraft has a `KeyboardHandler` and a `MouseHandler` (allocated): mods' wraps
+  and injections are theirs.
+- `/recipes` and `/uses` are gone (they called REI's and JEI's APIs), as are
+  `HORIZON_JAVA_DEBUG=rei` and `=jei`. R and U over a slot, or a viewer's own keys, are the way.
 
 ## Client HUD mods
 
@@ -722,6 +714,17 @@ gets SPIR-V, vertex layouts and uniform lists.
 
 ## 26.3 facts that cost time
 
+- **Mods hook vanilla's input with `@WrapOperation`, not events.** Architectury's
+  `ClientScreenInputEvent` fires from wraps of `Screen.mouseClicked`/`keyPressed`/... inside
+  `MouseHandler.onButton`/`KeyboardHandler.keyPress`: `HorizonHooks.fire` (HEAD/TAIL injects)
+  never reaches them; `HorizonHooks.wrapCall` runs a call's merged wraps. Their merged
+  handlers take the call's receiver, arguments and an `Operation`.
+- **REI's keys aren't KeyMappings**: its R/U/O live in its own config (cloth-config's
+  `ModifierKeyCode`), so Fabric's key registry doesn't list them; give screens every key the
+  screen would get instead of a list of mods' keys.
+- `ctl click-at` twice on a slot within a second is a double click (collects the stack):
+  a test that hovers a slot by picking its item up and putting it back sleeps between.
+
 - **A use the mirror starts never finishes.** The mirrored players are never ticked, so
   `LivingEntity.updatingUsingItem` never counts a use down: anything vanilla's `Item.use`
   starts with `startUsingItem` (eating, drinking, drawing a bow) sits there forever. Hand it to
@@ -970,18 +973,16 @@ gets SPIR-V, vertex layouts and uniform lists.
 - `MinecraftServer.weatherData` (Serene Seasons reads `ServerLevel.getWeatherData`): clear.
 - A recipe display with a null category (a mod's recipe type) can't cross vanilla's codec, so
   `HorizonClient.recipeBook` skips it; otherwise the whole client recipe book fails.
-- REI: its client fills displays only from the server's sync packet (raw
-  `player.connection.send`, which Horizon doesn't deliver) and builds them on a server it finds
-  through `Minecraft.getSingleplayerServer()`. `HorizonRecipeViewer` reloads REI's plugins
-  with the mirror as that server, then copies the server registry's displays into the client's
-  as synced ones (what `DisplaySyncPacket` does). REI's registry access comes through the
-  client's connection: the search connection now has the server's registries and is the game
-  mode's connection.
-- REI draws through its own `GuiGraphics.of(graphics)` (a second extractor on the same render
-  state), so HorizonGraphics' overrides were skipped: `ReiGuiGraphicsMixin` returns a class
-  made at run time (`HorizonGraphicsWrappers`, ASM) that extends REI's and forwards every
-  recorded method and `pose()` to the HorizonGraphics. Access wideners make vanilla's private
-  `innerBlit` public *final*: no override, so `GuiGraphicsMixin` forwards it. GUI atlas sprites
+- A recipe viewer's client fills displays from the server's sync payload (a raw
+  `player.connection.send` of a custom payload, which reaches the mod's client code now) after
+  the client's join reload (`recipesArrive`). Its registry access comes through the client's
+  connection: the search connection has the server's registries and is the game mode's.
+- A mod drawing through its own extractor on the one it was given (REI's
+  `GuiGraphics.of(graphics)`, a second extractor on the same render state) skipped
+  HorizonGraphics' overrides: `PlatformPlugin` hands every recorded method and `pose()` of
+  `GuiGraphicsExtractor` to the HorizonGraphics of that render state (see "Mods' overlay").
+  Access wideners make vanilla's private `innerBlit` public *final*: no override, so
+  `GuiGraphicsMixin` forwards it. GUI atlas sprites
   mods look up themselves (`getAtlasOrThrow(GUI).getSprite`) are made on demand (name only)
   and drawn by name. `setScreenAndShow` draws a frame at once: `renderFrame` is a no-op
   headless. Screens that read `mouseHandler.xpos()` get Horizon's mouse.
@@ -1282,6 +1283,36 @@ Naturalist (mobs with ModelPart models, Fabric API only). The repo's own critter
 (`ENTITY=naturalist:bear` for another mod's).
 
 ## Status
+
+No code tied to recipe viewers' and HUD mods' internals (2026-11-04, `bridge-generic-ui`,
+Ludovic's second condition for REI, JEI, Jade, AppleSkin, Architectury, Cloth Config): every
+class, mixin and reflection naming them is gone (`HorizonRecipeViewer`, `HorizonJei`,
+`ReiGuiGraphicsMixin`, `ReiAsyncSearchMixin`, `JeiConnectionMixin`, their entries in
+`HorizonClientState`, `HorizonClientConfig` and `ModsPlugin`, Architectury's events fired by
+name). In their place, what a vanilla client does, for every mod: the client's join gets the
+server's tags and recipes (`recipesArrive`), the client's connection is connected, the mods'
+`@WrapOperation`s of the screen calls in MouseHandler/KeyboardHandler run (`wrapCall`), a mod's
+own extractor records (`PlatformPlugin`), keys the inventory doesn't use go to the screen under
+the overlay with the hovered slot, and typing is seen from text boxes' focus and from a mod
+taking the typed characters. (`git grep -il "shedaniel\|mezz\|snownee\|squeek\|architectury\|autoconfig"`
+in `crates/horizon-jvm crates/horizon-client` finds comments only.)
+- Works (headless, screenshots): REI's list, search box (E typed in it), R/U over a slot
+  (crafting table, Farmer's Delight's beef stew), Escape back; REI draws its recipe screens
+  through its own GuiGraphics; JEI's start, list, search, uses from its list, R/U over slots,
+  over the cooking pot's screen (`pot-jei`); Jade's tooltip and AppleSkin on the HUD; Options →
+  Mods' Java settings screens (Jade's, Cloth Config's). Regress `rei jei pot-jei hud
+  modsettings join reiscreen` pass.
+- Broken (listed, not patched; their cases stay): **per-player state of these mods on a LAN or
+  dedicated server**: REI's and JEI's search text and REI's craftable filter, REI's, Jade's,
+  AppleSkin's and AutoConfig mods' settings are one for every player again (`rei-lan`,
+  `jei-lan`, `config-rejoin` fail); JEI's search box can't be typed in while another player's
+  inventory is open (each frame JEI lets go of a box whose screen isn't the open one); REI's
+  craftable filter searches with no player's inventory (an empty list). The first character typed into
+  REI's search box, if it is the inventory, drop, swap or a hotbar key, acts on the inventory.
+  `/recipes` and `/uses` are gone.
+- Licences: REI MIT; JEI MIT; Jade CC-BY-NC-SA-4.0; AppleSkin Unlicense; Architectury
+  LGPL-3.0; Cloth Config LGPL-3.0 (from each jar's `fabric.mod.json`). The bridge ships none of
+  their code and now names none of their classes.
 
 Create (Create Fly's 26.3 port, 2026-11-04, bridge-gpu-12): kinetic networks run and their
 shafts, cogs and motors draw turning; OBJ items draw; mods' fluids use their own sprites; 3D Skin
@@ -1742,11 +1773,11 @@ Traveler's Backpack, Trash Cans, Lootr, CC: Tweaked, BetterEnd/BetterNether, Uni
 Serene Seasons, Mutant Monsters...): Fabric starts, 9305 recipes load, the overworld generates
 through the mods with no failed chunk. Not available for 26.3 Fabric yet: EMI, Patchouli
 (Modonomicon instead), AE2, Mekanism, Create, Sophisticated Backpacks (Traveler's instead).
-`/recipes [item]` and `/uses [item]` (the held item without one) open REI's recipe view
-(`HorizonRecipeViewer`): vanilla crafting, Farmer's Delight cooking, Tech Reborn's compressor,
-Energized Power's recipes draw. The first one reloads REI (~3 s).
-JEI's item list, search, recipe screens and `/recipes`/`/uses` work over Horizon's inventory
-too (2026-11-04, `bridge-client-11`; REI first when both are there).
+R and U over a slot open REI's recipe view (since `bridge-generic-ui`; `/recipes` and `/uses`
+are gone): vanilla crafting, Farmer's Delight cooking, Tech Reborn's compressor, Energized
+Power's recipes draw.
+JEI's item list, search, recipe screens and R/U work over Horizon's inventory too
+(2026-11-04, `bridge-client-11`; generic since `bridge-generic-ui`).
 REI's item list, search box and R/U keys work over Horizon's inventory (2026-10-31,
 `bridge-rei-overlay`), and over mod container screens (2026-11-01, `bridge-client2`). REI
 26.3's craftable-filter button has no icon of its own (a tinted button: none is drawn in its
@@ -1769,7 +1800,7 @@ Moving Elevators, Simple Copper Pipes, Effortless Building, Nether Chested, Easy
 Boxes, Inventory Sorter, Wizards/Spell Engine/Runes, Jewelry, Archers, Mythic Upgrades,
 Forgiving Void, Elevator Mod, Mob Lassos, Hang Glider, FallingTree, Towns and Towers,
 Repurposed Structures, Open Parties and Claims, Better Combat): 265 mods, 20179 recipes, REI
-shows them (`/recipes justhammers:iron_hammer`). Fixed since (bridge-pack3): Open Parties and
+shows them (R over a hammer). Fixed since (bridge-pack3): Open Parties and
 Claims (a mirrored connection isn't "connecting"), FrozenLib capes (no downloads), Better
 Combat / Spell Engine / Player Animation Lib on the client player, and the server tick that
 froze while the client's models reloaded (now prepared on background workers, applied by
