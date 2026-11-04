@@ -97,6 +97,10 @@ Broken, first in every area's queue below:
   First a research round (gpu chat): does the kinetic network turn and process in Java (logic)
   and only not draw, or is the logic broken too? Then Flywheel's instances drawn through the
   GPU path, as the bridge does for block-entity renderers. Big: Create is the most-asked mod.
+  Second video (Windows): Create loads (its creative tab, items, advancements); a Creative
+  Motor places and draws; **many items in the tab are blank** (Create's items drawn by custom
+  item renderers: shafts, cogs, kinetic blocks); **honey places and flows but looks like
+  lava; chocolate places nothing visible**. Kinetics not shown working.
 
 Works for them: Bedrock Reloaded (small pack), Terralith ("runs better than normal Fabric"),
 Biomes O' Plenty; 800 FPS stable on a GTX 1060 3 GB / i5-9400F / 16 GB. Reported:
