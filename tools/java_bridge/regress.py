@@ -1059,6 +1059,36 @@ CASES = {
         forbid=[r"was sent with no player's client running", r"Incomplete data", r"Missing chunk with index", r"recipe viewer failed"],
         look="diamond ore's recipes: Advanced Loot Info's block loot page among them",
     ),
+    "cloth": dict(
+        about="Cloth Config's own settings screen (its demo, from Options > Mods): its icons drawn (a hyphenated mod id's "
+              "textures carried), a list expanded, the list scrolled (screens get the frame's delta ticks, as vanilla's Gui "
+              "passes), its search box filtering; a fast mouse's moves draw at most every 40 ms",
+        mods=["cloth"], optional=["fabric-api"], scene="none", env={"HORIZON_JAVA_DEBUG": "frames"},
+        steps=['$C options mods >/dev/null; sleep 1; $C click cloth-config-v26-3 >/dev/null; sleep 5; $C state > $S/open.json',
+               # "A list of Doubles"' arrow: the list opens (1.0, 2.0, 3.0 under it).
+               '$C click-at 45 152 >/dev/null; sleep 2',
+               '$C scroll-at 200 150 -10 >/dev/null; sleep 3',
+               '$C scroll-at 200 150 40 >/dev/null; sleep 2; $C click-at 200 49 >/dev/null; sleep 0.5; '
+               '$C type color >/dev/null; sleep 2',
+               # 150 moves in ~1.5 s (drag-at moves through each point): the server keeps up.
+               'pts=$(for i in $(seq 150); do echo -n "$((100 + i)) $((120 + i % 7)) "; done); '
+               't0=$(date +%s%N); $C drag-at $pts >/dev/null; t1=$(date +%s%N); '
+               'echo "moves took $(( (t1 - t0) / 1000000 )) ms" > $S/moves.txt'],
+        checks=[check_json("open.json", ["screen"], "java-screen", "Cloth Config's settings screen opens"),
+                check_log(r"content: cloth-config: [1-9][0-9]* files", "its textures are carried (mod id cloth-config)"),
+                check_log(r"frame of me\.shedaniel\.clothconfig2\.\S+: [^\n]*cloth-config2:textures/gui/cloth_config\.png",
+                          "its icons are drawn from its own texture"),
+                check_log(r"frame of me\.shedaniel\.clothconfig2\.\S+: [^\n]*A list of Doubles@\d+[ |@\d]*1\.0@\d+[ |@\d]*2\.0@",
+                          "the list opens"),
+                check_log(r"frame of me\.shedaniel\.clothconfig2\.\S+: [^\n]*Config Demo@-\d+",
+                          "scrolled: its top went up out of the list"),
+                check_log(r"(?m)frame of me\.shedaniel\.clothconfig2\.\S+: [^\n]*text color@(?:(?!Cool Key)[^\n])*A color field(?:(?!Cool Key)[^\n])*$",
+                          "its search box filters the entries"),
+                check_file("moves.txt", r"moves took ([0-9]|[0-9]{2}|[0-9]{3}|[0-4][0-9]{3}) ms", "150 mouse moves pass in under 5 s")],
+        forbid=[r"settings screen failed", r"a screen failed to draw", r"a screen's \S+ failed"],
+        look="none-0.png: Cloth's demo with its arrows and +/- icons; none-1.png: a list open; none-2.png: scrolled; "
+             "none-3.png: searching \"color\" (the colour fields)",
+    ),
     "modsettings2": dict(
         about="Options > Mods: a mod's own settings screen and one it gives another mod (getProvidedConfigScreenFactories, as Forge Config API Port does) open with a parent and go back to the Mods page on Done; a broken \"modmenu\" entrypoint (Compressed Blocks') is skipped, as Mod Menu does",
         fixtures=["configmod"], scene="none",
