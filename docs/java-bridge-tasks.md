@@ -81,6 +81,12 @@ By area:
   Chat (its own UDP server and Java audio: research).
 - **entities/gpu**: TACZ (guns: models, animations, projectiles).
 - Better Combat and Create: in the generic-entities and gpu-13 chats.
+- **Create, tester on batch 10 (2026-11-04, for gpu-13):** Create's "fancy 3D" items (the
+  ones drawn by a custom item renderer: wrench, held tools) don't draw, in the hand or the
+  creative tab; and a placed machine (press/mixer-like, over a basin or belt) draws with wrong
+  parts: grey cylinders and a pale blue-white flat square where its moving parts' textures
+  should be (a sprite or atlas mixed up for its block-entity parts, or a partial model). Not an
+  entity problem: item renderers and block-entity parts.
 - **Breaking sounds twice** (a tester, 2026-11-04: "dirt goes brrbrr"). Mods: Biomes O' Plenty,
   TerraBlender, GlitchCore, Terralith, Geophilic, Lithostitched, FallingTree, WorldEdit, Create
   Fly, Fabric API. Likely a routed break (FallingTree and WorldEdit patch breaking) where Java's
