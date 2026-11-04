@@ -123,6 +123,10 @@ By area:
   block beside it instead of filling the tank. Horizon's own item use (bucket, also any vanilla
   item with its own use) runs before the mod block gets the click; vanilla asks the block first
   (`useItemOn` on the block, then the item's `useOn` only if the block passed).
+  Clear evidence (tester, train tracks): placing a curved track by clicking a track, then the end,
+  says Create's own "Right-click the targeted train track first": the first click never reached
+  the track item's `useOn` (the item's remembered start is never set). A good regress case: track
+  item on a placed track, then the action bar must not show that line. Same for metal brackets.
 - **Create's motor speed can't be set** (tester, batch 10: "motors lack GUI"). Create has no
   screen for it: you look at the motor and **scroll the mouse wheel** (its value box, drawn as
   a HUD overlay on the looked-at block). So: mods' injections on `MouseHandler.onScroll` while
