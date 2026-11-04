@@ -1,9 +1,4 @@
-# Java bridge: the task queue (moved)
-
-> **Moved (2026-11-04): the task queue is now the `tasks` branch**, one file per area:
-> https://github.com/iaxivers/horizon/tree/tasks (read `README.md` there for the loop). Workers
-> read and write it directly; nothing waits for a merge. This file keeps the older reports.
-
+# Java bridge: the task queue
 
 The chats working on the bridge take their next task from here, so they keep going without
 waiting for a person. The boss chat merges the branches into `java-bridge` and updates this file.

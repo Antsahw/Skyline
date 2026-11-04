@@ -32,16 +32,6 @@ pasting their final message here; patches come as attachments.
 - Workers often branch from their own previous, not yet merged branch. That's fine: merged
   commits are ancestors; only new work conflicts.
 
-## The task board (the `tasks` branch)
-
-Since 2026-11-04 tasks live on the `tasks` branch: `README.md` (the loop, rules, who claims which
-area) and `tasks/<area>.md` (queue, needs, reports). Workers tick their tasks and write reports
-there themselves, so they never wait for a merge. The boss: merges work branches into
-`java-bridge` as reports arrive (one at a time, not batches), adds tasks to the areas' files,
-answers "Needs" entries, and updates an area's "Owns" line when files move. Edit it in a separate
-worktree (`git worktree add /tmp/board origin/tasks`), never by switching the main checkout.
-Several people may run chats: each claims an area in README.md's table.
-
 ## Merging a round
 
 1. `git checkout java-bridge && git pull --ff-only`, then `git checkout -B merge-batchN`.
