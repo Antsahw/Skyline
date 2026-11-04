@@ -1431,6 +1431,8 @@ public final class HorizonServer {
         // Mod blocks' scheduled ticks and block entities, as their levels' ticks run them.
         for (ServerLevel level : new ArrayList<>(LEVELS.values())) {
             if (level.getBlockTicks() instanceof HorizonTicks<?> ticks) ticks.run(level);
+            // The mods' fluids flow here (HorizonTicks: their scheduled fluid ticks).
+            if (level.getFluidTicks() instanceof HorizonTicks<?> ticks) ticks.run(level);
         }
         phase = HorizonProfile.add("scheduled ticks", phase);
         HorizonBlockEntities.tick();
@@ -2288,6 +2290,17 @@ public final class HorizonServer {
         net.minecraft.world.InteractionResult[] result = {net.minecraft.world.InteractionResult.PASS};
         fire("ServerPlayerGameMode.useItem", () -> result[0] =
                 player.gameMode.useItem(player, level, player.getItemInHand(interaction), interaction));
+        // A mod's food or drink (Item.use → Consumable.startConsuming: Farmer's Delight's meals,
+        // its bacon) started being used on the mirrored player, which is never ticked: its
+        // updateUsingItem never counted down and nothing was eaten, while Horizon, told the
+        // click was taken, never started eating either (the beta tester's bowl meal: the
+        // animation on and on, hunger unchanged). The use is Horizon's: its consume runs the
+        // item's components as the content build carried them (food, consume effects, the
+        // bowl as use_remainder), with the mods' injections at the head of useItem already run.
+        if (handOverConsumable(player, interaction)) {
+            syncInventories();
+            return 0;
+        }
         syncInventories();
         // The client half (MultiPlayerGameMode.useItem): a mod's item opens its screen there
         // (Nature's Compass, guide books). It runs after the server's, so what the server sent
@@ -2300,6 +2313,24 @@ public final class HorizonServer {
         if (!result[0].consumesAction() && !(result[0] instanceof net.minecraft.world.InteractionResult.Fail)) return 0;
         return result[0] instanceof net.minecraft.world.InteractionResult.Success success && success.shouldSwing() ? 2 : 1;
     }
+
+    /**
+     * Whether the mirrored player is now using a mod's consumable held in {@code hand}
+     * (useItem started it): the use is stopped here and left to Horizon, which times and
+     * finishes it with the item's components. A cancelled or refused use (a mod's
+     * UseItemCallback, a full player) never started, and stays the mirror's answer.
+     */
+    private static boolean handOverConsumable(ServerPlayer player, net.minecraft.world.InteractionHand hand) {
+        if (!player.isUsingItem() || player.getUsedItemHand() != hand) return false;
+        ItemStack using = player.getUseItem();
+        if (!modItem(using) || !using.has(net.minecraft.core.component.DataComponents.CONSUMABLE)) return false;
+        if (DEBUG_USE) Natives.log("use: " + BuiltInRegistries.ITEM.getKey(using.getItem()) + " eaten by Horizon ("
+                + using.getUseDuration(player) + " ticks)");
+        player.stopUsingItem();
+        return true;
+    }
+
+    private static final boolean DEBUG_USE = String.valueOf(System.getenv("HORIZON_JAVA_DEBUG")).contains("use");
 
     /** Whether a stack is a mod's item (vanilla's are Horizon's, both halves). */
     private static boolean modItem(net.minecraft.world.item.ItemStack stack) {
@@ -2406,7 +2437,37 @@ public final class HorizonServer {
         for (int i = 0; i + 2 < positions.length; i += 3) {
             BlockPos pos = new BlockPos(positions[i], positions[i + 1], positions[i + 2]);
             fire("BlockEntity (made)", () -> HorizonBlockEntities.ensure(level, pos));
+            // A mod's fluid placed, or a neighbour of it changed (Horizon tells: the mod's
+            // liquid block carries a vanilla template, LevelAccess::foreign_fluid): its tick,
+            // as LiquidBlock.onPlace / neighborChanged / updateShape schedule it. The mirror
+            // runs it (HorizonTicks), with the fluid's own delay.
+            var fluid = level.getFluidState(pos);
+            if (modFluid(fluid.getType())) {
+                level.scheduleTick(pos, fluid.getType(), fluid.getType().getTickDelay(level));
+            }
         }
+    }
+
+    /** Whether a fluid is a mod's (its flow is the mirror's; vanilla's water and lava are Horizon's). */
+    static boolean modFluid(net.minecraft.world.level.material.Fluid fluid) {
+        return fluid != net.minecraft.world.level.material.Fluids.EMPTY
+                && !BuiltInRegistries.FLUID.getKey(fluid).getNamespace().equals("minecraft");
+    }
+
+    /**
+     * The mods' fluid blocks (a LiquidBlock of a mod's fluid: BuildCraft's oil, Create's honey):
+     * Horizon leaves their flow to the mirror, which runs the fluid's own FlowingFluid.tick.
+     */
+    public static String[] modFluidBlocks() {
+        Thread.currentThread().setContextClassLoader(HorizonServer.class.getClassLoader());
+        List<String> out = new ArrayList<>();
+        for (var block : BuiltInRegistries.BLOCK) {
+            if (block instanceof net.minecraft.world.level.block.LiquidBlock
+                    && modFluid(block.defaultBlockState().getFluidState().getType())) {
+                out.add(BuiltInRegistries.BLOCK.getKey(block).toString());
+            }
+        }
+        return out.toArray(String[]::new);
     }
 
     public static void randomTicks(String dimension, int[] positions) {

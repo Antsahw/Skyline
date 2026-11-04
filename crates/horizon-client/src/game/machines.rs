@@ -1394,26 +1394,33 @@ impl Game<'_> {
         let target = offset(key, facing);
         let remaining = if dropper {
             match self.containers().view(target, false) {
-                None => self.dispense_default(key, facing, stack),
-                Some(into) => {
-                    let one = ItemStack {
-                        count: 1,
-                        ..stack.clone()
-                    };
-                    if self
-                        .add_item(None, &into, one, Some(facing.opposite()))
-                        .is_none()
-                    {
-                        self.view_changed(&into);
-                        Some(ItemStack {
-                            count: stack.count - 1,
-                            ..stack
-                        })
-                        .filter(|s| s.count > 0)
-                    } else {
-                        Some(stack)
+                // A Java mod's block in front (its block entity lives in Java), or a mod's
+                // container entity there: Fabric Transfer API's DropperBlockMixin, at the
+                // default dispense (vanilla found no container), moves one item of a slot it
+                // draws again into the block's item storage, and nothing is dispensed.
+                None if self
+                    .java_item_storage([target.0, target.1, target.2], facing.opposite()) =>
+                {
+                    return self.java_drop(key, &view, target, facing.opposite());
+                }
+                None => {
+                    // getContainerAt: a container entity in front (a chest minecart).
+                    match self.entity_container_at([
+                        f64::from(target.0) + 0.5,
+                        f64::from(target.1) + 0.5,
+                        f64::from(target.2) + 0.5,
+                    ]) {
+                        Some(id) => {
+                            let into = stack.clone();
+                            self.with_entity_container(id, |g, into_view| {
+                                g.drop_into(into_view, facing, into)
+                            })
+                            .unwrap_or(Some(stack))
+                        }
+                        None => self.dispense_default(key, facing, stack),
                     }
                 }
+                Some(into) => self.drop_into(&into, facing, stack),
             }
         } else {
             self.dispense_item(key, facing, stack)?
@@ -1422,6 +1429,61 @@ impl Game<'_> {
             *entry = remaining;
         }
         self.container_changed(key);
+        Ok(())
+    }
+
+    /// `DropperBlock.dispenseFrom` into a container: one item of `stack` through the face
+    /// opposite `facing` (`HopperBlockEntity.addItem`); what stays in the dropper's slot.
+    fn drop_into(&mut self, into: &View, facing: Direction, stack: ItemStack) -> Option<ItemStack> {
+        let one = ItemStack {
+            count: 1,
+            ..stack.clone()
+        };
+        if self
+            .add_item(None, into, one, Some(facing.opposite()))
+            .is_none()
+        {
+            self.view_changed(into);
+            Some(ItemStack {
+                count: stack.count - 1,
+                ..stack
+            })
+            .filter(|s| s.count > 0)
+        } else {
+            Some(stack)
+        }
+    }
+
+    /// The rest of Fabric's `DropperBlockMixin.hookDispense`: `getRandomSlot` once more, and
+    /// `StorageUtil.move` of one item of that slot into the Java mod's storage at `front`.
+    fn java_drop(&mut self, key: Pos, view: &View, front: Pos, face: Direction) -> Result<()> {
+        let mut slot = None;
+        let mut odds = 1;
+        for i in 0..view.len() {
+            if self.containers().get(view, i).is_some() {
+                if self.world.random.next_int_bound(odds).unwrap_or(1) == 0 {
+                    slot = Some(i);
+                }
+                odds += 1;
+            }
+        }
+        let Some(slot) = slot else {
+            return Ok(());
+        };
+        let Some(stack) = self.containers().get(view, slot).cloned() else {
+            return Ok(());
+        };
+        let moved = self.java_hopper_insert([front.0, front.1, front.2], face, &[Some(&stack)]);
+        if moved == Some(Some(0)) {
+            if let Some(entry) = self.slot_mut_at(view, slot) {
+                *entry = Some(ItemStack {
+                    count: stack.count - 1,
+                    ..stack
+                })
+                .filter(|s| s.count > 0);
+            }
+            self.container_changed(key);
+        }
         Ok(())
     }
 }

@@ -328,6 +328,17 @@ pub trait LevelAccess {
     fn allow_spread(&self, _kind: Spread, _from: BlockPos, _to: BlockPos) -> bool {
         true
     }
+    /// Whether `state` holds a fluid another engine runs: a Java mod's fluid (its block is
+    /// carried with water's or lava's template, but it flows by its own code, in the mods'
+    /// mirror). Horizon's fluid ticks, lava's random ticks and conversions leave it, and a
+    /// fluid tick it would schedule there is told to [`Self::foreign_fluid_changed`]
+    /// instead. The default: none.
+    fn foreign_fluid(&self, _state: BlockStateId) -> bool {
+        false
+    }
+    /// A foreign fluid at `pos` was placed or a neighbour of it changed: where vanilla's
+    /// `LiquidBlock` schedules its fluid tick, the engine running it does.
+    fn foreign_fluid_changed(&mut self, _pos: BlockPos) {}
     fn allow_fluid_level_change(
         &self,
         _pos: BlockPos,
