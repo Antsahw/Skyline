@@ -178,6 +178,9 @@ public final class HorizonClient {
         }
         // Screens click through the game mode (handleContainerInput): GameModeClientMixin.
         set(Minecraft.class, mc, "gameMode", Natives.allocate(net.minecraft.client.multiplayer.MultiPlayerGameMode.class));
+        // Its Minecraft, as its constructor keeps it (ensureHasSentCarriedItem reads the player:
+        // TACZ's gun draw calls it).
+        set(net.minecraft.client.multiplayer.MultiPlayerGameMode.class, mc.gameMode, "minecraft", mc);
         // Text boxes' typing area, for a window it has none of (TextInputManagerMixin).
         set(Minecraft.class, mc, "textInputManager", Natives.allocate(com.mojang.blaze3d.platform.TextInputManager.class));
         // Buttons click with a sound: a manager without an engine (SoundManagerMixin).
@@ -612,6 +615,19 @@ public final class HorizonClient {
         }
     }
 
+    /** Sets whether the mouse is grabbed (the window active too, once): what it was. */
+    private static boolean grabMouse(boolean grabbed) {
+        try {
+            if (minecraft.mouseHandler == null) mouseAt(0, 0);
+            boolean was = minecraft.mouseHandler.isMouseGrabbed();
+            set(net.minecraft.client.MouseHandler.class, minecraft.mouseHandler, "mouseGrabbed", grabbed);
+            if (!minecraft.isWindowActive()) set(com.mojang.blaze3d.platform.Window.class, minecraft.getWindow(), "focused", true);
+            return was;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
     /**
      * The mouse, at a GUI position (screens that read it themselves rather than from their
      * arguments: REI's recipe view), in the window's pixels (its scale is 3).
@@ -731,6 +747,12 @@ public final class HorizonClient {
             var client = clientLevel(player.level());
             if (client != null) set(net.minecraft.world.entity.Entity.class, local, "level", client);
             try {
+                // The initializers of mixins on the client player's own classes (LocalPlayer,
+                // AbstractClientPlayer: the server player has none of theirs), first, as its
+                // constructor runs them: TACZ's gun state objects take each other and the player.
+                for (Class<?> c = local.getClass(); c != net.minecraft.world.entity.player.Player.class; c = c.getSuperclass()) {
+                    HorizonMixinInit.run(local, c);
+                }
                 makeModFields(local, true);
                 copyModFields(player, local);
                 makeModFields(local, false);
@@ -1108,6 +1130,10 @@ public final class HorizonClient {
         var screen = SCREENS.get(player.getUUID());
         if (screen == null) screen = OVERLAYS.get(player.getUUID());
         if (screen != null) set(net.minecraft.client.gui.Gui.class, minecraft.gui, "screen", screen);
+        // Their window has the focus and, with no screen open, the mouse (MouseHandler.grabMouse
+        // as a screen closes): mods check both before acting on input (TACZ's guns fire only
+        // "in game": no screen, mouse grabbed, window active).
+        boolean grabbedBefore = grabMouse(minecraft.gui.screen() == null);
         // REI's searches started in this call run at its end, with this player's settings.
         var searches = HorizonRecipeViewer.queueSearches();
         try {
@@ -1121,6 +1147,7 @@ public final class HorizonClient {
             if (before != null) HorizonClientState.load(before.getUUID());
             set(Minecraft.class, minecraft, "player", before);
             set(net.minecraft.client.gui.Gui.class, minecraft.gui, "screen", screenBefore);
+            grabMouse(grabbedBefore);
             minecraft.level = levelBefore;
             set(net.minecraft.world.entity.Entity.class, local, "level", localLevel);
         }
@@ -1589,6 +1616,10 @@ public final class HorizonClient {
             var atlases = new net.minecraft.client.resources.model.sprite.AtlasManager(minecraft.getTextureManager(), 0);
             var skins = (net.minecraft.client.renderer.PlayerSkinRenderCache) Natives.allocate(net.minecraft.client.renderer.PlayerSkinRenderCache.class);
             var models = new net.minecraft.client.resources.model.ModelManager(colors, atlases, skins);
+            // Minecraft's constructor makes its model manager at once, its models filled by the
+            // reload: mods' client start reads it (TACZ's item renderers keep
+            // getEntityModels(), a supplier over it). Loaded or not: modelsLoaded().
+            if (minecraft.getModelManager() == null) set(Minecraft.class, minecraft, "modelManager", models);
             // The real atlases beside the headless GUI one, from the start: mods ask the
             // client's atlas manager for them as they stitch (Xaero's, for the blocks').
             Class<?> owner = net.minecraft.client.resources.model.sprite.AtlasManager.class;
@@ -1701,6 +1732,11 @@ public final class HorizonClient {
                     }
                     return result;
                 });
+    }
+
+    /** Whether the client's models finished loading (its model manager is there from the start). */
+    static boolean modelsLoaded() {
+        return modelsLoaded;
     }
 
     /** The models' reload under way: reload, model manager, atlas manager, start time, skins. */
@@ -2087,16 +2123,30 @@ public final class HorizonClient {
             Natives.log("Horizon's client: the mods' resources could not be loaded: " + t);
             return;
         }
-        var manager = new net.minecraft.server.packs.resources.MultiPackResourceManager(type, packs);
         // The resource pack list (Minecraft.getResourcePackRepository: Xaero's World Map hashes the
-        // selected ones): none chosen, as a new game's.
+        // selected ones): none of the player's chosen, as a new game's (Horizon draws with its
+        // own). The mods' injections at its first reload in Minecraft's constructor add their
+        // own sources to it (TACZ's gun packs, with the guns' models, textures and animations):
+        // their packs go over vanilla's and the mods' jars, as a required pack at the top does.
         try {
             var repository = new net.minecraft.server.packs.repository.PackRepository();
-            repository.reload();
             set(Minecraft.class, minecraft, "resourcePackRepository", repository);
+            HorizonHooks.fireClient(minecraft, HorizonHooks.START_PACKS);
+            repository.reload();
+            int added = 0;
+            for (var pack : repository.getAvailablePacks()) {
+                try {
+                    pack.open().forEach(packs::add);
+                    added++;
+                } catch (Throwable t) {
+                    Natives.log("Horizon's client: a mod's resource pack " + pack.getId() + " couldn't be opened: " + t);
+                }
+            }
+            if (added > 0) Natives.log("Horizon's client: " + added + " resource pack(s) the mods added: " + repository.getAvailableIds());
         } catch (Throwable t) {
             Natives.log("Horizon's client: no resource pack repository: " + t);
         }
+        var manager = new net.minecraft.server.packs.resources.MultiPackResourceManager(type, packs);
         // The client's resource manager (Minecraft.getResourceManager: Xaero reads its radar
         // icons' definitions there), over the same packs.
         try {
@@ -2212,8 +2262,13 @@ public final class HorizonClient {
                     if (HUD_FAILURES.merge("hands", 1, Integer::sum) == 1) Natives.log("Horizon's client: the hands' tick failed: " + t);
                 }
             }
+            // LocalPlayer.tick's head and end around it, the client mixins' (TACZ releases its
+            // guns' client state lock and follows the server's draw and reload there).
+            HorizonHooks.fireMerged(local, net.minecraft.client.player.LocalPlayer.class, "tick", "HEAD");
             HorizonHooks.fire(local, net.minecraft.world.entity.player.Player.class, "tick", "()V", "HEAD", new Object[0], null, true);
+            HorizonHooks.fire(local, net.minecraft.world.entity.player.Player.class, "tick", "()V", "RETURN", new Object[0], null, true);
             HorizonHooks.fire(local, net.minecraft.world.entity.player.Player.class, "tick", "()V", "TAIL", new Object[0], null, true);
+            HorizonHooks.fireMerged(local, net.minecraft.client.player.LocalPlayer.class, "tick", "RETURN");
         }
         HorizonServer.fireEach("ClientTickEvents.END_CLIENT_TICK",
                 net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents.END_CLIENT_TICK, l -> l.onEndTick(minecraft));
@@ -2248,11 +2303,20 @@ public final class HorizonClient {
         var out = new com.google.gson.JsonArray();
         java.util.Set<Integer> seen = new java.util.TreeSet<>();
         if (!keyPressHandlers().isEmpty() || !sdlKeyHandlers.isEmpty()) out.add(-1);
+        // Mouse buttons as -100 - button: the mods' KeyMappings set to one (TACZ's shoot and aim
+        // on the left and right buttons), and every button when mods handle them themselves
+        // (MouseHandler.onButton's injections).
+        if (!mouseButtonHandlers().isEmpty()) {
+            // (SDL's buttons, as 26.3's mouse keys are: left 1, middle 2, right 3, back 4, forward 5.)
+            for (int b = 1; b <= 5; b++) if (seen.add(-100 - b)) out.add(-100 - b);
+        }
         for (KeyMapping mapping : modKeys()) {
             var key = key(mapping);
-            if (key != null && key.getType() == com.mojang.blaze3d.platform.InputConstants.Type.KEYBOARD
-                    && key.getValue() >= 0 && seen.add(key.getValue())) {
+            if (key == null || key.getValue() < 0) continue;
+            if (key.getType() == com.mojang.blaze3d.platform.InputConstants.Type.KEYBOARD && seen.add(key.getValue())) {
                 out.add(key.getValue());
+            } else if (key.getType() == com.mojang.blaze3d.platform.InputConstants.Type.MOUSE && seen.add(-100 - key.getValue())) {
+                out.add(-100 - key.getValue());
             }
         }
         return out.toString();
@@ -2271,17 +2335,61 @@ public final class HorizonClient {
      * KeyMapping.set, and click on a press), kept for that player's client tick.
      */
     static void bind(java.util.UUID player, int scancode, boolean down) {
+        bind(player, com.mojang.blaze3d.platform.InputConstants.Type.KEYBOARD.getOrCreate(scancode), down);
+    }
+
+    /** A mouse button of a player's game while playing (MouseHandler.onButton: KeyMapping.set and click). */
+    static void bindMouse(java.util.UUID player, int button, boolean down) {
+        bind(player, com.mojang.blaze3d.platform.InputConstants.Type.MOUSE.getOrCreate(button), down);
+    }
+
+    private static void bind(java.util.UUID player, com.mojang.blaze3d.platform.InputConstants.Key pressed, boolean down) {
         Keys keys = KEYS.computeIfAbsent(player, p -> new Keys(
                 java.util.concurrent.ConcurrentHashMap.newKeySet(), new java.util.concurrent.ConcurrentHashMap<>()));
-        var pressed = com.mojang.blaze3d.platform.InputConstants.Type.KEYBOARD.getOrCreate(scancode);
         for (KeyMapping mapping : modKeys()) {
             if (!pressed.equals(key(mapping))) continue;
+            if (DEBUG_INPUT) Natives.log("bind " + pressed.getName() + (down ? " down" : " up") + ": " + mapping.getName());
             if (down) {
                 keys.down().add(mapping);
                 keys.clicks().merge(mapping, 1, Integer::sum);
             } else {
                 keys.down().remove(mapping);
             }
+        }
+    }
+
+    private static java.util.List<java.lang.reflect.Method> mouseButtonHandlers;
+
+    /** The mods' handlers merged into MouseHandler.onButton, at whatever point (TACZ's input events). */
+    static synchronized java.util.List<java.lang.reflect.Method> mouseButtonHandlers() {
+        if (mouseButtonHandlers != null) return mouseButtonHandlers;
+        try {
+            mouseButtonHandlers = HorizonHooks.injected(net.minecraft.client.MouseHandler.class, "onButton",
+                    long.class, net.minecraft.client.input.MouseButtonInfo.class, int.class);
+        } catch (Throwable t) {
+            Natives.log("Horizon's client: the mods' mouse handlers can't be read: " + t);
+            mouseButtonHandlers = java.util.List.of();
+        }
+        if (!mouseButtonHandlers.isEmpty()) {
+            Natives.log("Horizon's client: " + mouseButtonHandlers.size() + " mod mouse handler(s) get every button while playing");
+        }
+        return mouseButtonHandlers;
+    }
+
+    /**
+     * A mouse button of a player's game while playing, as MouseHandler.onButton gets it: the
+     * mods' injections there (press: action 1, release: 0), as that player's client.
+     */
+    static void mousePress(java.util.UUID id, int button, int mods, boolean down) {
+        var handlers = mouseButtonHandlers();
+        var player = HorizonServer.player(id);
+        if (handlers.isEmpty() || player == null || minecraft == null) return;
+        long window = HorizonScreenEvents.windowHandle(minecraft);
+        try {
+            as(player, () -> withKeys(player.getUUID(), () -> fireKey(handlers, minecraft.mouseHandler, "onButton", window,
+                    new net.minecraft.client.input.MouseButtonInfo(button, mods), down ? 1 : 0)));
+        } catch (Throwable t) {
+            Natives.log("Horizon's client: a mouse button failed: " + t);
         }
     }
 
@@ -3075,6 +3183,13 @@ public final class HorizonClient {
         java.util.UUID id = java.util.UUID.fromString(uuid);
         var in = com.google.gson.JsonParser.parseString(json).getAsJsonObject();
         String kind = in.get("kind").getAsString();
+        if (kind.equals("bind") && in.has("mouse")) {
+            int button = in.get("mouse").getAsInt();
+            boolean down = in.get("down").getAsBoolean();
+            bindMouse(id, button, down);
+            mousePress(id, button, in.has("mods") ? in.get("mods").getAsInt() : 0, down);
+            return;
+        }
         if (kind.equals("bind")) {
             int key = in.get("key").getAsInt();
             boolean down = in.get("down").getAsBoolean();

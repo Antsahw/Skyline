@@ -321,7 +321,7 @@ public final class HorizonEntityRender {
             if (FAILED.add("whole " + state.getBlock())) Natives.log("Java mods: " + state + "'s model in a world couldn't be read: " + t);
         }
         // Not kept until the models are loaded (the first ticks).
-        if (net.minecraft.client.Minecraft.getInstance().getModelManager() != null) WHOLE.put(state, result);
+        if (HorizonClient.modelsLoaded()) WHOLE.put(state, result);
         return result;
     }
 

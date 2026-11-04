@@ -1196,6 +1196,47 @@ public final class HorizonServer {
                             double[] motion, int[] modes, float[] health, float[] food, int[] permissions,
                             int[] kinds, String[] who, String[] texts, int[] positions,
                             String[] inventories) {
+        long started = System.nanoTime();
+        try {
+            tickBody(tick, dedicated, world, ids, names, dimensions, motion, modes, health, food, permissions, kinds, who,
+                    texts, positions, inventories);
+        } finally {
+            tickTime(tick, System.nanoTime() - started);
+        }
+    }
+
+    /**
+     * MinecraftServer.tickServer's record of its ticks' times (tickTimesNanos, the average and
+     * the smoothed time), which the mirror's server never ran: this tick's Java work. Mods read
+     * them (TACZ's shots look back by the average tick time; its array was null).
+     */
+    private static void tickTime(long tick, long nanos) {
+        MinecraftServer server = HorizonServer.server;
+        if (server == null) return;
+        try {
+            long[] times = server.getTickTimesNanos();
+            if (times == null) {
+                times = new long[100];
+                java.util.Arrays.fill(times, 50_000_000L);
+                HorizonClient.set(MinecraftServer.class, server, "tickTimesNanos", times);
+                HorizonClient.set(MinecraftServer.class, server, "aggregatedTickTimesNanos", 50_000_000L * times.length);
+                HorizonClient.set(MinecraftServer.class, server, "smoothedTickTimeMillis", 50.0F);
+            }
+            int i = (int) Math.floorMod(tick, (long) times.length);
+            long sum = (long) HorizonClient.field(MinecraftServer.class, server, "aggregatedTickTimesNanos") - times[i] + nanos;
+            times[i] = nanos;
+            HorizonClient.set(MinecraftServer.class, server, "aggregatedTickTimesNanos", sum);
+            float smoothed = (float) HorizonClient.field(MinecraftServer.class, server, "smoothedTickTimeMillis");
+            HorizonClient.set(MinecraftServer.class, server, "smoothedTickTimeMillis", smoothed * 0.8F + nanos / 1_000_000.0F * 0.19999999F);
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            // Left as it was.
+        }
+    }
+
+    private static void tickBody(long tick, boolean dedicated, String world, String[] ids, String[] names, String[] dimensions,
+                                 double[] motion, int[] modes, float[] health, float[] food, int[] permissions,
+                                 int[] kinds, String[] who, String[] texts, int[] positions,
+                                 String[] inventories) {
         Thread.currentThread().setContextClassLoader(HorizonServer.class.getClassLoader());
         serverThread = Thread.currentThread();
         try {
@@ -1427,10 +1468,18 @@ public final class HorizonServer {
         HorizonFunctions.tick(server, server.getWorldData().overworldData().getGameTime());
         phase = HorizonProfile.add("functions", phase);
         // Each player's tick (ServerPlayer.tick, Player.tick from doTick), as vanilla's
-        // levels and connections run them within the server's tick.
+        // levels and connections run them within the server's tick, with the ticks Player.tick
+        // runs inside it (super.tick(): LivingEntity.tick, then Entity.tick) nested as they are:
+        // TACZ ticks a player's guns (drawing, cool-downs, reloads) at LivingEntity.tick's end.
         for (ServerPlayer player : new ArrayList<>(PLAYERS)) {
             hook(player, ServerPlayer.class, "tick", "()V", "HEAD", NO_ARGUMENTS);
             hook(player, net.minecraft.world.entity.player.Player.class, "tick", "()V", "HEAD", NO_ARGUMENTS);
+            hook(player, net.minecraft.world.entity.LivingEntity.class, "tick", "()V", "HEAD", NO_ARGUMENTS);
+            hook(player, net.minecraft.world.entity.Entity.class, "tick", "()V", "HEAD", NO_ARGUMENTS);
+            hook(player, net.minecraft.world.entity.Entity.class, "tick", "()V", "RETURN", NO_ARGUMENTS);
+            hook(player, net.minecraft.world.entity.Entity.class, "tick", "()V", "TAIL", NO_ARGUMENTS);
+            hook(player, net.minecraft.world.entity.LivingEntity.class, "tick", "()V", "RETURN", NO_ARGUMENTS);
+            hook(player, net.minecraft.world.entity.LivingEntity.class, "tick", "()V", "TAIL", NO_ARGUMENTS);
             hook(player, net.minecraft.world.entity.player.Player.class, "tick", "()V", "RETURN", NO_ARGUMENTS);
             hook(player, net.minecraft.world.entity.player.Player.class, "tick", "()V", "TAIL", NO_ARGUMENTS);
             hook(player, ServerPlayer.class, "tick", "()V", "RETURN", NO_ARGUMENTS);

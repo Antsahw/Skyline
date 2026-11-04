@@ -50,7 +50,7 @@ public final class HorizonHooks {
     private static final Map<String, Integer> FAILURES = new ConcurrentHashMap<>();
     private static boolean scanned;
     /** HORIZON_JAVA_DEBUG=hooks: each firing is logged (ticks aside). */
-    private static final boolean DEBUG = String.valueOf(System.getenv("HORIZON_JAVA_DEBUG")).contains("hooks");
+    static final boolean DEBUG = String.valueOf(System.getenv("HORIZON_JAVA_DEBUG")).contains("hooks");
 
     /** What a firing did: whether a handler cancelled, and the return value it left. */
     public record Result(boolean cancelled, Object returnValue) {
@@ -433,6 +433,12 @@ public final class HorizonHooks {
     public static final String START_OPTIONS = "<start at the options>";
     /** Minecraft's constructor's end: after START_OPTIONS (FabricBoot runs both then). */
     public static final String START_END = "<start at its end>";
+    /**
+     * Minecraft's constructor at its resource pack list's first reload (PackRepository.reload):
+     * mods add their own pack sources there (TACZ's gun packs); HorizonClient's client
+     * resources fire it on their repository before reloading it.
+     */
+    public static final String START_PACKS = "<start at the packs' reload>";
 
     /** START_BEFORE or START_AFTER for an @At at Minecraft.<init>'s first Thread.currentThread(); else null. */
     private static String startPoint(Object at) {
@@ -451,6 +457,7 @@ public final class HorizonHooks {
         // CLIENT_STARTED listener there, which starts it in a world): before the client's first
         // reload and CLIENT_STARTED, as in a real client.
         if (target.startsWith("Lnet/minecraft/client/ResourceLoadStateTracker;startReload(")) return START_END;
+        if (target.startsWith("Lnet/minecraft/server/packs/repository/PackRepository;reload(")) return START_PACKS;
         if (!"Ljava/lang/Thread;currentThread()Ljava/lang/Thread;".equals(get(node, "target"))) return null;
         Object ordinal = get(node, "ordinal");
         if (ordinal instanceof Integer o && o != 0) return null;
@@ -514,7 +521,7 @@ public final class HorizonHooks {
                                         || (params.length == 1 && CallbackInfo.class.isAssignableFrom(params[0]))
                                 // The constructor's: its GameConfig may be taken (null here).
                                 : method.equals(START_AFTER) || method.equals(START_BEFORE) || method.equals(START_OPTIONS)
-                                        || method.equals(START_END)
+                                        || method.equals(START_END) || method.equals(START_PACKS)
                                         ? (params.length == 1 && CallbackInfo.class.isAssignableFrom(params[0]))
                                                 || (params.length == 2 && params[0] == net.minecraft.client.main.GameConfig.class
                                                         && CallbackInfo.class.isAssignableFrom(params[1]))
@@ -924,6 +931,7 @@ public final class HorizonHooks {
             if (get(a, "targets") instanceof List<?> l) for (Object t : l) targets.add(((String) t).replace('.', '/'));
         }
         if (targets.isEmpty()) return;
+        HorizonMixinInit.read(node, targets);
         String mixin = node.name.replace('/', '.');
         for (MethodNode m : node.methods) {
             for (AnnotationNode a : annotations(m.invisibleAnnotations, m.visibleAnnotations)) {
@@ -968,6 +976,8 @@ public final class HorizonHooks {
     public static void initFields(Object self) {
         scan();
         for (Class<?> c = self.getClass(); c != null && c != Object.class; c = c.getSuperclass()) {
+            // The mixins' initializers themselves, where their code can be copied.
+            HorizonMixinInit.run(self, c);
             List<String[]> inits = FIELD_INITS.get(c.getName().replace('.', '/'));
             if (inits == null) continue;
             for (String[] init : inits) {
