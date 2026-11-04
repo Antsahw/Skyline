@@ -58,6 +58,24 @@ both are fixed. The user's decision: **players play only through Horizon's launc
    it in the report. A mod that stops working is listed in java-bridge.md's status, not patched.
    Its regress cases stay and show what's broken.
 
+### Testers' Trello (2026-11-04, https://trello.com/b/2uhi4jkj)
+
+Works: JEI. Kinda: Farmer's Delight. Doesn't work (testers' builds may predate batch 10: ask
+them to pull first): Create Fly, TACZ Refabricated, Simple Voice Chat, Chunky, Better Combat,
+Chat Heads, Cloth Config, Flashback, ReplayMod. Also seen: "A Java mod failed in the HUD:
+NullPointerException ... ClientWaypointManager.hasWaypoints()" (client-12/gpu-12 gave the
+connection a waypoint manager: check it's set on every client connection, LAN guest and
+server too). Litematica untested by them.
+By area:
+- **client (UI mods, `bridge-client-13`)**: Cloth Config's screens (a library many mods use for
+  settings: first), Chat Heads (draws heads in chat: Horizon's own chat), ReplayMod and
+  Flashback (record packets and replay them with vanilla's renderer: research what's possible;
+  likely a "not supported" line like Sodium's if not), Litematica's overlay, the waypoint NPE.
+- **server/mixins**: Chunky (pregeneration through the server's chunk system), Simple Voice
+  Chat (its own UDP server and Java audio: research).
+- **entities/gpu**: TACZ (guns: models, animations, projectiles).
+- Better Combat and Create: in the generic-entities and gpu-13 chats.
+
 ### Later: upstream's launcher redesign (noted 2026-11-04)
 
 Upstream redesigned the launcher (the "glass" views). Batch 10 only added the Java mods tab to
