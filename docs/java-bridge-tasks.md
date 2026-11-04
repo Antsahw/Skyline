@@ -107,6 +107,10 @@ By area:
   Update: right-click does nothing **and thrown items don't go in either** (the depot takes
   item entities that land on it): so the item never gets in, not only a drawing gap. Mixins:
   the use on a mod block with an item in hand, and a mod block entity picking up item entities.
+  Same root, seen with Create's fluid tank: a water bucket used on the tank places a water
+  block beside it instead of filling the tank. Horizon's own item use (bucket, also any vanilla
+  item with its own use) runs before the mod block gets the click; vanilla asks the block first
+  (`useItemOn` on the block, then the item's `useOn` only if the block passed).
 - **Create's motor speed can't be set** (tester, batch 10: "motors lack GUI"). Create has no
   screen for it: you look at the motor and **scroll the mouse wheel** (its value box, drawn as
   a HUD overlay on the looked-at block). So: mods' injections on `MouseHandler.onScroll` while
