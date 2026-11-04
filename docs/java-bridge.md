@@ -2075,6 +2075,18 @@ without Java (`horizon_jvm::exit` waits for `BRIDGE`), so no archive of half the
   each mod living entity is listed as the vanilla type it is taken for
   (`HorizonNeighbours.like`) with its own id, box and health. A hit on one goes to the mirror
   (`java_mob_hits_entity`).
+- **A Java use's blocks are set before the click is answered.** A mod's `BlockItem.useOn`
+  places its block in the mirror; the `SetBlock` comes back as an action. It used to wait for
+  the next tick, while the click's correction (`UseItemOn`'s two `BlockUpdate`s) and its
+  acknowledgement went out at once: the player's game, which had predicted the block, got air
+  and kept it (regress `placed` polls the block 40 times after the click: it read air once,
+  then the stove). `java_use_block`/`java_use_item` now apply the level's writes at once
+  (`apply_java_use_writes`), as vanilla's `useItemOn` sets the block in the handler.
+- **Every state's mesh and light, offline:** `cargo build --profile fast -p
+  horizon-client-render --example state_mesh_scan`, then `target/fast/examples/state_mesh_scan
+  <content root>` (a run's `.horizon-cache/mod-content`) meshes and lights each state alone on
+  stone and prints its quads, and any panic (a worker's panic loses the job silently). The
+  81-jar pack: 110,458 states, no panic, every mod block with a model meshes (~1 min).
 - **Writes into unloaded chunks wait.** Vanilla's `setBlock` loads the chunk; Horizon's refused
   it. A mod's write into a chunk Horizon hasn't loaded now waits (both sides) until it loads.
 - **Horizon's projectiles on mod mobs.** Arrows, tridents, snowballs, fireballs meet the mods'
