@@ -31,6 +31,13 @@ impl ResolvedCuboidModel {
     pub fn uses_item_generator(&self) -> bool {
         self.generated
     }
+    /// The geometry's OBJ faces (a Java mod's OBJ model), read already.
+    pub fn obj_quads(&self) -> &[crate::obj::ObjQuad] {
+        self.geometry
+            .as_ref()
+            .and_then(|m| m.obj.as_ref())
+            .map_or(&[], |o| &o.quads)
+    }
     pub fn elements(&self) -> &[Option<Element>] {
         self.geometry
             .as_ref()
@@ -74,6 +81,7 @@ impl ModelLibrary {
             )]),
             elements: None,
             display: None,
+            obj: None,
         }
     }
     pub fn new(models: BTreeMap<String, CuboidModel>) -> Result<Self> {
@@ -302,6 +310,7 @@ pub fn missing_model() -> CuboidModel {
         display: Some(ItemTransforms {
             contexts: std::array::from_fn(|_| DisplayTransform::Inherit),
         }),
+        obj: None,
         textures: BTreeMap::from([
             (
                 "particle".to_owned(),

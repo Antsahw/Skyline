@@ -86,12 +86,15 @@ Broken, first in every area's queue below:
   the bowl back and applies its effects) isn't reached or applied for a Java mod's food
   (`consume.rs`, the mirror's use). Entities/mixins chat. New regress case: eat an FD meal and
   a plain FD food; check hunger, the stack and the bowl.
-- **(2026-11-04, same tester, Windows, screenshot) Mods' fluids don't work**: a honey bucket
+- **(2026-11-04, same tester, Windows, screenshot) Mods' fluids don't work** (drawing done in
+  gpu-12: their own sprites; flow is still lava's: mixins): a honey bucket
   (Create) places a fluid drawn as lava. Mods' fluids need their textures/tint (Fabric's
   `FluidRenderHandlerRegistry`) in Horizon's fluid mesher, and their flow (Horizon's fluid
   ticks are Rust: a mod `FlowingFluid` must tick in the mirror or be ported per fluid). gpu
   chat (drawing) + mixins (flow). Test with Create's honey and chocolate, and a plain fluid mod.
-- **(same) Create ("Create Fly", unofficial 26.3 port) is broken**: kinetic machines don't
+- **(same) Create ("Create Fly", unofficial 26.3 port) is broken** (gpu-12: Flywheel readied,
+  kinetic parts draw and turn, OBJ items draw, both NPEs fixed; left: the wrench's item,
+  contraptions untested): kinetic machines don't
   work. Create draws its shafts, cogs and contraptions with **Flywheel** (instanced rendering
   on top of vanilla's renderer, which Horizon doesn't run) and its contraptions are entities.
   First a research round (gpu chat): does the kinetic network turn and process in Java (logic)
@@ -130,7 +133,8 @@ Biomes O' Plenty; 800 FPS stable on a GTX 1060 3 GB / i5-9400F / 16 GB. Reported
   the mods' data the way a data pack overrides them (worldgen; the same for any data pack).
 - ~~**JEI doesn't appear**~~ done (client-11, 2026-11-04): its list, search and recipe screens
   over Horizon's inventory, per player.
-- **3D Skin Layers** doesn't draw (a player-model renderer mod: draws in the world; gpu/entities).
+- ~~**3D Skin Layers** doesn't draw~~ (gpu-12: its meshes drawn; Horizon's flat layers stay
+  under them).
 - Asked: macOS (untested); native Rust mods beside Java mods (untested; the launcher's native build has no
   `java-mods` feature: add it in the fork, then test one native mod with the test pack).
 
@@ -1102,3 +1106,23 @@ reload listeners (registered from `Minecraft.<init>` at a point the bridge doesn
 fluids, contraptions.
 Test: jar into `~/hz-test/jars`, `regress.py --java-only --jars ~/hz-test/jars create kinetic`.
 
+### gpu 12 (second chat): Create with its jar, OBJ models, mods' fluids, 3D Skin Layers (2026-11-04, branch `bridge-gpu-12`; Claude for iaxivers)
+
+Jars: CurseForge `create-fly-unofficial-port` file 9321329, Modrinth `3dskinlayers` 1.11.4,
+Fabric API 0.165.2. 2 cores, llvmpipe.
+Two chats took gpu 12; this one had Create's jar (CurseForge's edge CDN served it) and was
+rebased on the first's commit (its Flywheel hook firing and both NPE fixes are kept; this
+chat's own `HorizonFlywheel` and debug flag were dropped for them).
+- **Create with its jar**: the kinetic network turns in Java (16 rpm through motor, shafts,
+  cog); shafts, cogs and the motor's shaft draw and turn, in their sprites' UVs (atlas meshes
+  split by sprite); the still chunk models under them are gone (states "drawn whole", Rust
+  mesher). OBJ models (`horizon-assets/src/obj.rs`) fix the blank cogwheel, large cogwheel and
+  water wheel items. Regress `createwhole`. Not done: the wrench item (custom renderer only),
+  contraptions, other machines untested.
+- **Mods' fluids**: honey and chocolate drawn with their own sprites, not as lava (Java's baked
+  fluid models → mesher). Flow is still lava's (Horizon's ticks: mixins). Single player and LAN
+  host only for now. Regress `fluids`.
+- **3D Skin Layers**: its voxel meshes are drawn on players (146-164 quads on default skins,
+  front/back checked). Horizon's flat outer layers still draw under them. Regress `skinlayers`.
+Test: `regress.py --jars <folder with create-fly*.jar, skinlayers3d*, fabric-api*> create createwhole fluids skinlayers kinetic`;
+in-game: a creative motor with shafts and cogs, a honey bucket, third person with 3D Skin Layers.

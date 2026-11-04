@@ -601,6 +601,48 @@ gets SPIR-V, vertex layouts and uniform lists.
   uniforms, the target's lit pixels after it); `HORIZON_JAVA_GPU_DUMP=dir` writes each
   pipeline's SPIR-V, which `HORIZON_SPV_DIR=dir cargo test -p horizon-jvm gpu` reads back.
 
+## Create, Flywheel, OBJ models, mods' fluids, 3D Skin Layers (bridge-gpu-12)
+
+- **Flywheel** (its model helpers made by the mods' own injections at the level renderer's
+  reload: see the 26.3 facts, `HorizonHooks.fireMerged`). Create's renderers then draw through
+  `SuperByteBuffer`s: custom geometry in the block atlas's UVs.
+- **Custom geometry in an atlas's UVs** (`HorizonEntityRender.atlasMesh`): a mesh whose texture
+  is `ns:textures/atlas/<name>.png` is split by sprite (the sprite holding each quad's middle),
+  UVs made the sprite's own, as block models' quads already were.
+- **Blocks their renderer draws whole.** Create wraps its shafts' and cogwheels' block models
+  (`BracketedKineticBlockModel`: in a world only the brackets a block entity has; 6 and 130
+  quads outside one). Horizon drew the still model under the turning one. A block entity entry
+  is marked `whole` when its state's model has a `addPartsWithInfo(BlockAndTintGetter, BlockPos,
+  BlockState, RandomSource, List)` that gives nothing at its place (the mirror's client level);
+  the player's game then leaves that state's chunk model out
+  (`mesher::hide_model_drawn_by_block_entity`, all sections meshed again once).
+- **OBJ models** (`horizon-assets/src/obj.rs`): NeoForge's `"loader": "neoforge:obj"` (also
+  `forge:obj`), which Create's cogs, wheels and many kinetic parts use (100 models): the `.obj`
+  and its `.mtl` are read with the model (`model_library::with_obj`), faces become quads
+  (triangles repeat the last corner), `map_Kd #slot` names the model's texture slot, `flip_v`.
+  The OBJ is the model's geometry (no elements). Fixes the blank cogwheel, large cogwheel and
+  water wheel items. Still blank: items drawn only by a custom renderer (Create's wrench).
+- **The kinetic network runs in Java** (regress `create`: motor, shafts and cog at 16 rpm in
+  `HORIZON_JAVA_DEBUG=ber`, which also logs once per state what its renderer drew, its client
+  block model's quads and whether its renderer draws the block whole; regress `createwhole`).
+- **Mods' fluids**: a mod `LiquidBlock` is carried with `minecraft:lava` as its template, so
+  Horizon flowed it as lava and drew nothing for its own blocks (the mesher's fluids were water
+  and lava by name; the lava seen was Horizon's flow). Now the mesher gives a mod `LiquidBlock`'s
+  states (by class in the facts) a lava-family fluid state at its `level`, and the client's baked
+  `FluidStateModelSet` (vanilla's bake, with Fabric's fluid registry and Create's mixin) gives
+  each mod fluid its still and flowing sprites, tint and layer (`HorizonFluids` →
+  `Natives.modFluids` → `java_mod_fluids` → `mesher::set_mod_fluids`). The terrain atlas loads a
+  mod block's `<ns>:block|fluid/<name>_still|_flow` when the files exist (no model names them).
+  Flow is still lava's (Horizon's fluid ticks; mixins chat). Only where the process runs the
+  mods (single player, a LAN host): a dedicated server's players don't get the looks yet.
+- **3D Skin Layers**: it gives the PlayerModel's outer parts meshes in `setupAnim` (within its
+  LOD of the camera entity, from the client player's skin) and draws them in `ModelPart.render`.
+  `HorizonEntityRender.skinLayers` keeps the pose the player renderer submitted its model with,
+  runs `setupAnim` as that player with the camera on it, shows the parts that have a mesh (the
+  mirrored player's skin-part flags are all off), skips the other parts' cubes and renders the
+  root into custom geometry with the skin texture. Horizon still draws its flat outer layers
+  too; downloaded skins (not resource ids) don't reach Horizon's atlas.
+
 ## 26.3 facts that cost time
 
 - **A vanilla method Horizon cancels at its head skips the mods' injections at its end.**
@@ -613,6 +655,10 @@ gets SPIR-V, vertex layouts and uniform lists.
   `firstPersonHandsAndItems` was null (Create's client tick); its class's synced data was
   never built, and mods that key their data accessors by entity class (Create's
   `AllSynchedDatas`) had none for `LocalPlayer`. Both made in `HorizonClient.localPlayer`.
+- **Create's block models are wrappers that draw nothing in a world** (shafts, cogs: their
+  renderers draw them); `collectParts` without a world gives the full model. Don't judge a mod
+  block's chunk geometry by `collectParts`.
+- **Minecraft has no `cameraEntity` field in 26.3**: use `getCameraEntity`/`setCameraEntity`.
 
 - "Hoppers don't work" with a big pack was not Lithium: Horizon's hoppers are Rust and move
   vanilla containers tick for tick as without mods (same counts after `tick step` 1/8/8/23,
@@ -1113,6 +1159,11 @@ Naturalist (mobs with ModelPart models, Fabric API only). The repo's own critter
 (`ENTITY=naturalist:bear` for another mod's).
 
 ## Status
+
+Create (Create Fly's 26.3 port, 2026-11-04, bridge-gpu-12): kinetic networks run and their
+shafts, cogs and motors draw turning; OBJ items draw; mods' fluids use their own sprites; 3D Skin
+Layers draws its layers (see "Create, Flywheel, OBJ models, mods' fluids, 3D Skin Layers").
+`SCENE=create`, `SCENE=fluids`; regress `create`, `fluids`, `skinlayers`.
 
 Nether and End (tested 2026-10-31 with BOP, BetterNether, BetterEnd, BCLib, WorldWeaver):
 both generate through the mods, the Nether with BetterNether's and BOP's biomes and blocks

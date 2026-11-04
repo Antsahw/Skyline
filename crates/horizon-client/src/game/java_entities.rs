@@ -9,6 +9,7 @@ use super::Game;
 use horizon_client::mesher::Vertex;
 use horizon_client::mobs::{Part, anim::Poses, render};
 use horizon_core::geometry::{Aabb, Vec3};
+use horizon_world::registry::BlockStateId;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -211,6 +212,10 @@ struct RawShown {
     h: Option<f64>,
     #[serde(default)]
     block: bool,
+    /// A block entity whose renderer draws the whole block (its block's model draws nothing
+    /// in Java's world): the block's chunk model is left out.
+    #[serde(default)]
+    whole: bool,
     #[serde(default)]
     models: Vec<RawModel>,
     #[serde(default)]
@@ -350,10 +355,23 @@ fn lerp(a: f32, b: f32, t: f32) -> f32 {
 
 impl JavaEntities {
     /// A tick's entities from the server.
-    fn receive(&mut self, data: &[u8]) {
+    /// The places of block entities drawn whole (`whole`), for the chunk models to leave out.
+    fn receive(&mut self, data: &[u8]) -> Vec<[i32; 3]> {
         let Ok(payload) = serde_json::from_slice::<RawPayload>(data) else {
-            return;
+            return Vec::new();
         };
+        let whole: Vec<[i32; 3]> = payload
+            .entities
+            .iter()
+            .filter(|raw| raw.whole && !raw.keep)
+            .map(|raw| {
+                [
+                    raw.x.floor() as i32,
+                    raw.y.floor() as i32,
+                    raw.z.floor() as i32,
+                ]
+            })
+            .collect();
         for (key, tree) in payload.models {
             self.trees.insert(key, Arc::new(Part::parse("root", &tree)));
         }
@@ -387,6 +405,7 @@ impl JavaEntities {
             .into_iter()
             .map(|s| (s.id, s))
             .collect();
+        whole
     }
 
     /// Where an entity is `alpha` of the way from the last tick to this one.
@@ -408,10 +427,71 @@ impl JavaEntities {
 }
 
 impl Game<'_> {
+    /// The Java mods' fluids as their client models draw them (`horizon_jvm::take_mod_fluids`,
+    /// sent when the models load): each liquid block's states drawn with those sprites by the
+    /// mesher, not as lava (their template). Only where this process runs the mods (single
+    /// player, a LAN host): a server's other players don't get them yet.
+    pub(super) fn java_mod_fluids(&mut self) {
+        let Some(json) = horizon_jvm::take_mod_fluids() else {
+            return;
+        };
+        let Ok(looks) = serde_json::from_str::<HashMap<String, serde_json::Value>>(&json) else {
+            return;
+        };
+        let mut by_state = HashMap::new();
+        let registry = &self.pack.assets.registry;
+        for id in 0..registry.len() as u32 {
+            let Some(state) = registry.state(BlockStateId(id)) else {
+                continue;
+            };
+            let Some(look) = looks.get(&state.name) else {
+                continue;
+            };
+            let text = |k: &str| {
+                look.get(k)
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_owned()
+            };
+            by_state.insert(
+                id,
+                horizon_client::mesher::ModFluidLook {
+                    still: text("still"),
+                    flow: text("flow"),
+                    tint: look.get("tint").and_then(|v| v.as_i64()).unwrap_or(-1) as u32,
+                    translucent: look
+                        .get("translucent")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false),
+                },
+            );
+        }
+        log::info!(
+            "Java mods: {} fluid(s) drawn with their own sprites ({} states)",
+            looks.len(),
+            by_state.len()
+        );
+        if horizon_client::mesher::set_mod_fluids(by_state) {
+            self.all_sections_changed();
+        }
+    }
+
     /// The server's Java entities of this tick ([`CHANNEL`]).
     pub(super) fn remote_java_entities(&mut self, data: &[u8]) {
         let _timed = super::java_profile::Timed::named("(Rust) entities: the player's game reads");
-        self.java_entities.receive(data);
+        let whole = self.java_entities.receive(data);
+        // Blocks their renderers draw whole (Create's shafts and cogs, turning): their chunk
+        // models go, as in Java, where those models have no geometry in a world.
+        let mut changed = false;
+        for [x, y, z] in whole {
+            let state = self.world.block(x, y, z);
+            if state.0 != 0 {
+                changed |= horizon_client::mesher::hide_model_drawn_by_block_entity(state);
+            }
+        }
+        if changed {
+            self.all_sections_changed();
+        }
         // Other players on mods' mobs sit there (HumanoidModel's riding pose), as a
         // passengers packet would put them on a vehicle of Horizon's.
         let riders = &self.java_entities.riders;

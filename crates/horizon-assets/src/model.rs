@@ -64,6 +64,9 @@ pub struct CuboidModel {
     pub textures: BTreeMap<String, TextureSlot>,
     pub elements: Option<Vec<Option<Element>>>,
     pub display: Option<ItemTransforms>,
+    /// OBJ geometry (a Java mod's `"loader": "neoforge:obj"`): drawn as the model's geometry,
+    /// in place of elements. Its quads are read by whoever has the files ([`ObjModel::load`]).
+    pub obj: Option<crate::obj::ObjModel>,
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Element {
@@ -185,13 +188,30 @@ impl CuboidModel {
             .get("display")
             .map(|r| ItemTransforms::decode(r))
             .transpose()?;
+        let loader = obj.get("loader").map(|r| string(r)).transpose()?;
+        let obj_model = match (loader.as_deref(), obj.get("model")) {
+            (Some(loader), Some(model)) if crate::obj::is_obj_loader(loader) => {
+                Some(crate::obj::ObjModel {
+                    model: string(model)?,
+                    flip_v: obj.get("flip_v").is_some_and(|r| r.get() == "true"),
+                    quads: Vec::new(),
+                })
+            }
+            _ => None,
+        };
         Ok(Self {
             parent,
             ambient_occlusion,
             gui_light,
             textures,
-            elements,
+            // An OBJ model is the geometry: its elements (none) hide its parents'.
+            elements: if obj_model.is_some() && elements.is_none() {
+                Some(Vec::new())
+            } else {
+                elements
+            },
             display,
+            obj: obj_model,
         })
     }
 }

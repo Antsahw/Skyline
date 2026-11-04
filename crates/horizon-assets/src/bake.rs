@@ -211,7 +211,42 @@ fn bake_elements(
             )?);
         }
     }
+    for quad in model.obj_quads() {
+        output.push(bake_obj_quad(model, quad, transform)?);
+    }
     Ok(output)
+}
+/// An OBJ face (a Java mod's OBJ model), as NeoForge's `ObjModel` bakes it: corners in block
+/// units turned by the blockstate's rotation, UVs the sprite's own, no culling, untinted.
+fn bake_obj_quad(
+    model: &ResolvedCuboidModel,
+    quad: &crate::obj::ObjQuad,
+    transform: BlockModelTransform,
+) -> Result<ModelQuad> {
+    let slot = quad.texture.as_str();
+    let material = match model.material(slot)? {
+        Some(material) => material.clone(),
+        // A texture id given in the material library itself.
+        None if slot.contains(':') || slot.contains('/') => Material {
+            sprite: identifier(slot)?,
+            force_translucent: false,
+        },
+        None => Material {
+            sprite: "minecraft:missingno".to_owned(),
+            force_translucent: false,
+        },
+    };
+    let positions = quad.positions.map(|v| transform.position(v));
+    Ok(ModelQuad {
+        facing: facing(&positions).unwrap_or(Direction::Up),
+        positions,
+        uv: quad.uv,
+        cull: None,
+        material,
+        tint_index: -1,
+        shade_direction_override: None,
+        light_emission: 0,
+    })
 }
 /// `FaceBakery.bakeQuad` for a quad with explicit corners and unit-atlas UVs
 /// (`uv` in 0..16 texels), as `ItemModelGenerator` builds its layers.

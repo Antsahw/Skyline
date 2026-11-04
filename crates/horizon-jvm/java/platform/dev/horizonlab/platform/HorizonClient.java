@@ -1666,6 +1666,7 @@ public final class HorizonClient {
             HorizonHooks.fireMerged(minecraft, Minecraft.class, "onResourceLoadFinished", "HEAD");
             HorizonHooks.fireMerged(minecraft, Minecraft.class, "onResourceLoadFinished", "RETURN");
             modelsLoaded = true;
+            HorizonFluids.export();
             Natives.log("Horizon's client: block and item models loaded in " + (System.nanoTime() - started) / 1_000_000 + " ms"
                     + (HorizonLazyModels.on ? " (baked on first use)" : ""));
         } catch (Throwable t) {

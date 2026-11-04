@@ -786,6 +786,11 @@ fn boot(env: &mut JNIEnv, jars: &[PathBuf]) -> jni::errors::Result<String> {
                 fn_ptr: native_packet as *mut c_void,
             },
             NativeMethod {
+                name: "modFluids".into(),
+                sig: "(Ljava/lang/String;)V".into(),
+                fn_ptr: native_mod_fluids as *mut c_void,
+            },
+            NativeMethod {
                 name: "broadcast".into(),
                 sig: "(Ljava/lang/String;)V".into(),
                 fn_ptr: native_broadcast as *mut c_void,
@@ -1781,6 +1786,25 @@ extern "system" fn native_packet(
         };
         if let Ok(data) = env.convert_byte_array(&data) {
             events::push(events::Action::Packet { uuid, data });
+        }
+    }));
+}
+
+/// The Java mods' fluids as the client's models draw them (`Natives.modFluids`, once the
+/// models load): `{"<liquid block id>": {"still": sprite, "flow": sprite, "tint": argb,
+/// "translucent": bool}}`. Taken by the game that meshes ([`take_mod_fluids`]).
+static MOD_FLUIDS: Mutex<Option<String>> = Mutex::new(None);
+
+/// The mods' fluids' looks Java sent since the last call (see [`MOD_FLUIDS`]).
+pub fn take_mod_fluids() -> Option<String> {
+    MOD_FLUIDS.lock().ok()?.take()
+}
+
+/// `Natives.modFluids(String json)`.
+extern "system" fn native_mod_fluids(mut env: JNIEnv, _class: JClass, json: JString) {
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        if let (Ok(json), Ok(mut slot)) = (env.get_string(&json), MOD_FLUIDS.lock()) {
+            *slot = Some(json.into());
         }
     }));
 }

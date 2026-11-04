@@ -210,6 +210,20 @@ case "$SCENE" in
   computer) "$R/tools/java_bridge/around.sh" \
     'q "setblock $((X+2)) $Y $Z computercraft:computer_advanced[facing=west]"' \
     '$C look-at-block $((X+2)) $Y $Z >/dev/null' '$C mouse right click >/dev/null' 'sleep 6' ;;
+  # Create: a creative motor (16 rpm) driving a shaft, a cogwheel and a shaft westward,
+  # looked at from the south-west (the cog's face toward the camera).
+  create) "$R/tools/java_bridge/around.sh" \
+    'q "setblock $((X+4)) $Y $((Z-3)) create:creative_motor[facing=west]"' \
+    'q "setblock $((X+3)) $Y $((Z-3)) create:shaft[axis=x]"' \
+    'q "setblock $((X+2)) $Y $((Z-3)) create:cogwheel[axis=x]"' \
+    'q "setblock $((X+1)) $Y $((Z-3)) create:shaft[axis=x]"' \
+    'q "tp @s ~ ~ ~ -145 30"' 'sleep 3' ;;
+  # Mods' fluids (FLUIDS: block ids, default Create's honey and chocolate): a source of each
+  # sunk in a hole of the floor ahead (they can't spread), a stone wall behind, looked down at.
+  fluids) "$R/tools/java_bridge/around.sh" \
+    'q "fill $((X+4)) $Y $((Z-3)) $((X+4)) $((Y+1)) $((Z+3)) stone_bricks"' \
+    'n=0; for f in ${FLUIDS:-create:honey create:chocolate}; do q "setblock $((X+2)) $((Y-1)) $((Z-1+n*2)) $f"; n=$((n+1)); done' \
+    'q "tp @s ~ ~ ~ -90 50"' 'sleep 3' ;;
   none) ;;
 esac
 # For steps: aim FILE looks at the block whose "x y z" FILE holds (a small one too: a flower),

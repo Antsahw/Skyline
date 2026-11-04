@@ -160,6 +160,9 @@ public final class Natives {
     /** A system message to every player on the server, and its log. */
     public static native void broadcast(String text);
 
+    /** The mods' fluids as the client's models draw them (HorizonFluids): their sprites and tint. */
+    public static native void modFluids(String json);
+
     /**
      * A clientbound packet a mod sent a player that Horizon sends as it is (a sound, particles):
      * vanilla's encoding of it, its id first (a VarInt), then its body.

@@ -151,6 +151,7 @@ public final class HorizonEntityRender {
             new IdentityHashMap<>();
     /** A stable id a block entity's position (negative: never an entity's), for Horizon's tweening. */
     private static final Map<Long, Integer> BLOCK_IDS = new java.util.HashMap<>();
+    private static final java.util.Set<Object> DRAWN_LOGGED = new java.util.HashSet<>();
 
     /**
      * The block entity renderers' context, as BlockEntityRenderDispatcher makes it on a
@@ -218,11 +219,25 @@ public final class HorizonEntityRender {
             JsonArray itemsHere = new JsonArray();
             JsonArray models = blockModels(renderer, be, itemsHere);
             if (DEBUG_BER) debugBlock(level, be, models.size(), itemsHere.size());
+            // HORIZON_JAVA_DEBUG=ber: what each block state's renderer drew, once.
+            if (DEBUG_BER && DRAWN_LOGGED.add(be.getBlockState())) {
+                StringBuilder d = new StringBuilder();
+                for (var m : models) {
+                    var mo = m.getAsJsonObject();
+                    int quads = mo.has("v") ? (int) (mo.get("v").toString().chars().filter(c -> c == ',').count() + 1) / 36 : -1;
+                    d.append(' ').append(mo.has("tex") ? mo.get("tex").getAsString() : mo.has("key") ? mo.get("key").getAsString() : "?");
+                    if (quads >= 0) d.append(" (").append(quads).append(" quads)");
+                }
+                Natives.log("Java mods: drawn " + BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(be.getType()) + " "
+                        + be.getBlockState() + ":" + (d.length() == 0 ? " nothing" : d) + "; its block model: "
+                        + chunkQuads(be.getBlockState()) + " quads" + (whole(be) ? ", drawn whole by its renderer" : ""));
+            }
             if (models.isEmpty() && itemsHere.isEmpty()) continue;
             JsonObject o = new JsonObject();
             o.addProperty("id", BLOCK_IDS.computeIfAbsent(pos.asLong(), k -> -1 - BLOCK_IDS.size()));
             o.addProperty("type", BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(be.getType()).toString());
             o.addProperty("block", true);
+            if (whole(be)) o.addProperty("whole", true);
             o.addProperty("x", pos.getX());
             o.addProperty("y", pos.getY());
             o.addProperty("z", pos.getZ());
@@ -257,6 +272,72 @@ public final class HorizonEntityRender {
         var pos = be.getBlockPos();
         Natives.log("ber " + BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(be.getType()) + " at " + pos.getX() + " " + pos.getY()
                 + " " + pos.getZ() + ": " + models + " model(s), " + items + " item(s), " + data);
+    }
+
+    /** Per block state: whether its renderer draws the whole block (see whole(BlockEntity)). */
+    private static final Map<net.minecraft.world.level.block.state.BlockState, Boolean> WHOLE = new ConcurrentHashMap<>();
+
+    /**
+     * Whether a block entity's renderer draws its whole block: the block's model has geometry of
+     * its own (an item, a block breaking) but none in a world. Create wraps its shafts' and
+     * cogwheels' models (BracketedKineticBlockModel: in a world, only the brackets a block
+     * entity has), and its renderers draw them turning; Horizon's chunk would draw them still
+     * beneath. A wrapper adds a world's parts through {@code addPartsWithInfo(BlockAndTintGetter,
+     * BlockPos, BlockState, RandomSource, List)}; models without one are drawn as they are.
+     */
+    private static boolean whole(net.minecraft.world.level.block.entity.BlockEntity be) {
+        var state = be.getBlockState();
+        Boolean known = WHOLE.get(state);
+        if (known != null) return known;
+        boolean result = false;
+        try {
+            var model = net.minecraft.client.Minecraft.getInstance().getModelManager().getBlockStateModelSet().get(state);
+            Method parts = null;
+            for (Class<?> c = model.getClass(); c != null && parts == null; c = c.getSuperclass()) {
+                for (Method m : c.getDeclaredMethods()) {
+                    var types = m.getParameterTypes();
+                    if (m.getName().equals("addPartsWithInfo") && types.length == 5 && !java.lang.reflect.Modifier.isStatic(m.getModifiers())
+                            && types[1] == net.minecraft.core.BlockPos.class && types[4] == List.class) {
+                        parts = m;
+                        break;
+                    }
+                }
+            }
+            if (parts != null && chunkQuads(state) > 0) {
+                parts.setAccessible(true);
+                var level = HorizonClient.clientLevel(be.getLevel());
+                var list = new java.util.ArrayList<net.minecraft.client.renderer.block.dispatch.BlockStateModelPart>();
+                parts.invoke(model, level, be.getBlockPos(), state, net.minecraft.util.RandomSource.create(42), list);
+                int n = 0;
+                for (var part : list) {
+                    for (var side : net.minecraft.core.Direction.values()) n += part.getQuads(side).size();
+                    n += part.getQuads(null).size();
+                }
+                result = n == 0;
+            }
+        } catch (Throwable t) {
+            if (FAILED.add("whole " + state.getBlock())) Natives.log("Java mods: " + state + "'s model in a world couldn't be read: " + t);
+        }
+        // Not kept until the models are loaded (the first ticks).
+        if (net.minecraft.client.Minecraft.getInstance().getModelManager() != null) WHOLE.put(state, result);
+        return result;
+    }
+
+    /** The quads the client's model of a block state has (what a chunk would draw of it), or -1. */
+    private static int chunkQuads(net.minecraft.world.level.block.state.BlockState state) {
+        try {
+            var model = net.minecraft.client.Minecraft.getInstance().getModelManager().getBlockStateModelSet().get(state);
+            var parts = new java.util.ArrayList<net.minecraft.client.renderer.block.dispatch.BlockStateModelPart>();
+            model.collectParts(net.minecraft.util.RandomSource.create(42), parts);
+            int n = 0;
+            for (var part : parts) {
+                for (var side : net.minecraft.core.Direction.values()) n += part.getQuads(side).size();
+                n += part.getQuads(null).size();
+            }
+            return n;
+        } catch (Throwable t) {
+            return -1;
+        }
     }
 
     @SuppressWarnings({"unchecked", "rawtypes"})
@@ -672,7 +753,7 @@ public final class HorizonEntityRender {
             var a = avatar(p);
             var dispatcher = context().getEntityRenderDispatcher();
             if (!(dispatcher.getRenderer(a) instanceof net.minecraft.client.renderer.entity.LivingEntityRenderer renderer)) return null;
-            if (!modLayers(renderer)) return null;
+            if (!modLayers(renderer) && !SKIN_LAYERS) return null;
             JsonArray out = new JsonArray();
             JsonArray held = new JsonArray();
             EntityRenderState[] made = new EntityRenderState[1];
@@ -686,11 +767,15 @@ public final class HorizonEntityRender {
                 CameraRenderState camera = new CameraRenderState();
                 camera.orientation = new org.joml.Quaternionf();
                 camera.pos = net.minecraft.world.phys.Vec3.ZERO;
+                capturePlayer = SKIN_LAYERS;
+                playerSubmit = null;
                 renderer.submit(made[0], pose, collector(out), camera);
             } finally {
                 onlyMods = false;
+                capturePlayer = false;
                 items = null;
             }
+            skinLayers(out, p, a);
             firstPerson(p, a, made[0]);
             if (out.isEmpty() && held.isEmpty()) return null;
             StringBuilder e = new StringBuilder(256);
@@ -728,6 +813,104 @@ public final class HorizonEntityRender {
     }
 
     private static final java.util.Set<String> FAILED = java.util.Collections.synchronizedSet(new java.util.HashSet<>());
+
+    /** 3D Skin Layers is loaded: its mixin gives ModelPart a mesh drawn in place of its cubes. */
+    private static final boolean SKIN_LAYERS = net.fabricmc.loader.api.FabricLoader.getInstance().isModLoaded("skinlayers3d");
+    private static boolean capturePlayer;
+    /** The player's own model as its renderer submitted it: model, state, pose, render type, light, overlay. */
+    private static Object[] playerSubmit;
+    private static Method injectedMesh;
+
+    /**
+     * 3D Skin Layers: in PlayerModel.setupAnim it gives the outer layers' parts (hat, jacket,
+     * sleeves, trousers) meshes of voxels made from the skin, which ModelPart.render draws in
+     * place of their flat cubes. Horizon draws the player's model itself; here the parts with a
+     * mesh are rendered alone (the others skip their cubes) where the renderer put the model,
+     * into custom geometry with the skin as texture.
+     */
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private static void skinLayers(JsonArray out, net.minecraft.server.level.ServerPlayer p,
+                                   net.minecraft.client.player.RemotePlayer a) {
+        Object[] submit = playerSubmit;
+        playerSubmit = null;
+        if (submit == null) return;
+        try {
+            if (injectedMesh == null) injectedMesh = ModelPart.class.getMethod("getInjectedMesh");
+            var model = (net.minecraft.client.model.player.PlayerModel) submit[0];
+            // It builds the meshes within a distance of the camera (its LOD) from the skin of
+            // the client's player: as that player, its camera on the player drawn.
+            var mc = net.minecraft.client.Minecraft.getInstance();
+            net.minecraft.world.entity.Entity camera = null;
+            try {
+                camera = mc.getCameraEntity();
+            } catch (RuntimeException e) {
+                // No camera yet.
+            }
+            mc.setCameraEntity(a);
+            try {
+                HorizonClient.as(p, () -> ((net.minecraft.client.model.Model) model).setupAnim(submit[1]));
+            } finally {
+                if (camera != null) mc.setCameraEntity(camera);
+            }
+            ModelPart root = model.root();
+            java.util.List<ModelPart> parts = root.getAllParts();
+            java.util.List<ModelPart> skipped = new java.util.ArrayList<>();
+            java.util.List<ModelPart> shown = new java.util.ArrayList<>();
+            boolean any = false;
+            for (ModelPart part : parts) {
+                if (injectedMesh.invoke(part) != null) {
+                    any = true;
+                    // The mirrored player's skin parts (the client's settings, which Horizon
+                    // keeps itself) are all off: the parts that have a mesh are shown.
+                    if (!part.visible) {
+                        part.visible = true;
+                        shown.add(part);
+                    }
+                } else if (!part.skipDraw) {
+                    part.skipDraw = true;
+                    skipped.add(part);
+                }
+            }
+            try {
+                if (!any) return;
+                Recorder recorder = new Recorder();
+                root.render((PoseStack) submit[2], recorder, (Integer) submit[4], (Integer) submit[5], -1);
+                int n = recorder.vertices.size() / 4 * 4;
+                String texture = texture((RenderType) submit[3]);
+                if (n == 0 || texture == null) return;
+                JsonObject o = new JsonObject();
+                o.addProperty("tex", texture);
+                o.addProperty("overlay", recorder.overlay);
+                StringBuilder v = new StringBuilder(n * 64).append('[');
+                for (int i = 0; i < n; i++) {
+                    float[] x = recorder.vertices.get(i);
+                    for (int k = 0; k < 8; k++) {
+                        if (i > 0 || k > 0) v.append(',');
+                        HorizonJson.tenThousandths(x[k], v);
+                    }
+                    v.append(',').append((long) Float.floatToRawIntBits(x[8]) & 0xFFFFFFFFL);
+                }
+                o.add("v", new HorizonJson.Raw(v.append(']').toString()));
+                out.add(o);
+                if (FAILED.add("skinlayers drawn")) {
+                    float[] lo = {1e9F, 1e9F, 1e9F}, hi = {-1e9F, -1e9F, -1e9F};
+                    for (int i = 0; i < n; i++) {
+                        for (int k = 0; k < 3; k++) {
+                            lo[k] = Math.min(lo[k], recorder.vertices.get(i)[k]);
+                            hi[k] = Math.max(hi[k], recorder.vertices.get(i)[k]);
+                        }
+                    }
+                    Natives.log("Java mods: 3D Skin Layers draws " + n / 4 + " quads on a player (" + texture + "), from "
+                            + java.util.Arrays.toString(lo) + " to " + java.util.Arrays.toString(hi));
+                }
+            } finally {
+                for (ModelPart part : skipped) part.skipDraw = false;
+                for (ModelPart part : shown) part.visible = false;
+            }
+        } catch (Throwable t) {
+            if (FAILED.add("skinlayers")) Natives.log("Java mods: 3D Skin Layers' parts couldn't be drawn: " + t);
+        }
+    }
 
     /**
      * The player's first person as vanilla's FirstPersonHandsAndItemsRenderer draws each arm
@@ -990,7 +1173,17 @@ public final class HorizonEntityRender {
                         return proxy;
                     }
                     case "submitModel" -> {
-                        if (!kept(args[0])) return null;
+                        if (!kept(args[0])) {
+                            // The player's own model, left to Horizon: kept for mods that
+                            // change how its parts draw (3D Skin Layers: skinLayers).
+                            if (capturePlayer && args[0] instanceof net.minecraft.client.model.player.PlayerModel && args.length == 9) {
+                                PoseStack copy = new PoseStack();
+                                copy.last().pose().set(((PoseStack) args[2]).last().pose());
+                                copy.last().normal().set(((PoseStack) args[2]).last().normal());
+                                playerSubmit = new Object[] {args[0], args[1], copy, args[3], args[4], args[5]};
+                            }
+                            return null;
+                        }
                         if (args.length == 9) model(out, (Model) args[0], args[1], (PoseStack) args[2], (RenderType) args[3],
                                 (Integer) args[4], (Integer) args[5], (Integer) args[6], args[7]);
                     }
@@ -1075,6 +1268,12 @@ public final class HorizonEntityRender {
         renderer.render(pose.last(), recorder);
         int n = recorder.vertices.size() / 4 * 4;
         if (n == 0) return;
+        // An atlas's UVs (Create's SuperByteBuffers: block models through the block atlas): the
+        // quads split by sprite, UVs made the sprite's own, as block models' are (blockModel).
+        if (texture.contains(":textures/atlas/")) {
+            atlasMesh(out, texture, recorder, n, glows(type));
+            return;
+        }
         JsonObject o = new JsonObject();
         o.addProperty("tex", texture);
         o.addProperty("overlay", recorder.overlay);
@@ -1093,6 +1292,55 @@ public final class HorizonEntityRender {
         v.append(']');
         o.add("v", new HorizonJson.Raw(v.toString()));
         out.add(o);
+    }
+
+    /** Atlas UVs found to sprites (atlasMesh): by atlas and the quad's middle, to 1/65536. */
+    private static final Map<String, net.minecraft.client.renderer.texture.TextureAtlasSprite> SPRITE_AT = new ConcurrentHashMap<>();
+
+    /**
+     * Custom geometry in an atlas's UVs (`ns:textures/atlas/<name>.png`): each quad into the mesh
+     * of the sprite holding its middle, its UVs made that sprite's own (Horizon packs sprites
+     * by their texture files, not the client's atlas). A quad on no sprite is left out.
+     */
+    private static void atlasMesh(JsonArray out, String texture, Recorder recorder, int n, boolean glow) {
+        int colon = texture.indexOf(':');
+        String path = texture.substring(colon + 1).replace("textures/atlas/", "").replace(".png", "");
+        var atlasId = net.minecraft.resources.Identifier.fromNamespaceAndPath(texture.substring(0, colon), path);
+        Map<String, StringBuilder> bySprite = new java.util.LinkedHashMap<>();
+        for (int q = 0; q < n; q += 4) {
+            float mu = 0, mv = 0;
+            for (int i = 0; i < 4; i++) {
+                mu += recorder.vertices.get(q + i)[3] / 4;
+                mv += recorder.vertices.get(q + i)[4] / 4;
+            }
+            String key = path + ' ' + Math.round(mu * 65536) + ' ' + Math.round(mv * 65536);
+            var sprite = SPRITE_AT.get(key);
+            if (sprite == null) {
+                sprite = spriteAt(atlasId, mu, mv);
+                if (sprite == null) continue;
+                SPRITE_AT.put(key, sprite);
+            }
+            float du = sprite.getU1() - sprite.getU0(), dv = sprite.getV1() - sprite.getV0();
+            StringBuilder v = bySprite.computeIfAbsent(textureOf(sprite), k -> new StringBuilder(1024).append('['));
+            for (int i = 0; i < 4; i++) {
+                float[] x = recorder.vertices.get(q + i).clone();
+                x[3] = du == 0 ? 0 : (x[3] - sprite.getU0()) / du;
+                x[4] = dv == 0 ? 0 : (x[4] - sprite.getV0()) / dv;
+                for (int k = 0; k < 8; k++) {
+                    if (v.length() > 1) v.append(',');
+                    HorizonJson.tenThousandths(x[k], v);
+                }
+                v.append(',').append((long) Float.floatToRawIntBits(x[8]) & 0xFFFFFFFFL);
+            }
+        }
+        bySprite.forEach((tex, v) -> {
+            JsonObject o = new JsonObject();
+            o.addProperty("tex", tex);
+            o.addProperty("overlay", recorder.overlay);
+            if (glow) o.addProperty("glow", true);
+            o.add("v", new HorizonJson.Raw(v.append(']').toString()));
+            out.add(o);
+        });
     }
 
     /**

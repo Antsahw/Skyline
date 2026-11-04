@@ -44,6 +44,7 @@ MODS = {
     "terrablender": ["terrablender*"],
     "glitchcore": ["glitchcore*"],
     "fabric-api": ["fabric-api*"],
+    "skinlayers": ["skinlayers3d*"],
     "veinminer": ["veinminer-fabric*"],
     "rch": ["rightclickharvest*"],
     "jamlib": ["jamlib*"],
@@ -180,6 +181,37 @@ CASES = {
         steps=[],
         checks=[check_log(r"Java mods: commands", "the mods started")],
         look="beef on the stove's grill, a carrot on the cutting board",
+    ),
+    "createwhole": dict(
+        about="Create's shafts and cogwheel drawn only by their renderers (their block models give nothing in "
+              "a world: no still copy under the turning one), in their sprites' own UVs (Flywheel's "
+              "SuperByteBuffers draw in the block atlas's)",
+        mods=["create"], optional=["fabric-api"], scene="create", env={"HORIZON_JAVA_DEBUG": "ber"},
+        steps=['sleep 4'],
+        checks=[check_log(r"drawn create:bracketed_kinetic Block\{create:cogwheel\}\S*: .*create:textures/block/cogwheel\S* \([1-9].*drawn whole by its renderer",
+                          "the cogwheel's renderer draws it, in its sprites, whole"),
+                check_log(r"drawn create:bracketed_kinetic Block\{create:shaft\}\S*: .*drawn whole by its renderer", "the shaft is drawn whole"),
+                check_log(r"drawn create:motor .*create:textures/block/axis\S* \([1-9]", "the motor's shaft is drawn")],
+        forbid=[r"Java mods: drawing create:", r"ModelRenderHelper"],
+        look="create-0: the purple motor, a shaft, a wooden cogwheel and a shaft in a row; create-1: the cog turned a little",
+    ),
+    "fluids": dict(
+        about="Mods' fluids drawn with their own sprites (Create's honey and chocolate: their client "
+              "fluid models, read once the models load), not as lava",
+        mods=["create"], optional=["fabric-api"], scene="fluids",
+        steps=[],
+        checks=[check_log(r"2 mod fluid\(s\) drawn with their own sprites: .*create:block/honey_still", "Java reads honey's sprites"),
+                check_log(r"Java mods: 2 fluid\(s\) drawn with their own sprites \(32 states\)", "the game takes them")],
+        look="fluids-0: two holes in the floor, golden honey on the left, brown chocolate on the right (not lava)",
+    ),
+    "skinlayers": dict(
+        about="3D Skin Layers: the player's outer skin layers as 3D voxels (its meshes on the "
+              "PlayerModel's parts, rendered by the bridge as custom geometry)",
+        mods=["skinlayers", "fabric-api"], scene="none",
+        steps=['sleep 4; $C key f5 tap >/dev/null; $C key f5 tap >/dev/null; $C look 0 10 >/dev/null; sleep 4'],
+        checks=[check_log(r"3D Skin Layers draws [1-9][0-9]* quads on a player", "the layers' meshes are drawn")],
+        forbid=[r"3D Skin Layers' parts couldn't be drawn"],
+        look="none-1: the player from the front; jacket, sleeves and trousers stand out in 3D",
     ),
     "hud": dict(
         about="Jade's tooltip and AppleSkin on Horizon's HUD",

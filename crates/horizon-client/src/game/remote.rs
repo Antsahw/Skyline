@@ -5641,6 +5641,9 @@ impl Game<'_> {
 
     /// One client tick while connected (Minecraft.tick with a ClientLevel).
     pub(super) fn tick_remote(&mut self) -> Result<()> {
+        // The Java mods' fluids' looks, once their models load (this process's server).
+        #[cfg(feature = "java-mods")]
+        self.java_mod_fluids();
         self.tick_remote_level()?;
         // The rockets boosting this player tick after it, also while it waits
         // for chunks.
