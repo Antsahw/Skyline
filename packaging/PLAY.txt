@@ -25,11 +25,6 @@ Downloaded this archive directly?
   ./horizon-client (horizon-client.exe on Windows; on macOS the first time:
   right-click > Open). horizon-client --help lists the options.
 
-Fabric mods (only a build with horizon-play in this folder)
-  Double-click horizon-play, put Fabric mods for 26.3 in the fabric-mods folder it makes,
-  and start it again. It finds Minecraft and Java and prepares everything. Prism
-  Launcher can run it too, and more is in the fork's guide: docs/java-bridge-beta.md.
-
 Controls: mouse look, WASD move, Space jump, Left Shift sneak, Left Ctrl
 sprint, left click break, right click place/use, 1-9 or scroll for the hotbar,
 E inventory, Q drop, F1 hide the HUD, F3 debug, Esc pause.

@@ -225,14 +225,6 @@ fn package(binary: &Path, out: &Path) -> Result<(), String> {
     let repo = new_folder(out)?;
     copy_into(binary, out)?;
     copy_beside(binary, &TOOLS, out)?;
-    // Beside a Java mods build: the one step to play its mods (crates/horizon-play).
-    let player = binary
-        .parent()
-        .unwrap_or(Path::new(""))
-        .join(program_name(binary, "horizon-play"));
-    if player.is_file() {
-        copy_into(&player, out)?;
-    }
     copy_exporters(&repo.join("exporters"), &out.join("exporters"))?;
     let play = repo.join("packaging/PLAY.txt");
     copy(&play, &out.join("PLAY.txt"))

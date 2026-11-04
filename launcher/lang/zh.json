@@ -1093,7 +1093,7 @@
   "Its mods made for Minecraft {from} stay in its folder; some may not load in {to}.": "其为 Minecraft {from} 制作的模组会留在其文件夹中；部分可能无法在 {to} 中加载。",
   "Its worlds were saved by Minecraft {from}: {to} upgrades them for good, and can't open them if it is older.": "其世界由 Minecraft {from} 保存：{to} 会永久升级它们；如果 {to} 更旧，则无法打开它们。",
   "Fabric 26.3 mods (beta)": "Fabric 26.3 模组（测试版）",
-  "Runs the Fabric mods in this instance's mods-java folder. Off, the game never starts Java. On, the launcher downloads Horizon's build with Java mods, and the game gets Java 25 the first time it starts them.": "运行此实例 mods-java 文件夹中的 Fabric 模组。关闭时，游戏从不启动 Java。开启后，启动器会下载带 Java 模组的 Horizon 版本，游戏在首次启动这些模组时获取 Java 25。",
+  "Runs the Fabric mods in this instance's mods-java folder. Off, the game never starts Java. On, once you're signed in with an account that owns Minecraft, the launcher downloads Horizon's build with Java mods, and Java 25 if you have none.": "运行此实例 mods-java 文件夹中的 Fabric 模组。关闭时，游戏不会启动 Java。开启后，在你用拥有 Minecraft 的账户登录后，启动器会下载带 Java 模组的 Horizon 版本，并在你没有 Java 25 时下载它。",
   "Downloading the Fabric mods build…": "正在下载 Fabric 模组版本…",
   "The Fabric mods build is ready.": "Fabric 模组版本已就绪。",
   "Added {names}: they load the next time the game starts.": "已添加 {names}：下次启动游戏时加载。",

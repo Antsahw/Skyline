@@ -1746,10 +1746,11 @@ impl Launcher {
         self.starting_client = Some(tag.clone());
         self.play_pressed = Some(Instant::now());
         let tx = self.tx.clone();
-        let offline_without_owner = self.settings.dev_offline;
         // Fabric 26.3 mods on: the version's Java mods build first, when it isn't there yet.
         let java_build =
             self.starting_pack.is_none() && self.selected_instance().is_some_and(|i| i.java_mods);
+        // Fabric mods play only for a signed-in owner: never the developer option's offline pass.
+        let offline_without_owner = self.settings.dev_offline && !java_build;
         std::thread::spawn(move || {
             if java_build {
                 if let Err(e) = horizon_launcher::java_variant::ensure(&tag, |_| {}) {

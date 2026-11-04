@@ -26,7 +26,6 @@ members = [
     "crates/horizon-protocol",
     "crates/horizon-theme",
     "crates/horizon-prepare",
-    "crates/horizon-play",
     "crates/horizon-telemetry",
     "crates/horizon-bench",
     "crates/horizon-friends",

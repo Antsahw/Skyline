@@ -1093,7 +1093,7 @@
   "Its mods made for Minecraft {from} stay in its folder; some may not load in {to}.": "Minecraft {from} 用の Mod はフォルダーに残ります。{to} では一部が読み込まれないかもしれません。",
   "Its worlds were saved by Minecraft {from}: {to} upgrades them for good, and can't open them if it is older.": "ワールドは Minecraft {from} で保存されています：{to} はそれらを元に戻せない形で更新し、より古いバージョンなら開けません。",
   "Fabric 26.3 mods (beta)": "Fabric 26.3 MOD（ベータ）",
-  "Runs the Fabric mods in this instance's mods-java folder. Off, the game never starts Java. On, the launcher downloads Horizon's build with Java mods, and the game gets Java 25 the first time it starts them.": "このインスタンスの mods-java フォルダーにある Fabric MOD を実行します。オフのときゲームは Java を起動しません。オンにするとランチャーが Java MOD 対応の Horizon ビルドをダウンロードし、ゲームは初めて MOD を起動するときに Java 25 を取得します。",
+  "Runs the Fabric mods in this instance's mods-java folder. Off, the game never starts Java. On, once you're signed in with an account that owns Minecraft, the launcher downloads Horizon's build with Java mods, and Java 25 if you have none.": "このインスタンスの mods-java フォルダーにある Fabric Mod を実行します。オフのとき、ゲームは Java を起動しません。オンにすると、Minecraft を所有するアカウントでサインインした後、ランチャーが Java Mod 対応の Horizon ビルドと、必要なら Java 25 をダウンロードします。",
   "Downloading the Fabric mods build…": "Fabric MOD 対応ビルドをダウンロード中…",
   "The Fabric mods build is ready.": "Fabric MOD 対応ビルドの準備ができました。",
   "Added {names}: they load the next time the game starts.": "{names} を追加しました：次にゲームを起動したときに読み込まれます。",

@@ -47,32 +47,24 @@ The Java bridge runs **real Fabric mods for 26.3** inside Horizon. **Horizon's w
 | Mod worldgen: biomes, structures, colours, `/locate`, far terrain | ✅ Overworld, Nether, End; Biomes O' Plenty, Towns and Towers, Dungeons and Taverns; Tectonic's far terrain; skyblock and one-block worlds |
 | Mixins that change vanilla behaviour | ✅ Veinminer, Right Click Harvest, Carry On, Serene Seasons, Clumps, Better Combat: what a mod patches (breaking, using, hitting, jumps, teleports, falls, effects, advancements) goes to Java |
 | Multiplayer with mods | ✅ LAN and dedicated servers: each player's own maps, REI and mod settings |
-| The launcher | ✅ a **Java mods** tab (add, remove, which mods failed last game); runs from a normal install, fetches Java 25 itself |
+| The launcher | ✅ the only way to play: a **Fabric 26.3 mods (beta)** switch per instance and a **Java mods** tab (add, remove, which mods failed last game); fetches Java 25 after the Microsoft sign-in |
 | Renderer replacements (Sodium, Iris) | ➖ not needed: Horizon has its own renderer, so they have nothing to replace |
 | Mods that draw in the world (Litematica's overlay) | 🚧 |
-| Windows | ✅ builds and plays on Windows 11; no published build yet. Windows support and `horizon-play` by [martipops](https://github.com/martipops) |
+| Windows | ✅ builds and plays on Windows 11; no published build yet. Windows support by [martipops](https://github.com/martipops) |
 
 **Beta testers: start with [Try it](#try-it) and the [testers' guide](docs/java-bridge-beta.md).** How it works, the tick flow, 26.3 traps and the test tools: **[docs/java-bridge.md](docs/java-bridge.md)**.
 
 ### Try it
 
-**Easiest: press Play in Prism Launcher.** On Windows or Linux (macOS is untested), with Rust, Git and a JDK 25 installed:
+**Through the Horizon launcher only, signed in with a Microsoft account that owns Minecraft: Java Edition.** Nothing for the mods (the Fabric mods build, Java 25) is downloaded before that sign-in, and there is no offline way to play them. No release carries the Fabric mods build yet, so build the fork's game and launcher:
 
 ```sh
 git clone -b java-bridge https://github.com/iaxivers/horizon && cd horizon
-cargo run --profile fast -p horizon-play    # builds the game once; quit it when it opens
+cargo build --profile fast -p horizon-client --features horizon-client/java-mods
+cd launcher && cargo build --release && cd ..     # Fedora needs libxkbcommon-x11-devel
 ```
 
-Then in [Prism Launcher](https://prismlauncher.org):
-
-1. Make a Minecraft **26.3** + **Fabric** instance and add a mod.
-2. Right-click it > **Edit** > **Settings** > tick **Custom commands**.
-3. Paste the full path of `target/fast/horizon-play` (`horizon-play.exe` on Windows) into **Wrapper command**, and close the window.
-4. Press **Play**. The first start takes a few minutes.
-
-To go back to normal Minecraft, untick **Custom commands**. The **[testers' guide](docs/java-bridge-beta.md)** has every step, other ways to play, and what to test.
-
-**From the launcher:** build it (`cd launcher && cargo build --release`; Fedora needs `libxkbcommon-x11-devel`), install your game build as a version with `horizon-launcher import-build target/fast/horizon-client --trust-unsigned`, add jars with `horizon-launcher java-mods add <jar>`, then the **Java mods** tab shows on Home. Start it with `HORIZON_LAUNCHER_NO_SELF_UPDATE=1` so it doesn't update itself to upstream's.
+Start `launcher/target/release/horizon-launcher` with `HORIZON_LAUNCHER_NO_SELF_UPDATE=1`, sign in, install and prepare a Horizon version, then `horizon-launcher java-mods use-build target/fast/horizon-client`, turn on **Fabric 26.3 mods (beta)** under **Launch…**, add jars in the **Java mods** tab and press **Play**. Every step: the **[testers' guide](docs/java-bridge-beta.md)**.
 
 **Tests:** `python3 tools/java_bridge/regress.py --jars <jars>` plays every scene that once worked, headless, with screenshots; `--pack <mods folder> bigpack` plays a whole pack. Add `HORIZON_JAVA_PROFILE=1` to see what the mods cost each tick.
 

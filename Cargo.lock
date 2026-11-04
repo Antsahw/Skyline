@@ -1614,7 +1614,6 @@ dependencies = [
  "rustls",
  "rustls-pki-types",
  "serde_json",
- "sha1",
  "sha2",
  "ureq",
  "webpki-roots 0.26.11",
@@ -1684,21 +1683,6 @@ dependencies = [
  "horizon-core",
  "log",
  "regex",
-]
-
-[[package]]
-name = "horizon-play"
-version = "0.1.0"
-dependencies = [
- "horizon-prepare",
- "rustls",
- "rustls-pki-types",
- "serde_json",
- "sha1",
- "sha2",
- "ureq",
- "webpki-roots 0.26.11",
- "zip 2.6.1",
 ]
 
 [[package]]

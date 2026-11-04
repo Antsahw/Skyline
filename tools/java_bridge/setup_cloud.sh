@@ -17,7 +17,7 @@ if [ ! -x "$JAVA_HOME/bin/java" ]; then
 fi
 
 # Start the long build at once; everything else runs beside it.
-cargo build --profile fast -p horizon-client -p horizon-play -p horizon-prepare \
+cargo build --profile fast -p horizon-client -p horizon-prepare \
   --features horizon-client/java-mods >/tmp/build.log 2>&1 &
 BUILD=$!
 

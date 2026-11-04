@@ -43,7 +43,9 @@ count stayed under its 10k mark while the map was still filling in). Worldgen is
 Ludovic's agent read the branch: Horizon will link to it as an unofficial community project once
 both are fixed. The user's decision: **players play only through Horizon's launcher; Prism and
 `horizon-play` go.**
-1. **Ownership (one chat, `bridge-launcher-only`).** Remove `horizon-play` (crate, docs, CI,
+1. ~~**Ownership (one chat, `bridge-launcher-only`).**~~ Done 2026-11-04 (docs/java-bridge.md,
+   "Launcher only"). Left: lang/ (ko, hr, ar, hi, id, pt...) lack the fork's Java mods strings,
+   so the launcher's i18n test fails on java-bridge already. Was: Remove `horizon-play` (crate, docs, CI,
    packaging, regress `prism`) and Prism's wrapper path; the testers' guide becomes launcher
    only. No offline play anywhere a player can reach: the game with Java mods starts only from
    the launcher with its Microsoft sign-in (the switch's `--java-mods`), and nothing is

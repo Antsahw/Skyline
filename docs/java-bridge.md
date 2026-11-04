@@ -1921,13 +1921,15 @@ bridge's jars are in the game binary; the install is found above `--resources`
 then a working folder holding research-lock.json, come first), and its preparation left the
 game jar and libraries in `<version>/.local/minecraft/<v>/` (jars/, libraries/, manifest.json);
 the bridge's work folder is `<version>/.local/bridge` (Fabric Loader, its libraries and Fabric
-API, downloaded once, SHA-256 checked). Java: `HORIZON_JAVA_HOME`, `JAVA_HOME`, the PATH,
-installed JDKs, Minecraft's and the Horizon launcher's runtimes (`<launcher data>/minecraft/
-runtime`), else Mojang's runtime for the version (`javaVersion.component`: 26.3's is
-`java-runtime-epsilon`) is downloaded there (`runtime.rs`, ~ files checked by SHA-1), where the
-launcher finds it too. `HORIZON_JAVA_NO_DOWNLOAD=1` only looks. The downloads trust the public
-roots and the system's CA bundle (`SSL_CERT_FILE` or the distribution's file: a TLS-inspecting
-proxy or antivirus the system trusts) and use `HTTPS_PROXY`.
+API, downloaded once, SHA-256 checked). Java: `HORIZON_JAVA_HOME` (the launcher sets it), `JAVA_HOME`,
+the PATH, installed JDKs, Minecraft's and the Horizon launcher's runtimes (`<launcher data>/minecraft/
+runtime`, `runtime.rs`). **The game downloads no Java** (bridge-launcher-only): the launcher
+fetches Mojang's runtime for 26.3 (`java-runtime-epsilon`, `java::install`) when an instance with
+the Fabric switch plays and no Java 25 JDK is here, only past the strict owner gate
+(`java_variant::ensure`). Without one, the game downloads nothing: it says why and stops (exit 78,
+as any start of the mods that fails). Fabric's downloads trust the public roots and the system's CA bundle
+(`SSL_CERT_FILE` or the distribution's file: a TLS-inspecting proxy or antivirus the system
+trusts) and use `HTTPS_PROXY`.
 
 **A build without the game** (a release build: no Minecraft jar on the build machine) carries
 the platform mod's sources instead of its jar (`build.rs`: no prepared game, or
@@ -1935,11 +1937,11 @@ the platform mod's sources instead of its jar (`build.rs`: no prepared game, or
 run on (`platform.rs`: `javac` of that Java home, which Mojang's runtime has; ~11 s, 116 sources),
 against their own game jar, its libraries, Fabric Loader and Fabric API, into
 `<work>/platform/<key>/` (the key: the sources, the game jar and the bridge jar). A Java with
-no `javac` (a JRE) is told to use a JDK. `game-build.yml` builds Linux and Windows variants with
+no `javac` (a JRE) is told to use a JDK (the launcher picks only Java homes with `javac`). `game-build.yml` builds Linux and Windows variants with
 Java mods when its opt-in `java_mods` input is set (assets `<asset>-java`, the game built with
 `HORIZON_BRIDGE_PLATFORM=source`); nothing calls it with that yet (release and nightly signing
-are the maintainer's). Tested headless: `HORIZON_BRIDGE_PLATFORM=source` build, install_test with no
-Java: Mojang's Java downloaded, the platform built, Farmer's Delight's pot screen opens.
+are the maintainer's). Tested headless: `HORIZON_BRIDGE_PLATFORM=source` build, install_test (the Java the launcher
+would pass): the platform built, Farmer's Delight's pot screen opens.
 
 **The launcher's Java mods tab** (Home, beside Mods: `launcher/src/java_mods_page.rs`, core in
 `java_mods.rs`): shows for an instance whose game folder has `mods-java/`; lists the jars with
@@ -1953,8 +1955,9 @@ that failed) on their rows. CLI: `horizon-launcher java-mods list|add <jar>|remo
 version (binary, research-lock.json, the preparation's folders linked from the checkout), the
 game started as the launcher starts it (in its game folder, `--resources` only; no
 `HORIZON_ROOT`, Java variables or Java on the PATH, `HORIZON_JAVA_NO_SYSTEM=1` so installed
-JDKs aren't looked at), so Fabric's jars and Mojang's Java are downloaded into the scratch
-folders. The launcher starts the game that way (`client_command`: the game folder,
+JDKs aren't looked at), so Fabric's jars are downloaded into the scratch folders; the Java is
+the one the launcher passes (`HORIZON_JAVA_HOME`), and `NO_JAVA=1` checks that the game, with
+none, downloads nothing and says so. The launcher starts the game that way (`client_command`: the game folder,
 `--resources`), plus `--java-mods` when the instance's switch is on (below); `mods-java/` goes in
 the game folder (HORIZON_HOME). `OFF=1` runs it without `--java-mods`: no Java may start.
 
@@ -1967,7 +1970,7 @@ player turns them on**, per instance:
   `java_mods::mod_jars()`, which has no jars otherwise (one log line says how many it left off).
   So no Java start, no Java 25 download, no Fabric download without the switch. The tools set it:
   `launch.sh`, `lan_test.sh`, `server_test.sh` (`HORIZON_JAVA_MODS=1`), `install_test.sh`
-  (`--java-mods`, as the launcher), `horizon-play` (`--java-mods`). **Trap:** a game started by
+  (`--java-mods`, as the launcher). **Trap:** a game started by
   hand (or by a script of your own) with jars in `mods-java/` and no opt-in runs plain: the log's
   "Java mods: off (N jars in mods-java)" says so.
 - **The launcher** (`launcher/src/java_variant.rs`): Launch… on Home's Instance row has a
@@ -1999,39 +2002,40 @@ player turns them on**, per instance:
 What is left: release builds with `java-mods` published beside the plain ones (`-java` assets in
 the signed SHA256SUMS), which the maintainer turns on.
 
-### horizon-play: one step, any system
+### Launcher only (2026-11-04, bridge-launcher-only)
 
-`crates/horizon-play` is what players start, on every system (docs/java-bridge-beta.md). It finds
-the Horizon folder (beside the program, else the checkout it was built from), builds the game in
-a checkout, finds Java (the instance's, then Java's usual places, Minecraft's, the launcher's and
-Prism's runtimes, else it downloads Mojang's), prepares the player's own game files once (the
-official launcher's, Horizon launcher's or Prism's folders; the version JSON and server jar come
-from Mojang, as in the launcher's `backend.rs`, checked by SHA-1), and starts the game.
+Players play the Java mods only through Horizon's launcher, signed in (Ludovic's first condition
+for linking the fork). Gone: `crates/horizon-play` (its CI step, `xtask package`'s copy, PLAY.txt's
+lines, regress `prism`), and with it Prism's wrapper command, `--instance` offline play and its
+download of the server jar. What holds now:
+- **Play with the switch on needs the strict owner gate:** the window's developer option
+  (`dev_offline`) lets no Fabric instance through (`start_client`: `offline_without_owner` is off
+  when `java_mods`); the CLI's and MCP's Play always ask the gate (`backend::client_as`).
+- **No download before that gate** (`java_variant::owner_signed_in`, `account::launch`, as
+  `backend::download_for_owner`): the Fabric mods build (`ensure`, `follow` after an install, the
+  switch turning on, `java-mods on`) and Mojang's Java 25 (`ensure_java`) come only for an account
+  that owns the game; otherwise "Sign in … first: Fabric 26.3 mods download nothing before that."
+  `use-build` (a build of your own) downloads nothing and needs no sign-in.
+- **The game downloads no Java** (`find_or_fetch_java_home` is gone): `switch_command` passes the
+  launcher's Java 25 as `HORIZON_JAVA_HOME`. The server jar always comes from the player's own
+  install (`horizon-prepare`, as upstream).
+- **Developers' runs stay:** `HORIZON_JAVA_MODS=1` / `--java-mods` on the game binary (horizon-ctl,
+  regress, launch.sh), as Ludovic's own harnesses run the plain game.
+- **Tested headless:** `tools/java_bridge/launcher_switch_test.py` (no owner: `java-mods on` and
+  Play download nothing and say "Sign in"; `use-build` works signed out). The window under Xvfb
+  (clicks through python-xlib's XTEST), `settings.json` `"dev_offline": true`, stand-in programs:
+  a Fabric instance's Play (Update's ⋯ > Play without updating) starts nothing and the "Sign in to
+  play" screen comes up (the option hides it only for plain instances, `owner_shown`); with no
+  Java 25 here, the Console tab says "Sign in … first: Fabric 26.3 mods download nothing before
+  that" and `minecraft/runtime` stays empty; switch off, the same Play starts the plain program.
 
-Jars come from `fabric-mods/` (or an instance's `mods/`) into the game folder's `mods-java/` as hard links,
-which need no privilege, else copies. Left out, with the reason said: Fabric API, renderer
-replacements, and what requires those renderers (`mods.rs`). `.horizon-play-jars` lists what it
-manages; other jars in `mods-java/` stay.
-
-**Prism's wrapper command:** Prism sets `INST_MC_DIR` and starts the wrapper in place of Java, with
-the game's parameters on stdin (`param <value>` lines, then `launch`). The instance gets a `horizon/`
-folder (options, worlds, `mods-java/`); the mods' `config/` is the instance's, through a junction on
-Windows and a symlink elsewhere; Prism's signed-in account goes to the game as a session file (read
-once, deleted). `HORIZON_PRISM_DRY=1` sets up and prints the command; `HORIZON_PRISM_ARGS` adds game
-arguments. (Idea from the NeuHorizon fork's NeoForge wrapper.) `--instance FOLDER` does the same
-without Prism or its account.
-
-**A modpack's resource packs** (`packs.rs`): the instance's `resourcepacks/` is the game folder's
-(a link; when `horizon/resourcepacks` is already a folder, the instance's packs it lacks are
-linked into it), and the instance's selection (`resourcePacks`, `incompatibleResourcePacks` in its
-`options.txt`) is written into Horizon's `options.txt`: on the first start, and again only when the
-instance's selection changes (`.horizon-play-packs` records it), so a pack the player turns off in
-Horizon stays off. Regress `prism` checks both; `packs` loads a pack's packs in a game.
+**A modpack's resource packs** (game side): `resourcepacks/` and `options.txt` beside
+`mods-java/` load with it; regress `packs` checks it.
 
 **When the mods can't start,** the game exits with code 78 (`NOT_STARTED_EXIT`) instead of going on
-without them, and `horizon-play` shows the reason: a player would take the world for modded, and a
-modded world opened without its mods loses their blocks and items. `HORIZON_JAVA_OPTIONAL=1` goes
-on without them, as it used to.
+without them, and its log says why: a player would take the world for modded, and a modded world
+opened without its mods loses their blocks and items. `HORIZON_JAVA_OPTIONAL=1` goes on without
+them, as it used to.
 
 ### Windows
 

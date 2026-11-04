@@ -3,8 +3,14 @@
 //! starts Java, even with jars in its `mods-java/`. On: the launcher installs the version's
 //! Java mods build (game-build.yml's `<asset>-java`) in the version's `java/` folder, beside the
 //! plain one, where it plays with the version's prepared files, and starts it with
-//! [`OPT_IN_ARG`]. Java 25 is the game's to fetch, the first time it starts the mods.
+//! [`OPT_IN_ARG`] and the Java 25 to run the mods on ([`JAVA_HOME_VAR`]).
+//!
+//! Nothing for the mods is downloaded before the owner gate: the build and Mojang's Java for the
+//! version (`java-runtime-epsilon`) come only for a signed-in account that owns Minecraft: Java
+//! Edition ([`owner_signed_in`]), and Play with the switch on never takes the developer option's
+//! way past the gate (`dev_offline`). The game itself downloads no Java.
 use crate::backend::{self, Release, CLIENT};
+use crate::{account, java};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -15,6 +21,56 @@ pub const DIR: &str = "java";
 pub const OPT_IN_ARG: &str = "--java-mods";
 /// Written once the build is all there.
 const COMPLETE: &str = ".installed";
+/// The Java home the game runs the mods on (`horizon_jvm::JAVA_HOME_VAR`).
+pub const JAVA_HOME_VAR: &str = "HORIZON_JAVA_HOME";
+/// The Java the bridge needs (`horizon_jvm::JAVA_MAJOR`): 26.3's.
+const JAVA_MAJOR: u32 = 25;
+/// What Play and the switch say before a sign-in.
+pub const SIGN_IN_FIRST: &str = "Sign in with a Microsoft account that owns Minecraft: Java \
+     Edition first: Fabric 26.3 mods download nothing before that.";
+
+/// The strict owner gate (never the developer option's offline pass), asked before any download
+/// for the mods, as `backend::download_for_owner` asks it before downloading the game.
+pub fn owner_signed_in() -> Result<(), String> {
+    let mut accounts = account::Accounts::load();
+    let pass = account::launch(
+        &account::Endpoints::live(),
+        account::client_id().as_deref(),
+        account::store(),
+        &mut accounts,
+    );
+    if let Err(e) = accounts.save() {
+        eprintln!("Horizon: the accounts are not saved: {e}");
+    }
+    pass.map(|_| ())
+        .map_err(|_| crate::i18n::tr(SIGN_IN_FIRST).to_string())
+}
+
+/// A Java 25 JDK here for the mods (the bridge builds its platform mod with `javac`):
+/// `HORIZON_JAVA_HOME` when set, else Mojang's runtime the launcher downloaded, else one
+/// installed on this computer.
+pub fn java_home() -> Option<PathBuf> {
+    if let Some(home) = std::env::var_os(JAVA_HOME_VAR).filter(|h| !h.is_empty()) {
+        return Some(PathBuf::from(home));
+    }
+    let javac = if cfg!(windows) { "javac.exe" } else { "javac" };
+    java::mojang_runtimes(&java::runtimes_dir())
+        .into_iter()
+        .chain(java::installed())
+        .find(|r| r.major == JAVA_MAJOR && r.home.join("bin").join(javac).is_file())
+        .map(|r| r.home)
+}
+
+/// [`java_home`], else Mojang's Java 25 downloaded now. The caller has passed the owner gate.
+fn ensure_java() -> Result<PathBuf, String> {
+    if let Some(home) = java_home() {
+        return Ok(home);
+    }
+    let need = java::Need::named(&JAVA_MAJOR.to_string())?;
+    java::install(&need, &|line| eprintln!("{line}"))
+        .map(|r| r.home)
+        .map_err(|e| format!("Java {JAVA_MAJOR} for Fabric mods: {e}"))
+}
 
 /// game-build.yml's Java mods builds: (`std::env::consts::OS`, `ARCH`, the asset). None for macOS yet.
 pub const ASSETS: [(&str, &str, &str); 2] = [
@@ -133,14 +189,19 @@ pub fn use_build(tag: &str, program: &Path) -> Result<(), String> {
     place(&staging, &dir(tag))
 }
 
-/// Installs `tag`'s Java mods build unless it has it: the release of that tag, from GitHub.
+/// Installs `tag`'s Java mods build unless it has it (the release of that tag, from GitHub), and
+/// Java 25 unless there is one: only past the owner gate, when something is missing.
 pub fn ensure(tag: &str, progress: impl Fn(f32)) -> Result<(), String> {
-    if is_installed(tag) {
+    if is_installed(tag) && java_home().is_some() {
         return Ok(());
     }
-    fetch(tag, progress).map_err(|e| {
-        format!("Fabric 26.3 mods are on, but {tag} has no Fabric mods build here: {e}")
-    })
+    owner_signed_in()?;
+    if !is_installed(tag) {
+        fetch(tag, progress).map_err(|e| {
+            format!("Fabric 26.3 mods are on, but {tag} has no Fabric mods build here: {e}")
+        })?;
+    }
+    ensure_java().map(|_| ())
 }
 
 fn fetch(tag: &str, progress: impl Fn(f32)) -> Result<(), String> {
@@ -167,6 +228,10 @@ pub fn follow(release: &Release, tag: &str) {
         .iter()
         .any(|i| i.java_mods && i.version.as_deref().is_none_or(|v| v == tag));
     if !wanted || asset().is_none() || is_installed(tag) {
+        return;
+    }
+    if let Err(e) = owner_signed_in() {
+        eprintln!("Fabric mods build of {tag} not installed: {e}");
         return;
     }
     if let Err(e) = install(release, tag, |_| {}) {
@@ -200,6 +265,12 @@ pub fn switch_command(cmd: &mut Command) -> Result<(), String> {
     }
     if let Some(folder) = cmd.get_current_dir() {
         next.current_dir(folder);
+    }
+    // The Java the launcher has for the mods ([`ensure`] got it past the owner gate).
+    if !cmd.get_envs().any(|(k, _)| k == JAVA_HOME_VAR) {
+        if let Some(home) = java_home() {
+            next.env(JAVA_HOME_VAR, home);
+        }
     }
     next.arg(OPT_IN_ARG);
     *cmd = next;
