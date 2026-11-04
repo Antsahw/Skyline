@@ -41,6 +41,8 @@ wgpu = { version = "30.0.1", default-features = false, features = ["gles"] }
 
 [target.'cfg(windows)'.dependencies]
 wgpu = { version = "30.0.1", default-features = false, features = ["dx12"] }
+# The JVM's option strings in the system's code page (a user name like Ivér).
+windows-sys = { version = "0.61", features = ["Win32_Globalization", "Win32_Storage_FileSystem"] }
 
 [build-dependencies]
 # build.rs compiles the bridge's Java against Fabric Loader (src/libs.rs, shared) and packs it.

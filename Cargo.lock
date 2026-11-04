@@ -1584,6 +1584,7 @@ dependencies = [
  "ureq",
  "webpki-roots 0.26.11",
  "wgpu",
+ "windows-sys 0.61.2",
  "zip 2.6.1",
 ]
 

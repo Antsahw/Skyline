@@ -113,9 +113,11 @@ pub fn ensure(
         args.push('\n');
     }
     let argfile = dir.join("javac.args");
+    // javac reads this file as UTF-8, whatever the system, but its launcher reads the command
+    // line in the system's code page: only the file's own path needs care (a user name like Ivér).
     std::fs::write(&argfile, args).map_err(|e| format!("{}: {e}", argfile.display()))?;
     let output = std::process::Command::new(&javac)
-        .arg(format!("@{}", argfile.display()))
+        .arg(format!("@{}", crate::option_path(&argfile).display()))
         .output()
         .map_err(|e| format!("running {}: {e}", javac.display()))?;
     if !output.status.success() {

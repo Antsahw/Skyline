@@ -423,6 +423,78 @@ fn dll_search_path(home: &Path) {
     }
 }
 
+/// A JVM option's bytes. JNI reads options in the system's code page, not UTF-8 (on Windows; a
+/// folder or user name like `Ivér` otherwise breaks the class path).
+#[cfg(windows)]
+fn option_bytes(option: &str) -> Vec<u8> {
+    code_page_bytes(option).unwrap_or_else(|| option.as_bytes().to_vec())
+}
+
+#[cfg(not(windows))]
+fn option_bytes(option: &str) -> Vec<u8> {
+    option.as_bytes().to_vec()
+}
+
+/// `text` in the system's code page; `None` when it has a character the code page lacks.
+#[cfg(windows)]
+fn code_page_bytes(text: &str) -> Option<Vec<u8>> {
+    use windows_sys::Win32::Globalization::{
+        CP_ACP, GetACP, WC_NO_BEST_FIT_CHARS, WideCharToMultiByte,
+    };
+    const CP_UTF8: u32 = 65001;
+    // SAFETY: GetACP has no arguments or preconditions.
+    if text.is_ascii() || unsafe { GetACP() } == CP_UTF8 {
+        return Some(text.as_bytes().to_vec());
+    }
+    let wide: Vec<u16> = text.encode_utf16().collect();
+    let mut out = vec![0u8; wide.len() * 4];
+    let mut lost = 0;
+    // SAFETY: both buffers are valid for the lengths given, and `lost` for writing.
+    let written = unsafe {
+        WideCharToMultiByte(
+            CP_ACP,
+            WC_NO_BEST_FIT_CHARS,
+            wide.as_ptr(),
+            wide.len() as i32,
+            out.as_mut_ptr(),
+            out.len() as i32,
+            std::ptr::null(),
+            &mut lost,
+        )
+    };
+    if written <= 0 || lost != 0 {
+        return None;
+    }
+    out.truncate(written as usize);
+    Some(out)
+}
+
+/// A class path entry the JVM can read: as it is, else, with a character the system's code page
+/// lacks, the file's short name (`C:\\Users\\ABCDEF~1\\...`), which is plain ASCII.
+#[cfg(windows)]
+pub(crate) fn option_path(path: &Path) -> PathBuf {
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+    use windows_sys::Win32::Storage::FileSystem::GetShortPathNameW;
+    if path.to_str().is_some_and(|s| code_page_bytes(s).is_some()) {
+        return path.to_path_buf();
+    }
+    let wide: Vec<u16> = path.as_os_str().encode_wide().chain([0]).collect();
+    let mut short = vec![0u16; 32768];
+    // SAFETY: `wide` ends in a NUL, and `short` is valid for the length given.
+    let written =
+        unsafe { GetShortPathNameW(wide.as_ptr(), short.as_mut_ptr(), short.len() as u32) };
+    if written == 0 || written as usize >= short.len() {
+        return path.to_path_buf();
+    }
+    short.truncate(written as usize);
+    PathBuf::from(std::ffi::OsString::from_wide(&short))
+}
+
+#[cfg(not(windows))]
+pub(crate) fn option_path(path: &Path) -> PathBuf {
+    path.to_path_buf()
+}
+
 fn create_vm(
     home: &Path,
     class_path: &[PathBuf],
@@ -443,7 +515,8 @@ fn create_vm(
     // A JVM never unloads: keep its library mapped for the life of the process.
     std::mem::forget(library);
 
-    let joined = std::env::join_paths(class_path).map_err(|e| format!("class path: {e}"))?;
+    let joined = std::env::join_paths(class_path.iter().map(|p| option_path(p)))
+        .map_err(|e| format!("class path: {e}"))?;
     let mut options = vec![
         // Leave SIGINT, SIGTERM and SIGHUP to the game: Ctrl+C and shutdown stay Horizon's.
         "-Xrs".to_string(),
@@ -463,6 +536,11 @@ fn create_vm(
     ];
     if let Some(archive) = archive {
         options.push("-XX:+AutoCreateSharedArchive".into());
+        // It may not exist yet, and only what exists has a short name: its folder does.
+        let archive = match (archive.parent(), archive.file_name()) {
+            (Some(dir), Some(name)) => option_path(dir).join(name),
+            _ => archive.to_path_buf(),
+        };
         options.push(format!("-XX:SharedArchiveFile={}", archive.display()));
         // Classes from signed jars (Fabric's own sat4j) can't be archived: said once each.
         options.push("-Xlog:cds=off".into());
@@ -474,7 +552,7 @@ fn create_vm(
     }
     let options: Vec<CString> = options
         .into_iter()
-        .map(|o| CString::new(o).map_err(|_| "a NUL in a JVM option".to_string()))
+        .map(|o| CString::new(option_bytes(&o)).map_err(|_| "a NUL in a JVM option".to_string()))
         .collect::<Result<_, _>>()?;
     let mut raw: Vec<sys::JavaVMOption> = options
         .iter()

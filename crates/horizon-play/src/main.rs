@@ -547,6 +547,27 @@ fn write_session(home: &Path, account: &Account) -> Option<PathBuf> {
     Some(path)
 }
 
+/// Why the game's log says the mods didn't start: that line and the lines after it, up to the
+/// next log line (a compiler's errors take several).
+fn not_started_reason(log: &str) -> Option<String> {
+    let mut lines = log.lines().rev().collect::<Vec<_>>();
+    lines.reverse();
+    let start = lines
+        .iter()
+        .rposition(|l| l.contains("Java mods: not started: "))?;
+    let (_, first) = lines[start].split_once("Java mods: not started: ")?;
+    let rest = lines[start + 1..]
+        .iter()
+        .take_while(|l| !l.starts_with('['))
+        .take(12);
+    let mut reason = first.to_string();
+    for line in rest {
+        reason.push('\n');
+        reason.push_str(line);
+    }
+    Some(reason)
+}
+
 fn run(request: Request) -> Result<i32, String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let exe_dir = exe
@@ -638,17 +659,11 @@ fn run(request: Request) -> Result<i32, String> {
     if status.code() == Some(MODS_NOT_STARTED) {
         let reason = std::fs::read_to_string(&log)
             .ok()
-            .and_then(|text| {
-                text.lines().rev().find_map(|l| {
-                    l.split_once("Java mods: not started: ")
-                        .map(|(_, reason)| reason.to_string())
-                })
-            })
+            .and_then(|text| not_started_reason(&text))
             .unwrap_or_else(|| "the reason is in the log".into());
         return Err(format!(
             "your mods couldn't start, so the game stopped to keep your worlds safe.\n\n{reason}\n\n\
-             This usually means one mod doesn't work here: try removing the mod it names. The \
-             full log is {}",
+             If this names a mod, try removing that mod. The full log is {}",
             log.display()
         ));
     }
@@ -702,6 +717,19 @@ mod tests {
                 xuid: Some("42".into()),
             }
         );
+    }
+
+    #[test]
+    fn the_reason_takes_a_compilers_lines_but_not_the_next_log_line() {
+        let log = "[01:00:00] [main/ERROR]: Java mods: not started: javac failed:\n\
+                   Foo.java:1: error\n\
+                   1 error\n\
+                   [01:00:01] [main/INFO]: later\n";
+        assert_eq!(
+            not_started_reason(log).as_deref(),
+            Some("javac failed:\nFoo.java:1: error\n1 error")
+        );
+        assert_eq!(not_started_reason("[01:00:00] [main/INFO]: fine\n"), None);
     }
 
     #[test]
