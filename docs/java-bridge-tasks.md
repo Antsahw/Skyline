@@ -35,6 +35,23 @@ sync 4). A case that fails only in a full regress run is a bug in the case: make
 you meet one (on a slow box: `jump2` saw an extra refused jump, `worldmap-lazy`'s World Map
 count stayed under its 10k mark while the map was still filling in). Worldgen is still on round 6.
 
+### Upstream (2026-11-04: Ludovic asked for the bridge in the main repo)
+
+The user's decisions: **off by default; the launcher has a switch to turn on Fabric 26.3 mods.**
+One chat, branch `bridge-upstream-prep`, in this order:
+1. **The switch.** A launcher setting (per instance, `tr()` text, design-system look) "Fabric
+   26.3 mods (beta)", off. On: the instance installs/updates the `-java` game variant
+   (game-build.yml already packages it), shows the Java mods tab (today it shows whenever
+   `mods-java/` exists), and starts the game with an explicit opt-in (e.g. `--java-mods`).
+   Off: the plain build, no tab, no Java started, even with jars in `mods-java/`. The game
+   with the `java-mods` feature also starts Java only when opted in. Fetching Java 25 happens
+   only after the switch. Test headless: the launcher CLI, both states.
+2. **Shrink the shared-file edits** (5,300 lines in 122 of Horizon's files vs upstream main):
+   move logic into our files, leave one-line hooks; list each remaining hook and why
+   (`docs/java-bridge-upstream.md`).
+3. **Plan the PR series** (< ~500 lines each where possible): hooks, crates, gameplay files,
+   launcher, CI (Java 25, a few headless cases), docs. Don't open PRs until the user and Ludovic agree.
+
 ### The user's PC run (2026-11-03, 81-jar test pack from `tools/java_bridge/get_test_pack.py`)
 
 Plays (RX 9070 XT, Fedora): JourneyMap, Xaero's Minimap/World Map, Jade, REI, mod mobs ("very
