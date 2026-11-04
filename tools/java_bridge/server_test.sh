@@ -55,6 +55,7 @@ sv() { echo "$1" >&3; sleep 0.5; }
 for _ in $(seq 600); do grep -q 'Done (' "$SD/server.log" 2>/dev/null && break; sleep 1; done
 grep -q 'Done (' "$SD/server.log" || { echo "the server never started: $SD/server.log"; tail -20 "$SD/server.log"; exit 1; }
 GS=$(scratch player); echo "$GS" > /tmp/hz-bridge-player
+"$R/tools/java_bridge/fps_cap.sh" "$GS"
 (cd "$GS" && HORIZON_HOME=$GS/home HORIZON_LAUNCHER_HOME=$GS/lh XDG_DATA_HOME=$GS/data XDG_CONFIG_HOME=$GS/conf \
   HORIZON_LAUNCHER_NO_SELF_UPDATE=1 HORIZON_NO_AUDIO=1 HORIZON_JAVA_MODS=1 HORIZON_ROOT=$R \
   "$CTL" --socket "$GS/ctl.sock" launch --offscreen \

@@ -21235,6 +21235,8 @@ struct Loading {
     title_drawn: bool,
     menu: startup_menu::StartupMenu,
     error: Option<Box<dyn std::error::Error>>,
+    /// When the last offscreen frame was drawn (`about_to_wait` paces them).
+    drawn_at: Option<Instant>,
 }
 /// How long the handoff waits for the first title frame before building the
 /// world renderer anyway (a hidden window may never be asked to redraw).
@@ -21406,7 +21408,20 @@ impl Loading {
         }
         if let Some(w) = &self.window {
             if self.options.as_ref().is_some_and(|o| o.offscreen) {
-                self.draw();
+                // No vsync paces an offscreen window: vanilla's limit for a menu with no
+                // level (`FramerateLimitTracker`, OutOfLevelMenu: 60 a second) does, or a
+                // test's loading screen takes the whole GPU.
+                let now = Instant::now();
+                let next = self
+                    .drawn_at
+                    .map_or(now, |at| at + Duration::from_micros(1_000_000 / 60));
+                if now >= next {
+                    self.drawn_at = Some(now);
+                    self.draw();
+                } else {
+                    event_loop.set_control_flow(ControlFlow::WaitUntil(next));
+                    return;
+                }
             } else {
                 w.request_redraw();
             }
@@ -21684,6 +21699,7 @@ fn run_loading(
         title_drawn: false,
         menu,
         error: None,
+        drawn_at: None,
     };
     let mut app = App::Loading(Box::new(loading));
     let result = EventLoop::new()?.run_app(&mut app);

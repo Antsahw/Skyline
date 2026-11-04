@@ -33,6 +33,7 @@ cp "$R/research-lock.json" "$I/version/"
 for f in jars libraries manifest.json; do ln -s "$R/.local/minecraft/$V/$f" "$I/version/.local/minecraft/$V/$f"; done
 ln -s "$R/.local/horizon-client/$V" "$I/version/.local/horizon-client/$V"
 cp "$MODS"/*.jar "$I/home/mods-java/"
+"$R/tools/java_bridge/fps_cap.sh" "$I/home"
 if [ -z "$DISPLAY" ]; then
   pgrep -x Xvfb >/dev/null || (nohup Xvfb :77 -screen 0 1280x1024x24 >/tmp/xvfb.log 2>&1 &)
   export DISPLAY=:77; sleep 1

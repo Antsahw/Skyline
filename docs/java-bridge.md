@@ -880,6 +880,9 @@ gets SPIR-V, vertex layouts and uniform lists.
   grass and leaf is black; a client level without a `BiomeManager` throws in `getBiome`.
 - Atlas definitions fail ("Unknown element id: minecraft:directory") and item models too
   ("minecraft:model") until `ClientBootstrap.bootstrap()` has run.
+- An `--offscreen` window is paced only by the frame limiter (no vsync, nothing presented): the
+  loading screen drew as fast as it could (99% of a real GPU) until it was held to vanilla's 60
+  for a menu with no level (`Loading::about_to_wait`); in a world, `maxFps` (default 120) holds.
 - `DynamicGpuDataStorageMapped` grows its ring every frame unless `getDynamicUniforms().reset()`
   runs at the frame's end.
 - `RenderSystem.bindDefaultUniforms` binds `Lighting`, `Globals` and `Fog` only when set:
@@ -1098,7 +1101,11 @@ MODS=~/mods/toms  SCENE=terminal tools/java_bridge/screen_test.sh '$C click-at 1
 MODS=~/mods/x     SCENE=none     tools/java_bridge/screen_test.sh   # just start, print failures
 ```
 
-`launch.sh` starts a game, `around.sh` runs steps around the player. Clicks are GUI pixels
+`launch.sh` starts a game, `around.sh` runs steps around the player. Test games are capped at
+30 FPS (`fps_cap.sh`: `maxFps` in the game folder's options.txt; `MAX_FPS=n`, or an `OPTS` file
+with its own `maxFps`); an offscreen window has no vsync, so uncapped it takes a real GPU whole.
+A `resourcepacks/` and an `options.txt` beside `MODS` (a pack's folder) come along as a launcher
+instance's would: the packs linked, their selection on. Clicks are GUI pixels
 (427x240 at 1280x720; a screenshot pixel / 3). The log of a run: `<scratch>/home/logs/latest.log`;
 Java's lines start `[java]`. The first start of a mod set builds its content (~20 s, cached in
 `.horizon-cache/java-content`; bump `FORMAT` in `content.rs` when the content format changes).
@@ -1847,6 +1854,13 @@ Windows and a symlink elsewhere; Prism's signed-in account goes to the game as a
 once, deleted). `HORIZON_PRISM_DRY=1` sets up and prints the command; `HORIZON_PRISM_ARGS` adds game
 arguments. (Idea from the NeuHorizon fork's NeoForge wrapper.) `--instance FOLDER` does the same
 without Prism or its account.
+
+**A modpack's resource packs** (`packs.rs`): the instance's `resourcepacks/` is the game folder's
+(a link; when `horizon/resourcepacks` is already a folder, the instance's packs it lacks are
+linked into it), and the instance's selection (`resourcePacks`, `incompatibleResourcePacks` in its
+`options.txt`) is written into Horizon's `options.txt`: on the first start, and again only when the
+instance's selection changes (`.horizon-play-packs` records it), so a pack the player turns off in
+Horizon stays off. Regress `prism` checks both; `packs` loads a pack's packs in a game.
 
 **When the mods can't start,** the game exits with code 78 (`NOT_STARTED_EXIT`) instead of going on
 without them, and `horizon-play` shows the reason: a player would take the world for modded, and a
