@@ -191,3 +191,15 @@ fast: prefer them to cloud runs for big packs.
    a first 1.12 mod's block placed in Horizon. Old-mod translation in general (remapping renames,
    a shim library, local only: many mods are all rights reserved) is the other route for
    1.20–1.21 mods.
+
+## State after merge-batch8 (2026-11-04)
+
+- `java-bridge` = batch 8: `bridge-gpu-10` (placed mod blocks no longer turn to air;
+  `research-lock.json` accepts Mojang's republished 26.3 JSON `80608ff…`) and `bridge-mixins-8`
+  (Horizon's hoppers into/out of Java mods' blocks via Fabric `ItemStorage`). Conflict: only
+  java-bridge-tasks.md (kept both reports).
+- Checked here (2 cores, 7 GB): `placed hoppers pot server rei-lan` pass. Setup: JDK 25 from apt,
+  Mojang files by a manifest script into a launcher folder, `lab.py prepare` (accepted the new
+  JSON thanks to gpu-10), `horizon-prepare` 44 s, game build 18 min, jars from Modrinth by slug
+  (farmers-delight-refabricated, jade, appleskin, xaeros-minimap, rei, architectury-api,
+  cloth-config, fabric-api). Five cases ~25 min.
