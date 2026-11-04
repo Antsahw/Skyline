@@ -170,6 +170,12 @@ public final class Natives {
     public static native void packet(String uuid, byte[] data);
 
     /**
+     * A device mod's message from this game's own client half to the server it plays on
+     * (HorizonDeviceClient): its channel and body, sent as a custom payload.
+     */
+    public static native void devicePayload(String channel, byte[] body);
+
+    /**
      * Java hurt a Horizon player (ServerPlayerHurtMixin): Horizon hurts its player. NaN: no
      * source position; {@code by}: the attacker's name, or null.
      */

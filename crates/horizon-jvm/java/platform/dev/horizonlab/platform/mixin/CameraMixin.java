@@ -49,6 +49,29 @@ public abstract class CameraMixin {
     private void horizon$forward(CallbackInfoReturnable<Vector3fc> cir) {
         Entity player = horizon$player();
         if (player != null) cir.setReturnValue(player.getViewVector(1f).toVector3f());
+        else if (HorizonClient.headless()) cir.setReturnValue(new Vector3f(0f, 0f, -1f));
+    }
+
+    /** The camera's turn as vanilla's setRotation makes it, from the player's look. */
+    private static org.joml.Quaternionf horizon$rotation(Entity player) {
+        float deg = (float) (Math.PI / 180.0);
+        return new org.joml.Quaternionf().rotationYXZ((float) Math.PI - player.getYRot() * deg, -player.getXRot() * deg, 0f);
+    }
+
+    // Up and left (Simple Voice Chat's positional audio reads up: null before), as vanilla's
+    // are made from its turn.
+    @Inject(method = "upVector", at = @At("HEAD"), cancellable = true)
+    private void horizon$up(CallbackInfoReturnable<Vector3fc> cir) {
+        Entity player = horizon$player();
+        if (player != null) cir.setReturnValue(horizon$rotation(player).transform(new Vector3f(0f, 1f, 0f)));
+        else if (HorizonClient.headless()) cir.setReturnValue(new Vector3f(0f, 1f, 0f));
+    }
+
+    @Inject(method = "leftVector", at = @At("HEAD"), cancellable = true)
+    private void horizon$left(CallbackInfoReturnable<Vector3fc> cir) {
+        Entity player = horizon$player();
+        if (player != null) cir.setReturnValue(horizon$rotation(player).transform(new Vector3f(-1f, 0f, 0f)));
+        else if (HorizonClient.headless()) cir.setReturnValue(new Vector3f(-1f, 0f, 0f));
     }
 
     @Inject(method = "xRot", at = @At("HEAD"), cancellable = true)

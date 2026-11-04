@@ -37,6 +37,9 @@ public final class HorizonClient {
         String name = "Player";
         set(Minecraft.class, mc, "user", new net.minecraft.client.User(name,
                 net.minecraft.core.UUIDUtil.createOfflinePlayerUUID(name), "", java.util.Optional.empty(), java.util.Optional.empty()));
+        // The resource pack list, made by Minecraft's constructor before the client entrypoints:
+        // a mod's initializer adds its pack source to it (Simple Voice Chat's: it was null).
+        set(Minecraft.class, mc, "resourcePackRepository", new net.minecraft.server.packs.repository.PackRepository());
         HorizonServer.client = true;
     }
 
@@ -83,6 +86,7 @@ public final class HorizonClient {
 
     public static void finish() throws ReflectiveOperationException {
         Minecraft mc = minecraft;
+        HorizonDeviceMods.startScan();
         // options.txt is brought up to date by the game's data fixer, as the server's saves are.
         set(Minecraft.class, mc, "fixerUpper", net.minecraft.util.datafix.DataFixers.getDataFixer());
         set(Minecraft.class, mc, "options", new net.minecraft.client.Options(mc, mc.gameDirectory));
@@ -903,6 +907,35 @@ public final class HorizonClient {
     }
 
     /**
+     * A client's network connection as single player's is: over memory to a server in this
+     * process. Its channel is closed (nothing is written on it; sends go nowhere, as with no
+     * channel) but answers its address as vanilla's memory channel does: a LocalAddress (Simple
+     * Voice Chat connects its voice to the address of the game's connection: 127.0.0.1 here).
+     */
+    static net.minecraft.network.Connection memoryConnection(net.minecraft.network.Connection connection) {
+        var channel = new io.netty.channel.embedded.EmbeddedChannel() {
+            @Override
+            protected java.net.SocketAddress remoteAddress0() {
+                return new io.netty.channel.local.LocalAddress("horizon-server");
+            }
+
+            @Override
+            protected java.net.SocketAddress localAddress0() {
+                return new io.netty.channel.local.LocalAddress("horizon-client");
+            }
+        };
+        channel.remoteAddress();
+        channel.localAddress();
+        channel.close();
+        try {
+            set(net.minecraft.network.Connection.class, connection, "channel", channel);
+        } catch (ReflectiveOperationException e) {
+            Natives.log("Horizon's client: its connection has no address: " + e);
+        }
+        return connection;
+    }
+
+    /**
      * The client's connection (one for every player): one that never sends, with the server's
      * registries and features (what a client gets as it joins). Mods reach them through it:
      * through the client level's connection (REI's displays, once there is a level), else the
@@ -938,8 +971,8 @@ public final class HorizonClient {
             // a client's is before the server sends any (Cardinal Components' client tick).
             set(net.minecraft.client.multiplayer.ClientPacketListener.class, connection, "scoreboard",
                     new net.minecraft.world.scores.Scoreboard());
-            // Its network connection: a mirror one with no channel, as the players' are
-            // (connected, not connecting: MirrorConnectionMixin).
+            // Its network connection: a mirror one, as the players' are (connected, not
+            // connecting: MirrorConnectionMixin), over memory (memoryConnection).
             set(net.minecraft.client.multiplayer.ClientCommonPacketListenerImpl.class, connection, "connection",
                     HorizonServer.clientConnection());
             if (minecraft.gameMode != null) {
@@ -1016,7 +1049,7 @@ public final class HorizonClient {
     }
 
     /** A connection's player list (getPlayerInfo: JourneyMap's skins), empty. */
-    private static void players(net.minecraft.client.multiplayer.ClientPacketListener connection) throws ReflectiveOperationException {
+    static void players(net.minecraft.client.multiplayer.ClientPacketListener connection) throws ReflectiveOperationException {
         Class<?> owner = net.minecraft.client.multiplayer.ClientPacketListener.class;
         set(owner, connection, "playerInfoMap", new java.util.concurrent.ConcurrentHashMap<>());
         set(owner, connection, "listedPlayers", new java.util.LinkedHashSet<>());
@@ -1103,6 +1136,11 @@ public final class HorizonClient {
         var level = clientLevel(player.level());
         minecraft.level = level;
         set(net.minecraft.world.entity.Entity.class, local, "level", level);
+        // Their connection's level too (ClientPacketListener.getLevel: a connection with no
+        // level is one still logging in, and Simple Voice Chat sent nothing on it).
+        if (local.connection != null && level != null) {
+            set(net.minecraft.client.multiplayer.ClientPacketListener.class, local.connection, "level", level);
+        }
         // Their open screen is the GUI's (Minecraft.gui.screen()), which mods' client code looks at (a message
         // for the screen that is open: Tom's Storage's terminal's item list).
         var screen = SCREENS.get(player.getUUID());
@@ -1123,6 +1161,33 @@ public final class HorizonClient {
             set(net.minecraft.client.gui.Gui.class, minecraft.gui, "screen", screenBefore);
             minecraft.level = levelBefore;
             set(net.minecraft.world.entity.Entity.class, local, "level", localLevel);
+            if (before == null) rest();
+        }
+    }
+
+    /**
+     * Between players' runs the client is its own player's, as a real client always is, when
+     * this process's game has a player and a device mod runs here (HorizonDeviceMods): such a
+     * mod's own threads read Minecraft.player and .level at any time (Simple Voice Chat's
+     * speakers play only while there is a player and a level, and place voices by it).
+     */
+    static void rest() {
+        var own = HorizonDeviceMods.own;
+        if (own == null || minecraft == null || HorizonDeviceMods.mods().isEmpty()) return;
+        var player = HorizonServer.player(own);
+        if (player == null) return;
+        try {
+            var local = localPlayer(player);
+            var level = clientLevel(player.level());
+            if (local == null || level == null) return;
+            set(Minecraft.class, minecraft, "player", local);
+            minecraft.level = level;
+            set(net.minecraft.world.entity.Entity.class, local, "level", level);
+            if (local.connection != null) {
+                set(net.minecraft.client.multiplayer.ClientPacketListener.class, local.connection, "level", level);
+            }
+        } catch (ReflectiveOperationException e) {
+            Natives.log("Horizon's client: its own player couldn't stay its client's: " + e);
         }
     }
 
@@ -1132,6 +1197,7 @@ public final class HorizonClient {
      */
     static void left(java.util.UUID id) {
         JOINED.remove(id);
+        HorizonDeviceMods.RUN_THEIR_OWN.remove(id);
         CLIENT_CHUNKS.remove(id);
         HorizonClientState.forget(id);
         var overlay = OVERLAYS.remove(id);
@@ -1332,7 +1398,7 @@ public final class HorizonClient {
     public static boolean clientMessage(net.minecraft.client.player.LocalPlayer local,
                                         net.minecraft.network.chat.Component message, boolean overlay) {
         var player = SERVER_PLAYERS.get(local);
-        if (player == null) return false;
+        if (player == null) return HorizonDeviceClient.message(local, message, overlay);
         String json = HorizonServer.chatJson(message);
         if (overlay) Natives.overlay(player.getStringUUID(), json);
         else Natives.tell(player.getStringUUID(), json);
@@ -2030,7 +2096,8 @@ public final class HorizonClient {
             // client has none of.)
             if (merged == null || merged.mixin().startsWith("dev.horizonlab.platform.") || merged.mixin().startsWith("net.fabricmc.")
                     || params.length != 2 || params[0] != packet
-                    || !org.spongepowered.asm.mixin.injection.callback.CallbackInfo.class.isAssignableFrom(params[1])) {
+                    || !org.spongepowered.asm.mixin.injection.callback.CallbackInfo.class.isAssignableFrom(params[1])
+                    || !HorizonDeviceMods.runs(m)) {
                 continue;
             }
             try {
@@ -2091,7 +2158,8 @@ public final class HorizonClient {
         // The resource pack list (Minecraft.getResourcePackRepository: Xaero's World Map hashes the
         // selected ones): none chosen, as a new game's.
         try {
-            var repository = new net.minecraft.server.packs.repository.PackRepository();
+            var repository = minecraft.getResourcePackRepository();
+            if (repository == null) repository = new net.minecraft.server.packs.repository.PackRepository();
             repository.reload();
             set(Minecraft.class, minecraft, "resourcePackRepository", repository);
         } catch (Throwable t) {
@@ -2189,13 +2257,16 @@ public final class HorizonClient {
         return false;
     }
 
-    private static void tickOnce() {
+    static void tickOnce() {
         HorizonHooks.fireClient(minecraft, "runTick");
         HorizonHooks.fireClient(minecraft, "tick");
         // Once a frame in the game (the headless client's frames are its ticks, getDeltaTracker
         // whole ticks): Iceberg's render tick (Legendary Tooltips' turning 3D item, its targets'
         // pool given back).
         HorizonHooks.fireClient(minecraft, "renderFrame");
+        // The key bindings' handling in the tick (Minecraft.handleKeybinds, while playing):
+        // Simple Voice Chat reads its keys at its head.
+        if (minecraft.player != null && minecraft.gui.screen() == null) HorizonHooks.fireClient(minecraft, "handleKeybinds");
         HorizonServer.fireEach("ClientTickEvents.START_CLIENT_TICK",
                 net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents.START_CLIENT_TICK, l -> l.onStartTick(minecraft));
         // The client player's tick (the client level ticks it: Player.tick), as far as mods hook
@@ -2362,6 +2433,7 @@ public final class HorizonClient {
         Object[] call = java.util.Arrays.copyOf(args, args.length + 1);
         call[args.length] = info;
         for (var handler : handlers) {
+            if (!HorizonDeviceMods.runs(handler)) continue;
             try {
                 handler.invoke(java.lang.reflect.Modifier.isStatic(handler.getModifiers()) ? null : self, call);
             } catch (ReflectiveOperationException e) {
@@ -2721,7 +2793,7 @@ public final class HorizonClient {
                 var layer = (net.fabricmc.fabric.impl.client.rendering.hud.HudLayer) o;
                 if (layer.isRemoved()) continue;
                 var element = layer.element(none);
-                if (element == none) continue;
+                if (element == none || !HorizonDeviceMods.runs(element.getClass())) continue;
                 int before = graphics.ops().size();
                 hudPart(String.valueOf(layer.id()), () -> element.extractRenderState(graphics, delta));
                 if (DEBUG_HUD) Natives.log("hud element " + layer.id() + ": " + (graphics.ops().size() - before) + " ops");

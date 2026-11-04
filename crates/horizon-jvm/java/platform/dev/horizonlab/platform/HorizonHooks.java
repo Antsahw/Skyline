@@ -159,7 +159,7 @@ public final class HorizonHooks {
             }
         }
     }
-    private static final java.util.Set<String> CLIENT_METHODS = java.util.Set.of("runTick", "tick", "renderFrame");
+    private static final java.util.Set<String> CLIENT_METHODS = java.util.Set.of("runTick", "tick", "renderFrame", "handleKeybinds");
     private static final List<ClientHook> CLIENT_HOOKS = new ArrayList<>();
     private static final Map<String, List<Method>> CLIENT_RESOLVED = new ConcurrentHashMap<>();
 
@@ -405,6 +405,7 @@ public final class HorizonHooks {
             return found;
         });
         for (Method handler : handlers) {
+            if (!HorizonDeviceMods.runs(handler)) continue;
             try {
                 Object self = Modifier.isStatic(handler.getModifiers()) ? null : gameRenderer;
                 if (at.equals(RENDER)) handler.invoke(self, new CallbackInfo("render", true));
@@ -475,6 +476,7 @@ public final class HorizonHooks {
         if (CLIENT_HOOKS.isEmpty()) return;
         List<Method> handlers = CLIENT_RESOLVED.computeIfAbsent(method, k -> resolveClient(minecraft.getClass(), method));
         for (Method handler : handlers) {
+            if (!HorizonDeviceMods.runs(handler)) continue;
             Class<?>[] params = handler.getParameterTypes();
             Object[] call = new Object[params.length];
             for (int i = 0; i < params.length; i++) {

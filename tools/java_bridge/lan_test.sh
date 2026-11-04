@@ -6,6 +6,8 @@
 # host player's block). Prints the logs' failures.
 #   MODS=~/fd tools/java_bridge/lan_test.sh '$G command "give @s minecraft:beef"' '$G key e tap'
 #   JAVA_ONLY=1 ... : after a Java-only change (no game rebuild; see java.sh)
+#   CONFIG=dir: mods' settings for both games (launch.sh's); GUEST_ENV="A=1 B=2": the guest's
+#   own environment on top (voice_test.sh: each game its own sound devices)
 R=$(cd "$(dirname "$0")/../.." && pwd)
 : "${MODS:?MODS: a folder of mod jars}" "${OUT:=/tmp}" "${PORT:=25599}"
 if ! "${JAVA_HOME:-/nonexistent}/bin/java" -version 2>&1 | grep -q '"25'; then
@@ -36,9 +38,10 @@ GS=$(mktemp -d /tmp/hz-guest.XXXX)
 echo "$GS" > /tmp/hz-bridge-guest
 mkdir -p "$GS/mods-java" "$GS/home" "$GS/lh" "$GS/data" "$GS/conf"
 cp "$MODS"/*.jar "$GS/mods-java/"
+[ -n "$CONFIG" ] && mkdir -p "$GS/config" && cp -r "$CONFIG"/. "$GS/config/"
 "$R/tools/java_bridge/fps_cap.sh" "$GS"
 [ -z "$DISPLAY" ] && export DISPLAY=:77
-(cd "$GS" && HORIZON_HOME=$GS/home HORIZON_LAUNCHER_HOME=$GS/lh XDG_DATA_HOME=$GS/data XDG_CONFIG_HOME=$GS/conf \
+(cd "$GS" && env $GUEST_ENV HORIZON_HOME=$GS/home HORIZON_LAUNCHER_HOME=$GS/lh XDG_DATA_HOME=$GS/data XDG_CONFIG_HOME=$GS/conf \
   HORIZON_LAUNCHER_NO_SELF_UPDATE=1 HORIZON_NO_AUDIO=1 HORIZON_JAVA_MODS=1 HORIZON_ROOT=$R \
   "$CTL" --socket "$GS/ctl.sock" launch --offscreen \
   --game "$R/target/fast/horizon-client" --resources "$R/.local/horizon-client/26.3" > "$GS/ctl.out" 2>&1)

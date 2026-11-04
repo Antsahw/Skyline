@@ -234,7 +234,7 @@ public final class HorizonServer {
 
     /** The headless client's network connection (its packet listener's): a mirror one. */
     static synchronized net.minecraft.network.Connection clientConnection() {
-        if (clientConnection == null) clientConnection = allocate(net.minecraft.network.Connection.class);
+        if (clientConnection == null) clientConnection = HorizonClient.memoryConnection(allocate(net.minecraft.network.Connection.class));
         return clientConnection;
     }
 
@@ -1126,7 +1126,10 @@ public final class HorizonServer {
             fire(event, () -> call.accept(source.invoker()));
             return;
         }
+        // Client events: a device mod's listeners run only on its player's own machine.
+        boolean client = event.startsWith("Client");
         for (Object handler : handlers) {
+            if (client && !HorizonDeviceMods.runs(handler.getClass())) continue;
             String name = handler.getClass().getName();
             int lambda = name.indexOf("$$");
             fire(event + " [" + (lambda > 0 ? name.substring(0, lambda) : name) + "]", () -> call.accept((T) handler));

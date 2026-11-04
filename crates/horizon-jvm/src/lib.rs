@@ -18,6 +18,7 @@
 //! [`start`] is idempotent: later calls return the running bridge.
 
 pub mod content;
+pub mod device;
 pub mod events;
 pub mod facade;
 pub mod gpu;
@@ -816,6 +817,11 @@ fn boot(env: &mut JNIEnv, jars: &[PathBuf]) -> jni::errors::Result<String> {
                 name: "packet".into(),
                 sig: "(Ljava/lang/String;[B)V".into(),
                 fn_ptr: native_packet as *mut c_void,
+            },
+            NativeMethod {
+                name: "devicePayload".into(),
+                sig: "(Ljava/lang/String;[B)V".into(),
+                fn_ptr: native_device_payload as *mut c_void,
             },
             NativeMethod {
                 name: "modFluids".into(),
@@ -1818,6 +1824,24 @@ extern "system" fn native_packet(
         };
         if let Ok(data) = env.convert_byte_array(&data) {
             events::push(events::Action::Packet { uuid, data });
+        }
+    }));
+}
+
+/// `Natives.devicePayload(String channel, byte[] body)`: a device mod's message from this
+/// game's own client half to the server it is connected to ([`device`]).
+extern "system" fn native_device_payload(
+    mut env: JNIEnv,
+    _class: JClass,
+    channel: JString,
+    data: jni::objects::JByteArray,
+) {
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let Ok(channel) = env.get_string(&channel).map(String::from) else {
+            return;
+        };
+        if let Ok(data) = env.convert_byte_array(&data) {
+            device::push_out(channel, data);
         }
     }));
 }

@@ -162,7 +162,9 @@ public final class HorizonFailures {
         String mod = null;
         var url = HorizonFailures.class.getClassLoader().getResource(className.replace('.', '/') + ".class");
         if (url != null) {
-            String where = java.net.URLDecoder.decode(url.toString(), java.nio.charset.StandardCharsets.UTF_8);
+            // (A URL's "+" is a plus, not a form's space: most mods' jars have one in their name,
+            // voicechat-fabric-2.6.27+26.3.jar, and were blamed on no one.)
+            String where = java.net.URLDecoder.decode(url.toString().replace("+", "%2B"), java.nio.charset.StandardCharsets.UTF_8);
             for (String[] root : roots()) {
                 if (where.contains(root[0])) {
                     mod = root[1];

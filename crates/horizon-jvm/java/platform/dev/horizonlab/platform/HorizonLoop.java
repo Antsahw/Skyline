@@ -83,6 +83,11 @@ public final class HorizonLoop {
      * the server's tank, which sent its contents again: the server thread never left this).
      */
     public static void flush() {
+        // A client's message being read now (toServer runs the server's receiver at once): its
+        // answer reaches the client after the client's code that sent it, as over a network
+        // (Simple Voice Chat makes its client right after asking for its secret: the secret,
+        // delivered inside the ask, found none).
+        if (reading > 0) return;
         loopThread = Thread.currentThread();
         // Clients' messages sent off this thread (REI's reload threads: Advanced Loot Info asks
         // for its loot data there) reach the server here, as a real server reads its network.
@@ -106,6 +111,16 @@ public final class HorizonLoop {
     public static boolean toClient(ServerPlayer player, CustomPacketPayload payload) {
         if (!on()) return false;
         if (DEBUG) Natives.log("loop: server to client " + payload.type().id() + " for " + player.getName().getString());
+        // A device mod's message for a player whose client half isn't here: to their own game,
+        // which runs it (HorizonDeviceMods); none for a game that doesn't.
+        if (HorizonDeviceMods.deviceChannel(payload.type().id()) && !player.getUUID().equals(HorizonDeviceMods.own)) {
+            if (HorizonDeviceMods.RUN_THEIR_OWN.contains(player.getUUID())) {
+                byte[] body = write(payload, net.fabricmc.fabric.impl.networking.PayloadTypeRegistryImpl.CLIENTBOUND_PLAY,
+                        HorizonServer.server().registryAccess());
+                if (body != null) HorizonPackets.customPayload(player, payload.type().id().toString(), body);
+            }
+            return true;
+        }
         var handler = (ClientPlayNetworking.PlayPayloadHandler) ClientNetworkingImpl.PLAY.getHandler(payload.type().id());
         if (handler == null) return false;
         CustomPacketPayload received = carried(payload, net.fabricmc.fabric.impl.networking.PayloadTypeRegistryImpl.CLIENTBOUND_PLAY);
@@ -125,6 +140,70 @@ public final class HorizonLoop {
         };
         OUTBOX.add(delivery);
         return true;
+    }
+
+    /** A payload as its codec writes it (a custom payload's body), or null when it can't be. */
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    static byte[] write(CustomPacketPayload payload,
+                        net.fabricmc.fabric.impl.networking.PayloadTypeRegistryImpl<net.minecraft.network.RegistryFriendlyByteBuf> registry,
+                        net.minecraft.core.RegistryAccess access) {
+        var type = registry.get(payload.type().id());
+        if (type == null) return null;
+        var buf = new net.minecraft.network.RegistryFriendlyByteBuf(io.netty.buffer.Unpooled.buffer(), access);
+        try {
+            ((net.minecraft.network.codec.StreamCodec) type.codec()).encode(buf, payload);
+            byte[] out = new byte[buf.readableBytes()];
+            buf.readBytes(out);
+            return out;
+        } catch (Throwable t) {
+            Natives.log("Java mods: " + payload.type().id() + " couldn't be written: " + t);
+            return null;
+        } finally {
+            buf.release();
+        }
+    }
+
+    /** A payload read from its body by its registered codec, or null. */
+    static CustomPacketPayload read(String channel, byte[] body,
+                                    net.fabricmc.fabric.impl.networking.PayloadTypeRegistryImpl<net.minecraft.network.RegistryFriendlyByteBuf> registry,
+                                    net.minecraft.core.RegistryAccess access) {
+        var type = registry.get(Identifier.parse(channel));
+        if (type == null) return null;
+        var buf = new net.minecraft.network.RegistryFriendlyByteBuf(io.netty.buffer.Unpooled.wrappedBuffer(body), access);
+        try {
+            Object read = type.codec().decode(buf);
+            return read instanceof CustomPacketPayload p ? p : null;
+        } catch (Throwable t) {
+            Natives.log("Java mods: " + channel + " couldn't be read: " + t);
+            return null;
+        } finally {
+            buf.release();
+        }
+    }
+
+    /**
+     * A message a player's own game sent on a device mod's channel (its client half runs
+     * there: HorizonDeviceMods), to the mod's server code as that player's. On the server thread.
+     */
+    public static void fromGame(String uuid, String channel, byte[] body) {
+        ServerPlayer player = HorizonServer.player(java.util.UUID.fromString(uuid));
+        var server = HorizonServer.server();
+        if (player == null || server == null || !HorizonDeviceMods.deviceChannel(Identifier.parse(channel))) return;
+        CustomPacketPayload payload = read(channel, body, net.fabricmc.fabric.impl.networking.PayloadTypeRegistryImpl.SERVERBOUND_PLAY,
+                server.registryAccess());
+        if (DEBUG) Natives.log("loop: " + player.getName().getString() + "'s game to server " + channel);
+        if (payload != null) receive(player, payload);
+    }
+
+    /** A player's own game runs the device mods' client half (it said so as it joined). */
+    public static void runsTheirOwn(String uuid) {
+        HorizonDeviceMods.RUN_THEIR_OWN.add(java.util.UUID.fromString(uuid));
+    }
+
+    /** The player whose game this process is (null: none, a dedicated server). */
+    public static void ownPlayer(String uuid) {
+        HorizonDeviceMods.own = uuid == null || uuid.isEmpty() ? null : java.util.UUID.fromString(uuid);
+        if (!HorizonDeviceMods.mods().isEmpty()) Natives.log("Java mods: this game's own player: " + HorizonDeviceMods.own);
     }
 
     /** Payload types whose codec failed here: theirs go over as objects. */
@@ -178,6 +257,11 @@ public final class HorizonLoop {
     /** Client to server, for the player whose client runs now (Minecraft.player). */
     @SuppressWarnings({"unchecked", "rawtypes"})
     public static void toServer(CustomPacketPayload payload) {
+        // A game connected to another's server: the device mods' messages go to it.
+        if (HorizonDeviceClient.on()) {
+            HorizonDeviceClient.send(payload);
+            return;
+        }
         ServerPlayer player = HorizonClient.serverPlayer(Minecraft.getInstance().player);
         boolean elsewhere = loopThread != null && Thread.currentThread() != loopThread;
         // A client thread of a mod's own (REI's reload) sends with no player's client running:
@@ -194,8 +278,16 @@ public final class HorizonLoop {
             INBOX.add(() -> receive(from, payload));
             return;
         }
-        receive(player, payload);
+        reading++;
+        try {
+            receive(player, payload);
+        } finally {
+            reading--;
+        }
     }
+
+    /** Client messages read now, inside the client code that sent them (on the loop's thread). */
+    private static int reading;
 
     @SuppressWarnings({"unchecked", "rawtypes"})
     private static void receive(ServerPlayer player, CustomPacketPayload payload) {
