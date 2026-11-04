@@ -2538,6 +2538,32 @@ public final class HorizonServer {
         return left[0];
     }
 
+    /**
+     * A Horizon hopper at a Java mod's block pushes one item of its slots into it
+     * (HorizonHoppers.insert): the slot's index, -1 when none fits, -2 when it holds no items.
+     */
+    public static int hopperInsert(String dimension, int x, int y, int z, int face, String[] stacks) {
+        Thread.currentThread().setContextClassLoader(HorizonServer.class.getClassLoader());
+        if (server == null) return -2;
+        int[] slot = {-2};
+        fire("hopper insert", () -> slot[0] = HorizonHoppers.insert(level(dimension), new BlockPos(x, y, z), face, stacks));
+        syncInventories();
+        return slot[0];
+    }
+
+    /**
+     * A Horizon hopper under a Java mod's block pulls one item out of it
+     * (HorizonHoppers.extract): its SNBT, "" when none, null when it holds no items.
+     */
+    public static String hopperExtract(String dimension, int x, int y, int z, int face, boolean anyRoom, String[] partial) {
+        Thread.currentThread().setContextClassLoader(HorizonServer.class.getClassLoader());
+        if (server == null) return null;
+        String[] out = {null};
+        fire("hopper extract", () -> out[0] = HorizonHoppers.extract(level(dimension), new BlockPos(x, y, z), face, anyRoom, partial));
+        syncInventories();
+        return out[0];
+    }
+
     /** HORIZON_JAVA_DEBUG=ticks: each random tick the mods run is logged with what it made. */
     private static final boolean TICK_DEBUG = String.valueOf(System.getenv("HORIZON_JAVA_DEBUG")).contains("ticks");
     private static final Map<net.minecraft.world.level.block.Block, Boolean> TICK_ROUTED = new ConcurrentHashMap<>();

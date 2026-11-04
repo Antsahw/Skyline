@@ -280,6 +280,163 @@ impl Game<'_> {
     }
 }
 
+/// Java mods' blocks a hopper found no item storage on, by dimension, position and face: asked
+/// again after this game time (a hopper beside a mod's decorative block doesn't call Java each
+/// tick; a block entity that wasn't there yet is found a little later).
+#[cfg(feature = "java-mods")]
+static JAVA_NO_STORAGE: std::sync::Mutex<
+    Option<std::collections::HashMap<(&'static str, [i32; 3], u8), i64>>,
+> = std::sync::Mutex::new(None);
+
+impl Game<'_> {
+    /// Whether the block at `pos` is a Java mod's that a hopper may ask about `face`.
+    #[cfg(feature = "java-mods")]
+    fn java_hopper_block(&self, pos: [i32; 3], face: horizon_core::geometry::Direction) -> bool {
+        if !horizon_jvm::events::enabled() {
+            return false;
+        }
+        let Some(states) = JAVA_STATES.get() else {
+            return false;
+        };
+        let state = self.world.block(pos[0], pos[1], pos[2]);
+        if !states.get(state.0 as usize).copied().unwrap_or(false) {
+            return false;
+        }
+        let key = (self.dim.id(), pos, face as u8);
+        let mut cache = JAVA_NO_STORAGE.lock().unwrap_or_else(|e| e.into_inner());
+        let cache = cache.get_or_insert_with(Default::default);
+        match cache.get(&key) {
+            Some(&until) if self.world.game_time < until => false,
+            Some(_) => {
+                cache.remove(&key);
+                true
+            }
+            None => true,
+        }
+    }
+
+    #[cfg(feature = "java-mods")]
+    fn java_hopper_no_storage(&self, pos: [i32; 3], face: horizon_core::geometry::Direction) {
+        let mut cache = JAVA_NO_STORAGE.lock().unwrap_or_else(|e| e.into_inner());
+        let cache = cache.get_or_insert_with(Default::default);
+        if cache.len() > 4096 {
+            cache.clear();
+        }
+        cache.insert((self.dim.id(), pos, face as u8), self.world.game_time + 40);
+    }
+
+    /// A hopper pushes one item of its slots (`stacks`, in order) into the Java mod's block at
+    /// `pos` through `face`, by its item storage (Fabric's `ItemStorage.SIDED`, as Fabric
+    /// Transfer API's patch of `HopperBlockEntity.ejectItems` does). None when the block isn't
+    /// a Java mod's or holds no items there; else the slot whose item went in, if one did.
+    pub(super) fn java_hopper_insert(
+        &mut self,
+        pos: [i32; 3],
+        face: horizon_core::geometry::Direction,
+        stacks: &[Option<&horizon_client::items::ItemStack>],
+    ) -> Option<Option<usize>> {
+        #[cfg(feature = "java-mods")]
+        {
+            use horizon_jvm::events::HopperMove;
+            if !self.java_hopper_block(pos, face) {
+                return None;
+            }
+            let snbt: Vec<Option<String>> = stacks
+                .iter()
+                .map(|s| {
+                    s.map(|s| {
+                        let one = horizon_client::items::ItemStack {
+                            count: 1,
+                            ..s.clone()
+                        };
+                        horizon_client::snbt::to_snbt(&horizon_items::item_nbt::item_to_nbt(&one))
+                    })
+                })
+                .collect();
+            let refs: Vec<Option<&str>> = snbt.iter().map(Option::as_deref).collect();
+            let dim = self.dim.id();
+            let moved = self.with_java_world(|| {
+                horizon_jvm::events::hopper_insert(dim, pos, face as i32, &refs)
+            });
+            match moved {
+                Ok(HopperMove::Moved(slot)) => Some(Some(slot)),
+                Ok(HopperMove::Nothing) => Some(None),
+                Ok(HopperMove::NoStorage) => {
+                    self.java_hopper_no_storage(pos, face);
+                    None
+                }
+                Err(e) => {
+                    log::warn!("Java mods: a hopper's push into {pos:?} failed: {e}");
+                    self.java_hopper_no_storage(pos, face);
+                    None
+                }
+            }
+        }
+        #[cfg(not(feature = "java-mods"))]
+        {
+            let _ = (pos, face, stacks);
+            None
+        }
+    }
+
+    /// A hopper pulls one item out of the Java mod's block at `pos` through `face` (Fabric
+    /// Transfer API's patch of `suckInItems`): the first it offers that fits (`any_room`: the
+    /// hopper has an empty slot; else one of `partial`, its stacks not full yet). None when
+    /// the block isn't a Java mod's or holds no items there; else the item, if one came.
+    pub(super) fn java_hopper_extract(
+        &mut self,
+        pos: [i32; 3],
+        face: horizon_core::geometry::Direction,
+        any_room: bool,
+        partial: &[&horizon_client::items::ItemStack],
+    ) -> Option<Option<horizon_client::items::ItemStack>> {
+        #[cfg(feature = "java-mods")]
+        {
+            use horizon_jvm::events::HopperMove;
+            if !self.java_hopper_block(pos, face) {
+                return None;
+            }
+            let snbt: Vec<String> = partial
+                .iter()
+                .map(|s| {
+                    let one = horizon_client::items::ItemStack {
+                        count: 1,
+                        ..(*s).clone()
+                    };
+                    horizon_client::snbt::to_snbt(&horizon_items::item_nbt::item_to_nbt(&one))
+                })
+                .collect();
+            let refs: Vec<&str> = snbt.iter().map(String::as_str).collect();
+            let dim = self.dim.id();
+            let moved = self.with_java_world(|| {
+                horizon_jvm::events::hopper_extract(dim, pos, face as i32, any_room, &refs)
+            });
+            match moved {
+                Ok(HopperMove::Moved(snbt)) => Some(
+                    horizon_world::nbt::parse_snbt(&snbt)
+                        .ok()
+                        .and_then(|(tag, _)| horizon_items::item_nbt::item_from_nbt(&tag)),
+                ),
+                Ok(HopperMove::Nothing) => Some(None),
+                Ok(HopperMove::NoStorage) => {
+                    self.java_hopper_no_storage(pos, face);
+                    None
+                }
+                Err(e) => {
+                    log::warn!("Java mods: a hopper's pull from {pos:?} failed: {e}");
+                    self.java_hopper_no_storage(pos, face);
+                    None
+                }
+            }
+        }
+        #[cfg(not(feature = "java-mods"))]
+        {
+            let _ = (pos, face, any_room, partial);
+            None
+        }
+    }
+}
+
 #[cfg(not(feature = "java-mods"))]
 impl Game<'_> {
     pub(super) fn tick_java_server(&mut self) {}

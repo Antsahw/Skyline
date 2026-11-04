@@ -912,6 +912,28 @@ CASES = {
         forbid=[r"updatingChunkMap", r"McJtyLib failed"],
         look="XNet's controller screen",
     ),
+    "hoppers": dict(
+        about="Horizon's hoppers through a Java mod's blocks (Fabric's ItemStorage): into Farmer's Delight's "
+              "cooking pot, and hopper -> oak cabinet -> hopper -> chest",
+        mods=["fd"], scene="none",
+        steps=['read X Y Z < <($C state | grep -o \'"block_pos":\\[[^]]*\' | head -1 | sed \'s/.*\\[//; s/,/ /g\'); X=$((X + 3)); '
+               '$C command "fill $((X - 1)) $Y $((Z - 1)) $((X + 3)) $((Y + 4)) $((Z + 1)) minecraft:air" > /dev/null; '
+               '$C command "setblock $X $Y $Z farmersdelight:cooking_pot" > /dev/null; '
+               '$C command "setblock $X $((Y + 1)) $Z minecraft:hopper{Items:[{Slot:0b,id:\\"minecraft:beef\\",count:3}]}" > /dev/null; '
+               'C2=$((X + 3)); $C command "setblock $C2 $Y $Z minecraft:chest" > /dev/null; '
+               '$C command "setblock $C2 $((Y + 1)) $Z minecraft:hopper" > /dev/null; '
+               '$C command "setblock $C2 $((Y + 2)) $Z farmersdelight:oak_cabinet" > /dev/null; '
+               '$C command "setblock $C2 $((Y + 3)) $Z minecraft:hopper{Items:[{Slot:0b,id:\\"minecraft:beef\\",count:5},'
+               '{Slot:1b,id:\\"minecraft:carrot\\",count:2}]}" > /dev/null; sleep 25; '
+               '$C command "data get block $X $((Y + 1)) $Z Items" > $S/pot_hopper.json; '
+               '$C command "data get block $C2 $Y $Z Items" > $S/chest.json; '
+               '$C command "data get block $C2 $((Y + 3)) $Z Items" > $S/top_hopper.json'],
+        checks=[check_file("pot_hopper.json", r"block data: \[\]", "the hopper pushed its beef into the cooking pot"),
+                check_file("chest.json", r"count: 5, Slot: 0b, id: \\+\"minecraft:beef", "five beef came out of the cabinet"),
+                check_file("chest.json", r"count: 2, Slot: 1b, id: \\+\"minecraft:carrot", "and the two carrots"),
+                check_file("top_hopper.json", r"block data: \[\]", "the top hopper emptied into the cabinet")],
+        forbid=[r"a hopper's (push|pull)"],
+    ),
     "tech": dict(
         about="BuildCraft's module blocks (buildcraftbuilders:quarry) and two Large Fluid Tanks placed; the game still answers",
         mods=["buildcraft", "fluidtank", "scala"], scene="none",

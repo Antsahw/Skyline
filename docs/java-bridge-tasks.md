@@ -47,7 +47,8 @@ the working directory: `mods-java` is read from there, not from `HORIZON_HOME`).
 Broken, first in every area's queue below:
 - **Invisible blocks** in a swamp biome (a few), and **mod blocks invisible when placed** until
   a relaunch (gpu/client: a state's model not there for the mesher until the next start).
-- **Hoppers don't work** (with Lithium in the pack: its hopper mixins; mixins/entities).
+- ~~**Hoppers don't work**~~ (bridge-mixins-8: not Lithium; hoppers didn't see Java mods'
+  containers. Fixed, see Reports.)
 - **Litematica's UI** doesn't show (client; MaLiLib's MiniHUD does).
 - **Sodium** doesn't work: expected, it replaces vanilla's renderer, which Horizon doesn't use.
   Say so in-game (a "not needed in Horizon" line) rather than a failure (client).
@@ -958,3 +959,25 @@ swamp invisible". Here (2 cores, llvmpipe, the 81-jar pack, fresh and cached con
 - Also: `research-lock.json` accepts Mojang's newest republished 26.3 version JSON (a fresh
   machine's `lab.py prepare` refused it).
 Test: `regress.py --jars ~/hz-test/mods-java placed`; in-game, place mod blocks by hand.
+
+### Mixins 8 (2026-11-03, branch `bridge-mixins-8`; Claude for iaxivers)
+
+**Hoppers.** Not Lithium. Headless with the 81-jar pack, Horizon's own hoppers work as without
+mods: chest → hopper → chest, item pickup, hand-placed and sneak-placed hoppers, filling a
+chest or hopper through its screen (a mirror menu: this pack routes every block use), an
+auto-smelter, after a save and reload; tick-exact counts (`tick freeze` + `tick step`) are the
+same with the pack (Lithium in), with Lithium alone and with Fabric API alone. What didn't work:
+**any Java mod's container**: a hopper into Farmer's Delight's cooking pot did nothing (Horizon
+has no block entity there). Now Horizon's hoppers push into and pull out of Java mods' blocks
+through Fabric's `ItemStorage.SIDED` (`HorizonHoppers`; java-bridge.md, the mixin section).
+Tested: hopper → cooking pot (beef in the pot's screen), hopper → FD oak cabinet → hopper →
+chest, in FD alone and in the full pack. Regress: new case `hoppers` and `pot` pass. Touches
+`machines.rs` (two hooks, ~40 lines: shared Horizon file). Not done: droppers into Java blocks;
+hoppers on Java mods' entities (minecarts of mods).
+Test on the PC: pull, build, start the pack; a hopper with items on a cooking pot or an FD
+cabinet fills it; a hopper under the cabinet empties it. Other mods' machines (Energized
+Power) not tried yet: they work if they expose Fabric's item storage.
+Setup note: Mojang republished 26.3's version JSON again (sha1 `80608ff…`, asset index
+`331e5c8…`); `lab.py prepare` refuses it until `research-lock.json` accepts it (not changed
+here: upstream's file).
+
