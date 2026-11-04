@@ -81,7 +81,10 @@ public final class HorizonEntityRender {
         // Item models: none (ItemModelResolverMixin), so held and worn items draw nothing.
         var items = new net.minecraft.client.renderer.item.ItemModelResolver(null);
         HorizonClient.set(net.minecraft.client.renderer.entity.EntityRenderDispatcher.class, dispatcher, "itemModelResolver", items);
-        context = new EntityRendererProvider.Context(dispatcher, null, items, null, null, models, null,
+        // Block models once the client's are loaded (modelsLoaded): renderers that draw blocks
+        // (Create's contraptions: their blocks through the model set) need the resolver.
+        var blocks = mc.getModelManager() != null ? new net.minecraft.client.renderer.block.BlockModelResolver(mc.getModelManager()) : null;
+        context = new EntityRendererProvider.Context(dispatcher, blocks, items, null, null, models, null,
                 mc.getAtlasManager(), mc.font, null, null);
         // Its renderers by type (renderer(): vanilla's and the mods'), for renderers that draw
         // another entity through it (Carry On's carried mob), and the players' (AvatarRenderer,
@@ -116,6 +119,27 @@ public final class HorizonEntityRender {
         texturesField = net.minecraft.client.renderer.rendertype.RenderSetup.class.getDeclaredField("textures");
         texturesField.setAccessible(true);
         return context;
+    }
+
+    /**
+     * The client's models are in (HorizonClient.finishModels): the renderers' contexts are made
+     * again with its block models, and renderers that failed for want of them are tried again.
+     */
+    static void modelsLoaded() {
+        try {
+            if (context == null) return;
+            var mc = HorizonClient.minecraft();
+            var blocks = new net.minecraft.client.renderer.block.BlockModelResolver(mc.getModelManager());
+            HorizonClient.set(EntityRendererProvider.Context.class, context, "blockModelResolver", blocks);
+            if (blockContext != null) {
+                HorizonClient.set(net.minecraft.client.renderer.blockentity.BlockEntityRendererProvider.Context.class,
+                        blockContext, "blockModelResolver", blocks);
+            }
+            NO_RENDERER.clear();
+            NO_BLOCK_RENDERER.clear();
+        } catch (Throwable t) {
+            Natives.log("Java mods: the renderers' block models couldn't be set: " + t);
+        }
     }
 
     /** The renderer the mod registered for this type (EntityRenderers.PROVIDERS), made once. */
@@ -165,7 +189,7 @@ public final class HorizonEntityRender {
         var dispatcher = (net.minecraft.client.renderer.blockentity.BlockEntityRenderDispatcher)
                 Natives.allocate(net.minecraft.client.renderer.blockentity.BlockEntityRenderDispatcher.class);
         blockContext = new net.minecraft.client.renderer.blockentity.BlockEntityRendererProvider.Context(
-                dispatcher, null, entities.getItemModelResolver(), entities.getEntityRenderDispatcher(),
+                dispatcher, entities.getBlockModelResolver(), entities.getItemModelResolver(), entities.getEntityRenderDispatcher(),
                 entities.getModelSet(), entities.getFont(), null, null);
         return blockContext;
     }
@@ -1204,7 +1228,9 @@ public final class HorizonEntityRender {
         InvocationHandler handler = new InvocationHandler() {
             @Override
             public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
-                if (method.isDefault() && !method.getName().equals("submitBlockModel")) return InvocationHandler.invokeDefault(proxy, method, args);
+                if (method.isDefault() && !method.getName().equals("submitBlockModel") && !method.getName().equals("submitItem")) {
+                    return InvocationHandler.invokeDefault(proxy, method, args);
+                }
                 switch (method.getName()) {
                     case "order" -> {
                         return proxy;
@@ -1233,6 +1259,16 @@ public final class HorizonEntityRender {
                     case "submitBlockModel" -> {
                         if (args.length == 9) blockModel(out, (PoseStack) args[0], (List<?>) args[3], args[4], (int[]) args[5]);
                         else blockModel(out, (PoseStack) args[0], (List<?>) args[2], null, (int[]) args[3]);
+                        return null;
+                    }
+                    // An item's layer as the client's resolver made it (a block entity renderer
+                    // drawing an item with the real item models: Create's depot, its belts):
+                    // vanilla's (pose, context, light, overlay, outline, tints, quads, foil) and
+                    // Fabric's, with the layer's mesh before the foil.
+                    case "submitItem" -> {
+                        if (!kept(null)) return null;
+                        Object mesh = args.length == 9 ? args[7] : null;
+                        itemModel(out, (PoseStack) args[0], (net.minecraft.client.resources.model.geometry.ItemQuads) args[6], mesh, (int[]) args[5]);
                         return null;
                     }
                     case "hashCode" -> {
@@ -1416,8 +1452,61 @@ public final class HorizonEntityRender {
                 }
             }
         }
-        // A Fabric mesh (QuadEmitter quads: atlas UVs, no sprite): the sprite holding each
-        // quad's UVs, in its atlas.
+        meshQuads(bySprite, pose, matrix, mesh, tints);
+        flush(out, bySprite);
+    }
+
+    /** An item layer's quads (see the collector's submitItem), as a block model's. */
+    private static void itemModel(JsonArray out, PoseStack pose, net.minecraft.client.resources.model.geometry.ItemQuads quads,
+                                  Object mesh, int[] tints) {
+        var matrix = pose.last().pose();
+        Map<String, JsonArray> bySprite = new java.util.LinkedHashMap<>();
+        org.joml.Vector3f p = new org.joml.Vector3f();
+        org.joml.Vector3f n = new org.joml.Vector3f();
+        float[][] xyz = new float[4][3];
+        float[][] uv = new float[4][2];
+        if (quads != null) {
+            for (var quad : quads.all()) {
+                var info = quad.materialInfo();
+                for (int i = 0; i < 4; i++) {
+                    var at = quad.position(i);
+                    xyz[i][0] = at.x();
+                    xyz[i][1] = at.y();
+                    xyz[i][2] = at.z();
+                    long packed = quad.packedUV(i);
+                    uv[i][0] = net.minecraft.client.model.geom.builders.UVPair.unpackU(packed);
+                    uv[i][1] = net.minecraft.client.model.geom.builders.UVPair.unpackV(packed);
+                }
+                var dir = quad.direction();
+                n.set(dir.getStepX(), dir.getStepY(), dir.getStepZ());
+                int tint = info.isTinted() ? tint(tints, info.tintIndex()) : -1;
+                quad(bySprite, pose, matrix, info.sprite(), xyz, uv, null, n, tint, p);
+            }
+        }
+        meshQuads(bySprite, pose, matrix, mesh, tints);
+        flush(out, bySprite);
+    }
+
+    /** One mesh a sprite: its texture's quads, into out. */
+    private static void flush(JsonArray out, Map<String, JsonArray> bySprite) {
+        bySprite.forEach((texture, v) -> {
+            JsonObject o = new JsonObject();
+            o.addProperty("tex", texture);
+            o.addProperty("overlay", net.minecraft.client.renderer.texture.OverlayTexture.NO_OVERLAY);
+            o.add("v", v);
+            out.add(o);
+        });
+    }
+
+    /**
+     * A Fabric mesh (QuadEmitter quads: atlas UVs, no sprite): the sprite holding each quad's
+     * UVs, in its atlas.
+     */
+    private static void meshQuads(Map<String, JsonArray> bySprite, PoseStack pose, org.joml.Matrix4f matrix, Object mesh, int[] tints) {
+        org.joml.Vector3f p = new org.joml.Vector3f();
+        org.joml.Vector3f n = new org.joml.Vector3f();
+        float[][] xyz = new float[4][3];
+        float[][] uv = new float[4][2];
         if (mesh instanceof net.fabricmc.fabric.api.client.renderer.v1.mesh.MeshView view) {
             int[] colors = new int[4];
             view.forEach(q -> {
@@ -1438,13 +1527,6 @@ public final class HorizonEntityRender {
                 quad(bySprite, pose, matrix, sprite, xyz, uv, colors, n, tint, p);
             });
         }
-        bySprite.forEach((texture, v) -> {
-            JsonObject o = new JsonObject();
-            o.addProperty("tex", texture);
-            o.addProperty("overlay", net.minecraft.client.renderer.texture.OverlayTexture.NO_OVERLAY);
-            o.add("v", v);
-            out.add(o);
-        });
     }
 
     /** A sprite's texture file: the headless sprite's (HorizonSprites), else by its name. */
@@ -1483,7 +1565,7 @@ public final class HorizonEntityRender {
             new ConcurrentHashMap<>();
 
     @SuppressWarnings("unchecked")
-    private static net.minecraft.client.renderer.texture.TextureAtlasSprite spriteAt(net.minecraft.resources.Identifier atlasId, float u, float v) {
+    static net.minecraft.client.renderer.texture.TextureAtlasSprite spriteAt(net.minecraft.resources.Identifier atlasId, float u, float v) {
         var sprites = ATLAS_SPRITES.get(atlasId);
         if (sprites == null) {
             try {
@@ -1508,7 +1590,7 @@ public final class HorizonEntityRender {
      * A vertex consumer keeping what is written: per vertex its position, UV, normal and
      * colour (ARGB, as the float's bits); the overlay (UV1) of the last vertex for all.
      */
-    private static final class Recorder implements com.mojang.blaze3d.vertex.VertexConsumer {
+    static final class Recorder implements com.mojang.blaze3d.vertex.VertexConsumer {
         final List<float[]> vertices = new java.util.ArrayList<>();
         int overlay = net.minecraft.client.renderer.texture.OverlayTexture.NO_OVERLAY;
         private float[] last = new float[9];
@@ -1577,7 +1659,7 @@ public final class HorizonEntityRender {
 
     /** The texture a render type samples first (its Sampler0: the entity's texture). */
     @SuppressWarnings("unchecked")
-    private static String texture(RenderType type) throws ReflectiveOperationException {
+    static String texture(RenderType type) throws ReflectiveOperationException {
         Object setup = setupField.get(type);
         var textures = (Map<String, Object>) texturesField.get(setup);
         Object binding = textures.get("Sampler0");

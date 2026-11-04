@@ -43,9 +43,17 @@ public abstract class ItemModelResolverMixin {
         horizon$keep(state, stack, context, ci);
     }
 
+    /**
+     * A renderer that appends an item's layers itself (Create's depots and belts: their items'
+     * states made with appendItemLayers): the item is kept, as updateFor* keep theirs.
+     */
     @Inject(method = "appendItemLayers", at = @At("HEAD"), cancellable = true)
-    private void horizon$noLayers(CallbackInfo ci) {
-        if (modelManager == null) ci.cancel();
+    private void horizon$noLayers(ItemStackRenderState state, ItemStack stack, ItemDisplayContext context,
+                                  net.minecraft.world.level.Level level, net.minecraft.world.entity.ItemOwner owner, int seed,
+                                  CallbackInfo ci) {
+        if (modelManager != null) return;
+        if (!stack.isEmpty()) HorizonEntityRender.keepItem(state, stack, context);
+        ci.cancel();
     }
 
     private void horizon$keep(ItemStackRenderState state, ItemStack stack, ItemDisplayContext context, CallbackInfo ci) {

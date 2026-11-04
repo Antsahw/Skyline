@@ -802,6 +802,11 @@ fn boot(env: &mut JNIEnv, jars: &[PathBuf]) -> jni::errors::Result<String> {
                 fn_ptr: native_mod_fluids as *mut c_void,
             },
             NativeMethod {
+                name: "modItemModels".into(),
+                sig: "(Ljava/lang/String;)V".into(),
+                fn_ptr: native_mod_item_models as *mut c_void,
+            },
+            NativeMethod {
                 name: "broadcast".into(),
                 sig: "(Ljava/lang/String;)V".into(),
                 fn_ptr: native_broadcast as *mut c_void,
@@ -1815,6 +1820,27 @@ pub fn take_mod_fluids() -> Option<String> {
 extern "system" fn native_mod_fluids(mut env: JNIEnv, _class: JClass, json: JString) {
     let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         if let (Ok(json), Ok(mut slot)) = (env.get_string(&json), MOD_FLUIDS.lock()) {
+            *slot = Some(json.into());
+        }
+    }));
+}
+
+/// Mods' items drawn with the quads their own item model types make (`Natives.modItemModels`,
+/// once the models load): `{"<item id>": {"quads": [{"p": [12], "uv": [8], "s": sprite, "d":
+/// direction, "c": argb, "t": translucent, "e": emission}], "block_light": bool, "particle":
+/// sprite, "display": {"<context>": [rotation, translation, scale]}}}`. Taken by the game that
+/// draws items ([`take_mod_item_models`]).
+static MOD_ITEM_MODELS: Mutex<Option<String>> = Mutex::new(None);
+
+/// The mods' item models Java sent since the last call (see [`MOD_ITEM_MODELS`]).
+pub fn take_mod_item_models() -> Option<String> {
+    MOD_ITEM_MODELS.lock().ok()?.take()
+}
+
+/// `Natives.modItemModels(String json)`.
+extern "system" fn native_mod_item_models(mut env: JNIEnv, _class: JClass, json: JString) {
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        if let (Ok(json), Ok(mut slot)) = (env.get_string(&json), MOD_ITEM_MODELS.lock()) {
             *slot = Some(json.into());
         }
     }));

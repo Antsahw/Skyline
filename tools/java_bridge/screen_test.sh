@@ -225,6 +225,34 @@ case "$SCENE" in
     'q "fill $((X+4)) $Y $((Z-3)) $((X+4)) $((Y+1)) $((Z+3)) stone_bricks"' \
     'n=0; for f in ${FLUIDS:-create:honey create:chocolate}; do q "setblock $((X+2)) $((Y-1)) $((Z-1+n*2)) $f"; n=$((n+1)); done' \
     'q "tp @s ~ ~ ~ -90 50"' 'sleep 3' ;;
+  # Create's machines, each on its own creative motor (16 rpm), in a row east of the player:
+  # a press two blocks over a depot (north: its item is put on with a click, a step), a
+  # millstone under a hopper of wheat, a deployer under a hopper of cobblestone, over air it
+  # places them in (south); west, a belt's two shafts
+  # (the belt itself is made with its item, a step).
+  machines) "$R/tools/java_bridge/around.sh" \
+    'q "setblock $((X+3)) $((Y+2)) $((Z-3)) create:creative_motor[facing=south]"' \
+    'q "setblock $((X+3)) $((Y+2)) $((Z-2)) create:mechanical_press[facing=south]"' \
+    'q "setblock $((X+3)) $Y $((Z-2)) create:depot"' \
+    'q "setblock $((X+3)) $Y $Z create:creative_motor[facing=up]"' \
+    'q "setblock $((X+3)) $((Y+1)) $Z create:millstone"' \
+    'q "setblock $((X+3)) $((Y+2)) $Z minecraft:hopper[facing=down]"' \
+    'q "item replace block $((X+3)) $((Y+2)) $Z container.0 with minecraft:wheat 16"' \
+    'q "setblock $((X+3)) $((Y+1)) $((Z+2)) create:creative_motor[facing=south]"' \
+    'q "setblock $((X+3)) $((Y+1)) $((Z+3)) create:deployer[facing=down,axis_along_first=false]"' \
+    'q "setblock $((X+3)) $((Y+2)) $((Z+3)) minecraft:hopper[facing=down]"' \
+    'q "item replace block $((X+3)) $((Y+2)) $((Z+3)) container.0 with minecraft:cobblestone 8"' \
+    'q "setblock $((X-3)) $Y $((Z-3)) create:creative_motor[facing=east]"' \
+    'q "setblock $((X-2)) $Y $((Z-3)) create:shaft[axis=x]"' \
+    'q "setblock $((X-2)) $Y $((Z+1)) create:shaft[axis=x]"' \
+    'echo $X $Y $Z > $S/pos' 'q "tp @s ~ ~ ~ -90 25"' 'sleep 3' ;;
+  # A Create contraption: a mechanical bearing (on a creative motor) with planks and a log on
+  # it, east of the player; a step assembles it (a right-click on the bearing, empty hand).
+  contraption) "$R/tools/java_bridge/around.sh" \
+    'q "setblock $((X+3)) $Y $Z create:creative_motor[facing=up]"' \
+    'q "setblock $((X+3)) $((Y+1)) $Z create:mechanical_bearing[facing=up]"' \
+    'q "setblock $((X+3)) $((Y+2)) $Z minecraft:oak_planks"' \
+    'echo $X $Y $Z > $S/pos' 'q "tp @s ~ ~ ~ -90 10"' 'sleep 3' ;;
   none) ;;
 esac
 # For steps: aim FILE looks at the block whose "x y z" FILE holds (a small one too: a flower),

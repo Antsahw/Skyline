@@ -476,6 +476,23 @@ impl Game<'_> {
         }
     }
 
+    /// The Java mods' items drawn by their own item model types (`horizon_jvm::take_mod_item_models`,
+    /// sent when the models load): Horizon's definitions of them draw nothing (Create's
+    /// wrench), so they take the quads Java's models made. Only where this process runs the
+    /// mods (single player, a LAN host), as the fluids.
+    pub(super) fn java_mod_item_models(&mut self) {
+        let Some(json) = horizon_jvm::take_mod_item_models() else {
+            return;
+        };
+        let models = horizon_client::item_render::java_item_models_from_json(&json);
+        log::info!(
+            "Java mods: {} item(s) drawn with their Java models' quads",
+            models.len()
+        );
+        horizon_client::item_render::set_java_item_models(models);
+        self.pack.item_renderer.forget_drawn();
+    }
+
     /// The server's Java entities of this tick ([`CHANNEL`]).
     pub(super) fn remote_java_entities(&mut self, data: &[u8]) {
         let _timed = super::java_profile::Timed::named("(Rust) entities: the player's game reads");

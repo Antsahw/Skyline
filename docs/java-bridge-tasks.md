@@ -284,8 +284,9 @@ Broken, first in every area's queue below:
   ticks are Rust: a mod `FlowingFluid` must tick in the mirror or be ported per fluid). gpu
   chat (drawing) + mixins (flow). Test with Create's honey and chocolate, and a plain fluid mod.
 - **(same) Create ("Create Fly", unofficial 26.3 port) is broken** (gpu-12: Flywheel readied,
-  kinetic parts draw and turn, OBJ items draw, both NPEs fixed; left: the wrench's item,
-  contraptions untested): kinetic machines don't
+  kinetic parts draw and turn, OBJ items draw, both NPEs fixed; gpu-13: press, millstone,
+  deployer, belts, contraptions, the wrench and the tab's blank items; left: item entities in
+  the mirror): kinetic machines don't
   work. Create draws its shafts, cogs and contraptions with **Flywheel** (instanced rendering
   on top of vanilla's renderer, which Horizon doesn't run) and its contraptions are entities.
   First a research round (gpu chat): does the kinetic network turn and process in Java (logic)
@@ -1554,3 +1555,34 @@ The 60 most-downloaded Fabric 26.3 mods on Modrinth, each alone with its depende
 switch on): 39 work, 4 left out on purpose (Sodium family), 16 play with a failure, 1 stops the game
 (Essential). None adds blocks or mobs. Results: [java-bridge-survey.md](java-bridge-survey.md);
 failures queued above ("Survey 1"). Tools: `tools/java_bridge/survey/`. No code changed.
+### gpu 13: Create's machines, contraptions, the wrench, the blank tab items (2026-11-04, branch `bridge-gpu-13`; Claude for iaxivers)
+
+Jar: CurseForge `create-fly-unofficial-port` file 9321329 (`create-fly-26.3-6.0.9-unofficial.3.jar`,
+from `edge.forgecdn.net/files/9321/329/…`), Fabric API 0.165.2. Only generic fixes (java-bridge.md,
+"Create's machines, contraptions and items"):
+- **Works now**: the press (ingots → iron sheets on a depot two blocks under it, the sheets drawn
+  on the depot), the millstone (wheat → flour, fed by Horizon's hopper), the deployer (places what
+  a hopper gives it), belts (made with the connector between two shafts, drawn), a mechanical
+  bearing's contraption (assembles, draws, turns), the wrench and every blank item of Create's
+  tab (backtanks, linked controller...), in the tab and in hand.
+- Fixes: mods' own item model types (Java's resolved quads to Horizon's item renderer); OBJ
+  `map_Kd 0` as a slot; items block entity renderers draw (`submitItem`, `appendItemLayers`);
+  mirrored players' item cooldowns tick (the belt's second click); a click a mod block consumed
+  ends there (an empty off hand took the depot's items back); mods' client particles as packets
+  (the `ParticleEngine` NPE); neighbour updates mods call themselves are no-ops in the mirror (the
+  bearing's assembly NPE'd); renderers get the client's block models (contraptions).
+- From the testers' list: "items on stations don't show" (depot): the click must be on its top
+  face (Create's rule); it shows now. "Belts don't assemble": fixed (cooldown). "ParticleEngine":
+  fixed. "Fancy 3D items": fixed. "A broken block's moving parts stay": not a drawing bug, the
+  hand crank *block* stays after its cogwheel breaks (Horizon's neighbour update of a mod block
+  doesn't ask its `canSurvive`/`updateShape` in Java): mixins. Not reproduced here: the pale
+  blue-white square on presses/mixers/blaze burners (the press draws right on llvmpipe: ask for a
+  screenshot on the newest build).
+- Not done: Horizon's item entities in the mirror (thrown items onto belts, millstones, crushing
+  wheels, fans), players colliding with contraptions, Ponder, fluids in screens, the saw's blade.
+
+Regress: `createmachines contraption createitems` (new) and `create createwhole fluids kinetic
+skinlayers ber pot placed hud entity` pass.
+Test on the PC: `regress.py --jars <folder with create-fly*.jar, fabric-api*> createmachines contraption createitems`;
+in-game: the creative tab's Create page, a wrench in hand, a press over a depot (one gap), a
+bearing on a motor with a block on it (right-click the bearing).

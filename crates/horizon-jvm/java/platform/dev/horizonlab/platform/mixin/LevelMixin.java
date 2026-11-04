@@ -76,6 +76,39 @@ public abstract class LevelMixin {
         if (HorizonServer.isMirror(this)) ci.cancel();
     }
 
+    /**
+     * Neighbour updates a mod asks for itself (Create's contraptions as they lift their blocks:
+     * the shape updates around each): the mirror's levels are made without their constructor,
+     * so they have no neighbour updater (a null one failed the bearing's whole assembly).
+     * Horizon updates the neighbours of every block the mirror sets, as vanilla's setBlock
+     * would; these are left to it.
+     */
+    @Inject(method = "neighborShapeChanged", at = @At("HEAD"), cancellable = true)
+    private void horizon$shapeChanged(net.minecraft.core.Direction direction, BlockPos pos, BlockPos neighbor, BlockState state,
+                                      int flags, int recursion, CallbackInfo ci) {
+        if (HorizonServer.isMirror(this)) ci.cancel();
+    }
+
+    @Inject(method = "updateNeighborsAt(Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/block/Block;Lnet/minecraft/world/level/redstone/Orientation;)V",
+            at = @At("HEAD"), cancellable = true)
+    private void horizon$neighbors(BlockPos pos, net.minecraft.world.level.block.Block block,
+                                   net.minecraft.world.level.redstone.Orientation orientation, CallbackInfo ci) {
+        if (HorizonServer.isMirror(this)) ci.cancel();
+    }
+
+    @Inject(method = "updateNeighborsAtExceptFromFacing", at = @At("HEAD"), cancellable = true)
+    private void horizon$neighborsExcept(BlockPos pos, net.minecraft.world.level.block.Block block, net.minecraft.core.Direction skip,
+                                         net.minecraft.world.level.redstone.Orientation orientation, CallbackInfo ci) {
+        if (HorizonServer.isMirror(this)) ci.cancel();
+    }
+
+    @Inject(method = "neighborChanged(Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/block/Block;Lnet/minecraft/world/level/redstone/Orientation;)V",
+            at = @At("HEAD"), cancellable = true)
+    private void horizon$neighborChanged(BlockPos pos, net.minecraft.world.level.block.Block block,
+                                         net.minecraft.world.level.redstone.Orientation orientation, CallbackInfo ci) {
+        if (HorizonServer.isMirror(this)) ci.cancel();
+    }
+
     /** Horizon's light, read where a mod asks (the level has no chunk source). */
     @Inject(method = "getLightEngine", at = @At("HEAD"), cancellable = true)
     private void horizon$lightEngine(CallbackInfoReturnable<net.minecraft.world.level.lighting.LevelLightEngine> cir) {
