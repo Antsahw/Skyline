@@ -56,6 +56,43 @@ fn host_port(address: &str) -> (String, u16) {
     }
 }
 
+/// The device client's HUD (its mods' drawing), drawn over the game's HUD.
+static HUD: Mutex<Vec<Value>> = Mutex::new(Vec::new());
+/// The game's GUI size, which the device client lays its HUD and screens out in.
+static GUI_SIZE: Mutex<(i32, i32)> = Mutex::new((0, 0));
+/// The device client's screen is the one shown (a client-only screen of this game's own).
+static SCREEN_OPEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Whether the open client-only screen is the device client's (its input goes there).
+pub(super) fn screen_open() -> bool {
+    SCREEN_OPEN.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// The GUI's size as the game draws its HUD (`draw_java_hud`).
+pub(super) fn gui_size(width: i32, height: i32) {
+    *GUI_SIZE.lock().unwrap_or_else(|e| e.into_inner()) = (width, height);
+}
+
+/// The device client's HUD operations (empty: none).
+pub(super) fn hud_ops() -> Vec<Value> {
+    HUD.lock().unwrap_or_else(|e| e.into_inner()).clone()
+}
+
+/// A key while playing, to the device client too (its mods' key bindings and handlers).
+pub(super) fn key(key: i32, keycode: i32, mods: i32, down: bool) {
+    if DEVICE
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .mods
+        .is_empty()
+    {
+        return;
+    }
+    if let Err(e) = horizon_jvm::device::key(key, keycode, mods, down) {
+        log::warn!("Java mods: a key to the device client failed: {e}");
+    }
+}
+
 /// Whether a server's custom payload is for the device client here (a device mod's channel).
 pub(super) fn takes(channel: &str) -> bool {
     let device = DEVICE.lock().unwrap_or_else(|e| e.into_inner());
@@ -72,6 +109,8 @@ pub(super) fn payload(channel: &str, data: &[u8]) {
 /// The game left the server: the device client disconnects.
 pub(super) fn left() {
     WAITED.store(0, std::sync::atomic::Ordering::Relaxed);
+    SCREEN_OPEN.store(false, std::sync::atomic::Ordering::Relaxed);
+    HUD.lock().unwrap_or_else(|e| e.into_inner()).clear();
     let mut device = DEVICE.lock().unwrap_or_else(|e| e.into_inner());
     if device.joined.take().is_some()
         && let Err(e) = horizon_jvm::device::leave()
@@ -163,12 +202,14 @@ impl Game<'_> {
                 }))
             })
             .collect();
+        let (w, h) = *GUI_SIZE.lock().unwrap_or_else(|e| e.into_inner());
         let state = json!({
             "x": p.position.x, "y": p.position.y, "z": p.position.z,
-            "yaw": p.yaw, "pitch": p.pitch, "players": players,
+            "yaw": p.yaw, "pitch": p.pitch, "players": players, "w": w, "h": h,
         });
-        if let Err(e) = horizon_jvm::device::tick(&state.to_string()) {
-            log::warn!("Java mods: the device client's tick failed: {e}");
+        match horizon_jvm::device::tick(&state.to_string()) {
+            Ok(shown) => self.show_device(&shown),
+            Err(e) => log::warn!("Java mods: the device client's tick failed: {e}"),
         }
         for (channel, data) in horizon_jvm::device::take_out() {
             self.send(S::CustomPayload(CustomPayload { channel, data }));
@@ -185,6 +226,41 @@ impl Game<'_> {
                 }
                 _ => {}
             }
+        }
+    }
+
+    /// What the device client shows (its tick's or its input's answer): its HUD, its screen
+    /// (a client-only screen of this game: `Screen::JavaMod`), its screen closing.
+    fn show_device(&mut self, shown: &str) {
+        let Ok(shown) = serde_json::from_str::<Value>(shown) else {
+            return;
+        };
+        let window = super::java_screen::CLIENT_WINDOW;
+        if shown.get("close").and_then(Value::as_bool) == Some(true)
+            && SCREEN_OPEN.swap(false, std::sync::atomic::Ordering::Relaxed)
+        {
+            let close = json!({"window": window, "close": true}).to_string();
+            self.remote_java_screen(close.as_bytes());
+        }
+        if let Some(Value::Array(ops)) = shown.get("hud") {
+            let ops = self.take_java_images(ops);
+            *HUD.lock().unwrap_or_else(|e| e.into_inner()) = ops;
+        }
+        if let Some(ops) = shown.get("screen") {
+            SCREEN_OPEN.store(true, std::sync::atomic::Ordering::Relaxed);
+            let frame = json!({"window": window, "ops": ops}).to_string();
+            self.remote_java_screen(frame.as_bytes());
+        }
+    }
+
+    /// Input to the device client's screen (`send_java_screen_input` while it is the one shown).
+    pub(super) fn device_screen_input(&mut self, input: &Value) {
+        match horizon_jvm::device::input(&input.to_string()) {
+            Ok(shown) => self.show_device(&shown),
+            Err(e) => log::warn!("Java mods: the device client's screen input failed: {e}"),
+        }
+        if input.get("kind").and_then(Value::as_str) == Some("close") {
+            SCREEN_OPEN.store(false, std::sync::atomic::Ordering::Relaxed);
         }
     }
 

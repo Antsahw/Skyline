@@ -598,7 +598,7 @@ public final class HorizonClient {
     static int width = 427, height = 240;
 
     /** The headless window's size: Horizon's GUI size, at scale 3 (1280x720's). */
-    private static void windowSize() {
+    static void windowSize() {
         try {
             var window = minecraft.getWindow();
             if (window == null) return;
@@ -1308,6 +1308,11 @@ public final class HorizonClient {
      * it as a menu's (Natives.clientScreen, then frames).
      */
     public static void setScreen(net.minecraft.client.gui.screens.Screen screen) {
+        // A device client's screen (its player's own game shows it: HorizonDeviceClient).
+        if (HorizonDeviceClient.on()) {
+            HorizonDeviceClient.setScreen(screen);
+            return;
+        }
         var player = serverPlayer(minecraft.player);
         if (player == null) {
             if (screen != null) {
@@ -2392,39 +2397,43 @@ public final class HorizonClient {
      * hotkey may open a screen (Gui.setScreen: a client-only screen in their window).
      */
     static void keyPress(java.util.UUID id, int key, int keycode, int mods, boolean down) {
-        var handlers = keyPressHandlers();
-        var sdl = sdlKeyHandlers;
         var player = HorizonServer.player(id);
-        if ((handlers.isEmpty() && sdl.isEmpty()) || player == null || minecraft == null) return;
-        var event = new net.minecraft.client.input.KeyEvent(key, keycode, mods);
-        long window = HorizonScreenEvents.windowHandle(minecraft);
+        if ((keyPressHandlers().isEmpty() && sdlKeyHandlers.isEmpty()) || player == null || minecraft == null) return;
         try {
-            as(player, () -> {
-                boolean taken = false;
-                if (!sdl.isEmpty()) {
-                    if (sdlEvents == null) {
-                        sdlEvents = Natives.allocate(com.mojang.blaze3d.platform.SDLEventHandler.class);
-                        set(com.mojang.blaze3d.platform.SDLEventHandler.class, sdlEvents, "minecraft", minecraft);
-                    }
-                    var sdlEvent = org.lwjgl.sdl.SDL_Event.calloc();
-                    try {
-                        // SDL_EVENT_KEY_DOWN (0x300), SDL_EVENT_KEY_UP (0x301).
-                        sdlEvent.type(down ? 0x300 : 0x301);
-                        sdlEvent.key().type(down ? 0x300 : 0x301).scancode(key).key(keycode).mod((short) mods)
-                                .down(down).repeat(false);
-                        taken = fireKey(sdl, sdlEvents, "handleKeyEvent", sdlEvent);
-                    } finally {
-                        sdlEvent.free();
-                    }
-                }
-                if (!taken) taken = fireKey(handlers, minecraft.keyboardHandler, "keyPress", window, down ? 1 : 0, event);
-                if (DEBUG_INPUT) Natives.log("key " + key + (down ? " down" : " up") + " to " + sdl.size() + "+"
-                        + handlers.size() + " mod key handler(s)" + (taken ? ", taken" : "") + "; screen now "
-                        + minecraft.gui.screen());
-            });
+            as(player, () -> firePress(key, keycode, mods, down));
         } catch (Throwable t) {
             Natives.log("Horizon's client: a key press failed: " + t);
         }
+    }
+
+    /** The mods' key handlers for a press or release, as the client player now (keyPress). */
+    static void firePress(int key, int keycode, int mods, boolean down) throws Throwable {
+        var handlers = keyPressHandlers();
+        var sdl = sdlKeyHandlers;
+        if (handlers.isEmpty() && sdl.isEmpty()) return;
+        var event = new net.minecraft.client.input.KeyEvent(key, keycode, mods);
+        long window = HorizonScreenEvents.windowHandle(minecraft);
+        boolean taken = false;
+        if (!sdl.isEmpty()) {
+            if (sdlEvents == null) {
+                sdlEvents = Natives.allocate(com.mojang.blaze3d.platform.SDLEventHandler.class);
+                set(com.mojang.blaze3d.platform.SDLEventHandler.class, sdlEvents, "minecraft", minecraft);
+            }
+            var sdlEvent = org.lwjgl.sdl.SDL_Event.calloc();
+            try {
+                // SDL_EVENT_KEY_DOWN (0x300), SDL_EVENT_KEY_UP (0x301).
+                sdlEvent.type(down ? 0x300 : 0x301);
+                sdlEvent.key().type(down ? 0x300 : 0x301).scancode(key).key(keycode).mod((short) mods)
+                        .down(down).repeat(false);
+                taken = fireKey(sdl, sdlEvents, "handleKeyEvent", sdlEvent);
+            } finally {
+                sdlEvent.free();
+            }
+        }
+        if (!taken) taken = fireKey(handlers, minecraft.keyboardHandler, "keyPress", window, down ? 1 : 0, event);
+        if (DEBUG_INPUT) Natives.log("key " + key + (down ? " down" : " up") + " to " + sdl.size() + "+"
+                + handlers.size() + " mod key handler(s)" + (taken ? ", taken" : "") + "; screen now "
+                + minecraft.gui.screen());
     }
 
     /** Calls handlers (the method's arguments, then a CallbackInfo): whether one cancelled. */
@@ -2661,9 +2670,14 @@ public final class HorizonClient {
      * bar), then mods' handlers at the head and end of the whole HUD.
      */
     static com.google.gson.JsonArray hud(net.minecraft.server.level.ServerPlayer player) {
+        return hud(player.getUUID(), player.gameMode().isSurvival());
+    }
+
+    /** The HUD of the client player now (its images as {@code id}'s game has them). */
+    static com.google.gson.JsonArray hud(java.util.UUID id, boolean hurtable) {
         HorizonGraphics graphics = new HorizonGraphics(width, height);
         graphics.modsOnly = true;
-        graphics.imagesSent = imagesSent(player.getUUID());
+        graphics.imagesSent = imagesSent(id);
         var delta = net.minecraft.client.DeltaTracker.ONE;
         fabricHudElements(graphics, delta);
         // The end of the in-game GUI's frame: the mods' overlays there (MaLiLib's: MiniHUD).
@@ -2679,7 +2693,6 @@ public final class HorizonClient {
         HorizonHooks.initFields(hud);
         var hooked = HorizonHooks.hudMethods();
         // Hearts and food show where the player can be hurt (Hud.extractHotbarAndDecorations).
-        boolean hurtable = player.gameMode().isSurvival();
         if (hurtable && !java.util.Collections.disjoint(hooked, HEALTH_PARTS)) {
             hudPart("extractPlayerHealth", () -> call(hud, "extractPlayerHealth", graphics));
         }

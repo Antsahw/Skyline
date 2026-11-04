@@ -174,20 +174,64 @@ pub fn join(host: &str, port: u16, uuid: &str, name: &str) -> Result<Option<Vec<
 }
 
 /// Game: one tick of the device client: `state` is where the player and the others stand
-/// (`{"x","y","z","yaw","pitch","players":[{"u","n","x","y","z","yaw"}]}`).
-pub fn tick(state: &str) -> Result<(), String> {
+/// (`{"x","y","z","yaw","pitch","w","h","players":[{"u","n","x","y","z","yaw"}]}`). Returns
+/// what the game shows, each only when it changed: `{"hud": ops, "screen": ops, "close": true}`.
+pub fn tick(state: &str) -> Result<String, String> {
+    let Some(class) = client_class() else {
+        return Ok("{}".into());
+    };
+    call(class, |env, class| {
+        let state = env.new_string(state)?;
+        let value = env
+            .call_static_method(
+                class,
+                "tick",
+                "(Ljava/lang/String;)Ljava/lang/String;",
+                &[JValue::Object(&state)],
+            )?
+            .l()?;
+        Ok(env.get_string(&JString::from(value))?.into())
+    })
+}
+
+/// Game: a key pressed or released while playing (SDL scancode, keycode, modifiers).
+pub fn key(key: i32, keycode: i32, mods: i32, down: bool) -> Result<(), String> {
     let Some(class) = client_class() else {
         return Ok(());
     };
     call(class, |env, class| {
-        let state = env.new_string(state)?;
         env.call_static_method(
             class,
-            "tick",
-            "(Ljava/lang/String;)V",
-            &[JValue::Object(&state)],
+            "key",
+            "(IIIZ)V",
+            &[
+                JValue::Int(key),
+                JValue::Int(keycode),
+                JValue::Int(mods),
+                JValue::Bool(down.into()),
+            ],
         )?;
         Ok(())
+    })
+}
+
+/// Game: input to the device client's screen (`java_screen`'s input JSON). Returns what the
+/// game shows, as [`tick`] does.
+pub fn input(input: &str) -> Result<String, String> {
+    let Some(class) = client_class() else {
+        return Ok("{}".into());
+    };
+    call(class, |env, class| {
+        let input = env.new_string(input)?;
+        let value = env
+            .call_static_method(
+                class,
+                "input",
+                "(Ljava/lang/String;)Ljava/lang/String;",
+                &[JValue::Object(&input)],
+            )?
+            .l()?;
+        Ok(env.get_string(&JString::from(value))?.into())
     })
 }
 

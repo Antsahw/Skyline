@@ -136,13 +136,23 @@ public final class HorizonDeviceClient {
 
     /**
      * One tick of the game: where the player and the others are ({@code json}: x y z yaw pitch,
-     * players [{u n x y z yaw}] in the player's dimension), then the client's tick and frame for
-     * the device mods, and their tasks.
+     * players [{u n x y z yaw}] in the player's dimension, the GUI's size w h), then the
+     * client's tick and frame for the device mods, and their tasks. Returns what the game
+     * shows ({"hud": ops, "screen": ops, "close": true}, each only when it changed), or "{}".
      */
-    public static void tick(String json) {
-        if (!on) return;
+    public static String tick(String json) {
+        if (!on) return "{}";
         try {
             JsonObject state = JsonParser.parseString(json).getAsJsonObject();
+            if (state.has("w") && state.has("h")) {
+                int w = state.get("w").getAsInt(), h = state.get("h").getAsInt();
+                if (w > 0 && h > 0 && (w != HorizonClient.width || h != HorizonClient.height)) {
+                    HorizonClient.width = w;
+                    HorizonClient.height = h;
+                    HorizonClient.windowSize();
+                    if (screen != null) screen.resize(w, h);
+                }
+            }
             place(local, state.get("x").getAsDouble(), state.get("y").getAsDouble(), state.get("z").getAsDouble(),
                     state.get("yaw").getAsFloat(), state.get("pitch").getAsFloat());
             java.util.Set<UUID> seen = new java.util.HashSet<>();
@@ -172,13 +182,146 @@ public final class HorizonDeviceClient {
         }
         Minecraft mc = Minecraft.getInstance();
         HorizonClient.tasks();
-        HorizonClient.tickOnce();
+        try {
+            // The player's keys on the mods' key bindings (isDown, clicks) for the tick.
+            HorizonClient.withKeys(local.getUUID(), () -> {
+                if (screen != null) HorizonScreenEvents.tick(screen);
+                HorizonClient.tickOnce();
+            });
+        } catch (Throwable t) {
+            Natives.log("Java mods: the device client's tick failed: " + t);
+        }
         if (mc.gameRenderer != null) {
             HorizonHooks.fireFrame(mc.gameRenderer, true);
             HorizonHooks.fireRender(mc.gameRenderer);
             HorizonHooks.fireFrame(mc.gameRenderer, false);
         }
         HorizonClient.tasks();
+        return shown();
+    }
+
+    // ---- What the player's game shows: the mods' HUD and screens ----------------------------
+
+    private static net.minecraft.client.gui.screens.Screen screen;
+    private static boolean closed;
+    private static String hudSent, screenSent;
+    private static double mouseX, mouseY;
+
+    /** Minecraft.setScreen in the device client: the player's game shows it, or leaves it. */
+    static void setScreen(net.minecraft.client.gui.screens.Screen next) {
+        if (next instanceof HorizonOverlayScreen || next instanceof HorizonModsPage) next = null;
+        if (next == screen) return;
+        Minecraft mc = Minecraft.getInstance();
+        try {
+            if (screen != null) HorizonScreenEvents.removed(screen);
+            screen = next;
+            screenSent = null;
+            HorizonClient.set(net.minecraft.client.gui.Gui.class, mc.gui, "screen", next);
+            if (next == null) {
+                closed = true;
+                return;
+            }
+            next.added();
+            next.init(HorizonClient.width, HorizonClient.height);
+        } catch (Throwable t) {
+            Natives.log("Java mods: the device client's screen " + (next == null ? "couldn't close" : next.getClass().getName()
+                    + " couldn't open") + ": " + t);
+            screen = null;
+            closed = true;
+        }
+    }
+
+    private static String shown() {
+        JsonObject out = new JsonObject();
+        try {
+            var hud = HorizonClient.hud(local.getUUID(), false).toString();
+            if (!hud.equals(hudSent)) {
+                hudSent = hud;
+                out.add("hud", JsonParser.parseString(hud));
+            }
+        } catch (Throwable t) {
+            Natives.log("Java mods: the device client's HUD failed: " + t);
+        }
+        if (closed) {
+            closed = false;
+            out.addProperty("close", true);
+        }
+        if (screen != null) {
+            try {
+                HorizonGraphics graphics = new HorizonGraphics(HorizonClient.width, HorizonClient.height);
+                graphics.imagesSent = HorizonClient.imagesSent(local.getUUID());
+                HorizonClient.mouseAt(mouseX, mouseY);
+                HorizonScreenEvents.extract(screen, graphics, (int) mouseX, (int) mouseY, 0);
+                String ops = graphics.ops().toString();
+                if (!ops.equals(screenSent)) {
+                    screenSent = ops;
+                    out.add("screen", graphics.ops());
+                }
+            } catch (Throwable t) {
+                Natives.log("Java mods: the device client's screen failed to draw: " + t);
+                HorizonFailures.report("drawing a screen", t);
+            }
+        }
+        return out.toString();
+    }
+
+    /** A key of the player's game while playing (a device mod's key binding, its key handlers). */
+    public static void key(int key, int keycode, int mods, boolean down) {
+        if (!on) return;
+        HorizonClient.bind(local.getUUID(), key, down);
+        try {
+            HorizonClient.firePress(key, keycode, mods, down);
+        } catch (Throwable t) {
+            Natives.log("Java mods: a key press in the device client failed: " + t);
+        }
+    }
+
+    /** Input to the device client's screen ({"kind": move press release drag scroll key char close, ...}). */
+    public static String input(String json) {
+        if (!on) return "{}";
+        var in = JsonParser.parseString(json).getAsJsonObject();
+        String kind = in.get("kind").getAsString();
+        var shown = screen;
+        if (shown == null) return "{}";
+        Minecraft mc = Minecraft.getInstance();
+        double x = in.has("x") ? in.get("x").getAsDouble() : mouseX;
+        double y = in.has("y") ? in.get("y").getAsDouble() : mouseY;
+        int button = in.has("button") ? in.get("button").getAsInt() : 0;
+        int mods = in.has("mods") ? in.get("mods").getAsInt() : 0;
+        mouseX = x;
+        mouseY = y;
+        HorizonClient.mouseAt(x, y);
+        var event = new net.minecraft.client.input.MouseButtonEvent(x, y, new net.minecraft.client.input.MouseButtonInfo(button, mods));
+        try {
+            switch (kind) {
+                case "move" -> shown.mouseMoved(x, y);
+                case "press" -> HorizonScreenEvents.click(mc, shown, event, in.has("double") && in.get("double").getAsBoolean());
+                case "release" -> HorizonScreenEvents.release(mc, shown, event);
+                case "drag" -> HorizonScreenEvents.drag(mc, shown, event,
+                        in.has("dx") ? in.get("dx").getAsDouble() : 0, in.has("dy") ? in.get("dy").getAsDouble() : 0);
+                case "scroll" -> HorizonScreenEvents.scroll(mc, shown, x, y, in.get("h").getAsDouble(), in.get("v").getAsDouble());
+                case "key" -> {
+                    int key = in.get("key").getAsInt();
+                    HorizonScreenEvents.key(mc, shown, new net.minecraft.client.input.KeyEvent(
+                            key, in.has("keycode") ? in.get("keycode").getAsInt() : key, mods));
+                    // Escape on a screen that closes on it but stayed: closed, so the game never
+                    // keeps a screen it can't leave.
+                    if (key == 41 && screen == shown && shown.shouldCloseOnEsc()) setScreen(null);
+                }
+                case "char" -> HorizonScreenEvents.character(mc, shown, new net.minecraft.client.input.CharacterEvent(in.get("char").getAsInt()));
+                case "close" -> {
+                    // The game left the screen itself: it is gone here too (no close back).
+                    setScreen(null);
+                    closed = false;
+                }
+                default -> {}
+            }
+        } catch (Throwable t) {
+            Natives.log("Java mods: the device client's screen " + kind + " failed: " + t);
+            HorizonFailures.report("a screen", t);
+        }
+        HorizonClient.tasks();
+        return shown();
     }
 
     /** A device mod's message from the server (its channel, its body). */
@@ -241,6 +384,9 @@ public final class HorizonDeviceClient {
             Natives.log("Java mods: the device mods' client couldn't leave cleanly: " + t);
         }
         on = false;
+        screen = null;
+        closed = false;
+        hudSent = screenSent = null;
         try {
             HorizonClient.set(Minecraft.class, mc, "player", null);
         } catch (ReflectiveOperationException e) {

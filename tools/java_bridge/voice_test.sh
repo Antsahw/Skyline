@@ -55,11 +55,12 @@ EOF
 }
 voice() {
   sleep 20  # both voice clients connect
-  tone guestmic 440 25 & heard hostout 440 20; wait
-  tone hostmic 660 25 & heard guestout 660 20; wait
+  tone guestmic 440 25 & (sleep 6; $G screenshot "$OUT/voice-guest-talking.png" >/dev/null) & heard hostout 440 20; wait
+  tone hostmic 660 25 & (sleep 6; $H screenshot "$OUT/voice-host-talking.png" >/dev/null) & heard guestout 660 20; wait
 }
 export -f tone heard voice; export OUT
-"$R/tools/java_bridge/lan_test.sh" voice "$@"
+# Then the mod's own screen on each side (V: its key for its menu).
+"$R/tools/java_bridge/lan_test.sh" voice '$G key v tap; sleep 2' '$G key escape tap; $H key v tap; sleep 2' "$@"
 for log in "$(cat /tmp/hz-bridge-scratch)/home/logs/latest.log" "$(cat /tmp/hz-bridge-guest)/home/logs/latest.log"; do
   echo "== voice in $log"
   grep -E "voicechat|device" "$log" | grep -E "connected|authenticat|Connecting|run here|own sound|failed|ERROR|unavailable" | head -12 | cut -c1-220

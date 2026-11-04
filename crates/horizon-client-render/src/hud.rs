@@ -340,6 +340,35 @@ fn png_size(path: &Path) -> Option<(u32, u32)> {
     (header[..8] == *b"\x89PNG\r\n\x1a\n" && header[12..16] == *b"IHDR")
         .then(|| (field(16), field(20)))
 }
+/// A Java mod's texture folder its screens or HUD may draw from: any but those other atlases
+/// or no GUI use (items, models, armour, the world's own textures), and those packed apart
+/// (block, entity, particle, gui: walked by their own rule).
+fn java_gui_folder(name: &str) -> bool {
+    !matches!(
+        name,
+        "item"
+            | "items"
+            | "block"
+            | "blocks"
+            | "entity"
+            | "particle"
+            | "gui"
+            | "models"
+            | "model"
+            | "armor"
+            | "trims"
+            | "painting"
+            | "colormap"
+            | "environment"
+            | "effect"
+            | "mob_effect"
+            | "map"
+            | "misc"
+            | "font"
+            | "shaders"
+    )
+}
+
 fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
     // A prepared root's folder: from its data file, without listing the disk.
     if let Some(files) = horizon_core::prepared_files::files_under(dir) {
@@ -1130,7 +1159,6 @@ impl HudAtlas {
                         walk(&ns.path().join("textures/particle"), &mut files);
                     }
                     walk(&ns.path().join("textures/block"), &mut files);
-                    walk(&ns.path().join("textures/hud"), &mut files);
                     for file in fs::read_dir(ns.path().join("textures"))
                         .into_iter()
                         .flatten()
@@ -1139,6 +1167,12 @@ impl HudAtlas {
                         let path = file.path();
                         if path.extension().is_some_and(|e| e == "png") {
                             files.push(path);
+                        } else if path.is_dir()
+                            && file.file_name().to_str().is_some_and(java_gui_folder)
+                        {
+                            // Any other folder their screens and HUD may blit from
+                            // (Simple Voice Chat's `textures/icons/`, `textures/hud/`).
+                            walk(&path, &mut files);
                         }
                     }
                 }

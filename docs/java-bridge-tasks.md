@@ -77,8 +77,9 @@ By area:
   settings: first), Chat Heads (draws heads in chat: Horizon's own chat), ReplayMod and
   Flashback (record packets and replay them with vanilla's renderer: research what's possible;
   likely a "not supported" line like Sodium's if not), Litematica's overlay, the waypoint NPE.
-- **server/mixins**: Chunky (pregeneration through the server's chunk system), Simple Voice
-  Chat (its own UDP server and Java audio: research).
+- **server/mixins**: Chunky (pregeneration through the server's chunk system). Simple Voice
+  Chat: done in `bridge-voice-1` (java-bridge.md, "Voice chat"); left: icons over heads,
+  a dedicated-server run on a real network.
 - **entities/gpu**: TACZ (guns: models, animations, projectiles).
 - Better Combat and Create: in the generic-entities and gpu-13 chats.
 - **Breaking sounds twice** (a tester, 2026-11-04: "dirt goes brrbrr"). Mods: Biomes O' Plenty,
