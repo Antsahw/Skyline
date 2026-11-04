@@ -87,6 +87,27 @@ public final class HorizonPackets {
         }
     }
 
+    /** A custom payload to the player's own game: the channel, then the payload's body. */
+    static void customPayload(ServerPlayer player, String channel, byte[] body) {
+        try {
+            if (customPayloadId < 0) {
+                byte[] brand = encode(new net.minecraft.network.protocol.common.ClientboundCustomPayloadPacket(
+                        new net.minecraft.network.protocol.common.custom.BrandPayload("h")));
+                customPayloadId = brand[0] & 0x7F;
+            }
+            ByteBuf buf = Unpooled.buffer();
+            net.minecraft.network.FriendlyByteBuf out = new net.minecraft.network.FriendlyByteBuf(buf);
+            out.writeVarInt(customPayloadId);
+            out.writeUtf(channel);
+            out.writeBytes(body);
+            byte[] bytes = new byte[buf.readableBytes()];
+            buf.readBytes(bytes);
+            Natives.packet(player.getStringUUID(), bytes);
+        } catch (Throwable t) {
+            HorizonServer.fire("sending " + channel, () -> { throw new RuntimeException(t); });
+        }
+    }
+
     /** To every mirrored player in the level within {@code range} of the point. */
     static void near(ServerLevel level, double x, double y, double z, double range, Packet<?> packet) {
         for (ServerPlayer player : level.players()) {

@@ -1167,6 +1167,8 @@ mod run {
         pub(in crate::game) fn tick_java_server(&mut self) {
             super::super::java_profile::tick();
             self.send_java_commands();
+            let owner = self.lan.as_ref().and_then(|h| h.hub.singleplayer_owner);
+            self.java_device_own_player(owner);
             if !self.hears_players() {
                 return;
             }

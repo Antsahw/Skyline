@@ -2512,6 +2512,12 @@ impl Game<'_> {
             S::CustomPayload(p) if p.channel == horizon_client::lod_net::CHANNEL => {
                 self.guest_far_terrain(host, conn, &p.data)
             }
+            #[cfg(feature = "java-mods")]
+            S::CustomPayload(p) if p.channel == horizon_jvm::device::RUNS_OWN_CHANNEL => {
+                self.java_device_runs_own(host, conn)
+            }
+            #[cfg(feature = "java-mods")]
+            S::CustomPayload(p) => self.java_device_from_game(host, conn, &p.channel, &p.data),
             S::ChatCommandSigned(p) => self.guest_signed_command(host, conn, p),
             S::ChangeDifficulty(p) if host.hub.guests[gi].permission >= 2 => {
                 if !self.level.difficulty_locked && (0..=3).contains(&p.difficulty) {

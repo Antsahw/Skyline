@@ -79,9 +79,7 @@ impl ParsedModels {
         }
         let parsed = crate::par::par_map(&files, |(_, path)| {
             let text = horizon_core::prepared_files::read_to_string(path).ok()?;
-            CuboidModel::from_json(&text)
-                .ok()
-                .map(Arc::new)
+            CuboidModel::from_json(&text).ok().map(Arc::new)
         });
         let models = files
             .into_iter()

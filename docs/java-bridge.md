@@ -28,6 +28,7 @@ saying something works.
 | Mods' worldgen | `HorizonWorldgen.java` (also the biome queries: `biomes`, `findBiome`), `HorizonChunks.java` (chunk copies for code that reads chunks: saplings), `HorizonTints.java` (mods' block tints for the mesher) (vanilla's chunk steps on the mirror's level, chunks back as vanilla saves them), mixin `WorldGenRegionMixin`; Rust: `game/java_worldgen.rs` (`JavaTerrain`, wraps `VanillaTerrain` in `world_loading::make_streaming`), mods' biomes in `biome.rs` (`mod_biomes`) and the biome registry (`lan/data.rs`) |
 | Content conversion | `crates/horizon-port-pack` (`oracle.rs`, `carry.rs`), `HorizonContent.java` (facts, creative tabs), `crates/horizon-client/src/mod_content.rs` (content root) |
 | Recording, replays | `HorizonPacketTap.java` (the window's player's packets through a vanilla client pipeline), mixin `TapConnectionMixin`; Rust: `lan/packet_tap.rs` (kept from `lan/conn.rs`), `events::client_packets`/`wants_packets`/`client_closed`; Horizon's replay viewer `lan/replay.rs` (`--replay FILE.mcpr`); `HorizonClientCommands.java` (mods' Fabric client commands) |
+| Voice chat, device mods | `HorizonDeviceMods.java` (which mods use the player's sound devices; where their client code runs), `HorizonDeviceClient.java` (their client half in a game connected to another's server), `crates/horizon-jvm/src/device.rs`, `game/java_device.rs`; test `tools/java_bridge/voice_test.sh` |
 | Game side (Rust) | `crates/horizon-client/src/game/java_mods.rs` (start, content, creative), `java_server.rs` (actions from Java, menus, block entities, random ticks, `JAVA_STATES`, `JAVA_WINDOWS`), `java_screen.rs` (draws frames, sends input, key maps; `Screen::JavaMod` and `CLIENT_WINDOW` for client-only screens) |
 | NeoForge (prototype) | `java/dev/horizonlab/bridge/neo/NeoBoot.java`, `src/neoforge.rs`, `java_mods.rs` (`start_neoforge`, `HORIZON_NEOFORGE`), `java/neoforge/` (fixture, prototype platform), `tools/java_bridge/neoforge/`: see [java-bridge-neoforge.md](java-bridge-neoforge.md) |
 
@@ -515,6 +516,63 @@ What runs now:
   servers' players aren't recorded (the window's own player only, as one client records itself).
 - Test: `regress.py replaymod` (records a scene, quits, plays it with `replay_view.sh`),
   `flashback`. `replay_view.sh FILE` watches any recording headless.
+## Voice chat: mods on the player's own sound devices (bridge-voice-1)
+
+Simple Voice Chat works between players (2026-11-04: a LAN host and a guest hear each other,
+each on its own devices; `tools/java_bridge/voice_test.sh`). No code names the mod: what
+counts is what a mod's client code does.
+- **Device mods** (`HorizonDeviceMods`): a mod whose classes call `alcCaptureOpenDevice`,
+  `alcOpenDevice` or use `javax/sound/sampled/TargetDataLine` (found by a scan of its classes
+  at the client's start, beside it) opens the player's microphone or speakers, so its client
+  half must run on that player's machine. A server's headless client runs every player's
+  client, and such mods keep one client a process (SVC's `ClientManager`): a guest's join
+  replaced the host's voice client, and it would have opened the host's microphone for them.
+- **On a server**, device mods' client code runs only for the process's own player (Rust tells
+  `HorizonLoop.ownPlayer`: the single-player world's owner; none on a dedicated server).
+  For other players it is left out: client events (`fireEach` of `Client*` events), the
+  client's tick/frame/keybind injections (`fireClient`, `fireFrame`), connection injections,
+  key handlers, Fabric HUD elements (`HorizonDeviceMods.runs`, by the listener's or mixin's
+  mod: `HorizonFailures.modOf`). Their messages on the mod's channels (namespace = mod id) go
+  to that player's game when it said, as it joined, that it runs them
+  (`horizon:java_device_mods`; `HorizonLoop.toClient` encodes the payload with its codec and
+  sends it as a custom payload, `HorizonPackets.customPayload`); what the game sends back on
+  those channels reaches the mod's server receivers as that player's (`lan_actions` → 
+  `device::from_game` → `HorizonLoop.fromGame`).
+- **In a game connected to another's server** (a guest, a dedicated server's player), its own
+  JVM is idle (no world of its own); `HorizonDeviceClient` makes it that player's client for the
+  device mods only (`HorizonDeviceMods.runs`: only they run there): a `LocalPlayer`, a
+  `ClientLevel` holding the player and the others where Horizon's game sees them (each tick,
+  `game/java_device.rs` → `device::tick`), a connection whose channel answers the server's
+  address (SVC sends its voice to it), Fabric's INIT and JOIN, the client's tick with the
+  player's keys, frames and tasks. It joins 40 ticks after the player is in the world (the
+  server has mirrored them by then). Its HUD is drawn over the game's (`draw_java_hud`), its
+  screens are the game's client-only screens (`Screen::JavaMod`, window -1: input goes to the
+  JVM, not the server, while it is the device client's), its chat lines go to the game's
+  chat. It leaves with the game (`Minecraft.disconnect`'s injections: SVC closes its voice).
+- **The host's own client between runs**: SVC's speaker threads play only while
+  `Minecraft.player` and `.level` are set, at any time. With a device mod and an own player,
+  `as()` leaves the client its own player's (`HorizonClient.rest`) instead of none.
+- Generic fixes it took: the headless `Minecraft` has its `PackRepository` before the client
+  entrypoints (SVC adds its pack source there: its client init threw); client connections have
+  a level (`ClientPacketListener.getLevel`: SVC sends nothing on a connection without one) and a
+  closed memory channel answering `LocalAddress` (SVC: `127.0.0.1`); the answer to a client's
+  message arrives after the client code that sent it (`HorizonLoop.reading`: SVC made its client
+  right after asking for its secret, and the secret, delivered inside the ask, found none);
+  `Minecraft.handleKeybinds` injections fire each tick (SVC's keys: V opens its menu); the
+  camera answers `upVector`/`leftVector` (SVC's positional audio); `ChatComponent
+  .addClientSystemMessage` goes to the player (`ClientChatMixin`); failures and device mods are
+  found for jars with `+` in their name (`modOf` decoded `+` as a space: most mods were
+  blamed on no one); Java mods' GUI textures in any folder of theirs join the GUI atlas
+  (`java_gui_folder`: SVC's `textures/icons/`).
+- Tested: `voice_test.sh` (PulseAudio null sinks, one per game's speaker and microphone; a tone
+  into one game's microphone, recorded from the other's speakers): the host heard the guest's
+  440 Hz in 34 of 39 half-seconds, the guest the host's 660 Hz in 38 of 39 (the gaps: two games
+  and llvmpipe on 2 cores). V opens SVC's menu on both (the guest's from its own JVM).
+- Not yet: SVC's icons over players' heads (`AvatarRendererMixin`: Horizon draws the world);
+  the host's voice playback sometimes stutters while the server thread swaps players
+  (`as()`); on a dedicated server SVC binds its configured UDP port (24454: open it) but
+  ignores `voice_host` (it asks Fabric's side, which is the client's here). SVC's licence:
+  All Rights Reserved (its jar runs as it is; nothing of it is in the repo).
 
 ## Mods that change vanilla's behaviour (the mixin table, routed actions)
 

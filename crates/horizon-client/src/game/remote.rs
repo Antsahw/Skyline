@@ -1149,6 +1149,8 @@ impl Game<'_> {
         if let Some(old) = self.remote.as_mut().and_then(|r| r.heard_level.take()) {
             self.native_client_level_unload(&old);
         }
+        #[cfg(feature = "java-mods")]
+        super::java_device::left();
         if let Some(mut r) = self.remote.take() {
             r.session.disconnect();
         }
@@ -4520,6 +4522,10 @@ impl Game<'_> {
             C::CustomPayload(p) if p.channel == super::java_entities::PARTICLES => {
                 self.remote_java_particles(&p.data)
             }
+            #[cfg(feature = "java-mods")]
+            C::CustomPayload(p) if super::java_device::takes(&p.channel) => {
+                super::java_device::payload(&p.channel, &p.data)
+            }
             C::MountScreenOpen(p) => self.remote_open_mount(p),
             C::RecipeBookAdd(p) => self.remote_recipe_book_add(p),
             C::RecipeBookRemove(p) => self.remote_recipe_book_remove(p),
@@ -5801,6 +5807,8 @@ impl Game<'_> {
         self.native_net.to_server = 0;
         self.native_tick();
         self.tell_native_now();
+        #[cfg(feature = "java-mods")]
+        self.tick_device_client();
         // Far tiles the samplers asked for (`lod_net`).
         if let Some(r) = &self.remote {
             r.session.send_far_terrain();

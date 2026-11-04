@@ -216,6 +216,8 @@ impl Game<'_> {
             if self.has_control_down() {
                 mods |= CONTROL;
             }
+            #[cfg(feature = "java-mods")]
+            super::java_device::key(code, sdl_keycode(key, code), mods, pressed);
             let data = json!({"kind": "bind", "key": code, "keycode": sdl_keycode(key, code),
                 "mods": mods, "down": pressed})
             .to_string()
@@ -419,6 +421,15 @@ impl Game<'_> {
     /// Draws what Java mods draw on the HUD, over Horizon's own HUD; tells the server the HUD's
     /// size when it changes.
     pub(super) fn draw_java_hud(&mut self, batch: &mut HudBatch) {
+        // The device client's HUD (this game's own JVM: java_device), over the server's.
+        #[cfg(feature = "java-mods")]
+        {
+            super::java_device::gui_size(batch.width as i32, batch.height as i32);
+            let ops = super::java_device::hud_ops();
+            if !ops.is_empty() {
+                self.draw_java_ops(batch, &ops);
+            }
+        }
         let Some(hud) = self.java_hud.as_mut() else {
             return;
         };
@@ -527,7 +538,7 @@ impl Game<'_> {
     /// Draws a frame's operations (a mod screen's, or the HUD's): the item and text tooltips
     /// they ask for, for the caller to draw over them.
     #[allow(clippy::type_complexity)]
-    fn draw_java_ops(
+    pub(super) fn draw_java_ops(
         &mut self,
         batch: &mut HudBatch,
         ops: &[Value],
@@ -763,7 +774,7 @@ impl Game<'_> {
 
     /// A frame's operations with its images stored as they arrive (a frame may be replaced
     /// by the next before it is drawn; its images are sent once).
-    fn take_java_images(&mut self, ops: &[Value]) -> Vec<Value> {
+    pub(super) fn take_java_images(&mut self, ops: &[Value]) -> Vec<Value> {
         let mut kept = Vec::with_capacity(ops.len());
         for o in ops {
             if o.get("op").and_then(Value::as_str) == Some("image") {
@@ -855,6 +866,12 @@ impl Game<'_> {
 
     fn send_java_screen_input(&mut self, window: i32, mut input: Value) {
         input["window"] = json!(window);
+        // The device client's screen (this game's own JVM: java_device) takes its own input.
+        #[cfg(feature = "java-mods")]
+        if window == CLIENT_WINDOW && super::java_device::screen_open() {
+            self.device_screen_input(&input);
+            return;
+        }
         let data = input.to_string().into_bytes();
         self.send(S::CustomPayload(CustomPayload {
             channel: INPUT.into(),
