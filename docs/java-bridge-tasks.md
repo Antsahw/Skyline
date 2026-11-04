@@ -112,6 +112,11 @@ By area:
   a HUD overlay on the looked-at block). So: mods' injections on `MouseHandler.onScroll` while
   playing (not in a screen) must run and may cancel the hotbar scroll, and the value box overlay
   must draw. Client chat (`bridge-client-13`): generic, every mod with scroll-to-adjust gets it.
+- **Fluids drawn black in screens** (tester, batch 10): in JEI's list (and a mod's fluid slots)
+  the fluid entries (water, lava, Create's honey/chocolate) are black or dark squares. Mods draw
+  a fluid in a GUI from its still sprite in the block atlas, tinted (Fabric's
+  `FluidRenderHandler`/`FluidVariantRendering`, `GuiGraphics` blit of a `TextureAtlasSprite`):
+  the screen path needs those sprites and the tint. gpu-13 (it did fluids in the world).
 - **A broken block's moving parts stay** (tester, batch 10): break a cogwheel and the hand
   crank's handle on it keeps floating, drawn. A removed mod block entity must drop its
   renderer's instance (gpu-13: the recorder's per-block-entity draws on removal).
