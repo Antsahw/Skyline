@@ -169,6 +169,11 @@ By area:
   **Encased fans** do nothing: a fan's air current pushes entities and processes item entities
   in front of it (Java moving Horizon's entities: players, mobs, items; the same item-entity
   path as the depot and crushing wheels, plus entity motion set from a mod).
+  **Mechanical arms** draw but do nothing: their pick-up/drop-off points are chosen by
+  right-clicking blocks with the arm item before placing it (the use-order bug). "Anything
+  variable can't be set" (filters, speeds, thresholds): Create's value boxes (scroll) and
+  filter slots (right-click with an item on the box): the scroll and use buckets above.
+  **Drill works** (tester).
 - **A broken block's moving parts stay** (tester, batch 10): break a cogwheel and the hand
   crank's handle on it keeps floating, drawn. A removed mod block entity must drop its
   renderer's instance (gpu-13: the recorder's per-block-entity draws on removal).
