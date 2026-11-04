@@ -101,6 +101,21 @@ Broken, first in every area's queue below:
   Motor places and draws; **many items in the tab are blank** (Create's items drawn by custom
   item renderers: shafts, cogs, kinetic blocks); **honey places and flows but looks like
   lava; chocolate places nothing visible**. Kinetics not shown working.
+  Boss probe (2026-11-04, the jar from CurseForge `create-fly-unofficial-port`, file 9321329,
+  public domain; Flywheel and Ponder are inside it): Create starts; a motor, shafts and a
+  cogwheel place. Three concrete failures in the log:
+  1. **Flywheel never initialised**: Create's block-entity renderers already reach our BER path
+     (`CreativeMotorRenderer`, `BracketedKineticBlockEntityRenderer`) and throw because
+     `flywheel.lib.model.baked.ModelRenderHelper.INSTANCE` is null. Flywheel sets it in its
+     client init, hooked on vanilla's renderer start, which Horizon doesn't run: call it (or set
+     the helper) from the bridge. Likely fixes most invisible kinetic parts and blank items.
+  2. `LocalPlayer.firstPersonHandsAndItems()` returns null in our client player (Create's
+     client tick, every tick).
+  3. `SynchedEntityData.get` with a null accessor in Create's `AllSynchedDatas` (the HUD's
+     toolbox overlay): Create adds synced data to players; our player's data lacks it.
+  Not checked: whether the kinetic network turns (`/data get block` reads Horizon's world, which
+  has no Java block entity: read Java's `LIVE` instead). Order: 1 (gpu), then 2–3 (client),
+  then a regress case `create` (motor → shaft → cogwheel; speed read in Java; a screenshot).
 
 Works for them: Bedrock Reloaded (small pack), Terralith ("runs better than normal Fabric"),
 Biomes O' Plenty; 800 FPS stable on a GTX 1060 3 GB / i5-9400F / 16 GB. Reported:
