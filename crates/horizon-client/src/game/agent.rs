@@ -544,6 +544,9 @@ impl Game<'_> {
         self.repro
             .fill_summary(&mut input, self.input_trace.events());
         state["input"] = input;
+        // The window whose Java mod screen is drawn in place of the container screen (null:
+        // Horizon's own screen, or its stand-in for a mod's menu).
+        state["java_screen"] = json!(self.java_screen_window());
         state
     }
 

@@ -114,6 +114,27 @@ public final class HorizonClient {
         // (the hearts' jitter).
         set(net.minecraft.client.gui.Hud.class, hud, "minecraft", mc);
         set(net.minecraft.client.gui.Hud.class, hud, "random", net.minecraft.util.RandomSource.create());
+        // Its contextual bar (experience, locator, a mount's jump) as its constructor makes it:
+        // vanilla's hotbar run inside a mod's wrap of it (Create's) picks one each frame. (The
+        // ContextualInfo enum is private: by name.)
+        try {
+            @SuppressWarnings({"unchecked", "rawtypes"})
+            Class<Enum> info = (Class<Enum>) Class.forName("net.minecraft.client.gui.Hud$ContextualInfo", true,
+                    net.minecraft.client.gui.Hud.class.getClassLoader());
+            @SuppressWarnings("unchecked")
+            java.util.function.Function<String, Object> value = name -> Enum.valueOf(info, name);
+            set(net.minecraft.client.gui.Hud.class, hud, "contextualInfoBar", com.mojang.datafixers.util.Pair.of(
+                    value.apply("EMPTY"), net.minecraft.client.gui.contextualbar.ContextualBar.EMPTY));
+            java.util.Map<Object, java.util.function.Supplier<net.minecraft.client.gui.contextualbar.ContextualBar>> bars =
+                    new java.util.LinkedHashMap<>();
+            bars.put(value.apply("EMPTY"), () -> net.minecraft.client.gui.contextualbar.ContextualBar.EMPTY);
+            bars.put(value.apply("EXPERIENCE"), () -> new net.minecraft.client.gui.contextualbar.ExperienceBar(mc));
+            bars.put(value.apply("LOCATOR"), () -> new net.minecraft.client.gui.contextualbar.LocatorBar(mc));
+            bars.put(value.apply("JUMPABLE_VEHICLE"), () -> new net.minecraft.client.gui.contextualbar.JumpableVehicleBar(mc));
+            set(net.minecraft.client.gui.Hud.class, hud, "contextualInfoBars", com.google.common.collect.ImmutableMap.copyOf(bars));
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            Natives.log("Horizon's client: the HUD has no contextual bars: " + e);
+        }
         // Its overlays HUD mods ask about (Jade hides under an open tab list or a boss bar):
         // none showing.
         set(net.minecraft.client.gui.Hud.class, hud, "tabList",
@@ -645,6 +666,10 @@ public final class HorizonClient {
             set(net.minecraft.world.entity.player.Player.class, local, "gameProfile", player.getGameProfile());
             // Its keys (isShiftKeyDown: a collision context's descending): none pressed.
             set(net.minecraft.client.player.LocalPlayer.class, local, "input", new net.minecraft.client.player.ClientInput());
+            // Its first-person hands and items, as its constructor makes them (26.3:
+            // firstPersonHandsAndItems(); Create's client tick reads them every tick).
+            set(net.minecraft.client.player.LocalPlayer.class, local, "firstPersonHandsAndItems",
+                    new net.minecraft.client.player.FirstPersonHandsAndItems());
             // What its chat may do (ChatScreen asks: JourneyMap's map has one): anything.
             set(net.minecraft.client.player.LocalPlayer.class, local, "chatAbilities",
                     net.minecraft.client.multiplayer.chat.ChatAbilities.NO_RESTRICTIONS);
@@ -660,6 +685,12 @@ public final class HorizonClient {
             set(net.minecraft.world.entity.Entity.class, local, "level", player.level());
             // Its synced data (health: isAlive, which a screen's tick asks): the server player's.
             set(net.minecraft.world.entity.Entity.class, local, "entityData", player.getEntityData());
+            // A builder of synced data for its class, as its constructor makes one: mods that add
+            // synced data to every entity class from the builder (Create's AllSynchedDatas: its
+            // accessors by exact class, the toolbox HUD's) then know LocalPlayer's (the same ids
+            // as the server player's, whose data it reads). Before, Create's HUD read a null
+            // accessor every frame.
+            new net.minecraft.network.syncher.SynchedEntityData.Builder(local);
             // What it is in (water over its eyes: the HUD's air bubbles): the server player's.
             set(net.minecraft.world.entity.Entity.class, local, "fluidInteraction",
                     field(net.minecraft.world.entity.Entity.class, player, "fluidInteraction"));
@@ -884,6 +915,10 @@ public final class HorizonClient {
             // Xaero's sun brightness).
             set(net.minecraft.client.multiplayer.ClientPacketListener.class, connection, "clockManager",
                     new net.minecraft.client.ClientClockManager());
+            // Its waypoints (the HUD's locator bar asks hasWaypoints: Create's wrapped hotbar
+            // runs vanilla's contextual info): none, as before the server tracks any.
+            set(net.minecraft.client.multiplayer.ClientPacketListener.class, connection, "waypointManager",
+                    new net.minecraft.client.waypoints.ClientWaypointManager());
             players(connection);
             // Its scoreboard (ClientLevel.getScoreboard() is the connection's): an empty one, as
             // a client's is before the server sends any (Cardinal Components' client tick).
@@ -1135,6 +1170,11 @@ public final class HorizonClient {
             if (made[0] != null) CLIENT_MENUS.put(player.getUUID(), made[0]);
             else CLIENT_MENUS.remove(player.getUUID());
             var screen = (net.minecraft.client.gui.screens.Screen) create.invoke(constructor, shown, player.getInventory(), title);
+            // A new screen's first frame always goes, even one drawn as the last screen's was (the
+            // same pot opened again, nothing moved): its window is a new one in Horizon's game,
+            // which shows its stand-in until a frame for that window comes.
+            SENT.remove(player.getUUID());
+            UNDER.remove(player.getUUID());
             // Vanilla's order (Minecraft.setScreen): the GUI's screen is the new one, added, then
             // laid out; REI makes its overlay for the screen being opened there, once its
             // displays are in (prepare: its first reload), and searches its list again.
@@ -1159,6 +1199,7 @@ public final class HorizonClient {
     }
 
     public static void closeScreen(java.util.UUID player) {
+        UNDER.remove(player);
         CLIENT_ONLY.remove(player);
         CLIENT_MENUS.remove(player);
         SCREENS.remove(player);
@@ -1169,6 +1210,15 @@ public final class HorizonClient {
 
     /** Players whose open screen is a client-only one (no menu under it: Gui.setScreen's). */
     private static final java.util.Set<java.util.UUID> CLIENT_ONLY = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    /**
+     * The menu's screen under a player's client-only screen (JEI's recipes opened from the
+     * pot's screen) and the client menu it showed: back when the client-only screen closes,
+     * to its parent or to none, while the menu is still open.
+     */
+    private record Under(net.minecraft.client.gui.screens.Screen screen,
+                         net.minecraft.world.inventory.AbstractContainerMenu clientMenu) {}
+    private static final java.util.Map<java.util.UUID, Under> UNDER = new java.util.concurrent.ConcurrentHashMap<>();
 
     /**
      * Gui.setScreen in the headless client (GuiMixin): a mod's client code opens a screen of its
@@ -1204,13 +1254,36 @@ public final class HorizonClient {
         }
         try {
             if (current != null && clientOnly) HorizonScreenEvents.removed(current);
+            // Back to the menu's own screen from a client-only one over it (JEI's recipes
+            // closing to their parent, or closed with none) while the menu is open: the menu's
+            // window shows it again. Before, the menu's screen was gone (Horizon's stand-in
+            // showed, its one row of slots) and its window no longer heard of.
+            Under under = UNDER.get(id);
+            if (clientOnly && under != null && (screen == null || screen == under.screen())
+                    && player.containerMenu != null && player.containerMenu != player.inventoryMenu) {
+                UNDER.remove(id);
+                CLIENT_ONLY.remove(id);
+                if (under.clientMenu() != null) CLIENT_MENUS.put(id, under.clientMenu());
+                SCREENS.put(id, under.screen());
+                SENT.remove(id);
+                // Set again as vanilla's setScreen sets a parent: added, laid out (the recipe
+                // viewer's overlay made for it again).
+                set(net.minecraft.client.gui.Gui.class, minecraft.gui, "screen", under.screen());
+                under.screen().added();
+                under.screen().init(width, height);
+                HorizonRecipeViewer.refreshSearch();
+                Natives.clientScreen(id.toString(), false);
+                return;
+            }
             if (screen == null) {
                 closeScreen(id);
                 Natives.clientScreen(id.toString(), false);
                 return;
             }
             // Over a menu's screen (a button that opens a mod's settings), the menu stays open
-            // on the server, as vanilla's does until the client says otherwise.
+            // on the server, as vanilla's does until the client says otherwise; its screen is
+            // kept for when this one closes.
+            if (current != null && !clientOnly) UNDER.put(id, new Under(current, CLIENT_MENUS.get(id)));
             CLIENT_MENUS.remove(id);
             SCREENS.put(id, screen);
             OWNERS.put(id, player);
@@ -1779,6 +1852,8 @@ public final class HorizonClient {
                 }
                 set(net.minecraft.client.multiplayer.ClientPacketListener.class, copy, "clockManager",
                         new net.minecraft.client.ClientClockManager());
+                set(net.minecraft.client.multiplayer.ClientPacketListener.class, copy, "waypointManager",
+                        new net.minecraft.client.waypoints.ClientWaypointManager());
                 // Its Minecraft and network connection, as the shared one has (Architectury's and
                 // Puzzles Lib's join read minecraft.player and getConnection().getConnection()),
                 // and a scoreboard of its own (Cardinal Components' client tick reads
@@ -2094,11 +2169,15 @@ public final class HorizonClient {
         }
     }
 
-    /** The keyboard keys (26.3 scancodes) the mods' KeyMappings are set to, as a JSON array. */
+    /**
+     * The keyboard keys (26.3 scancodes) the mods' KeyMappings are set to, as a JSON array; -1
+     * too when a mod handles every key itself ({@link #keyPressHandlers}: MaLiLib's hotkeys).
+     */
     public static String boundKeys() {
         Thread.currentThread().setContextClassLoader(HorizonClient.class.getClassLoader());
         var out = new com.google.gson.JsonArray();
         java.util.Set<Integer> seen = new java.util.TreeSet<>();
+        if (!keyPressHandlers().isEmpty() || !sdlKeyHandlers.isEmpty()) out.add(-1);
         for (KeyMapping mapping : modKeys()) {
             var key = key(mapping);
             if (key != null && key.getType() == com.mojang.blaze3d.platform.InputConstants.Type.KEYBOARD
@@ -2134,6 +2213,95 @@ public final class HorizonClient {
                 keys.down().remove(mapping);
             }
         }
+    }
+
+    private static java.util.List<java.lang.reflect.Method> keyPressHandlers;
+    private static java.util.List<java.lang.reflect.Method> sdlKeyHandlers;
+    private static Object sdlEvents;
+
+    /**
+     * The mods' handlers merged into KeyboardHandler.keyPress, at whatever point they inject
+     * (MaLiLib's, after its FramerateLimitTracker call: every hotkey of Litematica, MiniHUD,
+     * Tweakeroo; Litematica's menu on M), and into SDLEventHandler.handleKeyEvent, which comes
+     * before it (MaLiLib keeps its pressed keys there). Fabric's and Horizon's own left out.
+     */
+    static synchronized java.util.List<java.lang.reflect.Method> keyPressHandlers() {
+        if (keyPressHandlers != null) return keyPressHandlers;
+        try {
+            keyPressHandlers = HorizonHooks.injected(net.minecraft.client.KeyboardHandler.class, "keyPress",
+                    long.class, int.class, net.minecraft.client.input.KeyEvent.class);
+            sdlKeyHandlers = HorizonHooks.injected(com.mojang.blaze3d.platform.SDLEventHandler.class, "handleKeyEvent",
+                    org.lwjgl.sdl.SDL_Event.class);
+        } catch (Throwable t) {
+            Natives.log("Horizon's client: the mods' key handlers can't be read: " + t);
+            keyPressHandlers = java.util.List.of();
+            sdlKeyHandlers = java.util.List.of();
+        }
+        if (!keyPressHandlers.isEmpty() || !sdlKeyHandlers.isEmpty()) {
+            Natives.log("Horizon's client: " + keyPressHandlers.size() + " mod key handler(s) and " + sdlKeyHandlers.size()
+                    + " SDL key handler(s) get every key while playing");
+        }
+        return keyPressHandlers;
+    }
+
+    /**
+     * A key of a player's game while playing, as the window's SDL event reaches the mods: their
+     * injections at SDLEventHandler.handleKeyEvent's head (an SDL_Event of the key), then theirs in
+     * KeyboardHandler.keyPress (press: action 1, release: 0), run as that player's client. A
+     * hotkey may open a screen (Gui.setScreen: a client-only screen in their window).
+     */
+    static void keyPress(java.util.UUID id, int key, int keycode, int mods, boolean down) {
+        var handlers = keyPressHandlers();
+        var sdl = sdlKeyHandlers;
+        var player = HorizonServer.player(id);
+        if ((handlers.isEmpty() && sdl.isEmpty()) || player == null || minecraft == null) return;
+        var event = new net.minecraft.client.input.KeyEvent(key, keycode, mods);
+        long window = HorizonScreenEvents.windowHandle(minecraft);
+        try {
+            as(player, () -> {
+                boolean taken = false;
+                if (!sdl.isEmpty()) {
+                    if (sdlEvents == null) {
+                        sdlEvents = Natives.allocate(com.mojang.blaze3d.platform.SDLEventHandler.class);
+                        set(com.mojang.blaze3d.platform.SDLEventHandler.class, sdlEvents, "minecraft", minecraft);
+                    }
+                    var sdlEvent = org.lwjgl.sdl.SDL_Event.calloc();
+                    try {
+                        // SDL_EVENT_KEY_DOWN (0x300), SDL_EVENT_KEY_UP (0x301).
+                        sdlEvent.type(down ? 0x300 : 0x301);
+                        sdlEvent.key().type(down ? 0x300 : 0x301).scancode(key).key(keycode).mod((short) mods)
+                                .down(down).repeat(false);
+                        taken = fireKey(sdl, sdlEvents, "handleKeyEvent", sdlEvent);
+                    } finally {
+                        sdlEvent.free();
+                    }
+                }
+                if (!taken) taken = fireKey(handlers, minecraft.keyboardHandler, "keyPress", window, down ? 1 : 0, event);
+                if (DEBUG_INPUT) Natives.log("key " + key + (down ? " down" : " up") + " to " + sdl.size() + "+"
+                        + handlers.size() + " mod key handler(s)" + (taken ? ", taken" : "") + "; screen now "
+                        + minecraft.gui.screen());
+            });
+        } catch (Throwable t) {
+            Natives.log("Horizon's client: a key press failed: " + t);
+        }
+    }
+
+    /** Calls handlers (the method's arguments, then a CallbackInfo): whether one cancelled. */
+    private static boolean fireKey(java.util.List<java.lang.reflect.Method> handlers, Object self, String method, Object... args) {
+        var info = new org.spongepowered.asm.mixin.injection.callback.CallbackInfo(method, true);
+        Object[] call = java.util.Arrays.copyOf(args, args.length + 1);
+        call[args.length] = info;
+        for (var handler : handlers) {
+            try {
+                handler.invoke(java.lang.reflect.Modifier.isStatic(handler.getModifiers()) ? null : self, call);
+            } catch (ReflectiveOperationException e) {
+                Throwable cause = e.getCause() != null ? e.getCause() : e;
+                HorizonFailures.report("a key press", cause, handler);
+                if (DEBUG_INPUT) Natives.log("key handler " + handler.getName() + " failed: " + cause);
+            }
+            if (info.isCancelled()) return true;
+        }
+        return false;
     }
 
     /**
@@ -2838,7 +3006,11 @@ public final class HorizonClient {
         var in = com.google.gson.JsonParser.parseString(json).getAsJsonObject();
         String kind = in.get("kind").getAsString();
         if (kind.equals("bind")) {
-            bind(id, in.get("key").getAsInt(), in.get("down").getAsBoolean());
+            int key = in.get("key").getAsInt();
+            boolean down = in.get("down").getAsBoolean();
+            bind(id, key, down);
+            keyPress(id, key, in.has("keycode") ? in.get("keycode").getAsInt() : key,
+                    in.has("mods") ? in.get("mods").getAsInt() : 0, down);
             return;
         }
         // A mod's settings screen, from the player's Mods page (as /modconfig opens it).

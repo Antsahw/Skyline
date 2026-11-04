@@ -1570,6 +1570,22 @@ pub fn game_rules(rules: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Mods left out of Fabric's (`renderers::split`: Sodium, Iris), one line each: the players
+/// are told they aren't needed, at their join (`HorizonFailures.notNeeded`).
+pub fn not_needed(lines: &[String]) -> Result<(), String> {
+    with_server(|env, class| {
+        let lines = env.new_string(lines.join("\n"))?;
+        env.call_static_method(
+            class,
+            "notNeeded",
+            "(Ljava/lang/String;)V",
+            &[JValue::Object(&lines)],
+        )?;
+        Ok(())
+    })?;
+    Ok(())
+}
+
 /// Java mods' blocks placed or removed at `positions` of `dimension`: their block entities made
 /// (or, gone, put away), so they tick from their placement as vanilla's do.
 pub fn block_entities(dimension: &str, positions: &[[i32; 3]]) -> Result<(), String> {

@@ -122,7 +122,7 @@ final class HorizonScreenEvents {
 
     private static final String CHAR_TYPED = "(JLnet/minecraft/client/input/CharacterEvent;)V";
 
-    private static long windowHandle(Minecraft mc) {
+    static long windowHandle(Minecraft mc) {
         try {
             return mc.getWindow() != null ? mc.getWindow().handle() : 0L;
         } catch (Throwable t) {

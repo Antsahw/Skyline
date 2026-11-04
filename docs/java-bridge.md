@@ -374,6 +374,38 @@ REI's do (2026-11-04, `bridge-client-11`). `HorizonJei.java` (reflection: JEI is
   `icons.png`).
 - `HORIZON_JAVA_DEBUG=hud` logs each HUD frame's size and each Fabric HUD element's ops.
 
+## Mods' hotkeys, client-only screens over menus, renderer mods (bridge-client-12)
+
+- **Every key while playing, for mods that handle keys themselves.** MaLiLib (Litematica,
+  MiniHUD, Tweakeroo) keeps its pressed keys in `SDLEventHandler.handleKeyEvent` and runs its
+  hotkeys from `KeyboardHandler.keyPress` (an INVOKE injection after
+  `FramerateLimitTracker.onInputReceived`), not through `KeyMapping`s. When a mod has such a
+  handler (`HorizonHooks.injected`: @Inject handlers merged into a method, found by their
+  mixin's annotation, any point), `boundKeys` adds `-1` and the window sends every key press
+  and release while playing (`java_bind_key`: scancode, keycode, modifiers). Java fires the
+  SDL handlers with a real `SDL_Event` (`SDL_Event.calloc`, KEY_DOWN 0x300 / KEY_UP 0x301),
+  then the `keyPress` ones (action 1/0), as that player's client (`HorizonClient.keyPress`).
+  Litematica's M opens its main menu (a client-only screen); regress `litematica`.
+- **A client-only screen over a menu's screen** (JEI's uses screen from the cooking pot's)
+  keeps the menu's screen (`HorizonClient.UNDER`) and Rust keeps the menu's window
+  (`JAVA_UNDER`); closing it (to its parent, or to none) while the menu is open puts both back,
+  and the menu's screen sends a frame again. Before, the pot came back as Horizon's one-row
+  stand-in. A new menu screen always sends its first frame (`SENT` cleared in `openScreen`):
+  the same pot opened again draws the same frame, for a new window. Regress `pot` (opened 20
+  times), `pot-jei`. `horizon-ctl state` has `java_screen`: the window whose Java screen is
+  drawn (null: Horizon's own screen or its stand-in).
+- **Renderer mods are left out** (`horizon_jvm::renderers`: sodium, iris, canvas, nvidium,
+  vulkanmod, and what depends on them): Fabric gets the other jars as `fabric.addMods` with an
+  empty mods folder, and players are told in gray "[Java mods] Sodium isn't needed in Horizon:
+  Horizon has its own renderer (left out)" (`HorizonFailures.notNeeded`, at join). Regress
+  `sodium`.
+- **Java's log4j writes no file.** The JVM starts with the bridge's `log4j2-horizon.xml`
+  (`-Dlog4j2.configurationFile`, console only); once Knot runs, `HorizonLog` replaces the
+  console with an appender into Horizon's log (`[java] [logger/LEVEL] message`, INFO and up,
+  stack traces cut to 12 frames). Mojang's config wrote `logs/latest.log` in the working
+  folder: on a dedicated server Horizon's own log, whose lines were overwritten.
+  Regress `server-log`.
+
 ## Mods that change vanilla's behaviour (the mixin table, routed actions)
 
 Most of vanilla's code never runs on the Java side: Horizon does it in Rust. A mod's Mixin into
@@ -1093,6 +1125,16 @@ Found in the upstream sync (2026-11-01):
 - Upstream removed `Levels::parked_chunks` (lent world): `with_java_world` reads parked levels
   through `parked_dims` + `parked_world`.
 - `save::decode_with` takes the dimension's `ColumnLayout` (`VanillaTerrain::layout`, now pub).
+- **A `LocalPlayer` made without its constructor lacks what 26.3's constructor makes**:
+  `firstPersonHandsAndItems` (Create's client tick), and its class never built synced data:
+  mods that hand out accessors per exact entity class from `SynchedEntityData.Builder`'s
+  constructor (Create's `AllSynchedDatas`) had none for `LocalPlayer`. `localPlayer` makes a
+  `new SynchedEntityData.Builder(local)` once (the data itself stays the server player's).
+- **The allocated `Hud` needs `contextualInfoBar` and `contextualInfoBars`** (vanilla's hotbar,
+  run inside a mod's wrap of it: Create's), and the client connections their
+  `waypointManager` (the locator bar asks it). `Hud.ContextualInfo` is private: by name.
+- **`export X=$(cmd) || exit 1` never exits**: the export's status hides `cmd`'s. The test
+  scripts ran stale jars after a failed `java.sh`; they now assign first.
 
 - **The server can run ticks faster than Horizon loads chunks** (after the upstream sync, a
   catching-up server runs the 40 ticks Skyblock Infinite schedules within a second). Anything

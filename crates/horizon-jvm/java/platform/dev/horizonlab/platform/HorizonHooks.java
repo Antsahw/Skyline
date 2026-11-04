@@ -657,6 +657,50 @@ public final class HorizonHooks {
         return new String[] {head, desc};
     }
 
+    /**
+     * The mods' @Inject handlers merged into {@code owner} for its {@code method}, at any point
+     * (INVOKE too), whose parameters are {@code params} then a CallbackInfo; Fabric API's and
+     * Horizon's own left out. Found by the handler's mixin class (its annotation names the
+     * target), for methods whose handlers share a shape with other methods' (SDLEventHandler's
+     * handle*Event(SDL_Event)).
+     */
+    public static List<Method> injected(Class<?> owner, String method, Class<?>... params) {
+        List<Method> found = new ArrayList<>();
+        Map<String, ClassNode> mixins = new HashMap<>();
+        for (Method m : owner.getDeclaredMethods()) {
+            MixinMerged merged = m.getAnnotation(MixinMerged.class);
+            if (merged == null || merged.mixin().startsWith("net.fabricmc.") || merged.mixin().startsWith("dev.horizonlab.")) continue;
+            Class<?>[] p = m.getParameterTypes();
+            if (p.length != params.length + 1 || !CallbackInfo.class.isAssignableFrom(p[params.length])) continue;
+            if (!java.util.Arrays.equals(java.util.Arrays.copyOf(p, params.length), params)) continue;
+            ClassNode node = mixins.computeIfAbsent(merged.mixin(), name -> {
+                try (var in = HorizonHooks.class.getClassLoader().getResourceAsStream(name.replace('.', '/') + ".class")) {
+                    if (in == null) return null;
+                    ClassNode n = new ClassNode();
+                    new ClassReader(in.readAllBytes()).accept(n, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+                    return n;
+                } catch (Throwable t) {
+                    return null;
+                }
+            });
+            if (node == null) continue;
+            boolean targets = false;
+            for (MethodNode handler : node.methods) {
+                if (!handlerNamed(m.getName(), handler.name)) continue;
+                for (AnnotationNode a : annotations(handler.invisibleAnnotations, handler.visibleAnnotations)) {
+                    if (!a.desc.equals("Lorg/spongepowered/asm/mixin/injection/Inject;")) continue;
+                    if (get(a, "method") instanceof List<?> specs) {
+                        for (Object spec : specs) if (parseSpec((String) spec)[0].equals(method)) targets = true;
+                    }
+                }
+            }
+            if (!targets) continue;
+            m.setAccessible(true);
+            found.add(m);
+        }
+        return found;
+    }
+
     // ---- Firing -----------------------------------------------------------------------------
 
     /** Whether any mod has an event-like injection into owner.method (owner with slashes). */

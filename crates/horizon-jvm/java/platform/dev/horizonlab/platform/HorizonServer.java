@@ -637,6 +637,14 @@ public final class HorizonServer {
         HorizonNeighbours.update(json);
     }
 
+    /** Mods Horizon left out of Fabric's (Sodium, Iris), one line each: told at the players' join. */
+    public static void notNeeded(String lines) {
+        if (lines == null) return;
+        for (String line : lines.split("\n")) {
+            if (!line.isBlank()) HorizonFailures.notNeeded(line);
+        }
+    }
+
     /**
      * Horizon's game rules into the mirror's (the server's, which every mirrored level reads)
      * and its difficulty: "id=value;...;difficulty=n" as Horizon has them. Set without the server (no

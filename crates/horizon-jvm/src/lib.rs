@@ -23,6 +23,7 @@ pub mod facade;
 pub mod gpu;
 pub mod libs;
 pub mod platform;
+pub mod renderers;
 pub mod runtime;
 pub mod world;
 
@@ -372,7 +373,13 @@ pub fn start(config: &Config) -> Result<&'static Bridge, String> {
         class_path.extend(fabric_libs.iter().cloned());
     }
     class_path.extend(config.class_path.iter().cloned());
-    let vm = create_vm(&config.home, &class_path, config.class_archive.as_deref())?;
+    let log_config = write_jar(&config.work, "log4j2-horizon.xml", LOG4J_CONFIG.as_bytes())?;
+    let vm = create_vm(
+        &config.home,
+        &class_path,
+        config.class_archive.as_deref(),
+        &log_config,
+    )?;
     let mut env = vm
         .attach_current_thread_permanently()
         .map_err(|e| format!("attach: {e}"))?;
@@ -495,10 +502,31 @@ pub(crate) fn option_path(path: &Path) -> PathBuf {
     path.to_path_buf()
 }
 
+/// Java's log4j config: the console only. Mojang's (in the game's libraries) adds a file
+/// appender at `logs/latest.log` of the working folder, which on a dedicated server is the
+/// server's folder, where Horizon writes its own `latest.log`: the two overwrote each other's
+/// lines. Once Knot runs, the platform's `HorizonLog` sends the lines to Horizon's log instead.
+const LOG4J_CONFIG: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<!-- Horizon's Java mod bridge: log4j's config (no file: lines go to Horizon's log). -->
+<Configuration status="WARN">
+  <Appenders>
+    <Console name="SysOut" target="SYSTEM_OUT">
+      <PatternLayout pattern="[%d{HH:mm:ss}] [%t/%level]: [java] (%logger{1}) %msg{nolookups}%n"/>
+    </Console>
+  </Appenders>
+  <Loggers>
+    <Root level="info">
+      <AppenderRef ref="SysOut"/>
+    </Root>
+  </Loggers>
+</Configuration>
+"#;
+
 fn create_vm(
     home: &Path,
     class_path: &[PathBuf],
     archive: Option<&Path>,
+    log_config: &Path,
 ) -> Result<JavaVM, String> {
     let path = libjvm(home)?;
     #[cfg(windows)]
@@ -522,6 +550,10 @@ fn create_vm(
         "-Xrs".to_string(),
         "-Dfile.encoding=UTF-8".into(),
         "-Dhorizon.bridge=1".into(),
+        format!(
+            "-Dlog4j2.configurationFile={}",
+            option_path(log_config).display()
+        ),
         format!("-Djava.class.path={}", joined.to_string_lossy()),
         // The heap gives back what it doesn't use: G1 keeps all it ever grew to otherwise (a
         // 107-jar pack: 555 MB live in 1.2-1.5 GB committed), and the game's own memory is
