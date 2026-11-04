@@ -60,6 +60,12 @@ both are fixed. The user's decision: **players play only through Horizon's launc
 
 ### Testers' Trello (2026-11-04, https://trello.com/b/2uhi4jkj)
 
+Chats on it (2026-11-04): `bridge-client-13` (Cloth Config, Chat Heads, waypoint NPE,
+Litematica), `bridge-replay-1` (ReplayMod, Flashback), `bridge-mixins-10` (double break sound,
+Chunky), `bridge-voice-1` (Simple Voice Chat), `bridge-entities-10` (TACZ), `bridge-trello-1`
+(reads the board, retests every card on the newest java-bridge, queues new ones here). The board
+is public: read it with a web fetch of `https://trello.com/b/2uhi4jkj.json`.
+
 Works: JEI. Kinda: Farmer's Delight. Doesn't work (testers' builds may predate batch 10: ask
 them to pull first): Create Fly, TACZ Refabricated, Simple Voice Chat, Chunky, Better Combat,
 Chat Heads, Cloth Config, Flashback, ReplayMod. Also seen: "A Java mod failed in the HUD:
