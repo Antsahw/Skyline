@@ -386,6 +386,27 @@ public final class HorizonMixinTable {
         return false;
     }
 
+    /**
+     * Whether a mod (not Fabric API, nor a performance mod) patches {@code methods} of
+     * {@code type} or of a class above it in any way, its client-only patches too (how a
+     * client class draws: the bridge then draws it through vanilla's code).
+     */
+    public static boolean patchedAnywhere(Class<?> type, Set<String> methods) {
+        scan();
+        for (Class<?> c = type; c != null && c != Object.class; c = c.getSuperclass()) {
+            String owner = c.getName().replace('.', '/');
+            Set<String> patched = BY_OWNER.get(owner);
+            if (patched == null) continue;
+            for (String method : patched) {
+                if (!methods.contains(method)) continue;
+                for (Patch p : PATCHES.get(owner + "." + method)) {
+                    if (!p.platform() && !p.performance()) return true;
+                }
+            }
+        }
+        return false;
+    }
+
     /** Whether any mod has an event-like injection at {@code at} of owner.method. */
     public static boolean hasEvent(String owner, String method, String at) {
         scan();

@@ -3248,9 +3248,10 @@ mod run {
         }
 
         /// The player acting now attacks the mob `id`, when Java mods patch the attack itself
-        /// (Better Combat, Farmer's Delight's knives): vanilla's `Player.attack` (Better
-        /// Combat's attack request) on copies of it and the mobs within 8 blocks; each mob hit
-        /// is hurt and pushed here with what its copy got. True when it was done that way.
+        /// (inside `Player.attack`, or the client's attack: a mod's own swing): vanilla's
+        /// `Player.attack` on copies of it and the mobs within 8 blocks, after the click's
+        /// client half; each mob hit is hurt and pushed here with what its copy got. True when
+        /// it was done that way (a mod's own swing taken: nothing hit here).
         /// A guest's attack on mob `id`, when Java mods patch the attack itself: their
         /// `Player.attack`, the guest facing the mob (its facing put back after). True when the
         /// mods took it.
@@ -3294,7 +3295,7 @@ mod run {
                 };
                 let (feet, yaw, pitch) =
                     ([p.position.x, p.position.y, p.position.z], p.yaw, p.pitch);
-                // The target first, then the mobs a sweep or Better Combat's swing can reach.
+                // The target first, then the mobs a sweep or a mod's swing can reach.
                 let mut chosen = vec![target];
                 for (i, m) in self.mobs.iter().enumerate() {
                     if i != target

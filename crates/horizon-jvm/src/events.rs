@@ -739,8 +739,9 @@ pub struct AttackHit {
 
 /// Player `uuid` attacks the game's mob `ids[0]`; `nbts` are it and the mobs around (vanilla's
 /// entity NBT), `ticks` the player's ticks since its last swing, `yaw`/`pitch` its view:
-/// vanilla's `Player.attack` with the mods' patches (Better Combat's attack request when it
-/// is loaded) on copies of them. Each mob hit, for the game to hurt; None: the game attacks
+/// the click's client half (the mods' head of `Minecraft.startAttack`; a mod that takes it
+/// makes its own attack), else vanilla's `Player.attack` with the mods' patches on copies of
+/// them. Each mob hit, for the game to hurt; None: the game attacks
 /// itself. Run it inside [`crate::world::with_blocks`].
 #[allow(clippy::too_many_arguments)]
 pub fn player_attack(
@@ -2273,28 +2274,6 @@ pub fn worldgen_lod_tops(
         optional_string_array(env, states)
     })?;
     Ok(states.flatten())
-}
-
-/// What a mod's generator on the noise cuts out of the land, for far terrain
-/// (`HorizonWorldgen.lodMask`): Grid World's grid, `["grid", x, y, z, replacement state]`.
-/// None for none.
-pub fn worldgen_lod_mask(dimension: &str) -> Result<Option<Vec<String>>, String> {
-    let parts = with_server(|env, class| {
-        let dimension = env.new_string(dimension)?;
-        let parts = env
-            .call_static_method(
-                class,
-                "worldgenLodMask",
-                "(Ljava/lang/String;)[Ljava/lang/String;",
-                &[JValue::Object(&dimension)],
-            )?
-            .l()?;
-        if parts.is_null() {
-            return Ok(None);
-        }
-        string_array(env, parts).map(Some)
-    })?;
-    Ok(parts.flatten())
 }
 
 /// What far terrain's noise is for a dimension the mods generate ([`worldgen_lod_noise`]).

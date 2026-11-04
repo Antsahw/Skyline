@@ -24,7 +24,7 @@ public abstract class GameListenerMixin {
     }
 
     /**
-     * A mod handing an attack to a mirrored player's connection (Better Combat's attack
+     * A mod handing an attack to a mirrored player's connection (a mod's own attack
      * request, as vanilla's attack packet): the player attacks the entity the level has under
      * that id, as handleAttack does past its checks (the mirror has no packet processor: the
      * thread check would throw). Horizon's own attacks don't come this way.

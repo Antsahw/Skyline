@@ -200,7 +200,8 @@ public final class HorizonHooks {
             }
         }
         if (!CLIENT_HOOKS.isEmpty()) {
-            Natives.log("Mixin census: " + CLIENT_HOOKS.size() + " injections into the client's tick, run each tick");
+            Natives.log("Mixin census: " + CLIENT_HOOKS.size() + " injections into the client's tick, run each tick ("
+                    + CLIENT_HOOKS.stream().map(h -> h.mod() + " " + h.method()).distinct().toList() + ")");
         }
     }
 
@@ -765,20 +766,28 @@ public final class HorizonHooks {
     /**
      * Runs the mods' injections at {@code at} of {@code self}'s {@code method} (see merged):
      * each handler gets the arguments of {@code args} its parameters take by type, else null
-     * (zero), and a CallbackInfo. Failures are logged a few times each.
+     * (zero), and the call's one CallbackInfo; a cancel ends the call, as in the method (the
+     * result says so). Failures are logged a few times each.
      */
-    public static void fireMerged(Object self, Class<?> owner, String method, String at, Object... args) {
-        for (Method handler : merged(owner, method, at)) {
+    public static Result fireMerged(Object self, Class<?> owner, String method, String at, Object... args) {
+        List<Method> handlers = merged(owner, method, at);
+        if (handlers.isEmpty()) return Result.NONE;
+        // One callback for the call, as Mixin gives the method's injections: a cancel ends it.
+        CallbackInfo info = null;
+        for (Method handler : handlers) {
             Class<?>[] params = handler.getParameterTypes();
             Object[] call = new Object[params.length];
             for (int i = 0; i < params.length; i++) {
                 if (CallbackInfo.class.isAssignableFrom(params[i])) {
-                    call[i] = params[i] == CallbackInfo.class ? new CallbackInfo(method, true)
-                            : new CallbackInfoReturnable<>(method, true);
+                    if (info == null) {
+                        info = params[i] == CallbackInfo.class ? new CallbackInfo(method, true)
+                                : new CallbackInfoReturnable<>(method, true);
+                    }
+                    call[i] = info;
                     continue;
                 }
                 for (Object arg : args) {
-                    if (params[i].isInstance(arg)) {
+                    if (params[i].isInstance(arg) || params[i] == boolean.class && arg instanceof Boolean) {
                         call[i] = arg;
                         break;
                     }
@@ -796,7 +805,16 @@ public final class HorizonHooks {
                     for (int f = 0; f < Math.min(frames.length, 10); f++) Natives.log("    at " + frames[f]);
                 }
             }
+            if (info != null && info.isCancelled()) break;
         }
+        if (info == null) return Result.NONE;
+        Object value = info instanceof CallbackInfoReturnable<?> cir ? cir.getReturnValue() : null;
+        return new Result(info.isCancelled(), value);
+    }
+
+    /** Whether mods inject at {@code at} of {@code owner.method} (see merged). */
+    public static boolean hasMerged(Class<?> owner, String method, String at) {
+        return !merged(owner, method, at).isEmpty();
     }
 
     // ---- Firing -----------------------------------------------------------------------------
@@ -950,6 +968,25 @@ public final class HorizonHooks {
                         && f.getOpcode() == org.objectweb.asm.Opcodes.PUTFIELD && f.owner.equals(node.name)) {
                     for (String t : targets) FIELD_INITS.computeIfAbsent(t, k -> new ArrayList<>()).add(new String[] {f.name, n.desc});
                 }
+                // new T, dup, aload_0 (checkcast), invokespecial T.<init>(Owner)V, putfield
+                // <mixin>.field: a part made for the object itself (Fabric's packet context
+                // on a Connection).
+                if (i + 4 < code.size() && code.get(i) instanceof org.objectweb.asm.tree.TypeInsnNode n && n.getOpcode() == org.objectweb.asm.Opcodes.NEW
+                        && code.get(i + 1).getOpcode() == org.objectweb.asm.Opcodes.DUP
+                        && code.get(i + 2) instanceof org.objectweb.asm.tree.VarInsnNode self && self.getOpcode() == org.objectweb.asm.Opcodes.ALOAD
+                        && self.var == 0) {
+                    int k = i + 3;
+                    if (code.get(k).getOpcode() == org.objectweb.asm.Opcodes.CHECKCAST) k++;
+                    if (k + 1 < code.size() && code.get(k) instanceof org.objectweb.asm.tree.MethodInsnNode c
+                            && c.getOpcode() == org.objectweb.asm.Opcodes.INVOKESPECIAL && c.owner.equals(n.desc) && c.name.equals("<init>")
+                            && org.objectweb.asm.Type.getArgumentTypes(c.desc).length == 1
+                            && org.objectweb.asm.Type.getArgumentTypes(c.desc)[0].getSort() == org.objectweb.asm.Type.OBJECT
+                            && code.get(k + 1) instanceof org.objectweb.asm.tree.FieldInsnNode f
+                            && f.getOpcode() == org.objectweb.asm.Opcodes.PUTFIELD && f.owner.equals(node.name)) {
+                        String param = org.objectweb.asm.Type.getArgumentTypes(c.desc)[0].getInternalName();
+                        for (String t : targets) FIELD_INITS.computeIfAbsent(t, x -> new ArrayList<>()).add(new String[] {f.name, n.desc, THIS, param});
+                    }
+                }
                 // invokestatic Owner.getter()T, putfield <mixin>.field: a mod's shared object
                 // (Enderscape's EnderscapeClient.clientsideVariables() on the HUD).
                 if (code.get(i) instanceof org.objectweb.asm.tree.MethodInsnNode c
@@ -964,7 +1001,13 @@ public final class HorizonHooks {
         }
     }
 
-    /** The mixins' {@code new T()} fields of {@code self}'s classes that are still null, made ({@link #FIELD_INITS}). */
+    /** A field init's marker for {@code new T(this)}. */
+    private static final String THIS = "<this>";
+
+    /**
+     * The mixins' {@code new T()} (or {@code new T(this)}) fields of {@code self}'s classes
+     * that are still null, made ({@link #FIELD_INITS}).
+     */
     public static void initFields(Object self) {
         scan();
         for (Class<?> c = self.getClass(); c != null && c != Object.class; c = c.getSuperclass()) {
@@ -977,6 +1020,14 @@ public final class HorizonHooks {
                     field.setAccessible(true);
                     if (field.get(self) != null) continue;
                     Class<?> type = Class.forName(init[1].replace('/', '.'), true, c.getClassLoader());
+                    if (init.length == 4 && THIS.equals(init[2])) {
+                        // new T(this).
+                        Class<?> param = Class.forName(init[3].replace('/', '.'), false, c.getClassLoader());
+                        var make = type.getDeclaredConstructor(param);
+                        make.setAccessible(true);
+                        field.set(self, make.newInstance(self));
+                        continue;
+                    }
                     if (init.length == 3) {
                         // A static getter: (field, owner, method).
                         Method getter = type.getDeclaredMethod(init[2]);

@@ -15,6 +15,16 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  */
 @Mixin(Connection.class)
 public abstract class ConnectionMixin {
+    /**
+     * What is sent on a mirrored connection, which has no channel: Fabric's configuration
+     * tasks' packets reach the client (HorizonConfiguration.sent), the rest is dropped.
+     */
+    @Inject(method = "send(Lnet/minecraft/network/protocol/Packet;Lio/netty/channel/ChannelFutureListener;Z)V", at = @At("HEAD"), cancellable = true)
+    private void horizon$send(net.minecraft.network.protocol.Packet<?> packet, io.netty.channel.ChannelFutureListener listener,
+                              boolean flush, org.spongepowered.asm.mixin.injection.callback.CallbackInfo ci) {
+        if (HorizonServer.isMirror(this) && dev.horizonlab.platform.HorizonConfiguration.sent(packet)) ci.cancel();
+    }
+
     @Inject(method = "isMemoryConnection", at = @At("HEAD"), cancellable = true)
     private void horizon$memory(CallbackInfoReturnable<Boolean> cir) {
         if (HorizonServer.isMirror(this)) cir.setReturnValue(HorizonServer.loop());

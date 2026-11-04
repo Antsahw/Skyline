@@ -41,29 +41,6 @@ public final class HorizonData {
     static PackRepository repository;
 
     /**
-     * A new world's dimensions as a server makes them for its default level type ("normal":
-     * DedicatedServerProperties.WorldDimensionData.create), so mods that change the default
-     * world preset are heard (WorldWeaver's wover:normal: Better End's and Better Nether's
-     * biome sources for the End and the Nether). Vanilla's normal preset if that fails.
-     */
-    /**
-     * The level type a new single-player world gets: vanilla's "normal", or the preset a mod
-     * makes the default (WorldWeaver's create-world screen picks its suggested default,
-     * wover:normal: Better End's and Better Nether's own End and Nether biome sources).
-     */
-    private static String defaultLevelType() {
-        try {
-            Class<?> wover = Class.forName("de.ambertation.wover.preset.impl.WorldPresetsManagerImpl",
-                    true, HorizonData.class.getClassLoader());
-            Object key = wover.getMethod("getDefault").invoke(null);
-            if (key instanceof net.minecraft.resources.ResourceKey<?> preset) return preset.identifier().toString();
-        } catch (ReflectiveOperationException | LinkageError e) {
-            // No WorldWeaver.
-        }
-        return "normal";
-    }
-
-    /**
      * The open world's level stems when it was made with a mod's world preset (One Block's,
      * Grid World's: Horizon's world creation writes its id as {@code horizon:preset}), by
      * dimension; empty for the default preset, whose stems are the registries' (made at start,
@@ -116,17 +93,26 @@ public final class HorizonData {
                 .map(net.minecraft.core.Holder::value).orElse(null);
     }
 
+    /**
+     * A new world's dimensions as a server with a default server.properties makes them:
+     * DedicatedServerProperties from no properties (the mods' patches there decide the default
+     * level type: a preset library's own, with its End and Nether biome sources), then its
+     * WorldDimensionData.create. Vanilla's normal preset if that fails.
+     */
     private static net.minecraft.world.level.levelgen.WorldDimensions defaultDimensions(
             net.minecraft.core.HolderLookup.Provider registries) {
         try {
-            Class<?> data = Class.forName("net.minecraft.server.dedicated.DedicatedServerProperties$WorldDimensionData",
-                    true, HorizonData.class.getClassLoader());
-            var constructor = data.getDeclaredConstructor(com.google.gson.JsonObject.class, String.class);
-            constructor.setAccessible(true);
-            Object properties = constructor.newInstance(new com.google.gson.JsonObject(), defaultLevelType());
-            var create = data.getDeclaredMethod("create", net.minecraft.core.HolderLookup.Provider.class);
+            var properties = new net.minecraft.server.dedicated.DedicatedServerProperties(new java.util.Properties());
+            var field = net.minecraft.server.dedicated.DedicatedServerProperties.class.getDeclaredField("worldDimensionData");
+            field.setAccessible(true);
+            Object data = field.get(properties);
+            var create = data.getClass().getDeclaredMethod("create", net.minecraft.core.HolderLookup.Provider.class);
             create.setAccessible(true);
-            return (net.minecraft.world.level.levelgen.WorldDimensions) create.invoke(properties, registries);
+            var dimensions = (net.minecraft.world.level.levelgen.WorldDimensions) create.invoke(data, registries);
+            var type = data.getClass().getDeclaredMethod("levelType");
+            type.setAccessible(true);
+            Natives.log("Java mods: a new world's level type is " + type.invoke(data) + " (the default server.properties')");
+            return dimensions;
         } catch (ReflectiveOperationException | RuntimeException e) {
             Natives.log("Java mods: the default world preset failed, vanilla's normal instead: " + e);
             return registries.lookupOrThrow(Registries.WORLD_PRESET).getOrThrow(WorldPresets.NORMAL).value()

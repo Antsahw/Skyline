@@ -3182,7 +3182,7 @@ impl Game<'_> {
             if host.hub.guests[gi].vehicle == Some(self.mobs[index].id) {
                 return;
             }
-            // Java mods that patch the attack itself (Better Combat): their Player.attack on
+            // Java mods that patch the attack itself: their Player.attack on
             // copies decides each mob's damage and knockback, the guest facing the mob.
             if self.java_mob_attack(host, conn, gi, id) {
                 return;

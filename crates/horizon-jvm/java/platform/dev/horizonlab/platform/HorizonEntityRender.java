@@ -759,7 +759,7 @@ public final class HorizonEntityRender {
             var a = avatar(p);
             var dispatcher = context().getEntityRenderDispatcher();
             if (!(dispatcher.getRenderer(a) instanceof net.minecraft.client.renderer.entity.LivingEntityRenderer renderer)) return null;
-            if (!modLayers(renderer) && !SKIN_LAYERS) return null;
+            if (!modLayers(renderer) && !modelPartsPatched()) return null;
             JsonArray out = new JsonArray();
             JsonArray held = new JsonArray();
             EntityRenderState[] made = new EntityRenderState[1];
@@ -773,7 +773,7 @@ public final class HorizonEntityRender {
                 CameraRenderState camera = new CameraRenderState();
                 camera.orientation = new org.joml.Quaternionf();
                 camera.pos = net.minecraft.world.phys.Vec3.ZERO;
-                capturePlayer = SKIN_LAYERS;
+                capturePlayer = modelPartsPatched();
                 playerSubmit = null;
                 renderer.submit(made[0], pose, collector(out), camera);
             } finally {
@@ -781,7 +781,7 @@ public final class HorizonEntityRender {
                 capturePlayer = false;
                 items = null;
             }
-            skinLayers(out, p, a);
+            modParts(out, p, a);
             firstPerson(p, a, made[0]);
             if (out.isEmpty() && held.isEmpty()) return null;
             StringBuilder e = new StringBuilder(256);
@@ -820,31 +820,51 @@ public final class HorizonEntityRender {
 
     private static final java.util.Set<String> FAILED = java.util.Collections.synchronizedSet(new java.util.HashSet<>());
 
-    /** 3D Skin Layers is loaded: its mixin gives ModelPart a mesh drawn in place of its cubes. */
-    private static final boolean SKIN_LAYERS = net.fabricmc.loader.api.FabricLoader.getInstance().isModLoaded("skinlayers3d");
+    private static Boolean modelPartsPatched;
+
+    /**
+     * Mods patch how a model's parts draw (ModelPart.render or compile: a part drawn as
+     * something other than its cubes, such as voxels made from the skin).
+     */
+    private static boolean modelPartsPatched() {
+        if (modelPartsPatched == null) {
+            modelPartsPatched = HorizonMixinTable.patchedAnywhere(ModelPart.class, java.util.Set.of("render", "compile"));
+            if (modelPartsPatched) {
+                Natives.log("Java mods: mods change how models' parts draw ("
+                        + HorizonMixinTable.mods("net/minecraft/client/model/geom/ModelPart", "render") + "): players' parts they draw are shown");
+            }
+        }
+        return modelPartsPatched;
+    }
+
     private static boolean capturePlayer;
     /** The player's own model as its renderer submitted it: model, state, pose, render type, light, overlay. */
     private static Object[] playerSubmit;
-    private static Method injectedMesh;
+    private static Field cubes, children;
 
     /**
-     * 3D Skin Layers: in PlayerModel.setupAnim it gives the outer layers' parts (hat, jacket,
-     * sleeves, trousers) meshes of voxels made from the skin, which ModelPart.render draws in
-     * place of their flat cubes. Horizon draws the player's model itself; here the parts with a
-     * mesh are rendered alone (the others skip their cubes) where the renderer put the model,
-     * into custom geometry with the skin as texture.
+     * The player model's parts a mod draws its own way (modelPartsPatched): Horizon draws the
+     * player's model itself, so only these go to it, as custom geometry with the skin as
+     * texture, where the renderer put the model. A part is the mod's when, rendered alone
+     * (vanilla's ModelPart.render, with the mods' patches), it gives other quads than its own
+     * cubes' faces. The model is set up first as vanilla's renderer does (setupAnim, as that
+     * player, the camera on it: mods build their parts' look there, near the camera).
      */
     @SuppressWarnings({"unchecked", "rawtypes"})
-    private static void skinLayers(JsonArray out, net.minecraft.server.level.ServerPlayer p,
-                                   net.minecraft.client.player.RemotePlayer a) {
+    private static void modParts(JsonArray out, net.minecraft.server.level.ServerPlayer p,
+                                 net.minecraft.client.player.RemotePlayer a) {
         Object[] submit = playerSubmit;
         playerSubmit = null;
         if (submit == null) return;
         try {
-            if (injectedMesh == null) injectedMesh = ModelPart.class.getMethod("getInjectedMesh");
+            if (cubes == null) {
+                Field c = ModelPart.class.getDeclaredField("cubes"), ch = ModelPart.class.getDeclaredField("children");
+                c.setAccessible(true);
+                ch.setAccessible(true);
+                children = ch;
+                cubes = c;
+            }
             var model = (net.minecraft.client.model.player.PlayerModel) submit[0];
-            // It builds the meshes within a distance of the camera (its LOD) from the skin of
-            // the client's player: as that player, its camera on the player drawn.
             var mc = net.minecraft.client.Minecraft.getInstance();
             net.minecraft.world.entity.Entity camera = null;
             try {
@@ -863,11 +883,12 @@ public final class HorizonEntityRender {
             java.util.List<ModelPart> skipped = new java.util.ArrayList<>();
             java.util.List<ModelPart> shown = new java.util.ArrayList<>();
             boolean any = false;
+            int light = (Integer) submit[4], overlay = (Integer) submit[5];
             for (ModelPart part : parts) {
-                if (injectedMesh.invoke(part) != null) {
+                if (part != root && ((Map<?, ?>) children.get(part)).isEmpty() && drawnByMod(part, light, overlay)) {
                     any = true;
                     // The mirrored player's skin parts (the client's settings, which Horizon
-                    // keeps itself) are all off: the parts that have a mesh are shown.
+                    // keeps itself) are all off: the mod's parts are shown.
                     if (!part.visible) {
                         part.visible = true;
                         shown.add(part);
@@ -880,7 +901,7 @@ public final class HorizonEntityRender {
             try {
                 if (!any) return;
                 Recorder recorder = new Recorder();
-                root.render((PoseStack) submit[2], recorder, (Integer) submit[4], (Integer) submit[5], -1);
+                root.render((PoseStack) submit[2], recorder, light, overlay, -1);
                 int n = recorder.vertices.size() / 4 * 4;
                 String texture = texture((RenderType) submit[3]);
                 if (n == 0 || texture == null) return;
@@ -898,23 +919,33 @@ public final class HorizonEntityRender {
                 }
                 o.add("v", new HorizonJson.Raw(v.append(']').toString()));
                 out.add(o);
-                if (FAILED.add("skinlayers drawn")) {
-                    float[] lo = {1e9F, 1e9F, 1e9F}, hi = {-1e9F, -1e9F, -1e9F};
-                    for (int i = 0; i < n; i++) {
-                        for (int k = 0; k < 3; k++) {
-                            lo[k] = Math.min(lo[k], recorder.vertices.get(i)[k]);
-                            hi[k] = Math.max(hi[k], recorder.vertices.get(i)[k]);
-                        }
-                    }
-                    Natives.log("Java mods: 3D Skin Layers draws " + n / 4 + " quads on a player (" + texture + "), from "
-                            + java.util.Arrays.toString(lo) + " to " + java.util.Arrays.toString(hi));
+                if (FAILED.add("mod parts drawn")) {
+                    Natives.log("Java mods: mods draw " + n / 4 + " quads of a player's model parts their own way (" + texture + ")");
                 }
             } finally {
                 for (ModelPart part : skipped) part.skipDraw = false;
                 for (ModelPart part : shown) part.visible = false;
             }
         } catch (Throwable t) {
-            if (FAILED.add("skinlayers")) Natives.log("Java mods: 3D Skin Layers' parts couldn't be drawn: " + t);
+            if (FAILED.add("mod parts")) Natives.log("Java mods: the player's model parts mods draw couldn't be drawn: " + t);
+        }
+    }
+
+    /** A part with no children, rendered alone, gives other quads than its cubes' faces. */
+    @SuppressWarnings("unchecked")
+    private static boolean drawnByMod(ModelPart part, int light, int overlay) throws ReflectiveOperationException {
+        int faces = 0;
+        for (ModelPart.Cube cube : (java.util.List<ModelPart.Cube>) cubes.get(part)) faces += cube.polygons.length;
+        boolean visible = part.visible, skip = part.skipDraw;
+        part.visible = true;
+        part.skipDraw = false;
+        try {
+            Recorder recorder = new Recorder();
+            part.render(new PoseStack(), recorder, light, overlay, -1);
+            return recorder.vertices.size() / 4 != faces;
+        } finally {
+            part.visible = visible;
+            part.skipDraw = skip;
         }
     }
 
@@ -1181,7 +1212,7 @@ public final class HorizonEntityRender {
                     case "submitModel" -> {
                         if (!kept(args[0])) {
                             // The player's own model, left to Horizon: kept for mods that
-                            // change how its parts draw (3D Skin Layers: skinLayers).
+                            // change how its parts draw (modParts).
                             if (capturePlayer && args[0] instanceof net.minecraft.client.model.player.PlayerModel && args.length == 9) {
                                 PoseStack copy = new PoseStack();
                                 copy.last().pose().set(((PoseStack) args[2]).last().pose());

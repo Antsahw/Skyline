@@ -857,10 +857,6 @@ public final class HorizonServer {
         return HorizonWorldgen.lodNoise(dimension, dir);
     }
 
-    public static String[] worldgenLodMask(String dimension) {
-        return HorizonWorldgen.lodMask(dimension);
-    }
-
     public static String[] worldgenLodColumns(String dimension, int[] xz) {
         return HorizonWorldgen.lodColumns(dimension, xz);
     }
@@ -1360,6 +1356,8 @@ public final class HorizonServer {
                     // events, then those at its end (Fabric's own injections are its events).
                     Object[] joining = {mirrorConnection(player), player,
                             net.minecraft.server.network.CommonListenerCookie.createInitial(player.getGameProfile(), false)};
+                    // The configuration phase before play: the mods' data their client needs first.
+                    HorizonConfiguration.configure(server, player, (net.minecraft.network.Connection) joining[0]);
                     hook(server.getPlayerList(), net.minecraft.server.players.PlayerList.class, "placeNewPlayer", PLACE_NEW_PLAYER, "HEAD", joining);
                     fireEach("ServerPlayConnectionEvents.INIT", ServerPlayConnectionEvents.INIT, l -> l.onPlayInit(connection, server));
                     fireEach("ServerEntityEvents.ENTITY_LOAD", ServerEntityEvents.ENTITY_LOAD, l -> l.onLoad(player, level));

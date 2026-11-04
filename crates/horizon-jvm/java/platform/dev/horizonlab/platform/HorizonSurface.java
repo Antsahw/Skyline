@@ -207,7 +207,7 @@ public final class HorizonSurface {
 
     /**
      * Every block a material rule can give (its block rules, ore veins, the badlands' bands),
-     * through sequences, conditions and references, and TerraBlender's per-mod sources.
+     * through sequences, conditions and references, and the rules a mod's own kinds of rule hold.
      */
     public static Set<BlockState> materials(MaterialRule rule) {
         Set<BlockState> out = new java.util.HashSet<>();
@@ -237,18 +237,35 @@ public final class HorizonSurface {
                     }
                     return;
                 }
-                // TerraBlender's NamespacedSurfaceRuleSource: its base and each mod's rules.
-                try {
-                    var base = rule.getClass().getMethod("base").invoke(rule);
-                    if (base instanceof MaterialRule b) collect(b, out, seen);
-                    var sources = rule.getClass().getMethod("sources").invoke(rule);
-                    if (sources instanceof Map<?, ?> map) {
-                        for (Object r : map.values()) if (r instanceof MaterialRule m) collect(m, out, seen);
+                // A mod's own kind of rule (one combining others: a base and each mod's
+                // rules): the rules it holds, in its fields, lists and maps.
+                for (Class<?> c = rule.getClass(); c != null && c != Object.class; c = c.getSuperclass()) {
+                    for (java.lang.reflect.Field f : c.getDeclaredFields()) {
+                        if (java.lang.reflect.Modifier.isStatic(f.getModifiers()) || f.getType().isPrimitive()) continue;
+                        try {
+                            f.setAccessible(true);
+                            held(f.get(rule), out, seen);
+                        } catch (RuntimeException | ReflectiveOperationException e) {
+                            // Not readable: its blocks aren't known.
+                        }
                     }
-                } catch (ReflectiveOperationException | RuntimeException e) {
-                    // Another kind of rule: its blocks aren't known.
                 }
             }
+        }
+    }
+
+    /** The material rules a value holds: itself, a holder's, a list's or a map's. */
+    private static void held(Object value, Set<BlockState> out, Set<Object> seen) {
+        switch (value) {
+            case MaterialRule m -> collect(m, out, seen);
+            case Holder<?> h when h.isBound() -> held(h.value(), out, seen);
+            case Iterable<?> list -> {
+                for (Object o : list) if (o instanceof MaterialRule || o instanceof Holder<?>) held(o, out, seen);
+            }
+            case Map<?, ?> map -> {
+                for (Object o : map.values()) if (o instanceof MaterialRule || o instanceof Holder<?>) held(o, out, seen);
+            }
+            case null, default -> {}
         }
     }
 

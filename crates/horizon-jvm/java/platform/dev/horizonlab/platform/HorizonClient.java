@@ -1427,6 +1427,43 @@ public final class HorizonClient {
         return result[0];
     }
 
+    /**
+     * The client half of a player's click on an entity (Minecraft.startAttack, which the attack
+     * key calls): the mods' injections at its head run on the player's client, looking at what
+     * the player looks at, its attack strength Horizon's swing ({@code ticks} since it). A mod
+     * that cancels it takes the click: its own attack follows, as its client sends it (its
+     * payloads reach the server's half; the hits land on the mirror's entities, Horizon's mobs'
+     * shadows among them). Whether one took it.
+     */
+    /** Each player's client ticks left with the attack key down (a click's press). */
+    private static final java.util.Map<java.util.UUID, Integer> ATTACK_HELD = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final int CLICK_TICKS = Integer.getInteger("horizon.clickTicks", 2);
+
+    public static boolean startAttack(net.minecraft.server.level.ServerPlayer player, int ticks) {
+        if (minecraft == null || minecraft.font == null) return false;
+        if (!HorizonHooks.hasMerged(Minecraft.class, "startAttack", "HEAD")) return false;
+        boolean[] taken = {false};
+        try {
+            inWorld(player, () -> withKeys(player.getUUID(), () -> {
+                HorizonServer.clientHalf = Thread.currentThread();
+                try {
+                    if (minecraft.player != null) HorizonCombat.setStrength(minecraft.player, ticks);
+                    taken[0] = HorizonHooks.fireMerged(minecraft, Minecraft.class, "startAttack", "HEAD").cancelled();
+                    // The click's press: the attack key reads down for its next client ticks.
+                    if (taken[0]) ATTACK_HELD.put(player.getUUID(), CLICK_TICKS);
+                } finally {
+                    HorizonServer.clientHalf = null;
+                }
+            }));
+        } catch (Throwable t) {
+            Throwable root = t;
+            while (root.getCause() != null && root.getCause() != root) root = root.getCause();
+            Natives.log("Horizon's client: the client side of an attack failed: " + root);
+            HorizonFailures.report("an attack", root);
+        }
+        return taken[0];
+    }
+
     // ---- The client's tick ------------------------------------------------------------------
 
     /**
@@ -1498,6 +1535,7 @@ public final class HorizonClient {
                     levelRendererReady();
                     long t = HorizonProfile.start();
                     tickOnce();
+                    ATTACK_HELD.computeIfPresent(player.getUUID(), (u, n) -> n > 1 ? n - 1 : null);
                     t = HorizonProfile.add("client: tick", t);
                     // The chunks mods asked for on their own threads (JourneyMap's mapping).
                     HorizonChunks.serveWanted(64);
@@ -2192,6 +2230,12 @@ public final class HorizonClient {
     private static void tickOnce() {
         HorizonHooks.fireClient(minecraft, "runTick");
         HorizonHooks.fireClient(minecraft, "tick");
+        // Minecraft.handleKeybinds' attack each tick (continueAttack: the attack key held with
+        // no screen up), as far as mods hook its head (a weapon's swing carried on).
+        if (minecraft.player != null && HorizonHooks.hasMerged(Minecraft.class, "continueAttack", "HEAD")) {
+            boolean held = minecraft.gui.screen() == null && minecraft.options.keyAttack.isDown();
+            HorizonHooks.fireMerged(minecraft, Minecraft.class, "continueAttack", "HEAD", held);
+        }
         // Once a frame in the game (the headless client's frames are its ticks, getDeltaTracker
         // whole ticks): Iceberg's render tick (Legendary Tooltips' turning 3D item, its targets'
         // pool given back).
@@ -2387,9 +2431,14 @@ public final class HorizonClient {
             mapping.setDown(keys != null && keys.down().contains(mapping));
             clickCount.setInt(mapping, keys == null ? 0 : keys.clicks().getOrDefault(mapping, 0));
         }
+        // Vanilla's attack key: down while the player's click lasts (startAttack).
+        KeyMapping attack = minecraft.options != null ? minecraft.options.keyAttack : null;
+        Integer held = ATTACK_HELD.get(player);
+        if (attack != null) attack.setDown(held != null && held > 0);
         try {
             run.run();
         } finally {
+            if (attack != null) attack.setDown(false);
             for (KeyMapping mapping : mappings) {
                 int left = clickCount.getInt(mapping);
                 if (keys != null) {
