@@ -60,6 +60,16 @@ both are fixed. The user's decision: **players play only through Horizon's launc
 
 ### Testers' Trello (2026-11-04, https://trello.com/b/2uhi4jkj)
 
+**CRASH, first of all (2026-11-04, tester, batch 10, Create + Fabric API):** placing a
+scaffolding stops the server thread: "Horizon: unsupported block collision state 36126"
+(`horizon-world/src/block_collision.rs`: `collision_shape` has no cached shape and no `dynamic`
+rule for the state, returns `Unsupported`, and a caller treats it as fatal). 36126 is past
+vanilla's states: a mod block whose collision depends on context (scaffolding-like). Fix: a
+state Horizon has no rule for must never end the game: ask Java for the mod block's shape
+(`getCollisionShape` in the mirror) or fall back to its outline/full cube, and log once. Find
+every caller that turns `Unsupported` into a stop. Own small chat (`bridge-crash-1`): regress
+case placing it, then walking into/on it.
+
 Chats on it (2026-11-04): `bridge-client-13` (Cloth Config, Chat Heads, waypoint NPE,
 Litematica), `bridge-replay-1` (ReplayMod, Flashback), `bridge-mixins-10` (double break sound,
 Chunky), `bridge-voice-1` (Simple Voice Chat), `bridge-entities-10` (TACZ), `bridge-trello-1`
