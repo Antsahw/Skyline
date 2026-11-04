@@ -60,6 +60,18 @@ both are fixed. The user's decision: **players play only through Horizon's launc
 
 ### Testers' Trello (2026-11-04, https://trello.com/b/2uhi4jkj)
 
+**CRASH, first of all (2026-11-04, tester, batch 10, Create + Fabric API):** placing a
+scaffolding stops the server thread: "Horizon: unsupported block collision state 36126"
+(`horizon-world/src/block_collision.rs`: `collision_shape` has no cached shape and no `dynamic`
+rule for the state, returns `Unsupported`, and a caller treats it as fatal). 36126 is past
+vanilla's states: a mod block whose collision depends on context (scaffolding-like). Fix: a
+state Horizon has no rule for must never end the game: ask Java for the mod block's shape
+(`getCollisionShape` in the mirror) or fall back to its outline/full cube, and log once. Find
+every caller that turns `Unsupported` into a stop. Own small chat (`bridge-crash-1`): regress
+case placing it, then walking into/on it.
+The tester had to **remake the world** after it: also check that a world saved at such a stop
+opens again.
+
 Chats on it (2026-11-04): `bridge-client-13` (Cloth Config, Chat Heads, waypoint NPE,
 Litematica), `bridge-replay-1` (ReplayMod, Flashback), `bridge-mixins-10` (double break sound,
 Chunky), `bridge-voice-1` (Simple Voice Chat), `bridge-entities-10` (TACZ), `bridge-trello-1`
@@ -81,6 +93,110 @@ By area:
   Chat (its own UDP server and Java audio: research).
 - **entities/gpu**: TACZ (guns: models, animations, projectiles).
 - Better Combat and Create: in the generic-entities and gpu-13 chats.
+- **Create, tester on batch 10 (2026-11-04, for gpu-13):** Create's "fancy 3D" items (the
+  ones drawn by a custom item renderer: wrench, held tools) don't draw, in the hand or the
+  creative tab; and a placed machine (press/mixer-like, over a basin or belt) draws with wrong
+  parts: grey cylinders and a pale blue-white flat square where its moving parts' textures
+  should be (a sprite or atlas mixed up for its block-entity parts, or a partial model). Not an
+  entity problem: item renderers and block-entity parts.
+- **FIRST for `bridge-mixins-10`: lava on water loops** (tester, batch 10, Create Fly + Fabric
+  API, videos): lava flowing onto water makes obsidian, which turns back into flowing lava,
+  again and again (constant smoke). Vanilla behaviour broken: a regression, likely batch 10's
+  fluids (mixins-9's `foreign_fluid`) or Create's mixin on `LiquidBlock.shouldSpreadLiquid`/
+  `FlowingFluid` interactions being routed to Java while Horizon's own fluid tick also runs, the
+  two writing over each other. Reproduce: Create + a lava source flowing onto still water;
+  vanilla gives obsidian/cobblestone once. Without Create too. Then **Create's own fluid
+  interactions** (honey + lava makes limestone, chocolate + lava makes scoria): what a mod adds
+  to lava's interactions must happen once, through the mod's code.
+- **Items placed on stations don't show** (tester, batch 10): right-click with an item on
+  Create's depot puts nothing visible on top; "like Farmer's Delight" (its cutting board,
+  skillet, stove show items on top through their block-entity renderers). First find which
+  half fails: is the item in the block entity (Java's `LIVE`, `HORIZON_JAVA_DEBUG=ber`) and
+  gone from the hand? Then it's drawing: block-entity renderers that draw an item stack
+  (`ItemModelResolver`/`submitItem` inside a BER) need the item path in the bridge's recorder.
+  If it never got in, it's the use (mixins). gpu-13 checks first; FD's cutting board passed
+  `pot`-style cases, so compare with it.
+  Update: right-click does nothing **and thrown items don't go in either** (the depot takes
+  item entities that land on it): so the item never gets in, not only a drawing gap. Mixins:
+  the use on a mod block with an item in hand, and a mod block entity picking up item entities.
+  Same root, seen with Create's fluid tank: a water bucket used on the tank places a water
+  block beside it instead of filling the tank. Horizon's own item use (bucket, also any vanilla
+  item with its own use) runs before the mod block gets the click; vanilla asks the block first
+  (`useItemOn` on the block, then the item's `useOn` only if the block passed).
+  Clear evidence (tester, train tracks): placing a curved track by clicking a track, then the end,
+  says Create's own "Right-click the targeted train track first": the first click never reached
+  the track item's `useOn` (the item's remembered start is never set). A good regress case: track
+  item on a placed track, then the action bar must not show that line. Same for metal brackets.
+- **Create's motor speed can't be set** (tester, batch 10: "motors lack GUI"). Create has no
+  screen for it: you look at the motor and **scroll the mouse wheel** (its value box, drawn as
+  a HUD overlay on the looked-at block). So: mods' injections on `MouseHandler.onScroll` while
+  playing (not in a screen) must run and may cancel the hotbar scroll, and the value box overlay
+  must draw. Same bucket: **Create's goggles** show nothing (worn, looking at a machine draws a stress/
+  speed tooltip overlay: a HUD layer of the looked-at block). Client chat (`bridge-client-13`): generic, every mod with scroll-to-adjust gets it.
+- **Fluids drawn black in screens** (tester, batch 10): in JEI's list (and a mod's fluid slots)
+  the fluid entries (water, lava, Create's honey/chocolate) are black or dark squares. Mods draw
+  a fluid in a GUI from its still sprite in the block atlas, tinted (Fabric's
+  `FluidRenderHandler`/`FluidVariantRendering`, `GuiGraphics` blit of a `TextureAtlasSprite`):
+  the screen path needs those sprites and the tint. gpu-13 (it did fluids in the world).
+- **Create machines, tester batch 10 (gpu-13 checks logic first, then drawing):** a water wheel
+  in flowing water doesn't spin (Create reads the neighbours' `FluidState` flow vectors in the
+  mirror: are Horizon's flowing water levels and falling flags there, and does the kinetic
+  network get a speed?); the mechanical mixer over a basin is "just bugged" (ask what: no
+  mixing, no animation, or a drawing gap; his screenshot has a block between mixer and basin,
+  check his setup). Confirmed working on batch 10: eating FD meals.
+  Also: **crushing wheels** do nothing (they process item entities thrown between them: the
+  same item-entity path as the depot, mixins); **fluid pipes draw broken** in water (a pipe
+  through a water block: its middle segment missing, the outline bigger than the model;
+  check the pipe's connection states after neighbour updates in the mirror, and multipart
+  models of waterlogged mod blocks).
+  And **mechanical pumps** "non functional" (a pump moves fluid between pipes and takes water
+  source blocks from the world: Java removing and reading Horizon's fluids through the mirror;
+  check with pump + pipes into a tank, his screenshot's setup may lack pipes).
+  **Mechanical saw** works (it fells the tree) but its blade doesn't draw (the saw's moving part,
+  a block-entity renderer part like the shafts; a black hole where it should be). **Ponder**
+  (Create's tutorial: hold W over an item's tooltip) is missing: its keybind on tooltips, then
+  a screen that draws small 3D scenes of a fake level through vanilla's renderer. Research
+  after the rest (gpu): likely the hardest Create piece.
+  **Belts don't assemble and chain conveyors don't connect**: both are made by using an item
+  (belt, chain) on one block then another, so likely the same use-order bug (mixins: the block
+  and the item's `useOn` first, as vanilla). And a client tick error: `ParticleEngine.
+  createParticle` on a null (Horizon's client has no vanilla `ParticleEngine`: a mod making a
+  particle client-side must get one that hands the particle to Horizon's particles; client chat).
+  **Blaze burners** work but draw wrong: the blaze head looks doubled/overlapping and a pale
+  blue-white flat square under it (the same pale square as the press/mixer report: likely one
+  sprite or render type wrong for animated/emissive block-entity parts; gpu-13).
+  **New kind (client chat): mods' client sounds.** Using Create's frogport: "failed in using a
+  block: NullPointerException ... FrogportAudioBehaviour.open". Mods play client sounds through
+  vanilla's `SoundManager` (`Minecraft.getSoundManager().play(SoundInstance)`, looping and moving
+  sounds); Horizon's client has no vanilla sound engine: give mods one that hands their sounds
+  to Horizon's audio. Casings work (tester).
+  **Encased fans** do nothing: a fan's air current pushes entities and processes item entities
+  in front of it (Java moving Horizon's entities: players, mobs, items; the same item-entity
+  path as the depot and crushing wheels, plus entity motion set from a mod).
+  **Mechanical arms** draw but do nothing: their pick-up/drop-off points are chosen by
+  right-clicking blocks with the arm item before placing it (the use-order bug). "Anything
+  variable can't be set" (filters, speeds, thresholds): Create's value boxes (scroll) and
+  filter slots (right-click with an item on the box): the scroll and use buckets above.
+  **Drill works** (tester).
+  **Windmill bearing and super glue** do nothing: a bearing assembles its sails into a
+  contraption (an entity carrying blocks) on right-click, glue is applied by clicking two
+  corners: the use-order bug, then contraptions (not done: gpu-13 has them listed).
+  **Toolbox: the block opens (lid animates) but no screen shows**, "again": a mod menu that
+  needs its opening data on the client (Fabric's `ExtendedScreenHandlerType`/menu data
+  sent with the open packet) or a screen that fails to make: check the log for the screen's
+  error; client chat.
+  **Cardboard armor disguise** doesn't work (full set + sneaking: you look like a box and mobs
+  ignore you). Two halves: drawing a player as something else (a mod's player-renderer hook;
+  Horizon draws players itself: gpu) and mobs ignoring a disguised player (Horizon's mobs are
+  Rust: they'd have to ask the mods whether a player can be targeted, a hook on target
+  selection: entities). Lower priority.
+  **Sandpaper** does nothing (hold right-click with it, the off-hand item gets polished): a mod
+  item used over time that isn't food. Mixins-9 made food finish; the same must hold for any
+  mod item with a use duration (`getUseDuration`, `onUseTick`, `finishUsingItem`,
+  `releaseUsing`): mixins.
+- **A broken block's moving parts stay** (tester, batch 10): break a cogwheel and the hand
+  crank's handle on it keeps floating, drawn. A removed mod block entity must drop its
+  renderer's instance (gpu-13: the recorder's per-block-entity draws on removal).
 - ~~**Breaking sounds twice**~~ and ~~**Chunky**~~: done in `bridge-mixins-10` (report below).
   Was: **Breaking sounds twice** (a tester, 2026-11-04: "dirt goes brrbrr"). Mods: Biomes O' Plenty,
   TerraBlender, GlitchCore, Terralith, Geophilic, Lithostitched, FallingTree, WorldEdit, Create
