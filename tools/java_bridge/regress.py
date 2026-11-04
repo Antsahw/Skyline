@@ -214,6 +214,53 @@ CASES = {
         forbid=[r"Java mods: drawing create:", r"ModelRenderHelper"],
         look="create-0: the purple motor, a shaft, a wooden cogwheel and a shaft in a row; create-1: the cog turned a little",
     ),
+    "createmachines": dict(
+        about="Create's machines (scene machines): a press makes iron sheets of the ingots a click put on its "
+              "depot (the click's off hand is the mod's use's: Horizon's client can't know a mod block took it), "
+              "a millstone grinds the wheat a hopper feeds it, a deployer places the cobblestone a hopper gives it, "
+              "a belt made between two shafts with its item (its first shaft's cooldown runs out: mirrored "
+              "players' item cooldowns tick), its connector's client particles drawn as packets",
+        mods=["create"], optional=["fabric-api"], scene="machines", env={"HORIZON_JAVA_DEBUG": "ber"}, timeout=900,
+        steps=['read X Y Z < $S/pos; $C command "give @s minecraft:iron_ingot 4" >/dev/null; sleep 0.5; '
+               '$C look-at block $((X+3)) $Y $((Z-2)) up >/dev/null; sleep 0.5; $C mouse right click >/dev/null; sleep 1; '
+               '$C command "clear @s" >/dev/null; $C command "give @s create:belt_connector 4" >/dev/null; sleep 0.5; '
+               '$C look-at-block $((X-2)) $Y $((Z-3)) >/dev/null; sleep 0.5; $C mouse right click >/dev/null; sleep 1; '
+               '$C look-at-block $((X-2)) $Y $((Z+1)) >/dev/null; sleep 0.5; $C mouse right click >/dev/null; sleep 1; '
+               '$C command "clear @s" >/dev/null; sleep 1',
+               'read X Y Z < $S/pos; $C command "tp @s $((X-1)) $Y $Z -90 12" >/dev/null; sleep 12',
+               'read X Y Z < $S/pos; $C block $((X+3)) $Y $((Z+3)) > $S/deployed.json; '
+               '$C command "tp @s $((X+1)) $Y $((Z-1)) 90 35" >/dev/null; sleep 3'],
+        checks=[check_log(r"ber create:depot at .*create:iron_sheet", "the press made iron sheets on the depot"),
+                check_log(r"ber create:millstone at .*create:wheat_flour", "the millstone ground wheat to flour"),
+                check_log(r"ber create:belt at .*Length:5", "the belt was made between the shafts"),
+                check_file("deployed.json", r"minecraft:cobblestone", "the deployer placed its cobblestone")],
+        forbid=[r"Java mods: drawing create:", r"ParticleEngine\.createParticle", r"failed to tick"],
+        look="createmachines-2: the press over its depot, the millstone under its hopper, the deployer and its "
+             "cobblestone; createmachines-3: the belt between its shafts",
+    ),
+    "contraption": dict(
+        about="A Create contraption: a mechanical bearing on a creative motor lifts the planks on it into a "
+              "contraption entity (the mirror's levels have no neighbour updater: the shape updates are "
+              "Horizon's) and turns it; its renderer gets the client's block models",
+        mods=["create"], optional=["fabric-api"], scene="contraption", timeout=900,
+        steps=['read X Y Z < $S/pos; $C command "clear @s" >/dev/null; $C look-at-block $((X+3)) $((Y+1)) $Z >/dev/null; '
+               'sleep 0.5; $C mouse right click >/dev/null; sleep 3; $C block $((X+3)) $((Y+2)) $Z > $S/lifted.json',
+               'sleep 2'],
+        checks=[check_file("lifted.json", r"minecraft:air", "the planks left the world: they are the contraption's")],
+        forbid=[r"no renderer for create:", r"Cannot invoke \"net\.minecraft\.world\.level\.redstone\.CollectingNeighborUpdater", r"failed to tick"],
+        look="contraption-1 and contraption-2: the planks on the bearing, turned by different angles",
+    ),
+    "createitems": dict(
+        about="Create's items drawn by its own item model types (the wrench, the extendo grip, the backtanks' "
+              "OBJ with `map_Kd 0`): the quads its Java models make reach Horizon's item renderer; the "
+              "creative tab's first row isn't blank, the wrench draws in hand",
+        mods=["create"], optional=["fabric-api"], scene="none", timeout=900,
+        steps=['sleep 8; $C command "give @s create:wrench" >/dev/null; sleep 2',
+               '$C key e tap >/dev/null; sleep 2; $C click-at 301 12 >/dev/null; sleep 2'],
+        checks=[check_log(r"Java mods: [1-9]\d* item\(s\) drawn with their Java models' quads", "the game takes Java's item models")],
+        forbid=[r"item create:\w+'s model couldn't be read"],
+        look="createitems-1: the wrench in hand; createitems-2: Create's creative tab, no blank slots in its first rows",
+    ),
     "fluids": dict(
         about="Mods' fluids drawn with their own sprites (Create's honey and chocolate: their client "
               "fluid models, read once the models load), not as lava",

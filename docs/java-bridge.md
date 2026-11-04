@@ -720,6 +720,48 @@ gets SPIR-V, vertex layouts and uniform lists.
   root into custom geometry with the skin texture. Horizon still draws its flat outer layers
   too; downloaded skins (not resource ids) don't reach Horizon's atlas.
 
+## Create's machines, contraptions and items (bridge-gpu-13)
+
+Generic fixes found with Create Fly (no Create-specific code); regress `createmachines`,
+`contraption`, `createitems` (scenes `machines`, `contraption`).
+- **Mods' own item model types** (`create:model/wrench`, `create:model/normal`, the extendo
+  grip, the linked controller...): Horizon reads only vanilla's types, so the items were blank.
+  Once the client's models are in, with a player (`HorizonItemModels.exportOnce`, from the
+  client tick), every item whose `ItemModel` class isn't vanilla's is resolved
+  (`updateForTopItem`, GUI) and its quads sent (`Natives.modItemModels` →
+  `item_render::set_java_item_models`): the layers' quads, the layers' Fabric meshes (Create
+  emits there: `FabricLayerRenderState.emitter`, read through `fabric_getMutableMesh`), and a
+  special renderer's submit into a collector keeping custom geometry and `submitItem`; local
+  transforms applied, UVs made each sprite's own, each context's display transform. Horizon
+  uses them where its own layers draw nothing (no quads, or the missing model).
+- **OBJ `map_Kd 0`** (no `#`): a texture slot of the model when it has one (Create's backtanks).
+- **Items a block entity renderer draws** with the real item models (`submitItem` reaching the
+  recording collector: vanilla's 8 arguments and Fabric's with the mesh) are kept as a block
+  model's quads; those it resolves with `appendItemLayers` itself (Create's depots and belts)
+  are kept items, as `updateFor*`'s are. Iron sheets show on the depot.
+- **Mirrored players' item cooldowns tick** (`HorizonServer.tick`): a belt connector's first
+  shaft starts a 5-tick cooldown that never ended, so the second click did nothing.
+- **A click a mod block consumed ends there** (`CLICK_TAKEN`): Horizon's client can't run a mod
+  block's use, so it sends the off hand's `UseItemOn` and `UseItem`s too; an empty off hand on a
+  depot took back the ingots just put on it. Within 4 ticks of a consumed `useBlock` (vanilla's
+  `rightClickDelay`: no new click comes sooner), the rest of the click is taken (returns 1).
+- **Client particles** a mod adds to the client level (`ClientLevel.doAddParticle`: the belt
+  connector's line) go to that player as a `ClientboundLevelParticlesPacket` (count 0); the
+  headless client has no particle engine (its NPE failed Create's whole client tick).
+- **Neighbour updates a mod calls itself** (`neighborShapeChanged`, `updateNeighborsAt`,
+  `updateNeighborsAtExceptFromFacing`, `neighborChanged(pos, block, orientation)`) are no-ops on
+  the mirror's levels: they have no `neighborUpdater` (made without their constructor), and a
+  bearing's assembly failed on it. Horizon updates the neighbours of the blocks it is told of.
+- **Contraptions**: the renderers' contexts get the client's `BlockModelResolver` once its models
+  load (`HorizonEntityRender.modelsLoaded`; renderers that failed before are tried again):
+  `ContraptionEntityRenderer` needs it. A bearing's contraption then draws and turns (its
+  blocks' SuperByteBuffer through the atlas-mesh path).
+- Works with no change: the press (ingots to sheets on a depot two blocks below it), the
+  millstone (fed by Horizon's hopper), the deployer (places what a hopper gives it), belts.
+- Not done: Horizon's item entities aren't in the mirror (items thrown on a belt or a
+  millstone, a press over items on the ground); players don't collide with contraptions; a
+  contraption's own moving actors (drills, harvesters) untested.
+
 ## 26.3 facts that cost time
 
 - **A use the mirror starts never finishes.** The mirrored players are never ticked, so
@@ -730,6 +772,12 @@ gets SPIR-V, vertex layouts and uniform lists.
   its `FluidState` sees that fluid: flow, random ticks, conversions, entity physics. The
   `LevelAccess::foreign_fluid` hook covers flow, random ticks and conversions; entities still
   read the template.
+- **Create's press sits two blocks over its depot**, with a gap (the depot asks `above(2)` for
+  the processing), and a depot takes items only through its top face: a press set right over
+  the depot never ran, and a click on the depot's side passed.
+- **A click's packets can come ticks apart** on a busy server (2 cores, llvmpipe): the off
+  hand's `UseItemOn` of a click came after the main hand's had been answered, past a one-tick
+  window (`CLICK_TAKEN` waits 4).
 - `$X.5` in a shell step is wrong for negative X (`-521.5` is block -522): use
   `$(awk "BEGIN{print $X + 0.5}")` (around.sh says so too; it cost a run here).
 
@@ -1285,6 +1333,9 @@ Create (Create Fly's 26.3 port, 2026-11-04, bridge-gpu-12): kinetic networks run
 shafts, cogs and motors draw turning; OBJ items draw; mods' fluids use their own sprites; 3D Skin
 Layers draws its layers (see "Create, Flywheel, OBJ models, mods' fluids, 3D Skin Layers").
 `SCENE=create`, `SCENE=fluids`; regress `create`, `fluids`, `skinlayers`.
+bridge-gpu-13: press, millstone, deployer and belts work; a bearing's contraption assembles,
+draws and turns; the wrench and the creative tab's blank items draw (Java's item models). See
+"Create's machines, contraptions and items"; regress `createmachines`, `contraption`, `createitems`.
 
 Nether and End (tested 2026-10-31 with BOP, BetterNether, BetterEnd, BCLib, WorldWeaver):
 both generate through the mods, the Nether with BetterNether's and BOP's biomes and blocks

@@ -295,6 +295,13 @@ fn bake_obj(
     let render_type = model.render_type.as_deref().and_then(RenderType::by_name);
     for face in obj.faces.iter().filter(|f| !hidden.contains(&f.object)) {
         let slot = match obj.materials.get(&face.material) {
+            // `map_Kd 0` (no `#`, no namespace) naming one of the model's texture slots: that
+            // slot, as Create's OBJ models (its backtanks) are drawn by its own loader.
+            Some(MtlTexture::Sprite(sprite))
+                if !sprite.contains(':') && model.material(sprite).ok().flatten().is_some() =>
+            {
+                sprite
+            }
             Some(MtlTexture::Sprite(sprite)) => {
                 output.push(obj_quad(
                     face,
@@ -626,6 +633,21 @@ mod loader_tests {
         let quads = bake(&library, "t:u");
         assert!(quads.iter().all(|q| !q.shade));
         assert_eq!(quads[0].material.sprite, "minecraft:block/s");
+    }
+    #[test]
+    fn mtl_map_without_hash_names_a_slot_when_the_model_has_it() {
+        // Create's backtanks: `map_Kd 0` with a texture "0"; a bare name the model has no slot
+        // for is still a sprite (minecraft:<name>).
+        let files = [
+            ("t:models/x.obj", OBJ),
+            ("t:models/o.mtl", "newmtl top\nmap_Kd 0\nnewmtl side\nmap_Kd plain\n"),
+        ];
+        let model = r#"{"loader":"neoforge:obj","model":"t:models/x.obj","mtl_override":"t:models/o.mtl",
+            "textures":{"0":"t:block/tank"}}"#;
+        let library = library(&[("t:b", model)], &files);
+        let quads = bake(&library, "t:b");
+        assert_eq!(quads[0].material.sprite, "t:block/tank");
+        assert_eq!(quads[1].material.sprite, "minecraft:plain");
     }
     #[test]
     fn missing_or_broken_obj_bakes_nothing() {

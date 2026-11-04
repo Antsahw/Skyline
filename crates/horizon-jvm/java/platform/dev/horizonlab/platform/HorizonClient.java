@@ -1496,6 +1496,8 @@ public final class HorizonClient {
                 inWorld(player, () -> withKeys(player.getUUID(), () -> {
                     joined(player);
                     levelRendererReady();
+                    // Once, with a player (mods' item models read it: Create's sand paper).
+                    if (modelsLoaded) HorizonItemModels.exportOnce();
                     long t = HorizonProfile.start();
                     tickOnce();
                     t = HorizonProfile.add("client: tick", t);
@@ -1739,6 +1741,7 @@ public final class HorizonClient {
             HorizonHooks.fireMerged(minecraft, Minecraft.class, "onResourceLoadFinished", "HEAD");
             HorizonHooks.fireMerged(minecraft, Minecraft.class, "onResourceLoadFinished", "RETURN");
             modelsLoaded = true;
+            HorizonEntityRender.modelsLoaded();
             HorizonFluids.export();
             Natives.log("Horizon's client: block and item models loaded in " + (System.nanoTime() - started) / 1_000_000 + " ms"
                     + (HorizonLazyModels.on ? " (baked on first use)" : ""));

@@ -1237,6 +1237,9 @@ public final class HorizonServer {
         // Players' age in ticks (Entity.tick's tickCount++, which mirrored players don't run):
         // mods time their actions by it (Carry On won't pick up on the tick it last acted).
         for (ServerPlayer p : BY_UUID.values()) p.tickCount++;
+        // Their item cooldowns (Player.tick's): a mod item's use that starts one (Create's belt
+        // connector: 5 ticks after its first shaft) was otherwise never usable again.
+        for (ServerPlayer p : BY_UUID.values()) fire("ItemCooldowns.tick", () -> p.getCooldowns().tick());
         fireEach("ServerTickEvents.START_SERVER_TICK", ServerTickEvents.START_SERVER_TICK, l -> l.onStartTick(server));
         for (ServerLevel level : new ArrayList<>(LEVELS.values())) {
             fireEach("ServerTickEvents.START_LEVEL_TICK", ServerTickEvents.START_LEVEL_TICK, l -> l.onStartTick(level));
@@ -2264,11 +2267,15 @@ public final class HorizonServer {
         ServerLevel level = level(dimension);
         if (selected >= 0 && selected < 9) player.getInventory().setSelectedSlot(selected);
         var interaction = hand == 1 ? net.minecraft.world.InteractionHand.OFF_HAND : net.minecraft.world.InteractionHand.MAIN_HAND;
+        // The click already ended in a mod's use (see CLICK_TAKEN): the rest of it is taken too.
+        if (clickTaken(player, level)) return 1;
         var hit = new net.minecraft.world.phys.BlockHitResult(new net.minecraft.world.phys.Vec3(hitX, hitY, hitZ),
                 net.minecraft.core.Direction.from3DDataValue(face), new BlockPos(x, y, z), false);
         net.minecraft.world.InteractionResult[] result = {net.minecraft.world.InteractionResult.PASS};
         fire("ServerPlayerGameMode.useItemOn", () -> result[0] =
                 player.gameMode.useItemOn(player, level, player.getItemInHand(interaction), interaction, hit));
+        if (DEBUG_USE) Natives.log("use: " + player.getItemInHand(interaction) + " on " + blockState(level, hit.getBlockPos())
+                + " at " + x + " " + y + " " + z + " (face " + hit.getDirection() + "): " + result[0]);
         syncInventories();
         // The client half (MultiPlayerGameMode.useItemOn) of using a mod's block: it opens its
         // screen there (Chunk Loaders' chunk grid). After the server's, as useItem's.
@@ -2277,7 +2284,28 @@ public final class HorizonServer {
             syncInventories();
         }
         if (!result[0].consumesAction() && !(result[0] instanceof net.minecraft.world.InteractionResult.Fail)) return 0;
+        if (result[0].consumesAction()) CLICK_TAKEN.put(player.getUUID(), level.getGameTime());
         return result[0] instanceof net.minecraft.world.InteractionResult.Success success && success.shouldSwing() ? 2 : 1;
+    }
+
+    /**
+     * Per player, the game time of the last click a mod's block use consumed. Vanilla's client
+     * ends a click at the first hand whose use consumes (MultiPlayerGameMode.useItemOn, then
+     * useItem); Horizon's client can't run a mod block's use to know, so it sends the click's
+     * other packets too (the off hand's useItemOn, both hands' useItem). They are what a vanilla
+     * client never sends: an empty off hand on a Create depot took back the ingot the main hand
+     * had just put on it. Within 4 ticks of a consumed use they are taken, doing nothing.
+     */
+    private static final Map<UUID, Long> CLICK_TAKEN = new ConcurrentHashMap<>();
+
+    private static boolean clickTaken(ServerPlayer player, ServerLevel level) {
+        Long at = CLICK_TAKEN.get(player.getUUID());
+        if (at == null) return false;
+        // The click's packets may come ticks apart on a busy server; a vanilla client uses again
+        // 4 ticks later at the soonest (Minecraft.rightClickDelay).
+        if (level.getGameTime() - at < 4) return true;
+        CLICK_TAKEN.remove(player.getUUID());
+        return false;
     }
 
     /**
@@ -2295,6 +2323,7 @@ public final class HorizonServer {
         // handleUseItem's rotation: where the client looked as it clicked.
         player.setYRot(yaw);
         player.setXRot(pitch);
+        if (clickTaken(player, level)) return 1;
         var interaction = hand == 1 ? net.minecraft.world.InteractionHand.OFF_HAND : net.minecraft.world.InteractionHand.MAIN_HAND;
         net.minecraft.world.InteractionResult[] result = {net.minecraft.world.InteractionResult.PASS};
         fire("ServerPlayerGameMode.useItem", () -> result[0] =

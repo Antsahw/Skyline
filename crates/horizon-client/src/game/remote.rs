@@ -5791,6 +5791,8 @@ impl Game<'_> {
         // The Java mods' fluids' looks, once their models load (this process's server).
         #[cfg(feature = "java-mods")]
         self.java_mod_fluids();
+        #[cfg(feature = "java-mods")]
+        self.java_mod_item_models();
         self.tick_remote_level()?;
         // The rockets boosting this player tick after it, also while it waits
         // for chunks.

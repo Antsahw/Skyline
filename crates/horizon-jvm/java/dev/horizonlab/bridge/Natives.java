@@ -163,6 +163,9 @@ public final class Natives {
     /** The mods' fluids as the client's models draw them (HorizonFluids): their sprites and tint. */
     public static native void modFluids(String json);
 
+    /** Mods' items drawn with their own model types' quads (HorizonItemModels), once the models load. */
+    public static native void modItemModels(String json);
+
     /**
      * A clientbound packet a mod sent a player that Horizon sends as it is (a sound, particles):
      * vanilla's encoding of it, its id first (a VarInt), then its body.
