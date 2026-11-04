@@ -5,6 +5,9 @@ waiting for a person. The boss chat merges the branches into `java-bridge` and u
 
 ## The loop, for each task
 
+Fresh cloud container: `tools/java_bridge/setup_cloud.sh` first (one command, ~20 min, mostly the
+build). Java-only change: `JAVA_ONLY=1` (seconds, no game rebuild). Run only your own cases.
+
 1. `git fetch origin && git merge origin/java-bridge` into your branch (start each task from the
    newest `java-bridge`, not from your last branch).
 2. Do the task. Stay in your area's files (below); if you must touch another area's, keep the

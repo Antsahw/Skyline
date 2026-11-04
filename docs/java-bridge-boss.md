@@ -75,6 +75,9 @@ pasting their final message here; patches come as attachments.
 
 ## A fresh boss container (what batch 4 needed)
 
+**Now one command:** `tools/java_bridge/setup_cloud.sh [modrinth-slug ...]` (JDK, Mojang files,
+prepare, the build in the background, jars into `~/jars`). Workers use it too.
+
 - JDK 25 from Adoptium into `~/jdk25` (`JAVA_HOME`, `HORIZON_JAVA_HOME`); `libasound2-dev
   libudev-dev`, `mesa-vulkan-drivers xvfb` for headless runs.
 - Fabric's libraries: the build's own download fails on the proxy's certificate: fetch the
