@@ -1958,6 +1958,20 @@ impl<'a> Plan<'a> {
         for (state, id) in indices {
             mapping[state] = id;
         }
+        // Blocks with their template's rows: where a template state has no cached shape
+        // (scaffolding, bamboo...), its rule is the template's (`CachedCollisionRegistry::template`).
+        let templates: Compound = self
+            .blocks
+            .iter()
+            .filter(|b| b.collision_shapes.is_none() && b.shapes.is_none())
+            .map(|b| {
+                (
+                    JavaString::from(b.rename.to.as_str()),
+                    Tag::String(JavaString::from(b.rename.from.as_str())),
+                )
+            })
+            .collect();
+        root.insert(JavaString::from("templates"), Tag::Compound(templates));
         Ok(())
     }
 

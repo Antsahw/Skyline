@@ -201,6 +201,32 @@ CASES = {
         checks=[check_log(r"Java mods: commands", "the mods started")],
         look="beef on the stove's grill, a carrot on the cutting board",
     ),
+    "scaffold": dict(
+        about="Create's andesite scaffolding (a vanilla ScaffoldingBlock subclass, no cached collision "
+              "shape): placed by hand, walked into, stood on. It stopped the game with \"unsupported block "
+              "collision state\"; now it follows vanilla scaffolding's rule (its template's), and a mod state "
+              "with no rule at all collides as a full block",
+        mods=["create"], optional=["fabric-api"], scene="none", timeout=900,
+        steps=['"$R/tools/java_bridge/around.sh" '
+               '\'q "gamemode survival"\' '
+               '\'q "give @s create:andesite_scaffolding 8"\' '
+               '\'$C select create:andesite_scaffolding >/dev/null; $C place $((X+2)) $Y $Z > $S/place.json\' '
+               # Walking east into it: vanilla's scaffolding is empty from the side, so the player
+               # passes through its block.
+               '\'$C look -90 0 >/dev/null; $C move forward 1.5 >/dev/null; $C state | python3 -c "'
+               'import json,sys; x=json.load(sys.stdin)[\\"player\\"][\\"position\\"][0]; '
+               'print(\\"through\\" if x > $X+3 else \\"stopped at %s\\" % x)" > $S/inside.txt\' '
+               # Standing on it: its top is a floor.
+               '\'q "tp @s $(p $X+2.5) $((Y+1)) $(p $Z+0.5)"; sleep 2; $C state | python3 -c "'
+               'import json,sys; p=json.load(sys.stdin)[\\"player\\"]; '
+               'print(\\"on top\\" if p[\\"position\\"][1] == $Y+1 and p[\\"on_ground\\"] else \\"fell to %s\\" % p[\\"position\\"])" > $S/ontop.txt\' '
+               '\'$C look 90 35 >/dev/null\''],
+        checks=[check_file("place.json", r'"block":"create:andesite_scaffolding"', "the scaffolding is placed by hand"),
+                check_file("inside.txt", r"^through", "the player walks through it from the side"),
+                check_file("ontop.txt", r"^on top", "the player stands on it")],
+        forbid=[r"unsupported block collision state", r"Horizon crashed"],
+        look="none-1: the view from on top of the scaffolding, looking down at the stone floor",
+    ),
     "createwhole": dict(
         about="Create's shafts and cogwheel drawn only by their renderers (their block models give nothing in "
               "a world: no still copy under the turning one), in their sprites' own UVs (Flywheel's "
