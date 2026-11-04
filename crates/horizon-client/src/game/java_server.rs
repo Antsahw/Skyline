@@ -218,6 +218,42 @@ pub(super) fn java_random_tick(
 #[cfg(feature = "java-mods")]
 static JAVA_SETS: std::sync::Mutex<Vec<[i32; 3]>> = std::sync::Mutex::new(Vec::new());
 
+/// The states that hold a Java mod's fluid (its `LiquidBlock`s: BuildCraft's oil, Create's
+/// honey), by state id: made with JAVA_STATES. The mods' mirror runs their flow
+/// (`HorizonTicks`); Horizon's fluid code leaves them (`LevelAccess::foreign_fluid`).
+#[cfg(feature = "java-mods")]
+static JAVA_FLUID_STATES: std::sync::OnceLock<Vec<bool>> = std::sync::OnceLock::new();
+
+/// `LevelAccess::foreign_fluid`: whether `state` holds a Java mod's fluid.
+pub(super) fn java_fluid(state: horizon_world::registry::BlockStateId) -> bool {
+    #[cfg(feature = "java-mods")]
+    {
+        JAVA_FLUID_STATES
+            .get()
+            .and_then(|s| s.get(state.0 as usize).copied())
+            .unwrap_or(false)
+    }
+    #[cfg(not(feature = "java-mods"))]
+    {
+        let _ = state;
+        false
+    }
+}
+
+/// `LevelAccess::foreign_fluid_changed`: a Java mod's fluid at `pos` was placed or a neighbour
+/// of it changed; the mods schedule its tick (`HorizonServer.blockEntities`, with the blocks set).
+pub(super) fn java_fluid_changed(pos: horizon_core::position::BlockPos) {
+    #[cfg(feature = "java-mods")]
+    {
+        let mut sets = JAVA_SETS.lock().unwrap_or_else(|e| e.into_inner());
+        if sets.len() < 65_536 {
+            sets.push([pos.x, pos.y, pos.z]);
+        }
+    }
+    #[cfg(not(feature = "java-mods"))]
+    let _ = pos;
+}
+
 /// horizon_client::world::SET_HOOK: a Java mod's block placed or removed is kept for the mods.
 #[cfg(feature = "java-mods")]
 pub(super) fn java_block_set(pos: (i32, i32, i32), previous: u32, state: u32) {
@@ -2782,6 +2818,30 @@ mod run {
                         })
                         .collect();
                     let _ = super::JAVA_ROUTED_TICKS.set(routed);
+                    // The mods' fluids: their blocks' states (every state of a LiquidBlock).
+                    let fluids: std::collections::HashSet<String> =
+                        match horizon_jvm::events::mod_fluid_blocks() {
+                            Ok(names) => names.into_iter().collect(),
+                            Err(e) => {
+                                log::warn!("Java mods: their fluids: {e}");
+                                Default::default()
+                            }
+                        };
+                    if !fluids.is_empty() {
+                        log::info!(
+                            "Java mods: {} fluid blocks flow by the mods' code",
+                            fluids.len()
+                        );
+                    }
+                    let fluids = (0..registry.len() as u32)
+                        .map(|id| {
+                            registry.state(BlockStateId(id)).is_some_and(|s| {
+                                let block = s.name.split('[').next().unwrap_or(&s.name);
+                                fluids.contains(block)
+                            })
+                        })
+                        .collect();
+                    let _ = super::JAVA_FLUID_STATES.set(fluids);
                     let _ = super::JAVA_STATES.set(states);
                 }
                 // Java mods' blocks placed or removed: their block entities made or put away.

@@ -1309,6 +1309,18 @@ pub fn routed_random_ticks() -> Result<Vec<String>, String> {
     Ok(names.unwrap_or_default())
 }
 
+/// The Java mods' fluid blocks (their `LiquidBlock`s of a mod's fluid), by id: the mods run
+/// their flow (`HorizonServer.modFluidBlocks`).
+pub fn mod_fluid_blocks() -> Result<Vec<String>, String> {
+    let names = with_server(|env, class| {
+        let array = env
+            .call_static_method(class, "modFluidBlocks", "()[Ljava/lang/String;", &[])?
+            .l()?;
+        string_array(env, array)
+    })?;
+    Ok(names.unwrap_or_default())
+}
+
 /// The other actions the game sends to the mods because a mod patches them:
 /// `"item_pickup"` ([`item_touch`]) and `"experience_orbs"` ([`orb_touch`]).
 pub fn routed_actions() -> Result<Vec<String>, String> {

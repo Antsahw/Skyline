@@ -1014,6 +1014,29 @@ CASES = {
                 check_file("cart_chest.json", r"count: 4, Slot: 0b, id: \\+\"minecraft:beef", "the hopper under the cart took its four beef")],
         forbid=[r"a hopper's (push|pull)"],
     ),
+    "fluids": dict(
+        about="A Java mod's fluids flow by their own code in the mirror (a beta tester's Create honey spread as "
+              "lava): BuildCraft's oil spreads as oil, its gaseous fuel rises to a glass ceiling and spreads under it, "
+              "water beside the oil makes no cobblestone",
+        mods=["buildcraft"], scene="none",
+        steps=['read X Y Z < <($C state | python3 -c "import json,sys,math;p=json.load(sys.stdin)[\'player\'][\'position\'];'
+               'print(math.floor(p[0]),math.floor(p[1]),math.floor(p[2]))"); '
+               '$C command "fill $((X - 8)) $((Y - 1)) $((Z - 8)) $((X + 8)) $((Y - 1)) $((Z + 8)) minecraft:stone" > /dev/null; '
+               '$C command "fill $((X - 8)) $Y $((Z - 8)) $((X + 8)) $((Y + 12)) $((Z + 8)) minecraft:air" > /dev/null; '
+               '$C command "fill $((X + 1)) $((Y + 8)) $((Z - 3)) $((X + 7)) $((Y + 8)) $((Z + 3)) minecraft:glass" > /dev/null; '
+               '$C command "tp @s $((X - 4)) $((Y + 4)) $Z -90 0" > /dev/null; $C command "gamemode spectator" > /dev/null; '
+               '$C command "setblock $((X + 4)) $Y $Z buildcraftenergy:fuel_gaseous" > /dev/null; '
+               '$C command "setblock $((X + 4)) $Y $((Z + 6)) buildcraftenergy:oil" > /dev/null; sleep 12; '
+               '$C block $((X + 4)) $((Y + 7)) $Z > $S/gas_top.json; $C block $((X + 8)) $Y $((Z + 6)) > $S/oil_far.json; '
+               '$C command "setblock $((X - 2)) $Y $((Z + 6)) minecraft:water" > /dev/null; sleep 8; '
+               '$C blocks $((X - 8)) $Y $((Z - 8)) $((X + 8)) $((Y + 7)) $((Z + 8)) > $S/blocks.json'],
+        checks=[check_file("gas_top.json", r'"block":"buildcraftenergy:fuel_gaseous"', "the gas rose to the ceiling (BuildCraft's own physics)"),
+                check_file("oil_far.json", r'"block":"buildcraftenergy:oil"', "the oil spread four blocks"),
+                check_file("blocks.json", r'\A(?![\s\S]*minecraft:(lava|cobblestone|obsidian))', "no lava, cobblestone or obsidian"),
+                check_file("blocks.json", r'"minecraft:water"', "the water flows too")],
+        forbid=[r"failed its fluid tick"],
+        look="nothing to see yet: mods' fluids aren't drawn (the gpu chat's half)",
+    ),
     "eat": dict(
         about="Farmer's Delight's foods are eaten (a beta tester's bowl meal never was: the mirror started the "
               "use and nothing ticked it): a beef stew from hunger 0 feeds and leaves its bowl; cooked bacon feeds",

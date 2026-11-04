@@ -1120,6 +1120,12 @@ impl GameLevel<'_> {
     }
 }
 impl LevelAccess for GameLevel<'_> {
+    fn foreign_fluid(&self, state: BlockStateId) -> bool {
+        java_server::java_fluid(state)
+    }
+    fn foreign_fluid_changed(&mut self, pos: BlockPos) {
+        java_server::java_fluid_changed(pos);
+    }
     fn redstone_experiments(&self) -> bool {
         self.redstone_experiments
     }

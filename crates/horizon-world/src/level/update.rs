@@ -278,6 +278,11 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         fluid: crate::fluid::FluidKind,
         delay: i32,
     ) -> ScheduleResult {
+        // A Java mod's fluid ticks in the mods' mirror, by its own delays.
+        if self.level.foreign_fluid(self.state(pos)) {
+            self.level.foreign_fluid_changed(pos);
+            return ScheduleResult::Added;
+        }
         let time = self.level.game_time();
         self.ticks.schedule_fluid(time, pos, fluid, delay)
     }

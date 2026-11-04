@@ -1431,6 +1431,8 @@ public final class HorizonServer {
         // Mod blocks' scheduled ticks and block entities, as their levels' ticks run them.
         for (ServerLevel level : new ArrayList<>(LEVELS.values())) {
             if (level.getBlockTicks() instanceof HorizonTicks<?> ticks) ticks.run(level);
+            // The mods' fluids flow here (HorizonTicks: their scheduled fluid ticks).
+            if (level.getFluidTicks() instanceof HorizonTicks<?> ticks) ticks.run(level);
         }
         phase = HorizonProfile.add("scheduled ticks", phase);
         HorizonBlockEntities.tick();
@@ -2435,7 +2437,37 @@ public final class HorizonServer {
         for (int i = 0; i + 2 < positions.length; i += 3) {
             BlockPos pos = new BlockPos(positions[i], positions[i + 1], positions[i + 2]);
             fire("BlockEntity (made)", () -> HorizonBlockEntities.ensure(level, pos));
+            // A mod's fluid placed, or a neighbour of it changed (Horizon tells: the mod's
+            // liquid block carries a vanilla template, LevelAccess::foreign_fluid): its tick,
+            // as LiquidBlock.onPlace / neighborChanged / updateShape schedule it. The mirror
+            // runs it (HorizonTicks), with the fluid's own delay.
+            var fluid = level.getFluidState(pos);
+            if (modFluid(fluid.getType())) {
+                level.scheduleTick(pos, fluid.getType(), fluid.getType().getTickDelay(level));
+            }
         }
+    }
+
+    /** Whether a fluid is a mod's (its flow is the mirror's; vanilla's water and lava are Horizon's). */
+    static boolean modFluid(net.minecraft.world.level.material.Fluid fluid) {
+        return fluid != net.minecraft.world.level.material.Fluids.EMPTY
+                && !BuiltInRegistries.FLUID.getKey(fluid).getNamespace().equals("minecraft");
+    }
+
+    /**
+     * The mods' fluid blocks (a LiquidBlock of a mod's fluid: BuildCraft's oil, Create's honey):
+     * Horizon leaves their flow to the mirror, which runs the fluid's own FlowingFluid.tick.
+     */
+    public static String[] modFluidBlocks() {
+        Thread.currentThread().setContextClassLoader(HorizonServer.class.getClassLoader());
+        List<String> out = new ArrayList<>();
+        for (var block : BuiltInRegistries.BLOCK) {
+            if (block instanceof net.minecraft.world.level.block.LiquidBlock
+                    && modFluid(block.defaultBlockState().getFluidState().getType())) {
+                out.add(BuiltInRegistries.BLOCK.getKey(block).toString());
+            }
+        }
+        return out.toArray(String[]::new);
     }
 
     public static void randomTicks(String dimension, int[] positions) {
