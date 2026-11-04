@@ -66,6 +66,8 @@ public final class HorizonPacketTap {
     private HorizonPacketTap() {}
 
     private static volatile Boolean wanted;
+    /** The mods that read the connection, by name (the player's line). */
+    private static String readers = "";
     /** The player whose game is this window (the tap's), as Rust named them. */
     private static volatile UUID owner;
     /** Bodies passed and not run through the pipeline yet (waiting for the owner's client). */
@@ -80,6 +82,7 @@ public final class HorizonPacketTap {
     private static final Set<String> FIRED_ELSEWHERE = Set.of("handleLogin", "handleSetSpawn", "handleCustomPayload",
             "handleCustomQuery", "handleCookieRequest");
     private static int packets;
+    private static boolean told;
 
     /**
      * Whether a mod reads a client connection's packets: a mod's mixin merged into
@@ -90,18 +93,22 @@ public final class HorizonPacketTap {
     public static boolean wanted() {
         if (wanted != null) return wanted;
         boolean found = false;
+        var mods = new java.util.TreeSet<String>();
         if (HorizonClient.headless()) {
             for (Class<?> owner : new Class<?>[] {Connection.class, ClientHandshakePacketListenerImpl.class}) {
                 for (Method m : owner.getDeclaredMethods()) {
                     var merged = m.getAnnotation(org.spongepowered.asm.mixin.transformer.meta.MixinMerged.class);
                     if (merged == null || merged.mixin().startsWith("dev.horizonlab.") || merged.mixin().startsWith("net.fabricmc.")) continue;
                     Natives.log("Horizon's client: " + merged.mixin() + " reads the client's connection: its packets are passed");
+                    String mod = HorizonFailures.modOf(merged.mixin());
+                    if (mod != null) mods.add(HorizonFailures.modName(mod));
                     found = true;
                     break;
                 }
             }
         }
         wanted = found;
+        readers = String.join(", ", mods);
         return found;
     }
 
@@ -192,6 +199,13 @@ public final class HorizonPacketTap {
         play = HorizonClient.connection(player);
         if (play != null) HorizonClient.set(ClientCommonPacketListenerImpl.class, play, "connection", c);
         Natives.log("Horizon's client: " + player.getName().getString() + "'s client connection reads its packets");
+        // What they get here, once a session: recordings, and where to watch them.
+        if (!told) {
+            told = true;
+            HorizonFailures.note(player.getStringUUID(), "Your client's packets go to " + (readers.isEmpty() ? "a mod" : readers)
+                    + " (recordings save as the world closes). Horizon plays ReplayMod's .mcpr recordings: "
+                    + "start it with --replay <file> (the launcher's game arguments)");
+        }
     }
 
     /**

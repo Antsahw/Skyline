@@ -30,6 +30,7 @@ pub mod packet_tap;
 pub mod playerdata;
 pub mod prediction;
 pub mod recipes;
+pub mod replay;
 pub mod scoreboard;
 pub mod tracking;
 pub mod waypoints;

@@ -522,5 +522,12 @@
   "horizon.extras.cosmetics_auras.tooltip": "Auras and trails other players wear. Off by default.",
   "horizon.extras.cosmetics.shown": "Shown",
   "horizon.extras.cosmetics.hidden": "Hidden",
-  "horizon.extras.cosmetics.name_tags": "Name tags only"
+  "horizon.extras.cosmetics.name_tags": "Name tags only",
+  "horizon.replay.started": "Replay: %s s recorded. Fly to watch. In chat: pause, play, speed <x>, skip <seconds>",
+  "horizon.replay.paused": "Replay paused",
+  "horizon.replay.playing": "Replay playing",
+  "horizon.replay.speed": "Replay speed %s",
+  "horizon.replay.skipped": "Replay skipped %s s",
+  "horizon.replay.ended": "Replay ended",
+  "horizon.replay.failed": "The replay couldn't be opened: %s"
 }

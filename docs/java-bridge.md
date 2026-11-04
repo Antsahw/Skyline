@@ -27,6 +27,7 @@ saying something works.
 | GPU (mods that draw with the GPU) | `crates/horizon-jvm/src/gpu/` (`mod.rs`: renderpearl's device on wgpu, natives on `dev.horizonlab.bridge.Gpu`; `spirv.rs`: combined samplers split for naga), `HorizonGpu.java` (the renderpearl backend: textures, buffers, transient memory, encoder, passes, pipelines), `HorizonGraphics` (pictures in picture, GPU textures as HUD images), `HorizonClient.guiRenderer` (the game renderer's GPU parts) |
 | Mods' worldgen | `HorizonWorldgen.java` (also the biome queries: `biomes`, `findBiome`), `HorizonChunks.java` (chunk copies for code that reads chunks: saplings), `HorizonTints.java` (mods' block tints for the mesher) (vanilla's chunk steps on the mirror's level, chunks back as vanilla saves them), mixin `WorldGenRegionMixin`; Rust: `game/java_worldgen.rs` (`JavaTerrain`, wraps `VanillaTerrain` in `world_loading::make_streaming`), mods' biomes in `biome.rs` (`mod_biomes`) and the biome registry (`lan/data.rs`) |
 | Content conversion | `crates/horizon-port-pack` (`oracle.rs`, `carry.rs`), `HorizonContent.java` (facts, creative tabs), `crates/horizon-client/src/mod_content.rs` (content root) |
+| Recording, replays | `HorizonPacketTap.java` (the window's player's packets through a vanilla client pipeline), mixin `TapConnectionMixin`; Rust: `lan/packet_tap.rs` (kept from `lan/conn.rs`), `events::client_packets`/`wants_packets`/`client_closed`; Horizon's replay viewer `lan/replay.rs` (`--replay FILE.mcpr`); `HorizonClientCommands.java` (mods' Fabric client commands) |
 | Game side (Rust) | `crates/horizon-client/src/game/java_mods.rs` (start, content, creative), `java_server.rs` (actions from Java, menus, block entities, random ticks, `JAVA_STATES`, `JAVA_WINDOWS`), `java_screen.rs` (draws frames, sends input, key maps; `Screen::JavaMod` and `CLIENT_WINDOW` for client-only screens) |
 
 ## How a tick flows
@@ -405,6 +406,82 @@ REI's do (2026-11-04, `bridge-client-11`). `HorizonJei.java` (reflection: JEI is
   stack traces cut to 12 frames). Mojang's config wrote `logs/latest.log` in the working
   folder: on a dedicated server Horizon's own log, whose lines were overwritten.
   Regress `server-log`.
+
+## Recording and replays: ReplayMod, Flashback (bridge-replay-1)
+
+How they work in Minecraft, and what of it Horizon has:
+- **ReplayMod** (GPL-3.0) records at the client's network connection: at the login's end
+  (`ClientHandshakePacketListenerImpl.handleLoginFinished`, its injection) it adds handlers
+  before and after the netty pipeline's decoder (the raw bytes and the decoded packets), saves
+  each packet with its time to `replay_recordings/<date>.mcpr` (a zip: `metaData.json`,
+  `recording.tmcpr`: int time, int length, body), adds the recording player's own moves from
+  its client tick, and saves when the channel goes inactive. It replays by feeding the file to
+  a new client connection (an EmbeddedChannel) with vanilla's renderer, its camera entity and
+  its jGui screens (the replay viewer and editor open from vanilla's title screen).
+- **Flashback** (All Rights Reserved: nothing of it copied) records every packet handed to a
+  client listener (`Connection.genericsFtw`, its injection) after a snapshot it writes from the
+  vanilla client's own world (`ClientChunkCache.storage`, entities, player infos, tab list,
+  boss bars, scoreboard, light engine), started by `/flashback start` (a Fabric client command)
+  or its pause-screen buttons. It replays on its own integrated server (`ReplayServer`) with
+  vanilla's renderer and an ImGui editor.
+- Horizon draws the world itself; the headless client has no renderer, no camera and no title
+  screen, and its client levels are mirrors of the server's (no client world of its own). So
+  **their replay viewers can't run in Horizon**. Recording needs the packets, which Horizon's
+  server sent only to the player's game.
+
+What runs now:
+- **The client's connection reads its packets** (`HorizonPacketTap`). When a mod's mixin is
+  merged into `Connection` or the login's listener (`wanted`, at start), Rust keeps the bodies
+  its server sends the window's own player (memory connection only: single player, a LAN
+  host; `lan/packet_tap.rs` from `conn.rs`'s login end and `PlayerSender`) and passes them
+  each tick before the Java tick (`events::client_packets`). Java runs them, in order, through
+  a real vanilla client pipeline on an `EmbeddedChannel` (`Connection.configureSerialization`,
+  `configurePacketHandler`), past the splitter (one packet each; memory packets aren't held to
+  2 MiB), inside the owner's `as()` after their join. Phases switch where vanilla's listeners
+  switch them (after the login's end and the configuration's end, the terminal packets); play
+  decodes with the server's registries. The connection hands each packet to a listener of the
+  phase's interface (a Proxy, `TapConnectionMixin`'s redirect in `channelRead0`) whose
+  handlers fire the mods' injections into the real listener's handler, HEAD and TAIL/RETURN
+  (read from the merged class: ReplayMod applies its configs from its own launcher), and at
+  the configuration end's `setupInboundProtocol` INVOKE (ReplayMod records the end there) —
+  never vanilla's bodies. The join's login and spawn and payloads are fired elsewhere and stay
+  out. The connection never sends (`send` cancelled; a mod's payload goes to the mods' server),
+  a decode fault is logged (never a disconnect), and it ends as the integrated world closes
+  (`events::client_closed` from `integrated.rs`: `disconnect`, channelInactive, Fabric's
+  `DISCONNECT`, then up to 30 s for the threads mods start, running client tasks meanwhile).
+  `HORIZON_JAVA_DEBUG=tap` logs each packet handed over.
+- **ReplayMod records**: "[Replay Mod] Recording started" in chat, RECORDING on the HUD, the
+  `.mcpr` saved as the world closes (a 50 s test: 14k packets, 2.7 MB, protocol 777). Its
+  config end (`replaymod:enabled_packs_data`, FinishConfiguration) and its own player
+  (AddEntity, moves) are in it.
+- **Horizon plays `.mcpr` recordings** (`lan/replay.rs`, `--replay FILE`; the launcher's game
+  arguments): a server end of a memory pipe the window joins (`connect_local`): its own login
+  end, the recorded configuration, then the play packets at their times. The viewer is put in
+  spectator mode, 4 blocks behind and 2 above the recorder's first position; left out: the
+  recorder's health, death, screens, game mode, abilities, later teleports, disconnects,
+  reconfiguration, transfers, and Horizon's own `horizon:` payloads (the Java HUD's frames).
+  Chat lines (or `/` commands) control it: `pause`, `play`, `speed <x>`, `skip <seconds>`.
+  Only recordings of protocol 777 (26.3) are played. A replay can't go back (no rewind) and
+  has no camera paths or video export (ReplayMod's editor).
+- **Flashback**: loads; `/flashback start` runs (client commands), but its snapshot needs the
+  vanilla client's own world, so it fails there (`Collection.size()` of a null). Players are
+  told at join (`renderers::PARTIAL`): it can't record or replay in Horizon yet.
+- Generic fixes on the way: **Fabric client commands** (`HorizonClientCommands`: registered
+  once, their roots in the server's command names and tree — an argument type of a mod's own
+  becomes one greedy argument — run on the player's client with its ClientSuggestionProvider);
+  **client chat lines** (`ChatComponent.addClientSystemMessage`) go to the player's chat;
+  **legacy `.lang` files** (`key=value`, ReplayMod's) read by the headless client's language
+  and carried as JSON (`carry.rs`, content FORMAT 15); `Minecraft.getGameProfile` is the
+  current player's; the game mode's constructor defaults (`destroyBlockPos`) and an empty
+  server-pack source; `HorizonHooks.fireMergedSkipping` (Fabric's own left out) and INVOKE
+  points in `fireMerged` (`"INVOKE <target>"`).
+- Not done: the replay viewer opened from inside the game (a single-player world can't
+  transfer: vanilla refuses it); the recording's own player has the mirror's entity id
+  (`0x7fff....`), so Horizon's packets about the player (id 1) don't apply to that body in a
+  replay; ReplayMod's red recording dot (its jGui texture) isn't drawn; guests' and dedicated
+  servers' players aren't recorded (the window's own player only, as one client records itself).
+- Test: `regress.py replaymod` (records a scene, quits, plays it with `replay_view.sh`),
+  `flashback`. `replay_view.sh FILE` watches any recording headless.
 
 ## Mods that change vanilla's behaviour (the mixin table, routed actions)
 
@@ -1280,6 +1357,11 @@ Naturalist (mobs with ModelPart models, Fabric API only). The repo's own critter
 (`ENTITY=naturalist:bear` for another mod's).
 
 ## Status
+
+Recording and replays (2026-11-04, bridge-replay-1): ReplayMod records in single player and as a
+LAN host (the window's player), and Horizon plays its `.mcpr` recordings (`--replay FILE`).
+Flashback loads, its client command runs, but it can't record or replay yet (told at join). See
+"Recording and replays". Regress `replaymod`, `flashback`.
 
 Create (Create Fly's 26.3 port, 2026-11-04, bridge-gpu-12): kinetic networks run and their
 shafts, cogs and motors draw turning; OBJ items draw; mods' fluids use their own sprites; 3D Skin
@@ -2208,6 +2290,7 @@ need the hook's exact place checked against what the mirror expects.
 | ~~`note_java_death*`~~ | **switched** (round 6): `java_player_died(uuid, message key, conn)` right before `native_player_died`, in `guest_die` and `death_message`: the message's damage type, else the tracker's last hit (`death`) |
 | `local_java_command`, `guest_java_command`, `send_java_commands` | already beside the native decision: `guest_command` asks native mods' `native_command_level`, then ours; the window asks `client_mod_command`, then ours. `native_perform_command` runs later in the guest's swap with usage strings, not Brigadier trees, so ours stays where the command is taken |
 | `java_player_chat` (chat.rs, lan.rs) | none (native has no server chat hook) |
+| `packet_tap::begin`/`keep` (lan/conn.rs: the memory connection's login end, `PlayerSender`), `java_world_closing` (integrated.rs, the server's stop) | none (no hook sees a connection's bytes) |
 | `java_select_slot`, `java_ride`, `java_orb_touch`, `java_crafted`, `java_tickets` (chunk tickets in streaming), precipitation | none |
 | Screens (`Screen::JavaMod`), REI's overlay, HUD mods | `native_mod_screen*`/`native_screen_*` (API 19/20), `native_panel_*` (API 2), `native_hud`/`native_health_hud` (API 27): layouts of their own, not our drawn-op frames |
 | Mod particles (`ParticleEngine::add_mod`) | upstream's `ParticleOptions::mod_particle` (native particle types): `add_mod` now uses its sprite sets |
@@ -2481,3 +2564,13 @@ Horizon's generator (the element is skipped, the processor list fails).
   (mods', 4903 in The Sift) still say `Name`/`Properties`. `StructureTemplate::from_nbt` reads
   both; nothing datafixes a pack template's blocks (vanilla's STRUCTURE fix type isn't
   ported), so renamed blocks of very old templates stay unknown.
+- **A packet pipeline of the headless client (26.3 trap).** After a terminal packet
+  (LoginFinished, FinishConfiguration) `ProtocolSwapHandler` swaps the decoder for
+  `UnconfiguredPipelineHandler.Inbound` ("inbound_config") until `setupInboundProtocol`'s task
+  comes back through the outbound pipeline: switch in the terminal packet's own handling, as
+  vanilla's listeners do. Fabric's networking ends the old listener's session at
+  `validateListener` and on `channelInactive`: listeners made without their constructors have
+  none, so `HorizonPacketTap.unlisten` clears the connection's listener first.
+- **Mods that apply their mixin configs themselves** (ReplayMod's launcher entrypoint) are
+  missing from the census (`HorizonHooks.fire`, read from `fabric.mod.json`): fire such
+  handlers with `fireMerged`, which reads the merged class.

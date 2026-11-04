@@ -425,7 +425,9 @@ fn start_once(root: &Path, dir: &Path, jars: Vec<PathBuf>, side: horizon_jvm::Si
             .collect();
         log::info!("Java mods: Fabric loaded {}", mods.join(", "));
         // Renderer mods left out: noted, and told to the players as they join.
-        let left: Vec<String> = left_out().iter().map(|l| l.line()).collect();
+        let mut left: Vec<String> = left_out().iter().map(|l| l.line()).collect();
+        // Mods that load but only partly work here (Flashback).
+        left.extend(horizon_jvm::renderers::partial_lines(bridge.mods()));
         for line in &left {
             log::info!("Java mods: {line}");
         }
