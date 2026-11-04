@@ -122,9 +122,10 @@ pub const JAVA_IMAGE_SLOTS: usize = 128;
 pub const JAVA_IMAGE_SIZE: u32 = 64;
 /// Bigger slots for Java mods' images that a 64-pixel slot would blur: what they draw with
 /// the GPU (Xaero's minimap, a picture in picture at the GUI scale; a full-screen map, sent
-/// shrunk to this) and a minimap's frame pieces (JourneyMap's rim and mask, 256 px),
+/// shrunk to this), a minimap's frame pieces (JourneyMap's rim and mask, 256 px) and the
+/// textures of mods' models the atlas hasn't (TACZ's guns, 256-512 px),
 /// [`JAVA_BIG_IMAGE_SIZE`] square. Slot `JAVA_IMAGE_SLOTS + i` is `horizon/javabig{i}`.
-pub const JAVA_BIG_IMAGE_SLOTS: usize = 8;
+pub const JAVA_BIG_IMAGE_SLOTS: usize = 16;
 pub const JAVA_BIG_IMAGE_SIZE: u32 = 512;
 
 /// A Java image slot's atlas sprite and side (small slots first, then big ones).

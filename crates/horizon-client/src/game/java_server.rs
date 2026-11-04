@@ -1562,8 +1562,20 @@ mod run {
                 out.push_str(",\"models\":{");
                 let have = sent.to.entry(who).or_default();
                 let mut first = true;
-                for e in entries {
-                    for key in &e.keys {
+                // The trees and textures the first person's models use (`keys`).
+                #[derive(serde::Deserialize)]
+                struct HandKeys {
+                    #[serde(default)]
+                    keys: Vec<String>,
+                }
+                let hand_keys: Vec<String> = uuid
+                    .and_then(|u| hands.get(u))
+                    .and_then(|h| serde_json::from_str::<HandKeys>(h.get()).ok())
+                    .map(|h| h.keys)
+                    .unwrap_or_default();
+                let hand_keys: Vec<&str> = hand_keys.iter().map(String::as_str).collect();
+                for keys in entries.iter().map(|e| &e.keys).chain(std::iter::once(&hand_keys)) {
+                    for key in keys {
                         if have.insert((*key).to_owned())
                             && let Some(tree) = sent.trees.get(*key)
                         {
@@ -1619,10 +1631,12 @@ mod run {
             riders.push('}');
             for g in &host.hub.guests {
                 let entities = near(&g.dimension, g.position);
-                if entities.is_empty() && !sent.showing.contains(&g.conn) {
+                // (What mods draw in its first person counts: a gun held with no mod entity near.)
+                let drawn = !entities.is_empty() || hands.contains_key(uuid_string(g.uuid).as_str());
+                if !drawn && !sent.showing.contains(&g.conn) {
                     continue;
                 }
-                if entities.is_empty() {
+                if !drawn {
                     sent.showing.remove(&g.conn);
                 } else {
                     sent.showing.insert(g.conn);

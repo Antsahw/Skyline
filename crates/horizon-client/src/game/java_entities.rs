@@ -110,6 +110,9 @@ pub(super) struct JavaEntities {
     own: Vec<Shown>,
     pub(super) hands: Option<Hands>,
     pub(super) ride: Option<Ride>,
+    /// Textures received this payload (atlas key, `{"width","height","rgba"}`), for the
+    /// game's Java image slots.
+    images: Vec<(String, Value)>,
     /// Other players riding mods' mobs: player entity id → the mob's id.
     riders: HashMap<u32, u32>,
 }
@@ -195,6 +198,7 @@ struct RawHands {
 #[derive(Clone, Default)]
 pub(super) struct Hands {
     models: Vec<Drawn>,
+    meshes: Vec<Mesh>,
     items: Vec<Item>,
     pub(super) hide: [bool; 2],
 }
@@ -373,6 +377,12 @@ impl JavaEntities {
             })
             .collect();
         for (key, tree) in payload.models {
+            // A texture Horizon's atlas hasn't (`img:<texture>`: TACZ's gun packs, which it
+            // reads at run time): its pixels, for a Java image slot.
+            if let Some(texture) = key.strip_prefix("img:") {
+                self.images.push((sprite_key(texture), tree));
+                continue;
+            }
             self.trees.insert(key, Arc::new(Part::parse("root", &tree)));
         }
         let last: HashMap<i32, &Shown> = self.now.iter().map(|s| (s.id, s)).collect();
@@ -396,10 +406,22 @@ impl JavaEntities {
             .iter()
             .filter_map(|(player, mob)| Some((player.parse().ok()?, *mob as u32)))
             .collect();
-        self.hands = payload.hands.map(|h| Hands {
-            models: h.models.into_iter().filter_map(RawModel::drawn).collect(),
-            items: h.items.iter().filter_map(item).collect(),
-            hide: h.hide,
+        self.hands = payload.hands.map(|h| {
+            // Custom geometry too (TACZ's guns in the hands, its own quads).
+            let (mut models, mut meshes) = (Vec::new(), Vec::new());
+            for m in h.models {
+                if m.v.is_some() {
+                    meshes.extend(m.mesh());
+                } else {
+                    models.extend(m.drawn());
+                }
+            }
+            Hands {
+                models,
+                meshes,
+                items: h.items.iter().filter_map(item).collect(),
+                hide: h.hide,
+            }
         });
         self.before = std::mem::replace(&mut self.now, now)
             .into_iter()
@@ -480,6 +502,10 @@ impl Game<'_> {
     pub(super) fn remote_java_entities(&mut self, data: &[u8]) {
         let _timed = super::java_profile::Timed::named("(Rust) entities: the player's game reads");
         let whole = self.java_entities.receive(data);
+        for (name, mut image) in std::mem::take(&mut self.java_entities.images) {
+            image["name"] = Value::from(name);
+            self.store_java_image(&image);
+        }
         // Blocks their renderers draw whole (Create's shafts and cogs, turning): their chunk
         // models go, as in Java, where those models have no geometry in a world.
         let mut changed = false;
@@ -572,6 +598,21 @@ impl Game<'_> {
         }
     }
 
+    /// Where a Java model's texture is in the GUI atlas: its sprite, else the part of the Java
+    /// image slot its pixels were stored in (a texture the server sent: `img:` trees).
+    fn java_sprite(&self, key: &str) -> Option<horizon_client::hud::Rect> {
+        let atlas = &self.gui.atlas;
+        if let Some(r) = atlas.sprites.get(key) {
+            return Some(*r);
+        }
+        let (slot, w, h) = self.java_image_slot(key)?;
+        let (sprite, side) = horizon_client::hud::java_image_slot(slot);
+        let mut r = *atlas.sprites.get(&sprite)?;
+        r.u1 = r.u0 + (r.u1 - r.u0) * w.min(side) as f32 / side as f32;
+        r.v1 = r.v0 + (r.v1 - r.v0) * h.min(side) as f32 / side as f32;
+        Some(r)
+    }
+
     /// What mods draw in first person (Carry On's carried block or mob in the hands): view
     /// space through `to_world` (the hands' own transform, game.rs `hand_geometry`).
     pub(super) fn java_hand_geometry(
@@ -584,7 +625,7 @@ impl Game<'_> {
             self.draw_look(
                 -1,
                 &h.models,
-                &[],
+                &h.meshes,
                 &h.items,
                 None,
                 to_world,
@@ -611,12 +652,11 @@ impl Game<'_> {
         out: &mut Vec<Vertex>,
     ) {
         let java = &self.java_entities;
-        let atlas = &self.gui.atlas;
         for (i, m) in models.iter().enumerate() {
             let Some(tree) = java.trees.get(&m.key) else {
                 continue;
             };
-            let Some(r) = atlas.sprites.get(&m.sprite) else {
+            let Some(r) = self.java_sprite(&m.sprite) else {
                 continue;
             };
             // The same model the tick before: its matrix and poses, to move from.
@@ -664,7 +704,7 @@ impl Game<'_> {
         // Custom geometry (GeckoLib's): its quads as written, moved with the entity
         // between ticks.
         for m in meshes {
-            let Some(r) = atlas.sprites.get(&m.sprite) else {
+            let Some(r) = self.java_sprite(&m.sprite) else {
                 continue;
             };
             let overlay = overlay_code(m.overlay);

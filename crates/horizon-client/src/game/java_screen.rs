@@ -784,10 +784,19 @@ impl Game<'_> {
         kept
     }
 
+    /// The Java image slot holding the image named `name`, with the image's size.
+    pub(super) fn java_image_slot(&self, name: &str) -> Option<(usize, u32, u32)> {
+        self.java_images
+            .slots
+            .iter()
+            .find(|s| s.0 == name)
+            .map(|s| (s.1, s.2, s.3))
+    }
+
     /// A mod's dynamic texture's pixels (`{"op":"image","name","width","height","rgba"}`):
     /// into an atlas slot (its own again, else a free one, else the least recently stored),
     /// shrunk to fit.
-    fn store_java_image(&mut self, o: &Value) {
+    pub(super) fn store_java_image(&mut self, o: &Value) {
         let (Some(name), Some(rgba)) = (
             o.get("name").and_then(Value::as_str),
             o.get("rgba")
