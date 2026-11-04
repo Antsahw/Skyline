@@ -311,6 +311,18 @@ impl VanillaTerrain {
                 kept.min_y + kept.height
             );
         }
+        let structures = generator.unsupported_structures();
+        if !structures.is_empty() {
+            log::warn!(
+                "Horizon: {dimension}: {} structures can't generate here (types Horizon lacks): {}",
+                structures.len(),
+                structures
+                    .iter()
+                    .map(|(name, kind)| format!("{name} ({kind})"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+        }
         let unsupported = generator.unsupported_features();
         if !unsupported.is_empty() {
             log::warn!(
@@ -541,6 +553,12 @@ impl VanillaTerrain {
         radius: i32,
     ) -> Option<(String, [i32; 3])> {
         self.generator.worker().locate(names, from, radius)
+    }
+    /// The structures this dimension's sets may place that Horizon's generator can't
+    /// (structure, its type): a mod's own structure type. The Java mod bridge has the mods
+    /// generate such a dimension.
+    pub fn unsupported_structures(&self) -> Vec<(String, String)> {
+        self.generator.unsupported_structures()
     }
     /// The chunks an older version saved, which new chunks blend with
     /// (`Blender.of`).

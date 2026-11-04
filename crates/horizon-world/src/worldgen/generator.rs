@@ -2494,6 +2494,7 @@ trait SeededPipeline: Send + Sync {
         pieces: &[serde_json::Value],
     ) -> Result<(), String>;
     fn forget_structure_starts(&self);
+    fn unsupported_structures(&self) -> Vec<(String, String)>;
     fn ring_positions(&self, worker: &mut WorkerState, set: &str) -> Option<Vec<ChunkPos>>;
     fn spawn_position(&self) -> Result<[i32; 2], GeneratorError>;
     fn region_random(&self, center: ChunkPos) -> Box<dyn super::structure::legacy::PieceRandom>;
@@ -2674,6 +2675,12 @@ where
         if let Some(structures) = &self.structures {
             structures.forget_starts();
         }
+    }
+    fn unsupported_structures(&self) -> Vec<(String, String)> {
+        self.structures
+            .as_ref()
+            .map(|structures| structures.unsupported())
+            .unwrap_or_default()
     }
     fn ring_positions(&self, worker: &mut WorkerState, set: &str) -> Option<Vec<ChunkPos>> {
         self.structures.as_ref()?.ring_positions(
@@ -3595,6 +3602,11 @@ impl OverworldGenerator {
     /// their algorithm or bindings are not implemented, with the decode error.
     pub fn unsupported_features(&self) -> Vec<(String, String)> {
         self.pipeline.unsupported_features()
+    }
+    /// The structures this dimension's structure sets may place that Horizon can't
+    /// generate: (structure, its type), a mod's own structure type (none in vanilla).
+    pub fn unsupported_structures(&self) -> Vec<(String, String)> {
+        self.pipeline.unsupported_structures()
     }
     /// NoiseBasedChunkGenerator.getOrigin: the chunk a new world's spawn
     /// search starts from (NoiseSpawnFinder over the `spawn_target` points).

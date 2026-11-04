@@ -117,9 +117,12 @@ public final class HorizonWorldgen {
     /**
      * Readies generation of {@code dimension} for Horizon's world (its seed, whether it has
      * structures): whether mods change that dimension's generation, so Horizon generates its
-     * chunks here. Called once a dimension, before its first chunk.
+     * chunks here. Called once a dimension, before its first chunk. {@code horizonCannot}:
+     * "structure type" of each structure the dimension's sets place that Horizon's generator
+     * can't make (a mod's own structure type); those mods' structures need this side too.
      */
-    public static synchronized boolean start(String dimension, long seed, boolean structures) {
+    public static synchronized boolean start(String dimension, long seed, boolean structures,
+            String[] horizonCannot) {
         Thread.currentThread().setContextClassLoader(HorizonWorldgen.class.getClassLoader());
         try {
             HorizonServer.ensureServer();
@@ -133,6 +136,14 @@ public final class HorizonWorldgen {
             if (generator == null) return false;
             levelHooks(level, dimension, seed);
             List<String> mods = modded(level, generator);
+            for (String cannot : horizonCannot == null ? new String[0] : horizonCannot) {
+                String[] parts = cannot.split(" ", 2);
+                String structure = parts[0];
+                String namespace = structure.contains(":") ? structure.substring(0, structure.indexOf(':')) : structure;
+                Natives.log("Java mods: " + dimension + " has " + structure + " (" + (parts.length > 1 ? parts[1] : "?")
+                        + "), a structure Horizon's generator can't make");
+                if (!mods.contains(namespace)) mods.add(namespace);
+            }
             if (mods.isEmpty()) {
                 Natives.log("Java mods: " + dimension + " generates as vanilla's (Horizon's generator)");
                 return false;
@@ -299,7 +310,7 @@ public final class HorizonWorldgen {
         if (resources != null) {
             String dimension = level.dimension().identifier().getPath();
             for (String folder : new String[] {"worldgen/noise_settings", "worldgen/density_function", "worldgen/noise",
-                    "worldgen/biome", "worldgen/placed_feature", "worldgen/configured_feature", "dimension"}) {
+                    "worldgen/biome", "worldgen/placed_feature", "worldgen/feature", "dimension"}) {
                 for (var entry : resources.listResourceStacks(folder, id -> id.getNamespace().equals("minecraft")).entrySet()) {
                     if (folder.equals("dimension") && !entry.getKey().getPath().equals("dimension/" + dimension + ".json")) continue;
                     for (var resource : entry.getValue()) {

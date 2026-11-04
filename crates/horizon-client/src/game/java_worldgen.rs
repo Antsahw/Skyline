@@ -15,10 +15,12 @@ use std::sync::{Arc, OnceLock};
 /// How long the first chunk waits for Java and Fabric to start (they start beside the world).
 const JAVA_START: std::time::Duration = std::time::Duration::from_secs(300);
 
-/// The Java mods' jars as data packs whose structure pieces Horizon's generator reads
-/// (templates, template pools, processor lists), lowest first in jar order: a mod replacing
-/// vanilla's templates (The Sift's ancient city centres) changes the structures Horizon
-/// generates as a data pack would. Fabric adds each mod's data as a pack below the world's.
+/// The Java mods' jars as data packs whose structures Horizon's generator reads (new
+/// structures and their sets, biome tags, templates, template pools, processor lists, the
+/// features pools place), lowest first in jar order: a mod replacing vanilla's templates
+/// (The Sift's ancient city centres) or adding structures to a dimension it otherwise leaves
+/// alone (Towns and Towers' villages) changes the structures Horizon generates as a data
+/// pack would. Fabric adds each mod's data as a pack below the world's.
 pub(super) fn mod_structure_packs() -> Vec<horizon_client::datapack::DataPack> {
     super::java_mods::mod_jars()
         .1
@@ -237,11 +239,19 @@ impl JavaTerrain {
             );
             return false;
         }
+        // Structures Horizon's generator can't make here (a mod's own structure type:
+        // Friends & Foes' citadel): the mods generate the dimension, with them.
+        let cannot = if self.structures {
+            self.inner.unsupported_structures()
+        } else {
+            Vec::new()
+        };
         match horizon_jvm::events::worldgen_start(
             &self.dimension,
             self.seed,
             self.structures,
             &self.world,
+            &cannot,
         ) {
             Ok(true) => {
                 let origin = horizon_jvm::events::worldgen_origin(&self.dimension)
