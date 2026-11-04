@@ -66,6 +66,10 @@ Chunky), `bridge-voice-1` (Simple Voice Chat), `bridge-entities-10` (TACZ), `bri
 (reads the board, retests every card on the newest java-bridge, queues new ones here). The board
 is public: read it with a web fetch of `https://trello.com/b/2uhi4jkj.json`.
 
+bridge-client-13 (see Reports): Cloth Config's screens fixed (icons, scrolling, lag); the
+waypoint NPE was already fixed (now regressed on host, LAN guest, server); Litematica's
+in-world overlay and Chat Heads' heads researched, not done (java-bridge.md says why and how).
+
 Works: JEI. Kinda: Farmer's Delight. Doesn't work (testers' builds may predate batch 10: ask
 them to pull first): Create Fly, TACZ Refabricated, Simple Voice Chat, Chunky, Better Combat,
 Chat Heads, Cloth Config, Flashback, ReplayMod. Also seen: "A Java mod failed in the HUD:
@@ -1300,3 +1304,24 @@ chat's own `HorizonFlywheel` and debug flag were dropped for them).
 `create createwhole fluids skinlayers kinetic pot terminal ber placed hud` pass.
 Test: `regress.py --jars <folder with create-fly*.jar, skinlayers3d*, fabric-api*> create createwhole fluids skinlayers kinetic`;
 in-game: a creative motor with shafts and cogs, a honey bucket, third person with 3D Skin Layers.
+
+### Client 13: Cloth Config, waypoints, Litematica, Chat Heads (2026-11-04, branch `bridge-client-13`; Claude for iaxivers)
+
+Jars (Modrinth): cloth-config 26.3.159 (LGPL-3.0), Mod Menu 21.0.0, Chat Heads 1.3.2 (MPL-2.0),
+Litematica 0.29.1 + MaLiLib 0.30.2 (LGPL-3.0), Fabric API 0.165.2. 2 cores, llvmpipe.
+- **Cloth Config "lags badly"**: every mouse move drew the whole screen (4-18 ms here) and
+  walked `config/`; a fast PC sends hundreds a second. Moves/drags now skip the walk and
+  draw at most every 40 ms; the window sends moves at most every 20 ms. Also fixed: its icons
+  were blank (mods with `-` in their id were never carried: generic, every such mod), and its
+  lists never scrolled (screens got delta 0; vanilla passes the frame's delta ticks).
+  Touches pack's files a little (`carry.rs`, content FORMAT 15).
+- **Waypoint NPE**: already fixed on java-bridge; new fixture checks fail without it and pass
+  on host, LAN guest and dedicated server. Testers: pull.
+- **Litematica**: menus and HUD work; the schematic overlay in the world needs mods'
+  world rendering (vanilla's level renderer, which Horizon replaces): gpu work, not started.
+- **Chat Heads**: chat works with it; no heads (it patches vanilla's chat, which Horizon
+  replaces). Plan in java-bridge.md; not started.
+- Regress (`--java-only` after a full build): cloth, join, join-lan, join-server (new or
+  extended), jei, pot, hud, rei, reiscreen, modsettings, litematica, server: all pass.
+Test on the PC: `regress.py --jars <jars with cloth-config, modmenu, fabric-api> cloth join-lan`,
+or play: Options → Mods → Cloth Config, scroll and move the mouse fast.
