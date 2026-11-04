@@ -44,6 +44,7 @@ MODS = {
     "terrablender": ["terrablender*"],
     "glitchcore": ["glitchcore*"],
     "fabric-api": ["fabric-api*"],
+    "skinlayers": ["skinlayers3d*"],
     "veinminer": ["veinminer-fabric*"],
     "rch": ["rightclickharvest*"],
     "jamlib": ["jamlib*"],
@@ -94,6 +95,8 @@ MODS = {
     "cristellib": ["cristellib*", "cristel*lib*"],
     "faf": ["friendsandfoes*"],
     "resourcefullib": ["resourcefullib*"],
+
+    "create": ["create-fly*"],
 }
 
 
@@ -158,12 +161,76 @@ CASES = {
                            "once there, the stove never turns back to air in the player's game")],
         look="the stove in front of the player",
     ),
+    "kinetic": dict(
+        about="Create's client patterns (kineticmod fixture): a block entity renderer whose helper is made at the end "
+              "of the level renderer's reload (LevelExtractor.allChanged, from a Mixin plugin's list) draws a turning "
+              "shaft; the client tick reads the player's first-person hands and its class's synced data",
+        fixtures=["kineticmod"], scene="none", env={"HORIZON_JAVA_DEBUG": "ber"},
+        steps=['"$R/tools/java_bridge/around.sh" \'q "setblock $((X+2)) $Y $Z horizon_kinetic:shaft"\' '
+               '\'$C look-at $(p $X+2.5) $((Y+1)) $(p $Z+0.5) >/dev/null; sleep 6\''],
+        checks=[check_log(r"mod injection\(s\) at RETURN of LevelExtractor\.allChanged", "the level renderer's reload ran the mod's injection"),
+                check_log(r"horizon_kinetic: client ready \(hands FirstPersonHandsAndItems, data for LocalPlayer, reload ended true\)",
+                          "the client tick reads the hands and the player's data; the resource reload's end was told"),
+                check_log(r"ber horizon_kinetic:shaft at .*: [1-9]\d* model\(s\).*Speed:16", "the shaft's renderer draws it, turning")],
+        forbid=[r"drawing horizon_kinetic", r"no synced data accessor", r"failed in the client's tick"],
+        look="a turning wooden cube and a small orange one beside it, above the shaft",
+    ),
+    "create": dict(
+        about="Create (Create Fly's unofficial 26.3 port; Flywheel inside): a creative motor turns a shaft and a "
+              "cogwheel. Flywheel's model helpers are made at the level renderer's reload (its backend off), so "
+              "Create's block entity renderers draw the turning parts; the network's speed is read in Java",
+        mods=["create"], optional=["fabric-api"], scene="none", env={"HORIZON_JAVA_DEBUG": "ber"}, timeout=900,
+        steps=['"$R/tools/java_bridge/around.sh" '
+               '\'q "setblock $((X+2)) $Y $((Z-1)) create:creative_motor[facing=south]"\' '
+               '\'q "setblock $((X+2)) $Y $Z create:shaft[axis=z]"\' '
+               '\'q "setblock $((X+2)) $Y $((Z+1)) create:cogwheel[axis=z]"\' '
+               '\'q "tp @s $(p $X-0.5) $Y $(p $Z+0.5)"\' '
+               '\'$C look-at $(p $X+2.5) $(p $Y+0.5) $(p $Z+0.5) >/dev/null; sleep 8\''],
+        checks=[check_log(r"mod injection\(s\) at RETURN of LevelExtractor\.allChanged", "Flywheel's level renderer reload ran"),
+                check_log(r"ber create:motor at .*: [1-9]\d* model\(s\)", "the motor's renderer draws its shaft"),
+                check_log(r"ber create:bracketed_kinetic at .*: [1-9]\d* model\(s\).*Speed:-?[1-9]",
+                          "the shaft and cogwheel draw, turning (their Speed in Java isn't 0)")],
+        forbid=[r"drawing create:", r"ModelRenderHelper", r"firstPersonHandsAndItems",
+                r"SynchedEntityData\.get"],
+        look="the motor, shaft and cogwheel in front of the player, turned (two screenshots differ)",
+    ),
     "ber": dict(
         about="Farmer's Delight's block entity renderers: beef on the stove, a carrot on the board",
         mods=["fd"], scene="ber",
         steps=[],
         checks=[check_log(r"Java mods: commands", "the mods started")],
         look="beef on the stove's grill, a carrot on the cutting board",
+    ),
+    "createwhole": dict(
+        about="Create's shafts and cogwheel drawn only by their renderers (their block models give nothing in "
+              "a world: no still copy under the turning one), in their sprites' own UVs (Flywheel's "
+              "SuperByteBuffers draw in the block atlas's)",
+        mods=["create"], optional=["fabric-api"], scene="create", env={"HORIZON_JAVA_DEBUG": "ber"},
+        steps=['sleep 4'],
+        checks=[check_log(r"drawn create:bracketed_kinetic Block\{create:cogwheel\}\S*: .*create:textures/block/cogwheel\S* \([1-9].*drawn whole by its renderer",
+                          "the cogwheel's renderer draws it, in its sprites, whole"),
+                check_log(r"drawn create:bracketed_kinetic Block\{create:shaft\}\S*: .*drawn whole by its renderer", "the shaft is drawn whole"),
+                check_log(r"drawn create:motor .*create:textures/block/axis\S* \([1-9]", "the motor's shaft is drawn")],
+        forbid=[r"Java mods: drawing create:", r"ModelRenderHelper"],
+        look="create-0: the purple motor, a shaft, a wooden cogwheel and a shaft in a row; create-1: the cog turned a little",
+    ),
+    "fluids": dict(
+        about="Mods' fluids drawn with their own sprites (Create's honey and chocolate: their client "
+              "fluid models, read once the models load), not as lava",
+        mods=["create"], optional=["fabric-api"], scene="fluids",
+        steps=[],
+        checks=[check_log(r"2 mod fluid\(s\) drawn with their own sprites: .*create:block/honey_still", "Java reads honey's sprites"),
+                check_log(r"Java mods: 2 fluid\(s\) drawn with their own sprites \(32 states\)", "the game takes them")],
+        look="fluids-0: two holes in the floor, golden honey on the left, brown chocolate on the right (not lava)",
+    ),
+    "skinlayers": dict(
+        about="3D Skin Layers: the player's outer skin layers as 3D voxels (its meshes on the "
+              "PlayerModel's parts, rendered by the bridge as custom geometry)",
+        mods=["skinlayers", "fabric-api"], scene="none",
+        steps=['sleep 4; $C key f5 tap >/dev/null; $C key f5 tap >/dev/null; $C look 0 10 >/dev/null; sleep 4'],
+        checks=[check_log(r"3D Skin Layers draws [1-9][0-9]* quads on a player", "the layers' meshes are drawn")],
+        forbid=[r"3D Skin Layers' parts couldn't be drawn"],
+        look="none-1: the player from the front; jacket, sleeves and trousers stand out in 3D",
     ),
     "hud": dict(
         about="Jade's tooltip and AppleSkin on Horizon's HUD",

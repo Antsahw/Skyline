@@ -1,0 +1,7 @@
+{
+  "required": true,
+  "package": "dev.horizonlab.kineticmod.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": ["SynchedDataBuilderMixin"],
+  "injectors": {"defaultRequire": 1}
+}

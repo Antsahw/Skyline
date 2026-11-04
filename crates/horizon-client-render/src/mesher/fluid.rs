@@ -197,6 +197,7 @@ pub(super) fn tesselate(
     (nether, shader_pack_lighting, separate_ao): (bool, bool, bool),
     pad: &Padded,
     water_color: u32,
+    mod_look: Option<super::ModFluid>,
     out: &mut SectionMesh,
     [x, y, z]: [i32; 3],
 ) {
@@ -235,10 +236,13 @@ pub(super) fn tesselate(
     let water = matches!(kind, FluidKind::Water | FluidKind::FlowingWater);
     let tint = if water {
         water_color & 0xFF_FFFF
+    } else if let Some(look) = mod_look {
+        look.tint & 0xFF_FFFF
     } else {
         0xFF_FFFF
     };
-    let emission = if water {
+    // A mod's fluid (its template's family: lava's) doesn't glow as lava does.
+    let emission = if water || mod_look.is_some() {
         0
     } else {
         crate::mesher::hdr_tier("lava", 15)
@@ -317,10 +321,12 @@ pub(super) fn tesselate(
             tables.water_flow,
             Some(tables.water_overlay),
         )
+    } else if let Some(look) = mod_look {
+        (look.still, look.flow, None)
     } else {
         (tables.lava_still, tables.lava_flow, None)
     };
-    let target = if water {
+    let target = if water || mod_look.is_some_and(|o| o.translucent) {
         &mut out.translucent
     } else {
         &mut out.solid

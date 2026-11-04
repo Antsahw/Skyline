@@ -533,6 +533,69 @@ enum Tint {
     Redstone(u8),
     Stem(u8),
 }
+/// Block states whose chunk model isn't drawn because their block entity's renderer draws the
+/// whole block (a Java mod's model that, in a world, has no geometry of its own: Create's shafts
+/// and cogwheels, which their renderers turn). By state id; the Java mods' entities say which.
+static DRAWN_BY_BLOCK_ENTITY: std::sync::LazyLock<std::sync::RwLock<std::sync::Arc<Vec<bool>>>> =
+    std::sync::LazyLock::new(Default::default);
+
+/// Marks a state's chunk model as drawn by its block entity (see [`DRAWN_BY_BLOCK_ENTITY`]):
+/// true when it wasn't already (the sections holding it need meshing again).
+pub fn hide_model_drawn_by_block_entity(state: BlockStateId) -> bool {
+    let index = state.0 as usize;
+    let mut set = DRAWN_BY_BLOCK_ENTITY
+        .write()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if set.get(index).copied().unwrap_or(false) {
+        return false;
+    }
+    let mut next = (**set).clone();
+    if next.len() <= index {
+        next.resize(index + 1, false);
+    }
+    next[index] = true;
+    *set = std::sync::Arc::new(next);
+    true
+}
+
+/// A Java mod's fluid as its client model draws it: still and flowing sprite names
+/// (`create:fluid/honey_still`), tint (ARGB, -1 none) and whether it is translucent.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ModFluidLook {
+    pub still: String,
+    pub flow: String,
+    pub tint: u32,
+    pub translucent: bool,
+}
+
+/// [`ModFluidLook`]s by state id: a mod's liquid block (carried with lava as its template)
+/// drawn with its own sprites instead of lava's.
+#[allow(clippy::type_complexity)]
+static MOD_FLUIDS: std::sync::LazyLock<
+    std::sync::RwLock<std::sync::Arc<std::collections::HashMap<u32, ModFluidLook>>>,
+> = std::sync::LazyLock::new(Default::default);
+
+/// Sets the mods' fluids' looks by state id; true when they changed (sections to mesh again).
+pub fn set_mod_fluids(looks: std::collections::HashMap<u32, ModFluidLook>) -> bool {
+    let mut set = MOD_FLUIDS
+        .write()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if **set == looks {
+        return false;
+    }
+    *set = std::sync::Arc::new(looks);
+    true
+}
+
+/// A mod fluid's sprite layers and colour, resolved for one section ([`ModFluidLook`]).
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ModFluid {
+    pub still: u16,
+    pub flow: u16,
+    pub tint: u32,
+    pub translucent: bool,
+}
+
 /// Mods' blocks' tint sources by block id (their BlockColors registrations, as the Java mod
 /// bridge exports them): what `MeshTables` takes for blocks vanilla's table doesn't name.
 static MOD_TINTS: std::sync::RwLock<Option<std::collections::HashMap<String, Vec<Tint>>>> =
@@ -787,7 +850,22 @@ impl MeshTables {
                 emission: s.emission,
                 tier: hdr_tier(name, s.emission),
                 emissive,
-                fluid: FluidState::from_block(state)?,
+                fluid: match FluidState::from_block(state)? {
+                    // A Java mod's liquid (Create's honey: a LiquidBlock carried with lava as
+                    // its template): a fluid of lava's family at its `level`, drawn with the
+                    // mod's own sprites once Java's models give them (set_mod_fluids).
+                    f if f.kind() == FluidKind::Empty
+                        && !s.name.starts_with("minecraft:")
+                        && s.has_class("LiquidBlock") =>
+                    {
+                        match prop("level") {
+                            0 => FluidState::new(FluidKind::Lava, 8, false),
+                            l if l >= 8 => FluidState::new(FluidKind::FlowingLava, 8, true),
+                            l => FluidState::new(FluidKind::FlowingLava, 8 - l, false),
+                        }
+                    }
+                    f => f,
+                },
                 model: s.render_shape == RenderShape::Model,
                 block_entity: s.block_entity,
                 tints,
@@ -1518,6 +1596,25 @@ impl Mesher<'_> {
         let info = &self.tables.info;
         let full_faces = &self.tables.full_faces;
         let catalog = &self.render.model_catalog;
+        let drawn_by_block_entity = DRAWN_BY_BLOCK_ENTITY
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        let mod_fluids = MOD_FLUIDS
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        let sprite_layers = &self.render.sprite_layers;
+        let mod_fluid = |id: u32| -> Option<ModFluid> {
+            let look = mod_fluids.get(&id)?;
+            let layer = |name: &str| sprite_layers.get(name).map(|&l| l as u16);
+            Some(ModFluid {
+                still: layer(&look.still)?,
+                flow: layer(&look.flow)?,
+                tint: look.tint,
+                translucent: look.translucent,
+            })
+        };
         let mut models = Vec::new();
         for y in 0..16 {
             for z in 0..16 {
@@ -1545,9 +1642,14 @@ impl Mesher<'_> {
                             self.shader_pack_lighting,
                             self.separate_ao,
                         );
-                        fluid::tesselate(self.tables, shade, pad, water, &mut out, [x, y, z]);
+                        let own = if mod_fluids.is_empty() {
+                            None
+                        } else {
+                            mod_fluid(id)
+                        };
+                        fluid::tesselate(self.tables, shade, pad, water, own, &mut out, [x, y, z]);
                     }
-                    if !state.model {
+                    if !state.model || drawn_by_block_entity.get(id as usize) == Some(&true) {
                         continue;
                     }
                     let world = BlockPos::new(center.x * 16 + x, base_y + y, center.z * 16 + z);

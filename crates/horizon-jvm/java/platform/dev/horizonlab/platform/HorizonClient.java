@@ -712,6 +712,20 @@ public final class HorizonClient {
             // controller); then the constructors' end (Better Combat's and Spell Engine's
             // animation stacks, read from that map).
             HorizonServer.emptyCollections(local, net.minecraft.client.player.LocalPlayer.class);
+            // Its first-person hands (firstPersonHandsAndItems(), made in its constructor):
+            // Create's client tick reads the held items there each tick (the Extendo Grip).
+            set(net.minecraft.client.player.LocalPlayer.class, local, "firstPersonHandsAndItems",
+                    new net.minecraft.client.player.FirstPersonHandsAndItems());
+            // Its class's synced data, as its constructor's SynchedEntityData.Builder makes it
+            // (the data itself is the server player's, above). Mods that add data to players
+            // make their accessors per entity class there: Create's AllSynchedDatas looks a
+            // player's up by getClass(), and found none for LocalPlayer (a null accessor in
+            // SynchedEntityData.get: its toolbox HUD, every frame).
+            try {
+                new net.minecraft.network.syncher.SynchedEntityData.Builder(local);
+            } catch (Throwable t) {
+                Natives.log("Horizon's client: the client player's synced data couldn't be made: " + t);
+            }
             // In a client level while they run, as a client player's constructors are (Player
             // Animation Lib prepares its layers only on the client side).
             var client = clientLevel(player.level());
@@ -1481,6 +1495,7 @@ public final class HorizonClient {
             try {
                 inWorld(player, () -> withKeys(player.getUUID(), () -> {
                     joined(player);
+                    levelRendererReady();
                     long t = HorizonProfile.start();
                     tickOnce();
                     t = HorizonProfile.add("client: tick", t);
@@ -1718,6 +1733,13 @@ public final class HorizonClient {
             set(owner, minecraft.getAtlasManager(), "spriteLookup", field(owner, atlases, "spriteLookup"));
             fonts(atlases, skins);
             featureRenderer(models, atlases);
+            // The end of the client's resource reload (Minecraft.onResourceLoadFinished, which the
+            // headless client never runs): the mods' injections there (Flywheel's in Create:
+            // its backend chosen, its renderer caches reset).
+            HorizonHooks.fireMerged(minecraft, Minecraft.class, "onResourceLoadFinished", "HEAD");
+            HorizonHooks.fireMerged(minecraft, Minecraft.class, "onResourceLoadFinished", "RETURN");
+            modelsLoaded = true;
+            HorizonFluids.export();
             Natives.log("Horizon's client: block and item models loaded in " + (System.nanoTime() - started) / 1_000_000 + " ms"
                     + (HorizonLazyModels.on ? " (baked on first use)" : ""));
         } catch (Throwable t) {
@@ -1728,6 +1750,45 @@ public final class HorizonClient {
         }
     }
     private static boolean gpuParts;
+    /** The models' reload ended with the models in place. */
+    private static volatile boolean modelsLoaded;
+    /** The client levels whose level renderer was told of them (levelRendererReady). */
+    private static final java.util.Set<net.minecraft.client.multiplayer.ClientLevel> RENDERED_LEVELS =
+            java.util.Collections.newSetFromMap(new java.util.WeakHashMap<>());
+
+    /**
+     * The level renderer's reload for the client's level (LevelExtractor.allChanged, which a
+     * client runs as its level renderer gets a level and after each resource reload), once per
+     * client level once the models are in. Horizon draws the world, so allChanged's body stays
+     * cancelled (LevelExtractorMixin); the mods' injections at its end run here, with the
+     * extractor's level set. Flywheel (inside Create) sets up its model helpers there
+     * (ModelRenderHelper): without it every Create block entity renderer threw a
+     * NullPointerException and its shafts, cogs and kinetic items drew nothing. Flywheel's
+     * backend stays off (it draws with OpenGL; the headless client's GPU is Horizon's), so
+     * Create draws its parts through its block entity renderers, which the bridge records.
+     */
+    /**
+     * Whether a client level's renderer reload ran (levelRendererReady): mods' block entity
+     * renderers draw from then on (Flywheel's helpers, the client's baked models).
+     */
+    static boolean levelRendered() {
+        return !RENDERED_LEVELS.isEmpty();
+    }
+
+    private static void levelRendererReady() {
+        if (!modelsLoaded || !(minecraft.level instanceof net.minecraft.client.multiplayer.ClientLevel level)
+                || !RENDERED_LEVELS.add(level)) return;
+        var extractor = minecraft.levelExtractor;
+        if (extractor == null) return;
+        try {
+            Class<?> owner = net.minecraft.client.renderer.extract.LevelExtractor.class;
+            set(owner, extractor, "minecraft", minecraft);
+            set(owner, extractor, "level", level);
+            HorizonHooks.fireMerged(extractor, owner, "allChanged", "RETURN");
+        } catch (Throwable t) {
+            Natives.log("Horizon's client: the level renderer's reload failed: " + t);
+        }
+    }
 
     /** A client player's place in its level: moves and removals are the server's business. */
     private static final net.minecraft.world.level.entity.EntityInLevelCallback IN_LEVEL =
@@ -2142,6 +2203,15 @@ public final class HorizonClient {
         // is the server's.
         var local = minecraft.player;
         if (local != null) {
+            // Its hands' items and heights (LocalPlayer.tick ticks them; mods read them).
+            var hands = local.firstPersonHandsAndItems();
+            if (hands != null) {
+                try {
+                    hands.tick(local);
+                } catch (Throwable t) {
+                    if (HUD_FAILURES.merge("hands", 1, Integer::sum) == 1) Natives.log("Horizon's client: the hands' tick failed: " + t);
+                }
+            }
             HorizonHooks.fire(local, net.minecraft.world.entity.player.Player.class, "tick", "()V", "HEAD", new Object[0], null, true);
             HorizonHooks.fire(local, net.minecraft.world.entity.player.Player.class, "tick", "()V", "TAIL", new Object[0], null, true);
         }

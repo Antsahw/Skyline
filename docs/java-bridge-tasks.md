@@ -99,11 +99,16 @@ Broken, first in every area's queue below:
   a plain FD food; check hunger, the stack and the bowl.
 - **(2026-11-04, same tester, Windows, screenshot) Mods' fluids don't work** (flow: done in
   bridge-mixins-9, regress `fluids`; drawing and entities in them still open): a honey bucket
+
+- **(2026-11-04, same tester, Windows, screenshot) Mods' fluids don't work** (drawing done in
+  gpu-12: their own sprites; flow is still lava's: mixins): a honey bucket
   (Create) places a fluid drawn as lava. Mods' fluids need their textures/tint (Fabric's
   `FluidRenderHandlerRegistry`) in Horizon's fluid mesher, and their flow (Horizon's fluid
   ticks are Rust: a mod `FlowingFluid` must tick in the mirror or be ported per fluid). gpu
   chat (drawing) + mixins (flow). Test with Create's honey and chocolate, and a plain fluid mod.
-- **(same) Create ("Create Fly", unofficial 26.3 port) is broken**: kinetic machines don't
+- **(same) Create ("Create Fly", unofficial 26.3 port) is broken** (gpu-12: Flywheel readied,
+  kinetic parts draw and turn, OBJ items draw, both NPEs fixed; left: the wrench's item,
+  contraptions untested): kinetic machines don't
   work. Create draws its shafts, cogs and contraptions with **Flywheel** (instanced rendering
   on top of vanilla's renderer, which Horizon doesn't run) and its contraptions are entities.
   First a research round (gpu chat): does the kinetic network turn and process in Java (logic)
@@ -127,6 +132,8 @@ Broken, first in every area's queue below:
   Not checked: whether the kinetic network turns (`/data get block` reads Horizon's world, which
   has no Java block entity: read Java's `LIVE` instead). Order: 1 (gpu), then 2–3 (client),
   then a regress case `create` (motor → shaft → cogwheel; speed read in Java; a screenshot).
+  **1–3 fixed (gpu 12, see Reports); the `create` case is written but not yet run with the
+  real jar** (CurseForge's CDN is blocked from the agents' machines): run it on a PC.
 
 Works for them: Bedrock Reloaded (small pack), Terralith ("runs better than normal Fabric"),
 Biomes O' Plenty; 800 FPS stable on a GTX 1060 3 GB / i5-9400F / 16 GB. Reported:
@@ -139,7 +146,8 @@ Biomes O' Plenty; 800 FPS stable on a GTX 1060 3 GB / i5-9400F / 16 GB. Reported
   the mods' data the way a data pack overrides them (worldgen; the same for any data pack).
 - ~~**JEI doesn't appear**~~ done (client-11, 2026-11-04): its list, search and recipe screens
   over Horizon's inventory, per player.
-- **3D Skin Layers** doesn't draw (a player-model renderer mod: draws in the world; gpu/entities).
+- ~~**3D Skin Layers** doesn't draw~~ (gpu-12: its meshes drawn; Horizon's flat layers stay
+  under them).
 - Asked: macOS (untested); native Rust mods beside Java mods (untested; the launcher's native build has no
   `java-mods` feature: add it in the fork, then test one native mod with the test pack).
 
@@ -1186,3 +1194,53 @@ element/processor types in jigsaws. Unrelated, seen: Friends & Foes' moobloom dr
 Test on the PC: `regress.py --jars <jars with friendsandfoes, ResourcefulLib, t_and_t,
 cristellib, cloth-config, fabric-api> newstructures structuretypes`; or play a new world with
 Friends & Foes and `/locate structure friendsandfoes:illusioner_shack`.
+
+### gpu 12: Flywheel initialised for Create (2026-11-04, branch `bridge-gpu-12`; Claude for iaxivers)
+
+The boss probe's three Create failures, fixed in the bridge (no Create-specific code):
+- **Flywheel's model helpers** (`ModelRenderHelper.INSTANCE` null in every Create block entity
+  renderer) are made at the end of `LevelExtractor.allChanged`, Flywheel's level renderer
+  reload. Horizon cancels that method at its head (it draws the world), which also skipped the
+  mods' injections at its end. Now, once the models are in and per client level, the mods'
+  RETURN injections there run (`HorizonClient.levelRendererReady`), and those at the head of
+  `Minecraft.onResourceLoadFinished` once the models load (Flywheel picks its backend there:
+  off, the GPU not being OpenGL, so Create draws its parts through its renderers, which the
+  bridge records). They're found from the merged class (`HorizonHooks.fireMerged`): Create's
+  client mixins come from its Mixin plugin's list, which the census never read.
+- `LocalPlayer.firstPersonHandsAndItems()` is made (and ticked) for the client player.
+- The client player's class gets its synced data built (`new SynchedEntityData.Builder(local)`):
+  Create keys its player data accessors by class and had none for `LocalPlayer`.
+- `HORIZON_JAVA_DEBUG=ber`: each drawn mod block entity every 5 s (models submitted, its data:
+  Create's `Speed`).
+Not tested with Create itself: its jar couldn't be downloaded here (CurseForge's CDN refused;
+building it from source wasn't allowed). A fixture with Create's three patterns (`kineticmod`:
+a renderer throwing until an `allChanged` injection from a Mixin plugin ran, the hands and
+class-keyed data read each client tick) fails on the old bridge exactly as Create did and
+passes now. Regress `kinetic` (new), `ber`, `pot`, `hud`, `placed` pass; `create` (new) needs
+the jar. Not done: the blank items in the creative tab (custom item renderers), Create's own
+reload listeners (registered from `Minecraft.<init>` at a point the bridge doesn't fire),
+fluids, contraptions.
+Test: jar into `~/hz-test/jars`, `regress.py --java-only --jars ~/hz-test/jars create kinetic`.
+
+### gpu 12 (second chat): Create with its jar, OBJ models, mods' fluids, 3D Skin Layers (2026-11-04, branch `bridge-gpu-12`; Claude for iaxivers)
+
+Jars: CurseForge `create-fly-unofficial-port` file 9321329, Modrinth `3dskinlayers` 1.11.4,
+Fabric API 0.165.2. 2 cores, llvmpipe.
+Two chats took gpu 12; this one had Create's jar (CurseForge's edge CDN served it) and was
+rebased on the first's commit (its Flywheel hook firing and both NPE fixes are kept; this
+chat's own `HorizonFlywheel` and debug flag were dropped for them).
+- **Create with its jar**: the kinetic network turns in Java (16 rpm through motor, shafts,
+  cog); shafts, cogs and the motor's shaft draw and turn, in their sprites' UVs (atlas meshes
+  split by sprite); the still chunk models under them are gone (states "drawn whole", Rust
+  mesher). OBJ models (`horizon-assets/src/obj.rs`) fix the blank cogwheel, large cogwheel and
+  water wheel items. Create's HUD hook no longer fails (empty contextual bars, a waypoint
+  manager). Regress `createwhole`. Not done: the wrench item (custom renderer only),
+  contraptions, other machines untested.
+- **Mods' fluids**: honey and chocolate drawn with their own sprites, not as lava (Java's baked
+  fluid models → mesher). Flow is still lava's (Horizon's ticks: mixins). Single player and LAN
+  host only for now. Regress `fluids`.
+- **3D Skin Layers**: its voxel meshes are drawn on players (146-164 quads on default skins,
+  front/back checked). Horizon's flat outer layers still draw under them. Regress `skinlayers`.
+`create createwhole fluids skinlayers kinetic pot terminal ber placed hud` pass.
+Test: `regress.py --jars <folder with create-fly*.jar, skinlayers3d*, fabric-api*> create createwhole fluids skinlayers kinetic`;
+in-game: a creative motor with shafts and cogs, a honey bucket, third person with 3D Skin Layers.
