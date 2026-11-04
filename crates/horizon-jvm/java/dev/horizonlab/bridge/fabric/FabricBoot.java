@@ -61,6 +61,12 @@ public final class FabricBoot {
 
         Knot knot = new Knot(env);
         gameLoader = knot.init(new String[0]);
+        // Mods' log lines into Horizon's log from here on (the platform's HorizonLog).
+        try {
+            Class.forName("dev.horizonlab.platform.HorizonLog", true, gameLoader).getMethod("install").invoke(null);
+        } catch (ClassNotFoundException e) {
+            // No platform mod: the console has them.
+        }
         FabricLoaderImpl loader = FabricLoaderImpl.INSTANCE;
         bootstrapGame();
         loader.prepareModInit(HorizonGameProvider.gameDir, null);

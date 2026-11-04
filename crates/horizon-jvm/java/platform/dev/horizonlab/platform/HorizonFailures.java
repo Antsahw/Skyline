@@ -68,6 +68,20 @@ public final class HorizonFailures {
         }
     }
 
+    /**
+     * A mod Horizon left out because it isn't needed (a renderer: Horizon has its own): told
+     * as a note, not a failure, and not counted in {@link #LIMIT}.
+     */
+    static void notNeeded(String text) {
+        JsonObject o = new JsonObject();
+        o.addProperty("text", "");
+        JsonArray extra = new JsonArray();
+        extra.add(part("[Java mods] ", "gold"));
+        extra.add(part(text, "gray"));
+        o.add("extra", extra);
+        tell(o);
+    }
+
     private static String trim(String message) {
         String m = message.replace('\n', ' ');
         return m.length() > 120 ? m.substring(0, 117) + "..." : m;

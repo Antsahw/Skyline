@@ -17,7 +17,7 @@ impl Game<'_> {
     /// Starts the JVM and Fabric if `mods-java/` holds jars. No jars, no JVM: one folder read.
     pub(super) fn start_java_mods(&mut self) {
         let dir = Self::options_path().with_file_name(horizon_jvm::DIR);
-        let jars = horizon_jvm::jars(&dir);
+        let jars = run_jars(&dir);
         if jars.is_empty() {
             return;
         }
@@ -36,7 +36,7 @@ pub(super) fn start_early() {
         return;
     }
     let dir = Game::options_path().with_file_name(horizon_jvm::DIR);
-    let jars = horizon_jvm::jars(&dir);
+    let jars = run_jars(&dir);
     if !jars.is_empty() {
         spawn_start(dir, jars);
     }
@@ -125,13 +125,49 @@ fn java_component(root: &Path) -> Option<String> {
         .map(str::to_string)
 }
 
+/// The jars of `dir` (`mods-java/`) Fabric loads: all but the renderer mods Horizon doesn't
+/// need (Sodium, Iris: Horizon has its own renderer) and the mods that need them
+/// (`horizon_jvm::renderers`). Worked out once for a set of jars.
+fn run_jars(dir: &Path) -> Vec<PathBuf> {
+    let jars = horizon_jvm::jars(dir);
+    let mut last = SPLIT.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((all, kept, _)) = last.as_ref()
+        && *all == jars
+    {
+        return kept.clone();
+    }
+    let (kept, left) = horizon_jvm::renderers::split(&jars);
+    *last = Some((jars, kept.clone(), left));
+    kept
+}
+
+/// The last [`run_jars`]: all jars, the ones Fabric loads, the ones left out.
+#[allow(clippy::type_complexity)]
+static SPLIT: std::sync::Mutex<
+    Option<(
+        Vec<PathBuf>,
+        Vec<PathBuf>,
+        Vec<horizon_jvm::renderers::LeftOut>,
+    )>,
+> = std::sync::Mutex::new(None);
+
+/// The mods [`run_jars`] left out.
+fn left_out() -> Vec<horizon_jvm::renderers::LeftOut> {
+    SPLIT
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+        .map(|(_, _, left)| left.clone())
+        .unwrap_or_default()
+}
+
 /// The content mods made from the Java mods in `mods-java/` (their blocks, items and assets,
 /// horizon-jvm's `content`), for the game's content root over `base` (the prepared tables):
 /// read back from the cache when the jars are the ones they were made from, else made now,
 /// with Java and Fabric started for it (they stay up for the game).
 pub(super) fn java_content(base: &Path) -> Vec<PathBuf> {
     let dir = Game::options_path().with_file_name(horizon_jvm::DIR);
-    let jars = horizon_jvm::jars(&dir);
+    let jars = run_jars(&dir);
     if jars.is_empty() {
         return Vec::new();
     }
@@ -341,6 +377,17 @@ fn start_once(root: &Path, dir: &Path, jars: Vec<PathBuf>, side: horizon_jvm::Si
             .filter(|m| !m.starts_with("fabric-") || m.starts_with("fabric-api "))
             .collect();
         log::info!("Java mods: Fabric loaded {}", mods.join(", "));
+        // Renderer mods left out: noted, and told to the players as they join.
+        let left: Vec<String> = left_out().iter().map(|l| l.line()).collect();
+        for line in &left {
+            log::info!("Java mods: {line}");
+        }
+        if !left.is_empty()
+            && let Err(e) = horizon_jvm::events::not_needed(&left)
+        {
+            log::warn!("Java mods: the left-out mods weren't told: {e}");
+        }
+
         for class in PROBE_CLASSES {
             if let Err(e) = bridge.check_class(class) {
                 log::warn!("Java mods: {class} failed to load: {e}");
@@ -373,12 +420,22 @@ fn fabric(
             &work.join("fabric-api"),
         )?]
     };
+    // With mods left out (`run_jars`), Fabric reads no folder: the jars it loads are listed.
+    let (mut add_mods, mods) = (add_mods, dir.to_path_buf());
+    let mods = if left_out().is_empty() {
+        mods
+    } else {
+        let none = work.join("no-mods");
+        std::fs::create_dir_all(&none).map_err(|e| format!("{}: {e}", none.display()))?;
+        add_mods.extend(jars.iter().cloned());
+        none
+    };
     Ok(horizon_jvm::Fabric {
         game_jar: horizon_jvm::facade::game_jar(root)?,
         libraries: horizon_jvm::facade::game_libraries(root)?,
         add_mods,
         platform: true,
-        mods: dir.to_path_buf(),
+        mods,
         game_dir: dir.parent().map(Path::to_path_buf).unwrap_or_default(),
         version: game_version(root)?,
         side,

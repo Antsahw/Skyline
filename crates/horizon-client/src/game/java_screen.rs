@@ -180,7 +180,8 @@ impl Game<'_> {
         let Some(code) = sdl_key(key) else {
             return;
         };
-        if !self.java_binds.keys.contains(&code) {
+        // -1: a mod takes every key (MaLiLib's hotkeys, in KeyboardHandler.keyPress).
+        if !self.java_binds.keys.contains(&code) && !self.java_binds.keys.contains(&-1) {
             return;
         }
         let send = if pressed {
@@ -189,9 +190,17 @@ impl Game<'_> {
             self.java_binds.down.remove(&code)
         };
         if send {
-            let data = json!({"kind": "bind", "key": code, "down": pressed})
-                .to_string()
-                .into_bytes();
+            let mut mods = 0;
+            if self.has_shift_down() {
+                mods |= SHIFT;
+            }
+            if self.has_control_down() {
+                mods |= CONTROL;
+            }
+            let data = json!({"kind": "bind", "key": code, "keycode": sdl_keycode(key, code),
+                "mods": mods, "down": pressed})
+            .to_string()
+            .into_bytes();
             self.send(S::CustomPayload(CustomPayload {
                 channel: INPUT.into(),
                 data,

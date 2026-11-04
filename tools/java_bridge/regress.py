@@ -85,6 +85,10 @@ MODS = {
     "aci": ["advancedcoreinfo*"],
     "compressedblocks": ["compressedblocks*"],
     "sift": ["mielon*the*sift*", "mielons-the-sift*"],
+    "sodium": ["sodium-fabric*"],
+    "iris": ["iris-fabric*"],
+    "create": ["create-fly*"],
+    "litematica": ["litematica*"],
 }
 
 
@@ -112,10 +116,19 @@ CASES = {
     "pot": dict(
         about="Farmer's Delight: the cooking pot's screen opens; beef moved into it",
         mods=["fd"], scene="pot",
-        steps=['$C click-at 141 187', '$C click-at 163 62', '$C state > $S/state.json; $C screen > $S/screen.json'],
+        steps=['$C click-at 141 187', '$C click-at 163 62', '$C state > $S/state.json; $C screen > $S/screen.json',
+               # Closed and opened again 20 times, quickly and slowly (a tester's pot sometimes
+               # came back as Horizon's one-row stand-in): FD's own screen each time.
+               'ok=0; for i in $(seq 20); do $C key escape tap >/dev/null; sleep 0.$((i % 4 * 3 + 1)); '
+               '$C mouse right click >/dev/null; sleep 1.5; '
+               '$C state | python3 -c "import json,sys; s=json.load(sys.stdin); '
+               'print(s[\'screen\'], s.get(\'java_screen\'))" >> $S/reopen.log; '
+               'tail -1 $S/reopen.log | grep -q "^container [0-9]" && ok=$((ok+1)); done; '
+               'echo "own screen $ok/20" > $S/reopen.txt'],
         checks=[check_json("state.json", ["screen"], "container", "the pot's screen is open"),
                 check_json("state.json", ["looking_at", "block", "block"], "farmersdelight:cooking_pot", "looking at the pot"),
-                check_file("screen.json", screen_has(300, "minecraft:beef"), "beef is in the pot's first slot")],
+                check_file("screen.json", screen_has(300, "minecraft:beef"), "beef is in the pot's first slot"),
+                check_file("reopen.txt", r"own screen 20/20", "closed and opened 20 times: FD's own screen each time")],
     ),
     "terminal": dict(
         about="Tom's Storage: the terminal lists the chest beside its connector",
@@ -187,6 +200,49 @@ CASES = {
                 check_log(r"recipe viewer \(JEI\): uses of 1 farmersdelight:tomato: opened", "/uses opens a mod item's uses")],
         forbid=[r"JEI: could not start", r"recipe viewer \(JEI\) failed", r"screen event handler failed"],
         look="none-1.png: JEI's list right of the inventory; none-2.png: beef's 4 items; none-3.png: oak log's uses",
+    ),
+    "sodium": dict(
+        about="Sodium and Iris in mods-java: left out of Fabric's mods, the player told they aren't needed (no failure)",
+        mods=["sodium", "iris", "fd"], scene="pot",
+        steps=['sleep 2; $C messages 30 > $S/messages.json; $C state > $S/state.json'],
+        checks=[check_log(r"Sodium isn't needed in Horizon", "the log says Sodium isn't needed"),
+                check_file("messages.json", r"Iris isn't needed in Horizon: Horizon has its own renderer", "the player is told Iris isn't needed"),
+                check_json("state.json", ["screen"], "container", "the other mods run (the pot's screen opens)")],
+        forbid=[r"Your Java mods couldn't start", r"Mixin apply .* failed"],
+        look="sodium-0.png: the pot's screen; the chat's gray [Java mods] lines",
+    ),
+    "litematica": dict(
+        about="Litematica's main menu on M (MaLiLib's hotkeys: every key while playing goes to the mods' KeyboardHandler.keyPress handlers)",
+        mods=["litematica", "malilib"], scene="none",
+        steps=['sleep 3; $C key m tap >/dev/null; sleep 3; $C state > $S/menu.json',
+               # Its Configuration menu button (top right).
+               '$C click-at 250 40 >/dev/null; sleep 3; $C state > $S/config.json'],
+        checks=[check_file("menu.json", r'"screen":"java-screen"', "M opens Litematica's main menu"),
+                check_file("config.json", r'"screen":"java-screen"', "its Configuration menu button opens a screen")],
+        forbid=[r"key press failed"],
+        look="none-0.png: Litematica's main menu (Schematic Placements, Load Schematics...); none-1.png: its configuration screen",
+    ),
+    "create": dict(
+        about="Create (Create Fly, unofficial 26.3 port): its client tick and HUD run on Horizon's client player "
+              "(firstPersonHandsAndItems, its synced data by the player's class, the HUD's contextual bar and waypoints)",
+        mods=["create"], scene="none",
+        steps=['$C command "setblock ~2 ~ ~ create:creative_motor[facing=west]" >/dev/null; '
+               '$C command "setblock ~3 ~ ~ create:shaft[axis=x]" >/dev/null; sleep 6; $C state > $S/state.json'],
+        checks=[check_json("state.json", ["screen"], "playing", "the player plays"),
+                check_log(r"Fabric loaded .*create", "Create loads")],
+        forbid=[r"firstPersonHandsAndItems", r'"accessor" is null', r"contextualInfoBar", r"ClientWaypointManager", r"HUD's \S+ failed"],
+        look="none-0.png: a creative motor and a shaft beside the player (their moving parts need Flywheel: gpu chat)",
+    ),
+    "pot-jei": dict(
+        about="JEI's uses screen opened from the cooking pot's screen, then Escape: back to FD's own screen "
+              "(it came back as Horizon's one-row stand-in)",
+        mods=["jei", "fd"], optional=["fabric-api"], scene="pot",
+        steps=['sleep 12; $C click-at 322 38 right >/dev/null; sleep 4; $C state > $S/uses.json',
+               '$C key escape tap >/dev/null; sleep 3; $C state > $S/back.json'],
+        checks=[check_file("uses.json", r'"screen":"java-screen"', "a right click on JEI's list opens its uses screen over the pot"),
+                check_file("back.json", r'"screen":"container"', "Escape goes back to the pot's window"),
+                check_file("back.json", r'"java_screen":[0-9]+', "the pot's own screen, not the stand-in")],
+        look="pot-jei-1.png: FD's cooking pot screen (grid, arrow, bowl slot) with JEI's list beside it",
     ),
     "jei-lan": dict(
         about="JEI per player: the host types in its search box; the guest's list stays full, its box empty and not typed in",
@@ -837,6 +893,16 @@ CASES = {
                 check_log(r"Gave 1 \[Bread\] to Player", "the player was in the world for the console's commands")],
         forbid=[r"waited two minutes for the Java mods"],
         look="Xaero's minimap top left, Jade's box at the top, AppleSkin's hunger outline",
+    ),
+    "server-log": dict(
+        about="A dedicated server's logs/latest.log has one writer: Java's log4j writes no file of its own there "
+              "(it overwrote Horizon's lines); mods' log lines go into Horizon's log",
+        mods=["fd"], scene="none", server=True,
+        steps=['sleep 4; ls $S/logs > $S/log-files.txt'],
+        checks=[check_log(r"Done \(", "the server's start line is there"),
+                check_log(r"\[java\] \[\w+/(INFO|WARN|ERROR)\] ", "mods' and the game's log4j lines are in Horizon's log"),
+                check_file("log-files.txt", r"\A(?![\s\S]*\.log\.gz)[\s\S]*latest\.log", "no log4j roll-over of latest.log on Java's start")],
+        look="server-log: the server's latest.log, read whole",
     ),
     "maps-server": dict(
         about="Map mods for a dedicated server's player: JourneyMap's minimap and full-screen map, Xaero's minimap and World Map (M), no JourneyMap server-tick failure",

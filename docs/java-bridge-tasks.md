@@ -66,15 +66,16 @@ Broken, first in every area's queue below:
   a relaunch (gpu/client: a state's model not there for the mesher until the next start).
 - ~~**Hoppers don't work**~~ (bridge-mixins-8: not Lithium; hoppers didn't see Java mods'
   containers. Fixed, see Reports.)
-- **Litematica's UI** doesn't show (client; MaLiLib's MiniHUD does).
-- **Sodium** doesn't work: expected, it replaces vanilla's renderer, which Horizon doesn't use.
-  Say so in-game (a "not needed in Horizon" line) rather than a failure (client).
+- ~~**Litematica's UI** doesn't show~~ (client-12: MaLiLib's hotkeys get every key; M opens
+  its menu. See Reports.)
+- ~~**Sodium** doesn't work~~ (client-12: renderer mods are left out, with a gray "isn't needed
+  in Horizon" line.)
 - The test's offscreen window renders uncapped (99% GPU, coil whine): cap it (tools).
 
 ### First beta testers (2026-11-03, Discord)
 
-- **(2026-11-04, Windows 11 tester, video) Farmer's Delight's cooking pot sometimes opens as
-  Horizon's stand-in screen** (one row of 9 slots titled "Cooking Pot", `mod_menu_type` in
+- ~~**(2026-11-04, Windows 11 tester, video) Farmer's Delight's cooking pot sometimes opens as
+  Horizon's stand-in screen**~~ (client-12: JEI's screens over the pot lost it; see Reports) (one row of 9 slots titled "Cooking Pot", `mod_menu_type` in
   `remote.rs`) instead of FD's own Java screen (grid, arrow, bowl slot, JEI beside it). The
   same pot opens right on other clicks: a race between Horizon's stand-in and the Java screen
   taking over. Client chat, first in its queue. Reproduce: open and close the pot 20 times
@@ -109,10 +110,9 @@ Broken, first in every area's queue below:
      `flywheel.lib.model.baked.ModelRenderHelper.INSTANCE` is null. Flywheel sets it in its
      client init, hooked on vanilla's renderer start, which Horizon doesn't run: call it (or set
      the helper) from the bridge. Likely fixes most invisible kinetic parts and blank items.
-  2. `LocalPlayer.firstPersonHandsAndItems()` returns null in our client player (Create's
-     client tick, every tick).
-  3. `SynchedEntityData.get` with a null accessor in Create's `AllSynchedDatas` (the HUD's
-     toolbox overlay): Create adds synced data to players; our player's data lacks it.
+  2. ~~`LocalPlayer.firstPersonHandsAndItems()` returns null~~ (client-12)
+  3. ~~`SynchedEntityData.get` with a null accessor in Create's `AllSynchedDatas`~~ (client-12;
+     two more HUD failures behind it fixed too: the Hud's contextual bar, the waypoints)
   Not checked: whether the kinetic network turns (`/data get block` reads Horizon's world, which
   has no Java block entity: read Java's `LIVE` instead). Order: 1 (gpu), then 2–3 (client),
   then a regress case `create` (motor → shaft → cogwheel; speed read in Java; a screenshot).
@@ -152,7 +152,7 @@ Biomes O' Plenty; 800 FPS stable on a GTX 1060 3 GB / i5-9400F / 16 GB. Reported
    ALA Industrial's pipes there (no "over 16 MiB" in the log, pipes place).
 
 ### client
-1. **Dedicated servers' `logs/latest.log` is written by two writers.** Java's log4j uses
+1. ~~**Dedicated servers' `logs/latest.log` is written by two writers.**~~ (client-12) Java's log4j uses
    Mojang's `log4j2.xml` (in `com/mojang/logging`'s jar: a `RollingRandomAccessFile` at
    `logs/latest.log`, relative to the working folder), which on a dedicated server is the
    server's folder, where Horizon writes its own `latest.log`: lines are overwritten (batch 7's
@@ -1073,3 +1073,28 @@ Not yet per player: JEI's bookmarks and settings. Regress `jei`, `jei-lan` (new)
 `reiscreen`, `pot`, `terminal`, `rei-lan`, `modsettings`, `config-rejoin`, `keys`, `failmsg`.
 Test: `regress.py --jars <jars with jei, fabric-api, Farmer's Delight> jei jei-lan`.
 
+
+### Client 12: pot stand-in, Create's client NPEs, Sodium, the server's log, Litematica (2026-11-04, branch `bridge-client-12`; Claude for iaxivers)
+
+- **Cooking pot as the stand-in**: a client-only screen opened over a menu's screen (JEI's uses
+  or recipes from the pot) replaced it; Escape there went back to the pot as a client-only
+  screen, and the next Escape to Horizon's one-row stand-in. Now the menu's screen and its
+  window are kept under it and come back (`HorizonClient.UNDER`, Rust `JAVA_UNDER`); a new menu
+  screen always sends its first frame. Shown failing with the old Java (`pot-jei`: screen
+  `java-screen`, window -1), passing now. `pot` opens it 20 more times (all FD's screen).
+- **Create's client NPEs** fixed (the `LocalPlayer`'s `firstPersonHandsAndItems`; a synced-data
+  builder for its class), and the two HUD failures behind them (`Hud`'s contextual bar, the
+  connection's waypoints). Left: Flywheel (gpu). Regress `create`.
+- **Sodium/Iris** (and canvas, nvidium, vulkanmod, what needs them) left out of Fabric's mods;
+  players get a gray "[Java mods] Sodium isn't needed in Horizon: Horizon has its own renderer
+  (left out)". Regress `sodium`.
+- **Dedicated server's latest.log**: log4j starts with the bridge's console-only config, then
+  `HorizonLog` sends mods' lines into Horizon's log. Regress `server-log`.
+- **Litematica's UI**: MaLiLib's hotkeys never got keys (they're not KeyMappings). Every key
+  while playing goes to the mods' `SDLEventHandler.handleKeyEvent` and `KeyboardHandler.keyPress`
+  handlers; M opens Litematica's menu, its buttons work. Regress `litematica`. Not tried:
+  placing a schematic (its overlay draws with vanilla's level renderer: gpu).
+- Tools: `screen_test.sh`, `server_test.sh`, `lan_test.sh` ran stale jars after a failed
+  `java.sh` (`export X=$(...) || exit 1`); they stop now. `horizon-ctl state` has `java_screen`.
+- Regress (`--java-only` after a full build): pot, pot-jei, sodium, litematica, create,
+  server-log (new or extended), jei, minihud, server, terminal: all pass.

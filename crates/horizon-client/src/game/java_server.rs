@@ -938,6 +938,11 @@ mod run {
     static JAVA_WINDOWS: std::sync::Mutex<std::collections::BTreeMap<String, (u32, i32)>> =
         std::sync::Mutex::new(std::collections::BTreeMap::new());
 
+    /// The menu window under a player's client-only screen (JEI's recipes over a mod's
+    /// menu), by player: back in [`JAVA_WINDOWS`] when the client-only screen closes.
+    static JAVA_UNDER: std::sync::Mutex<std::collections::BTreeMap<String, (u32, i32)>> =
+        std::sync::Mutex::new(std::collections::BTreeMap::new());
+
     /// The player whose Java mod's menu has `window` open on `conn`.
     fn java_window_of(host: &LanHost, conn: u32, window: i32) -> Option<String> {
         let uuid = host
@@ -1831,13 +1836,24 @@ mod run {
                             continue;
                         };
                         let mut windows = JAVA_WINDOWS.lock().unwrap_or_else(|e| e.into_inner());
+                        let mut under = JAVA_UNDER.lock().unwrap_or_else(|e| e.into_inner());
                         let client = (conn, super::super::java_screen::CLIENT_WINDOW);
                         if open {
-                            // Its frames and input go by the client-only screen's window.
-                            windows.insert(uuid, client);
+                            // Its frames and input go by the client-only screen's window; a
+                            // menu's window under it waits.
+                            if let Some(menu) = windows.insert(uuid.clone(), client)
+                                && menu != client
+                            {
+                                under.insert(uuid, menu);
+                            }
                         } else if windows.get(&uuid) == Some(&client) {
                             windows.remove(&uuid);
                             Self::send_java_screen_close(host, conn);
+                            // Back to the menu's screen, if its menu is still open (the
+                            // menu's next frame shows it in place of the stand-in).
+                            if let Some(menu) = under.remove(&uuid) {
+                                windows.insert(uuid, menu);
+                            }
                         }
                     }
                     horizon_jvm::events::Action::Food {
@@ -1883,6 +1899,14 @@ mod run {
                         let Some(items) = items else {
                             if let Some((c, w)) = windows.remove(&uuid)
                                 && w != super::super::java_screen::CLIENT_WINDOW
+                            {
+                                host.hub.close_window(c, w);
+                            }
+                            // A menu under a client-only screen closed too.
+                            if let Some((c, w)) = JAVA_UNDER
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner())
+                                .remove(&uuid)
                             {
                                 host.hub.close_window(c, w);
                             }
