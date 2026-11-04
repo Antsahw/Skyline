@@ -69,6 +69,8 @@ state Horizon has no rule for must never end the game: ask Java for the mod bloc
 (`getCollisionShape` in the mirror) or fall back to its outline/full cube, and log once. Find
 every caller that turns `Unsupported` into a stop. Own small chat (`bridge-crash-1`): regress
 case placing it, then walking into/on it.
+The tester had to **remake the world** after it: also check that a world saved at such a stop
+opens again.
 
 Chats on it (2026-11-04): `bridge-client-13` (Cloth Config, Chat Heads, waypoint NPE,
 Litematica), `bridge-replay-1` (ReplayMod, Flashback), `bridge-mixins-10` (double break sound,
@@ -150,6 +152,11 @@ By area:
   (Create's tutorial: hold W over an item's tooltip) is missing: its keybind on tooltips, then
   a screen that draws small 3D scenes of a fake level through vanilla's renderer. Research
   after the rest (gpu): likely the hardest Create piece.
+  **Belts don't assemble and chain conveyors don't connect**: both are made by using an item
+  (belt, chain) on one block then another, so likely the same use-order bug (mixins: the block
+  and the item's `useOn` first, as vanilla). And a client tick error: `ParticleEngine.
+  createParticle` on a null (Horizon's client has no vanilla `ParticleEngine`: a mod making a
+  particle client-side must get one that hands the particle to Horizon's particles; client chat).
 - **A broken block's moving parts stay** (tester, batch 10): break a cogwheel and the hand
   crank's handle on it keeps floating, drawn. A removed mod block entity must drop its
   renderer's instance (gpu-13: the recorder's per-block-entity draws on removal).
