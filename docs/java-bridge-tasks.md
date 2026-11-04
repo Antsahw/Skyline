@@ -65,8 +65,8 @@ Biomes O' Plenty; 800 FPS stable on a GTX 1060 3 GB / i5-9400F / 16 GB. Reported
   city_center_{1,2,3}.nbt` (8 sonorous deepslate before the frame), new worlds get vanilla's
   centres. Horizon's structure code must read templates (and template pools, processors) from
   the mods' data the way a data pack overrides them (worldgen; the same for any data pack).
-- **JEI doesn't appear** (its Fabric build: needs its overlay on Horizon's inventory, as REI's
-  has; client).
+- ~~**JEI doesn't appear**~~ done (client-11, 2026-11-04): its list, search and recipe screens
+  over Horizon's inventory, per player.
 - **3D Skin Layers** doesn't draw (a player-model renderer mod: draws in the world; gpu/entities).
 - Asked: macOS (untested); native Rust mods beside Java mods (untested; the launcher's native build has no
   `java-mods` feature: add it in the fork, then test one native mod with the test pack).
@@ -997,4 +997,18 @@ overworld is Horizon's generator ("generates as vanilla's"). Unit tests in `over
 (same jars, asset index 331e5c8…). Not done: `/place template` from mods' data, mods' new
 structures/structure sets in Horizon's generator (a structures-only mod in an otherwise
 vanilla overworld still gets none).
+
+### Client 11: JEI over Horizon's inventory (2026-11-04, branch `bridge-client-11`; Claude for iaxivers)
+
+JEI (31.17.0.108, Fabric 26.3) works like REI: its item list beside Horizon's inventory, its
+search box (typed in), clicks on entries (left: recipes, right: uses), R/U over its entries and
+over Horizon's slots, its recipe screens (Escape back to the inventory), `/recipes` and `/uses`.
+It never started: its start listener was registered from an injection into `Minecraft.<init>`
+the headless client never ran. Now started with the mirror's recipes as a joining client is
+(`HorizonJei`). Shared fixes: Fabric's screen input/tick/frame events are fired for every
+screen (`HorizonScreenEvents`), client levels have the server's tick rate (potion tooltips threw),
+reload listeners added at `CLIENT_STARTED` run. Search text and keyboard focus per player.
+Not yet per player: JEI's bookmarks and settings. Regress `jei`, `jei-lan` (new), `rei`,
+`reiscreen`, `pot`, `terminal`, `rei-lan`, `modsettings`, `config-rejoin`, `keys`, `failmsg`.
+Test: `regress.py --jars <jars with jei, fabric-api, Farmer's Delight> jei jei-lan`.
 

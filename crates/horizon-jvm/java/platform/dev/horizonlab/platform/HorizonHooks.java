@@ -447,6 +447,10 @@ public final class HorizonHooks {
         String target = String.valueOf(get(node, "target"));
         if (target.startsWith("Lnet/minecraft/client/Options;<init>(")
                 || target.startsWith("Lnet/minecraft/world/level/storage/LevelStorageSource;parseValidator(")) return START_OPTIONS;
+        // The first resource reload's start, late in the constructor (JEI registers its
+        // CLIENT_STARTED listener there, which starts it in a world): before the client's first
+        // reload and CLIENT_STARTED, as in a real client.
+        if (target.startsWith("Lnet/minecraft/client/ResourceLoadStateTracker;startReload(")) return START_END;
         if (!"Ljava/lang/Thread;currentThread()Ljava/lang/Thread;".equals(get(node, "target"))) return null;
         Object ordinal = get(node, "ordinal");
         if (ordinal instanceof Integer o && o != 0) return null;

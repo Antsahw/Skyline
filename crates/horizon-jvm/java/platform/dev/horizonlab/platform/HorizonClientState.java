@@ -152,8 +152,9 @@ final class HorizonClientState {
         if (player == null || player.equals(loaded)) return;
         // A second player: REI's searches run inside their player's as() (its settings in).
         if (loaded != null) HorizonRecipeViewer.searchPerPlayer();
-        // Their mods' settings too (HorizonClientConfig).
+        // Their mods' settings too (HorizonClientConfig), and JEI's search text.
         HorizonClientConfig.swap(loaded, player);
+        HorizonJei.swap(loaded, player);
         List<Slot> all = slots();
         if (all.isEmpty()) {
             loaded = player;
@@ -194,6 +195,7 @@ final class HorizonClientState {
     static synchronized void forget(UUID player) {
         Object[] gone = SAVED.remove(player);
         HorizonClientConfig.forget(player);
+        HorizonJei.forget(player);
         List<Slot> all = slots();
         if (player.equals(loaded)) {
             gone = new Object[all.size()];

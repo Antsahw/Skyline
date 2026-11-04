@@ -8,7 +8,8 @@
     "JourneyMapFullscreenMixin",
     "JourneyMapFilesMixin",
     "JourneyMapPropertiesMixin",
-    "ReiAsyncSearchMixin"
+    "ReiAsyncSearchMixin",
+    "JeiConnectionMixin"
   ],
   "injectors": {
     "defaultRequire": 0
