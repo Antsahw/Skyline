@@ -104,6 +104,12 @@ By area:
   (`ItemModelResolver`/`submitItem` inside a BER) need the item path in the bridge's recorder.
   If it never got in, it's the use (mixins). gpu-13 checks first; FD's cutting board passed
   `pot`-style cases, so compare with it.
+  Update: right-click does nothing **and thrown items don't go in either** (the depot takes
+  item entities that land on it): so the item never gets in, not only a drawing gap. Mixins:
+  the use on a mod block with an item in hand, and a mod block entity picking up item entities.
+- **A broken block's moving parts stay** (tester, batch 10): break a cogwheel and the hand
+  crank's handle on it keeps floating, drawn. A removed mod block entity must drop its
+  renderer's instance (gpu-13: the recorder's per-block-entity draws on removal).
 - **Breaking sounds twice** (a tester, 2026-11-04: "dirt goes brrbrr"). Mods: Biomes O' Plenty,
   TerraBlender, GlitchCore, Terralith, Geophilic, Lithostitched, FallingTree, WorldEdit, Create
   Fly, Fabric API. Likely a routed break (FallingTree and WorldEdit patch breaking) where Java's
