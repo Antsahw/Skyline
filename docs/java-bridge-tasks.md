@@ -1300,3 +1300,28 @@ chat's own `HorizonFlywheel` and debug flag were dropped for them).
 `create createwhole fluids skinlayers kinetic pot terminal ber placed hud` pass.
 Test: `regress.py --jars <folder with create-fly*.jar, skinlayers3d*, fabric-api*> create createwhole fluids skinlayers kinetic`;
 in-game: a creative motor with shafts and cogs, a honey bucket, third person with 3D Skin Layers.
+
+### Entities 10: TACZ Refabricated's guns (2026-11-04, branch `bridge-entities-10`; Claude for iaxivers)
+
+Works (TACZ 0.8.6-beta1 for 26.3, Player Animation Lib, Forge Config API Port; all generic,
+no mod-specific code; TACZ is GPL3 / CC BY-NC-ND 4.0, nothing of it copied): an AK-47 held on
+the left button fires full auto, its magazine count drops (back in Horizon's slot), bullets
+(TACZ's own entity) kill Horizon's zombie; the gun draws in first person with its
+animations, muzzle flash and ejected casings, and in third person in the player's hand.
+Generic fixes (see java-bridge.md's status): mouse-bound key bindings and `MouseHandler.onButton`
+injections; mixins' whole field initializers (`HorizonMixinInit`); `LocalPlayer.tick` and
+players' `LivingEntity`/`Entity.tick` injections; the mirror's tick times and chunk maps'
+players; model manager from the start, mods' client packs; deferred custom geometry, first
+person with meshes, mod-drawn item models through the real resolver, textures sent as images;
+shadows' invulnerable ticks reset as the mod resets them.
+Regress `tacz`, `tacz-model` (new). Outside the area: `HorizonClient` (keys, mouse, packs, model
+manager), `HorizonHooks` (initializers, START_PACKS), `HorizonServer` (tick hooks, tick
+times), `ChunkMapMixin`, `ItemModelResolverMixin`, `HorizonGraphics.isModFrame` (package
+access), `java_screen.rs`/`remote.rs` (mouse), `java_server.rs` (hands' trees, hurtMob flag),
+`hud.rs` (16 big image slots), the `hurtMob` native.
+Not done (next tasks): gun icons in Horizon's GUI (items drawn only by a mod's renderer: record
+their GUI submit as an icon mesh or image); bullet tracers (the renderer runs on the server's
+entity, without its client spawn data); cancelling Horizon's own attack when mods cancel
+`startAttack` (TACZ: no punch or block break with a gun); third-person aiming pose; zoom/recoil
+on Horizon's camera; the item name shows `block.tacz.modern_kinetic_gun` (the gun's name is
+its mod's, from its data).

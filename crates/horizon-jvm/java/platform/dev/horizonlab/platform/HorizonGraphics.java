@@ -677,7 +677,7 @@ public final class HorizonGraphics extends GuiGraphicsExtractor {
         });
     }
 
-    private static boolean isModFrame(Class<?> owner, StackWalker.StackFrame frame) {
+    static boolean isModFrame(Class<?> owner, StackWalker.StackFrame frame) {
         String name = owner.getName();
         boolean platform = name.startsWith("net.minecraft.") || name.startsWith("com.mojang.") || name.startsWith("net.fabricmc.")
                 || name.startsWith("java.") || name.startsWith("jdk.") || name.startsWith("sun.") || name.startsWith("org.joml.")

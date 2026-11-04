@@ -632,7 +632,36 @@ public final class HorizonEntityRender {
             vanillaHand = true;
             return false;
         }
-        return !onlyMods || inModLayer;
+        return !onlyMods || inModLayer || submittedByMod();
+    }
+
+    private static final Map<String, Boolean> MOD_FRAMES = new ConcurrentHashMap<>();
+    private static final StackWalker WALKER = StackWalker.getInstance(StackWalker.Option.RETAIN_CLASS_REFERENCE);
+
+    /**
+     * Whether a mod's code made this submit: going out from the collector, past Horizon's own
+     * frames there, a mod's frame (a mod's class, or a mod's handler merged into a vanilla
+     * class: TACZ draws its guns from its injection into vanilla's ItemInHandLayer) comes
+     * before Horizon's driver, as HorizonGraphics' modsOnly decides for HUD ops.
+     */
+    private static boolean submittedByMod() {
+        return WALKER.walk(frames -> {
+            boolean inner = true;
+            for (var it = frames.iterator(); it.hasNext(); ) {
+                var frame = it.next();
+                Class<?> owner = frame.getDeclaringClass();
+                String name = owner.getName();
+                boolean ours = name.startsWith("dev.horizonlab.") || name.startsWith("jdk.proxy") || name.startsWith("java.lang.reflect.");
+                if (inner) {
+                    if (ours) continue;
+                    inner = false;
+                }
+                if (name.startsWith("dev.horizonlab.")) return false;
+                if (MOD_FRAMES.computeIfAbsent(name + "#" + frame.getMethodName() + frame.getDescriptor(),
+                        k -> HorizonGraphics.isModFrame(owner, frame))) return true;
+            }
+            return false;
+        });
     }
 
     /** A mod's layer of a player renderer, marked while it submits (onlyMods keeps those). */
@@ -1026,6 +1055,44 @@ public final class HorizonEntityRender {
     private static final Map<Object, Kept> KEPT = java.util.Collections.synchronizedMap(new IdentityHashMap<>());
     /** Where the entity being drawn puts its items. */
     private static JsonArray items;
+
+    /** Per item model: whether it is a mod's own (modDrawn). */
+    private static final Map<net.minecraft.resources.Identifier, Boolean> MOD_DRAWN = new ConcurrentHashMap<>();
+
+    /**
+     * Whether an item's model is one only its mod can draw: a mod's own item model type
+     * ({@code tacz:custom_renderer}, baked to a mod's class) or vanilla's special model with a
+     * mod's renderer. Horizon's item renderer can't draw these (they resolve to its builtin
+     * entity model: nothing), so the client's real resolver resolves them and their renderer
+     * submits its geometry, recorded as the entity's (ItemModelResolverMixin). Only once the
+     * client's models are loaded.
+     */
+    public static boolean modDrawn(net.minecraft.world.item.ItemStack stack) {
+        if (stack.isEmpty() || !HorizonClient.modelsLoaded()) return false;
+        var id = stack.get(net.minecraft.core.component.DataComponents.ITEM_MODEL);
+        if (id == null || id.getNamespace().equals("minecraft")) return false;
+        return MOD_DRAWN.computeIfAbsent(id, k -> {
+            try {
+                var model = net.minecraft.client.Minecraft.getInstance().getModelManager().getItemModel(k);
+                if (model == null) return false;
+                Object drawer = model;
+                if (model instanceof net.minecraft.client.renderer.item.SpecialModelWrapper<?> special) {
+                    drawer = HorizonClient.field(net.minecraft.client.renderer.item.SpecialModelWrapper.class, special, "specialRenderer");
+                }
+                boolean mod = drawer != null && !drawer.getClass().getName().startsWith("net.minecraft.");
+                if (mod) Natives.log("Java mods: " + k + "'s item model is drawn by its mod (" + drawer.getClass().getName() + ")");
+                return mod;
+            } catch (Throwable t) {
+                return false;
+            }
+        });
+    }
+
+    /** The client's resolver over its real models, once loaded (null before). */
+    public static net.minecraft.client.renderer.item.ItemModelResolver realItemResolver() {
+        if (!HorizonClient.modelsLoaded()) return null;
+        return net.minecraft.client.Minecraft.getInstance().getItemModelResolver();
+    }
 
     public static void keepItem(Object state, net.minecraft.world.item.ItemStack stack,
                                 net.minecraft.world.item.ItemDisplayContext context) {
