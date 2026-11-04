@@ -2262,6 +2262,8 @@ fn carried_over(name: &std::ffi::OsStr, target: Target) -> bool {
         .collect();
     own.push(backend::CLIENT.to_string());
     own.push(".installed".to_string());
+    // The base's Fabric mods build is another game than the new one.
+    own.push(crate::java_variant::DIR.to_string());
     if target == Target::Server {
         own.push("horizon-engine".to_string());
     }
