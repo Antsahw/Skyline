@@ -34,45 +34,47 @@ Minecraft: Java Edition 26.3, rewritten in Rust. Same worlds, same rules, same t
 
 The Java bridge runs **real Fabric mods for 26.3** inside Horizon. **Horizon's world stays the real one:** Horizon (Rust) keeps running all of vanilla's logic (terrain, blocks, redstone, mobs, physics, the server, saving, rendering). A Java VM in the game's own process loads Fabric Loader and the real 26.3 jar and runs **only the mods' own code** (their mobs, machines, worldgen features, screens) against a mirror of Horizon's world, made lazily as mods read it; what the mods change is written back into Horizon's world. Without mod jars, Java never starts. The goal is big packs, SkyFactory-style, at Horizon's speed.
 
-**Status (2026-11-03):** an 81-jar pack (165 mods with the ones they bundle) plays on a real PC (RX 9070 XT, Fedora), from the launcher, at about the same speed as Horizon without mods. Not released yet: build it yourself (below).
+**Status (2026-11-04):** an 81-jar pack (165 mods with the ones they bundle) plays on a real PC at about Horizon's own speed, and beta testers are playing their own packs on Linux and Windows. **Off by default:** Java mods only run when you turn on **"Fabric 26.3 mods (beta)"** for an instance in the launcher. Not released yet: build it yourself (below). Horizon's maintainer has asked for it upstream; it's being cleaned up for that first (launcher only, and no code tied to any one mod's internals).
 
 | Area | Status |
 |---|---|
 | Loading | ✅ 81- to 107-jar packs start (up to 265 mods, 20,000+ recipes); content made once per set of jars, Java's classes cached between runs |
-| Blocks, items, recipes, creative tabs | ✅ (🐛 some mod blocks invisible when placed until a relaunch; a few missing textures) |
-| Machines and their screens (block entities, menus) | ✅ Farmer's Delight, Tom's Storage, Energized Power, CC: Tweaked, XNet, BuildCraft (🐛 hoppers in a pack with Lithium) |
-| REI, Jade, AppleSkin, tooltips, skill trees | ✅ REI's list, search, R/U and recipes; Legendary Tooltips; Pufferfish's Skills; Advanced Loot Info |
-| Maps | ✅ Xaero's Minimap and World Map, XaeroPlus, JourneyMap, VoxelMap (not beside Xaero's: both register the same packet), MiniHUD |
-| Mod mobs: AI, combat, models, saving, sounds, particles, projectiles | ✅ Naturalist, Friends & Foes, Mutant Monsters, GeckoLib mobs; they fight Horizon's mobs and players both ways |
-| Mod worldgen: biomes, structures, colours, `/locate`, far terrain | ✅ Overworld, Nether, End; Biomes O' Plenty, Towns and Towers, Dungeons and Taverns; Tectonic's far terrain; skyblock and one-block worlds |
-| Mixins that change vanilla behaviour | ✅ Veinminer, Right Click Harvest, Carry On, Serene Seasons, Clumps, Better Combat: what a mod patches (breaking, using, hitting, jumps, teleports, falls, effects, advancements) goes to Java |
-| Multiplayer with mods | ✅ LAN and dedicated servers: each player's own maps, REI and mod settings |
-| The launcher | ✅ a **Java mods** tab (add, remove, which mods failed last game); runs from a normal install, fetches Java 25 itself |
-| Renderer replacements (Sodium, Iris) | ➖ not needed: Horizon has its own renderer, so they have nothing to replace |
-| Mods that draw in the world (Litematica's overlay) | 🚧 |
-| Windows | ✅ builds and plays on Windows 11; no published build yet. Windows support and `horizon-play` by [martipops](https://github.com/martipops) |
+| Blocks, items, recipes, creative tabs | ✅ placed mod blocks show at once; a modpack's bundled resource packs are picked up |
+| Machines and their screens | ✅ Farmer's Delight (pot, stove, cutting board, meals), Tom's Storage, Energized Power, CC: Tweaked, XNet, BuildCraft; Horizon's hoppers and droppers fill and empty mod blocks |
+| Create | 🚧 loads; motors, shafts and cogwheels draw and turn; honey and chocolate flow with their own look. Not yet: other machines, belts, contraptions, the wrench |
+| Mods' fluids | ✅ drawn with their own textures, flow by the mod's own code |
+| JEI, REI, Jade, AppleSkin, tooltips | ✅ JEI's and REI's lists, search and recipes, per player |
+| Maps | ✅ Xaero's Minimap and World Map, XaeroPlus, JourneyMap, VoxelMap, MiniHUD |
+| Mod mobs | ✅ Naturalist, Friends & Foes, Mutant Monsters, GeckoLib mobs; they fight Horizon's mobs and players both ways |
+| Mod worldgen | ✅ Biomes O' Plenty, Terralith, Towns and Towers, Dungeons and Taverns, mods' own structure types and template overrides (The Sift); Tectonic's far terrain; skyblock and one-block worlds |
+| Mods that change vanilla behaviour (mixins) | ✅ Veinminer, Right Click Harvest, Carry On, Serene Seasons, Clumps |
+| Player look | ✅ 3D Skin Layers |
+| Multiplayer with mods | ✅ LAN and dedicated servers: each player's own maps, recipe viewers and mod settings |
+| The launcher | ✅ the "Fabric 26.3 mods (beta)" switch per instance and a **Java mods** tab (add, remove, which mods failed last game); fetches Java 25 itself |
+| Renderer replacements (Sodium, Iris) | ➖ not needed: Horizon has its own renderer; they're left out with a note |
+| Known not working yet | 🐛 Cloth Config screens, Chat Heads, ReplayMod, Flashback, Simple Voice Chat, Chunky, TACZ, Better Combat; a block's break sound twice with some mods. Being worked on; testers track mods on [their Trello](https://trello.com/b/2uhi4jkj) |
+| Windows | ✅ builds and plays on Windows 11 (Windows support by [martipops](https://github.com/martipops)); macOS untested |
 
-**Beta testers: start with [Try it](#try-it) and the [testers' guide](docs/java-bridge-beta.md).** How it works, the tick flow, 26.3 traps and the test tools: **[docs/java-bridge.md](docs/java-bridge.md)**.
+How it works, the tick flow, 26.3 traps and the test tools: **[docs/java-bridge.md](docs/java-bridge.md)**. What each chat is fixing: [docs/java-bridge-tasks.md](docs/java-bridge-tasks.md).
 
 ### Try it
 
-**Easiest: press Play in Prism Launcher.** On Windows or Linux (macOS is untested), with Rust, Git and a JDK 25 installed:
+You need Rust, Git, a JDK 25 and Minecraft: Java Edition 26.3 (played once in the official launcher). Build the game with Java mods, and the launcher:
 
 ```sh
 git clone -b java-bridge https://github.com/iaxivers/horizon && cd horizon
-cargo run --profile fast -p horizon-play    # builds the game once; quit it when it opens
+cargo build --profile fast -p horizon-client --features horizon-client/java-mods
+cd launcher && cargo build --release    # Fedora needs libxkbcommon-x11-devel
 ```
 
-Then in [Prism Launcher](https://prismlauncher.org):
+Then, with the launcher (start it with `HORIZON_LAUNCHER_NO_SELF_UPDATE=1` so it doesn't replace itself with upstream's):
 
-1. Make a Minecraft **26.3** + **Fabric** instance and add a mod.
-2. Right-click it > **Edit** > **Settings** > tick **Custom commands**.
-3. Paste the full path of `target/fast/horizon-play` (`horizon-play.exe` on Windows) into **Wrapper command**, and close the window.
-4. Press **Play**. The first start takes a few minutes.
+1. Sign in with your Microsoft account and make a Horizon 26.3 instance.
+2. Use your build: `horizon-launcher java-mods use-build target/fast/horizon-client`.
+3. Turn on **Fabric 26.3 mods (beta)** (Launch… on Home, or `horizon-launcher java-mods on`).
+4. Add Fabric 26.3 mods in the **Java mods** tab (or `horizon-launcher java-mods add <jar>`) and press **Play**. The first start with new mods takes a few minutes.
 
-To go back to normal Minecraft, untick **Custom commands**. The **[testers' guide](docs/java-bridge-beta.md)** has every step, other ways to play, and what to test.
-
-**From the launcher:** build it (`cd launcher && cargo build --release`; Fedora needs `libxkbcommon-x11-devel`), install your game build as a version with `horizon-launcher import-build target/fast/horizon-client --trust-unsigned`, add jars with `horizon-launcher java-mods add <jar>`, then the **Java mods** tab shows on Home. Start it with `HORIZON_LAUNCHER_NO_SELF_UPDATE=1` so it doesn't update itself to upstream's.
+Found a bug? Post it with a screenshot, your mod list and `logs/latest.log`.
 
 **Tests:** `python3 tools/java_bridge/regress.py --jars <jars>` plays every scene that once worked, headless, with screenshots; `--pack <mods folder> bigpack` plays a whole pack. Add `HORIZON_JAVA_PROFILE=1` to see what the mods cost each tick.
 
