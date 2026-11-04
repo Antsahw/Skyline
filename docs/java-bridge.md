@@ -1802,6 +1802,10 @@ player turns them on**, per instance:
   option (`settings.json` `"dev_offline": true`) and `HORIZON_LAUNCHER_PAGE=launch` (Launch…
   open): off → `horizon-client --resources …`, no Java mods tab; on → `java/horizon-client
   --resources … --java-mods` and the tab; off → plain again.
+- **The game, as the launcher starts it** (`install_test.sh`, Farmer's Delight in `mods-java/`):
+  `OFF=1`: the world plays, the log says "Java mods: off (1 jars in mods-java)", no `libjvm` in
+  the process, no `.local/bridge` (nothing of Fabric's downloaded) and no Java runtime fetched;
+  with `--java-mods`: Fabric and Farmer's Delight load, `/give @s farmersdelight:cooking_pot` works.
 
 What is left: release builds with `java-mods` published beside the plain ones (`-java` assets in
 the signed SHA256SUMS), which the maintainer turns on.
