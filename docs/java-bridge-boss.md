@@ -195,7 +195,9 @@ fast: prefer them to cloud runs for big packs.
    both ways (pre-flattening ids and metadata ↔ 26.3 states), entities and NBT likewise, the
    1.12 client's GL rendering captured as today's GPU path does for 26.3. Start with a research
    round: what SkyFactory 4's mods touch (worldgen, tile entities, capabilities, GUIs), and
-   a first 1.12 mod's block placed in Horizon. Old-mod translation in general (remapping renames,
+   a first 1.12 mod's block placed in Horizon. **Research done (2026-11-04):**
+   [java-bridge-112.md](java-bridge-112.md) has the measured needs and eight phases; phase 1
+   is `boot112`. Old-mod translation in general (remapping renames,
    a shim library, local only: many mods are all rights reserved) is the other route for
    1.20–1.21 mods.
 
