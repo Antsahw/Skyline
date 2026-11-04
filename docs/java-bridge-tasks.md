@@ -87,6 +87,15 @@ By area:
   parts: grey cylinders and a pale blue-white flat square where its moving parts' textures
   should be (a sprite or atlas mixed up for its block-entity parts, or a partial model). Not an
   entity problem: item renderers and block-entity parts.
+- **FIRST for `bridge-mixins-10`: lava on water loops** (tester, batch 10, Create Fly + Fabric
+  API, videos): lava flowing onto water makes obsidian, which turns back into flowing lava,
+  again and again (constant smoke). Vanilla behaviour broken: a regression, likely batch 10's
+  fluids (mixins-9's `foreign_fluid`) or Create's mixin on `LiquidBlock.shouldSpreadLiquid`/
+  `FlowingFluid` interactions being routed to Java while Horizon's own fluid tick also runs, the
+  two writing over each other. Reproduce: Create + a lava source flowing onto still water;
+  vanilla gives obsidian/cobblestone once. Without Create too. Then **Create's own fluid
+  interactions** (honey + lava makes limestone, chocolate + lava makes scoria): what a mod adds
+  to lava's interactions must happen once, through the mod's code.
 - **Breaking sounds twice** (a tester, 2026-11-04: "dirt goes brrbrr"). Mods: Biomes O' Plenty,
   TerraBlender, GlitchCore, Terralith, Geophilic, Lithostitched, FallingTree, WorldEdit, Create
   Fly, Fabric API. Likely a routed break (FallingTree and WorldEdit patch breaking) where Java's
