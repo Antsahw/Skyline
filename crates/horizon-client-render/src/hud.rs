@@ -12,6 +12,10 @@ use std::{
 use wgpu::util::DeviceExt;
 
 pub mod cit_glint;
+mod java;
+pub use java::{
+    JAVA_BIG_IMAGE_SIZE, JAVA_BIG_IMAGE_SLOTS, JAVA_IMAGE_SIZE, JAVA_IMAGE_SLOTS, java_image_slot,
+};
 mod pack_text;
 
 /// A sprite's atlas region, and its size in GUI pixels: the size of the
@@ -116,29 +120,6 @@ pub const MAX_ATLAS_SIZE: u32 = 16384;
 /// framed maps, so the pool holds a wall; too few slots re-upload every map
 /// every frame. 26.3's `MapTextureManager` keeps a texture per map instead.
 pub const MAP_SLOTS: usize = 256;
-/// Atlas slots for Java mods' dynamic textures (images they draw in memory: Chunk Loaders'
-/// chunk maps; game/java_screen.rs), each [`JAVA_IMAGE_SIZE`] square; bigger images are shrunk.
-pub const JAVA_IMAGE_SLOTS: usize = 128;
-pub const JAVA_IMAGE_SIZE: u32 = 64;
-/// Bigger slots for Java mods' images that a 64-pixel slot would blur: what they draw with
-/// the GPU (Xaero's minimap, a picture in picture at the GUI scale; a full-screen map, sent
-/// shrunk to this), a minimap's frame pieces (JourneyMap's rim and mask, 256 px) and the
-/// textures of mods' models the atlas hasn't (TACZ's guns, 256-512 px),
-/// [`JAVA_BIG_IMAGE_SIZE`] square. Slot `JAVA_IMAGE_SLOTS + i` is `horizon/javabig{i}`.
-pub const JAVA_BIG_IMAGE_SLOTS: usize = 16;
-pub const JAVA_BIG_IMAGE_SIZE: u32 = 512;
-
-/// A Java image slot's atlas sprite and side (small slots first, then big ones).
-pub fn java_image_slot(slot: usize) -> (String, u32) {
-    if slot < JAVA_IMAGE_SLOTS {
-        (format!("horizon/java{slot}"), JAVA_IMAGE_SIZE)
-    } else {
-        (
-            format!("horizon/javabig{}", slot - JAVA_IMAGE_SLOTS),
-            JAVA_BIG_IMAGE_SIZE,
-        )
-    }
-}
 /// The atlas sprite of map slot `slot` (`horizon/map{slot}`), named once:
 /// every map shown asks for its slot's each frame.
 pub fn map_slot_sprite(slot: usize) -> Option<&'static str> {
@@ -341,35 +322,6 @@ fn png_size(path: &Path) -> Option<(u32, u32)> {
     (header[..8] == *b"\x89PNG\r\n\x1a\n" && header[12..16] == *b"IHDR")
         .then(|| (field(16), field(20)))
 }
-/// A Java mod's texture folder its screens or HUD may draw from: any but those other atlases
-/// or no GUI use (items, models, armour, the world's own textures), and those packed apart
-/// (block, entity, particle, gui: walked by their own rule).
-fn java_gui_folder(name: &str) -> bool {
-    !matches!(
-        name,
-        "item"
-            | "items"
-            | "block"
-            | "blocks"
-            | "entity"
-            | "particle"
-            | "gui"
-            | "models"
-            | "model"
-            | "armor"
-            | "trims"
-            | "painting"
-            | "colormap"
-            | "environment"
-            | "effect"
-            | "mob_effect"
-            | "map"
-            | "misc"
-            | "font"
-            | "shaders"
-    )
-}
-
 fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
     // A prepared root's folder: from its data file, without listing the disk.
     if let Some(files) = horizon_core::prepared_files::files_under(dir) {
@@ -885,19 +837,7 @@ impl HudAtlas {
             let name = map_slot_sprite(i).unwrap_or_default();
             images.push((name.into(), 128, 128, vec![0; 128 * 128 * 4]));
         }
-        for i in JAVA_IMAGE_SLOTS..JAVA_IMAGE_SLOTS + JAVA_BIG_IMAGE_SLOTS {
-            let (name, side) = java_image_slot(i);
-            images.push((name, side, side, vec![0; (side * side * 4) as usize]));
-        }
-        for i in 0..JAVA_IMAGE_SLOTS {
-            let side = JAVA_IMAGE_SIZE;
-            images.push((
-                format!("horizon/java{i}"),
-                side,
-                side,
-                vec![0; (side * side * 4) as usize],
-            ));
-        }
+        java::java_slots(images);
         // The minimap extra's image (game/extras.rs).
         images.push((
             MINIMAP_SPRITE.into(),
@@ -1149,33 +1089,7 @@ impl HudAtlas {
             for ns in namespaces.flatten() {
                 if ns.file_name() != "minecraft" {
                     walk(&ns.path().join("textures/gui"), &mut files);
-                    // Java mods (game/java_screen.rs, java_entities.rs): their entity textures,
-                    // their block textures (models their block entity renderers draw: Chunk
-                    // Loaders' floating core), their particles, HUD mods' sheets (AppleSkin's
-                    // `textures/icons.png`, `textures/hud/`) and loose textures.
-                    if !folders.contains(&"entity") {
-                        walk(&ns.path().join("textures/entity"), &mut files);
-                    }
-                    if !folders.contains(&"particle") {
-                        walk(&ns.path().join("textures/particle"), &mut files);
-                    }
-                    walk(&ns.path().join("textures/block"), &mut files);
-                    for file in fs::read_dir(ns.path().join("textures"))
-                        .into_iter()
-                        .flatten()
-                        .flatten()
-                    {
-                        let path = file.path();
-                        if path.extension().is_some_and(|e| e == "png") {
-                            files.push(path);
-                        } else if path.is_dir()
-                            && file.file_name().to_str().is_some_and(java_gui_folder)
-                        {
-                            // Any other folder their screens and HUD may blit from
-                            // (Simple Voice Chat's `textures/icons/`, `textures/hud/`).
-                            walk(&path, &mut files);
-                        }
-                    }
+                    java::walk_java_textures(&ns.path(), folders, &mut files);
                 }
             }
         }

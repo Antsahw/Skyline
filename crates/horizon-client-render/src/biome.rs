@@ -1,11 +1,12 @@
 //! Biome colours from the pinned biome definitions and colormaps
 //! (`Biome.getGrassColor`/`getFoliageColor`/..., `BlockTintSources`).
+mod java;
 use crate::Result;
 use horizon_core::{noise::SimplexNoise, position::BlockPos, random::LegacyRandom};
+pub use java::mod_biomes;
 use serde_json::Value;
 use std::{
     collections::{BTreeMap, HashMap},
-    fs,
     path::Path,
     sync::Arc,
 };
@@ -271,34 +272,6 @@ pub fn identifier_order(a: &str, b: &str) -> std::cmp::Ordering {
     }
     split(a).cmp(&split(b))
 }
-/// The biome files of every namespace but vanilla's under `root/data`, by namespace then name.
-pub fn mod_biomes(root: &Path) -> Vec<(String, std::path::PathBuf)> {
-    let mut out = Vec::new();
-    let Ok(namespaces) = fs::read_dir(root.join("data")) else {
-        return out;
-    };
-    let mut namespaces: Vec<String> = namespaces
-        .filter_map(|e| e.ok())
-        .filter_map(|e| e.file_name().into_string().ok())
-        .filter(|n| n != "minecraft")
-        .collect();
-    namespaces.sort();
-    for namespace in namespaces {
-        let Ok(files) = fs::read_dir(root.join("data").join(&namespace).join("worldgen/biome"))
-        else {
-            continue;
-        };
-        let mut files: Vec<_> = files
-            .filter_map(|e| e.ok())
-            .map(|e| e.path())
-            .filter(|p| p.extension().is_some_and(|e| e == "json"))
-            .collect();
-        files.sort();
-        out.extend(files.into_iter().map(|p| (namespace.clone(), p)));
-    }
-    out
-}
-
 impl Biomes {
     pub fn load(root: &Path) -> Result<Self> {
         let maps = Colormaps {
@@ -324,18 +297,7 @@ impl Biomes {
                 &maps,
             ));
         }
-        // Mods' biomes (a content mod's data/<ns>/worldgen/biome, as Java mods' carry them)
-        // after vanilla's, so vanilla's keep their ids.
-        for (namespace, path) in mod_biomes(root) {
-            let name = format!(
-                "{namespace}:{}",
-                path.file_stem()
-                    .and_then(|s| s.to_str())
-                    .ok_or("bad biome")?
-            );
-            let v: Value = serde_json::from_slice(&fs::read(&path)?)?;
-            list.push(BiomeInfo::from_json(name, &v, &maps));
-        }
+        java::push_mod_biomes(root, &maps, &mut list)?;
         let index = list
             .iter()
             .enumerate()

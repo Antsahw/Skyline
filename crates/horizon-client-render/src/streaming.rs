@@ -2,6 +2,8 @@
 //! around the player, closest first. The game thread owns the world and only
 //! hands immutable `Arc` snapshots to workers; results carry a sequence number
 //! so stale work is dropped.
+mod busy;
+mod java;
 use crate::fast_hash::{FxHashMap, FxHashSet};
 use crate::section_mask::SectionMask;
 use crate::{
@@ -502,11 +504,8 @@ pub struct Streaming {
     pub radius: i32,
     /// `/forceload`ed chunks: kept loaded whatever the distance.
     pub forced: HashSet<(i32, i32)>,
-    /// Chunks Java mods' chunk tickets keep (chunk loaders): loaded and ticking as forced
-    /// ones, but not `/forceload`'s (not saved, not listed). Set with [`Self::set_ticketed`].
-    ticketed: HashSet<(i32, i32)>,
-    /// `forced` and `ticketed` together, while `ticketed` has any.
-    kept: HashSet<(i32, i32)>,
+    /// Chunks Java mods' chunk tickets keep (streaming/java.rs).
+    tickets: java::Tickets,
     /// No work is scheduled while paused (title screen).
     pub paused: bool,
     /// Dimension flags: sky light, Nether face shading.
@@ -1068,8 +1067,7 @@ impl Streaming {
             center: (0, 0),
             radius: 8,
             forced: HashSet::new(),
-            ticketed: HashSet::new(),
-            kept: HashSet::new(),
+            tickets: Default::default(),
             paused: false,
             sky_light: true,
             nether_shading: false,
@@ -1552,19 +1550,6 @@ impl Streaming {
     pub fn pending(&self) -> usize {
         self.shared.queue.lock().unwrap().len()
     }
-    /// What [`Self::busy`] waits for: generating, decorating, viewing, finishing, lighting,
-    /// meshing, queued.
-    pub fn busy_parts(&self) -> [usize; 7] {
-        [
-            self.generating.len(),
-            self.decorating,
-            self.viewing.len(),
-            self.finishing.len(),
-            self.lighting.len(),
-            self.meshing.len(),
-            self.pending(),
-        ]
-    }
     /// Whether any chunk is queued or on its way from generation to a mesh.
     pub fn busy(&self) -> bool {
         self.chunks_in_flight() || !self.meshing.is_empty() || self.pending() != 0
@@ -1628,50 +1613,6 @@ impl Streaming {
     }
     /// Advance streaming: collect finished work, then schedule more.
     /// Returns meshes ready for upload and columns that were unloaded.
-    /// The chunks Java mods' tickets keep (`horizon_jvm` `Action::ChunkTickets`).
-    /// New ones are ranked for decoration and generation looks again, as `/forceload add`'s are.
-    pub fn set_ticketed(&mut self, chunks: impl IntoIterator<Item = (i32, i32)>) {
-        let chunks: HashSet<(i32, i32)> = chunks.into_iter().collect();
-        let mut new: Vec<(i32, i32)> = chunks
-            .iter()
-            .filter(|c| !self.ticketed.contains(c))
-            .copied()
-            .collect();
-        new.sort_unstable();
-        for (x, z) in new {
-            self.rank_forced(x, z, x, z);
-        }
-        self.ticketed = chunks;
-        self.refresh_kept();
-        self.generation_scan.exhausted = false;
-    }
-    /// What mods' tickets keep (see [`Self::set_ticketed`]).
-    pub fn ticketed(&self) -> &HashSet<(i32, i32)> {
-        &self.ticketed
-    }
-    /// `forced` and `ticketed` together, as the chunk tickets see them.
-    pub fn kept_chunks(&self) -> impl Iterator<Item = (i32, i32)> + '_ {
-        self.forced
-            .iter()
-            .chain(self.ticketed.iter().filter(|c| !self.forced.contains(c)))
-            .copied()
-    }
-    /// The forced chunks the ranges use (`kept` while mods' tickets add to them).
-    fn kept_or_forced(&self) -> impl Iterator<Item = &(i32, i32)> + '_ {
-        if self.ticketed.is_empty() {
-            self.forced.iter()
-        } else {
-            self.kept.iter()
-        }
-    }
-    /// `forced` changes outside Streaming (`/forceload`): the union follows each update.
-    fn refresh_kept(&mut self) {
-        self.kept.clear();
-        if !self.ticketed.is_empty() {
-            self.kept.extend(self.forced.iter().copied());
-            self.kept.extend(self.ticketed.iter().copied());
-        }
-    }
     pub fn update(
         &mut self,
         world: &mut World,
@@ -1681,9 +1622,7 @@ impl Streaming {
             return (uploads, Vec::new());
         }
         ExtraCover::refresh(&mut self.cover, &self.extra);
-        if !self.ticketed.is_empty() {
-            self.refresh_kept();
-        }
+        self.tickets.refresh(&self.forced);
         // The sweeps below walk every loaded column and proto chunk. Run them
         // at once when the view moves and every eighth tick otherwise: a
         // column can stay a little past the edge without anyone noticing.
@@ -1896,11 +1835,7 @@ impl Streaming {
                 center: self.center,
                 radius: self.radius,
                 extra: &self.extra,
-                forced: if self.ticketed.is_empty() {
-                    &self.forced
-                } else {
-                    &self.kept
-                },
+                forced: self.tickets.or(&self.forced),
                 cover: ExtraCover::matching(&self.cover, &self.extra),
                 band: self.band.as_ref(),
             };
@@ -2083,7 +2018,7 @@ impl Streaming {
         let area = (
             self.center,
             self.radius,
-            self.forced.len() + self.ticketed.len(),
+            self.forced.len() + self.tickets.len(),
         );
         if self.waiting_area != area {
             self.waiting_area = area;
@@ -2091,11 +2026,7 @@ impl Streaming {
                 center: self.center,
                 radius: self.radius,
                 extra: &self.extra,
-                forced: if self.ticketed.is_empty() {
-                    &self.forced
-                } else {
-                    &self.kept
-                },
+                forced: self.tickets.or(&self.forced),
                 cover: ExtraCover::matching(&self.cover, &self.extra),
                 band: self.band.as_ref(),
             };
@@ -2190,11 +2121,7 @@ impl Streaming {
                 center: self.center,
                 radius: self.radius,
                 extra: &self.extra,
-                forced: if self.ticketed.is_empty() {
-                    &self.forced
-                } else {
-                    &self.kept
-                },
+                forced: self.tickets.or(&self.forced),
                 cover: ExtraCover::matching(&self.cover, &self.extra),
                 band: self.band.as_ref(),
             },
@@ -2327,11 +2254,7 @@ impl Streaming {
             center: self.center,
             radius: self.radius,
             extra: &self.extra,
-            forced: if self.ticketed.is_empty() {
-                &self.forced
-            } else {
-                &self.kept
-            },
+            forced: self.tickets.or(&self.forced),
             cover: ExtraCover::matching(&self.cover, &self.extra),
             band: self.band.as_ref(),
         }

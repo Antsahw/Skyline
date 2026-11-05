@@ -197,7 +197,7 @@ pub(super) fn tesselate(
     (nether, shader_pack_lighting, separate_ao): (bool, bool, bool),
     pad: &Padded,
     water_color: u32,
-    mod_look: Option<super::ModFluid>,
+    mod_look: Option<super::java::ModFluid>,
     out: &mut SectionMesh,
     [x, y, z]: [i32; 3],
 ) {
