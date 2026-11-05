@@ -1827,7 +1827,9 @@ take"):
 - Touched outside mixins' files (small): `game.rs` (one skip in the item tick, one LevelAccess
   method), `levels.rs` (parked items accessors), horizon-world `fluids.rs`/`level/mod.rs` (the
   `liquid_interaction` hook), `HorizonLoop` (packets), `HorizonClient.useBlockFirst`.
-Regress: `createclick createitemsin createfluids` (new); see below for the rest.
+Regress (2 cores, llvmpipe): `createclick createitemsin createfluids` (new) and `create
+createmachines contraption createitems fluids kinetic scaffold pot placed eat breaksound droppers
+hud jei rei join` pass.
 Test on the PC: `regress.py --jars <folder with create-fly*.jar, fabric-api*> createclick createitemsin createfluids`;
 in-game: right-click a depot with a mechanical arm, then place it; throw iron on a depot; place
 tracks with their item and a station on them; hold sandpaper with rose quartz in the off hand.
