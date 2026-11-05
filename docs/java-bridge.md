@@ -1924,10 +1924,14 @@ Fabric: the mods are constructed and registered, and common setup runs. Nothing 
 yet: no mirror, content or screens. Plan, the Fabric/NeoForge differences, NeoForge's start
 sequence and its traps: [java-bridge-neoforge.md](java-bridge-neoforge.md). **NeoForge and FML are
 LGPL: run them, never read their source** (that page says what's allowed).
-Forge 1.12.2 (SkyFactory 4), 2026-11-04, bridge-112-research: research only, nothing runs yet.
-Plan in [java-bridge-112.md](java-bridge-112.md) (Cleanroom in the bridge's JVM, the 1.12 ↔ 26.3
-mapping, drawing, phases). `tools/java_bridge/scan112.py <mods>` measures what a 1.12 mods
-folder needs (classes only, nothing run).
+Forge 1.12.2 (SkyFactory 4): plan in [java-bridge-112.md](java-bridge-112.md) (2026-11-04,
+bridge-112-research). Phase 1 runs (2026-11-05, bridge-112-boot): Cleanroom 0.7.14-alpha boots
+hidden in the bridge's JVM from Rust (`horizon_jvm::boot112`, its own start, the Fabric path
+untouched) and reports blocks with stored states, items with subtypes, fluids, entities, biomes,
+dimensions: the fixture in ~8 s, SkyFactory 4 (217 mods) in ~90 s with 4 GB of heap.
+`tools/java_bridge/{fetch112.py,build112.sh,run112.sh}`; status and 1.12 traps on that page.
+**Cleanroom is source-available, not LGPL: run it, never read or redistribute it.**
+`tools/java_bridge/scan112.py <mods>` measures what a 1.12 mods folder needs (classes only).
 Recording and replays (2026-11-04, bridge-replay-1): ReplayMod records in single player and as a
 LAN host (the window's player), and Horizon plays its `.mcpr` recordings (`--replay FILE`).
 Flashback loads, its client command runs, but it can't record or replay yet (told at join). See

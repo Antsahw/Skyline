@@ -67,5 +67,16 @@
         "manifest_sha1": "e0c8d5ccfe8cfb38075ff1b7f6352d7b03fd7868"
       }
     }
+  },
+  "cleanroom": {
+    "version": "0.7.14-alpha",
+    "maven": "https://maven.cleanroommc.com/",
+    "installer_url": "https://maven.cleanroommc.com/com/cleanroommc/cleanroom/0.7.14-alpha/cleanroom-0.7.14-alpha-installer.jar",
+    "installer_sha256": "03e0e55217271c90792762ab4acf94f123a0a20b60a3d13932e035d40ed4daca",
+    "minecraft": "1.12.2",
+    "java_major": 25,
+    "mcp_names_url": "https://maven.minecraftforge.net/de/oceanlabs/mcp/mcp_stable/39-1.12/mcp_stable-39-1.12.zip",
+    "mcp_names_sha256": "13a31f28c11f8f395ffe7e8563ade459f5a0ee46493abbbde3ce6e9493ac4152",
+    "note": "Forge 1.12.2 for the bridge's 1.12 side (docs/java-bridge-112.md). Fetched by tools/java_bridge/fetch112.py; never committed or redistributed (CleanroomMC License 1.0: run and use allowed, public redistribution not). MCP stable_39 names (dev only, build112.sh): the 1.12 platform code is written with them and renamed to SRG."
   }
 }

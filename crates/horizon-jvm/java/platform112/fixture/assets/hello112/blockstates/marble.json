@@ -1,0 +1,5 @@
+{"variants": {
+  "variant=0": {"model": "hello112:marble_0"},
+  "variant=1": {"model": "hello112:marble_1"},
+  "variant=2": {"model": "hello112:marble_2"}
+}}

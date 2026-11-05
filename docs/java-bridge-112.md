@@ -86,14 +86,130 @@ InControl's spawn rules.
 | `WorldEvent.Load/Unload/Save`, `ServerTickEvent`, `WorldTickEvent` | 38/47/16, 37, 22 | the mirror's levels and tick |
 | `LootTableLoadEvent`, `ItemCraftedEvent`, `EntityItemPickupEvent` | 18, 16, 14 | loot, crafting result, pickup |
 
+## Phase 1 status: Cleanroom boots hidden in the bridge's JVM (2026-11-05, `bridge-112-boot`)
+
+**Runs:** Cleanroom 0.7.14-alpha (Forge 14.23.5.2864) boots inside the bridge's JVM from Rust
+(`horizon_jvm::boot112::start`), hidden: SDL's offscreen driver gives a real GL context (Mesa
+llvmpipe in the cloud), no window shows. Every mod loads (preInit, init, postInit, textures,
+models), the main menu opens, then the platform mod keeps 1.12's client thread for Horizon and
+returns a report: mods; every block with its **stored states** (the distinct
+`getStateFromMeta(0..15)` with meta, light, opacity) and FML's number; every item with its
+listed stacks (meta, translation key, client name, NBT), subtypes, max damage, stack size;
+fluids; entities; biomes; dimensions. `call(bridge, "ping")` / `"screenshot MOD PATH"` run on
+the client thread afterwards (a frame of the hidden client read back with `glReadPixels`).
+
+| Run (2-core cloud box, llvmpipe) | Start | Heap after | Peak RSS | Blocks / stored states / all states | Items / listed stacks |
+|---|---:|---:|---:|---:|---:|
+| Fixture `hello112` only | 8.1–8.6 s | 180–270 MB | – | 256 / – / – | 415 / – |
+| SkyFactory 4.2.4 server pack + Cleanroom swaps (217 mods) | 89–100 s | 3.7–4.4 GB | 5.9 GB | 2951 / 17 612 / 165 638 | 4881 / 23 949 |
+
+SF4's stored states are ~11% of its full state sets: the plan's "content blocks carry only stored
+states" holds. FML's numbers: blocks up to 2950 (of 4096), items up to 8565. 504 fluids, 308
+entities, 84 biomes, 8 dimensions (Compact Machines 144, Hunting Dimension 28885, Lost Cities 111,
+AE2 storage cells 2, Twilight Forest 7). Two block states (of 17 612) throw in their own mod's
+`getMetaFromState`: reported with `error`, not fatal.
+
+Screenshots of the hidden client (SF4's own main menu with Thermal Foundation's item icons
+drawn by 1.12's renderer; the fixture's items over vanilla's menu) were checked in the
+`bridge-112-boot` chat.
+
+**Try it** (Java 25 as `JAVA_HOME`/`HORIZON_JAVA_HOME`):
+
+```sh
+python3 -I tools/java_bridge/fetch112.py        # Cleanroom + Mojang's 1.12.2 into ~/.cache/horizon-112 (~270 MB)
+tools/java_bridge/build112.sh                   # first run: one boot to dump the compile jar (~1 min)
+tools/java_bridge/run112.sh "" report.json shot.png              # standalone: report + screenshot
+cargo test -p horizon-jvm --test boot112 -- --nocapture          # the same through Rust/JNI (passes without the cache)
+GAME=~/sf4 XMX=4500M SHOT_MOD=thermalfoundation tools/java_bridge/run112.sh "" sf4.json sf4.png   # a pack folder
+```
+
+A pack folder for `GAME=`: its `config/`, `scripts/`, `resources/`, `oresources/`, `fontfiles/`
+and `mods/` with Cleanroom's swaps. SF4 4.2.4 as tested: dropped FastFurnace, FastWorkbench,
+FoamFix, JEI, Mercurius, Forgelin, Surge, Toast Control, **SmoothFont** (see traps); added Had
+Enough Items 4.37.3, Forgelin-Continuous 2.4.20.0, Fugue 0.25.5 (Modrinth), **Scalar Legacy
+1.0.1** (CurseForge 1235372: OpenComputers and the other Scala 2.11 mods crash without it).
+Mekanism stayed the original 9.8.3 (it loads; Mekanism CE not needed to boot).
+
+**Files:**
+
+| Piece | Files |
+|---|---|
+| Rust | `crates/horizon-jvm/src/boot112.rs` (`Cleanroom`, `launch`, `args`, `start`, `call`), `tests/boot112.rs` |
+| Boot (system class path, JDK types only) | `java/dev/horizonlab/bridge/c112/Boot112.java` (in the bridge jar: `start` runs Foundation on thread "Horizon 1.12", waits for the hand-over; `call`) |
+| Platform mod `horizon112` | `java/platform112/mod/`: `Horizon112` (first client tick: hand-over, then runs Horizon's commands on the client thread forever), `Report112`, `Screenshot112` |
+| Fixture `hello112` | `java/platform112/fixture/`: marble (3 stored states, item subtypes), lamp (light 15), gem (2 subtypes, own names), wand (damageable), goo (Forge fluid); models over vanilla textures |
+| Dev tools | `java/platform112/devdump/`: `ClassDumpAgent` + `DumpMod` (the compile jar), `Remap112` (SRG ↔ MCP) |
+| Scripts | `tools/java_bridge/fetch112.py`, `build112.sh`, `run112.sh`; pins in `research-lock.json` → `cleanroom` |
+
+**How it boots.** `fetch112.py` reads the pinned installer's own `install_profile.json` and
+`version.json` (217 libraries; per-OS natives extracted; Cleanroom's universal jar; Mojang's
+client jar, which FML patches in memory from `binpatches.zip`) and writes `launch.json`.
+`boot112::start` puts the bridge jar + that class path on the JVM, sets `SDL_VIDEO_DRIVER=offscreen`
+and `ALSOFT_DRIVERS=null` (unless set), copies the platform jar to
+`<game>/horizon-java-112/horizon112-platform.jar` and passes `--mods horizon-java-112/...` (the
+player's `mods/` stays theirs), turns FML's splash off in `config/splash.properties`, and calls
+`Boot112.start(Foundation, args)` (offline `--username Horizon --accessToken 0`, FML's client
+tweaker). On the first `ClientTickEvent` the platform mod puts a `Function<String,String>` into
+the `SynchronousQueue` Boot112 left in `System.getProperties()`, then loops on its task queue:
+1.12's game loop never runs again; Horizon owns the client thread and its GL context.
+
+**How the platform code is compiled (no ForgeGradle).** 1.12 runs with SRG member names
+(`func_176203_a`) and FML deobfuscates Mojang's and Forge's classes at load time, so no jar on
+disk has the names mods are compiled against. `build112.sh` boots once with `ClassDumpAgent`
+(a `-javaagent` keeping every `net/minecraft*` class as FML defines it) while `DumpMod` loads all
+of them; the dump (~4600 classes, SRG names) is renamed to MCP names with MCP's stable_39 CSVs
+(`Remap112 deobf`). Platform and fixture code are written with MCP names like any 1.12 mod,
+compiled with `--release 8` against that jar, and renamed back to SRG (`Remap112 reobf`: each
+member found through its owner's supertypes). Both jars stay in `~/.cache/horizon-112/<ver>/dev/`:
+they hold Mojang's code, never commit them.
+
+### 1.12 traps found in phase 1
+
+- **A mod class on the system class path never gets its events.** The first dump mod sat in the
+  `-javaagent` jar (system class path): `@Mod.EventHandler` and `@SubscribeEvent` methods were
+  silently never called (its annotations resolve against the app loader's Forge classes, FML
+  looks for Foundation's). Keep mod code out of the system class path; `Boot112` uses JDK types
+  only and the hand-over crosses through `System.getProperties()`.
+- **Forge's universal jar names Mojang's classes obfuscated** (`aow` = `Block`): compiling
+  against it fails. Compile against the runtime dump, which has Forge's classes as FML transforms
+  them.
+- **FML's splash waits for a click** (`SplashProgress.confirm`) when Fugue/Scalar are missing:
+  the boot hangs forever. `splash.properties enabled=false` (also one GL thread fewer).
+- **OpenAL can't open a device headless**: 1.12 waits 30 s for its sound system, then goes
+  silent. `ALSOFT_DRIVERS=null` opens OpenAL Soft's null device at once.
+- **LWJGL aborts the whole process** on a GL call with no current context ("FATAL ERROR in native
+  method … The JVM will abort"): SmoothFont rasterises fonts on its own thread, which relies on a
+  context it doesn't have with the splash off. In Horizon that kills the game, not just 1.12:
+  dropped from SF4 for now; later give such threads a shared context or catch them first.
+- **A crash report ends the process** (FML exits after "Game crashed!", as with the missing Scala
+  library). Phase 2 must stop 1.12's exits from taking Horizon down.
+- **`--mods` paths are relative to the game folder**; an absolute path is ignored silently ("Found
+  mods from the command line:" with nothing after it).
+- **Mods without `pack.mcmeta` need `en_US.lang`** (FML's LegacyV2Adapter asks for the old name);
+  with `pack_format: 3`, `en_us.lang`. The fixture has a `pack.mcmeta`.
+- **Memory:** SF4 needs ~4.5 GB of heap; `-Xmx6G` + llvmpipe got the JVM OOM-killed on an 8 GB box.
+  On the player's machine 1.12 shares Horizon's process, so its heap adds to Horizon's.
+- FML's version check calls out to the network at start (harmless; turn off later in `forge.cfg`).
+- Cleanroom prints a big "Fugue and Scalar are not installed" warning with the fixture only:
+  harmless (`config/forge_early.cfg` turns it off).
+
+**Next (phase 2, `placed112`):** content conversion from this report (stored states → content
+blocks, listed stacks → items, baked quads + the 1.12 atlas → models), the vanilla mapping both
+ways, and a game-side switch (`HORIZON_112=<install>` like `HORIZON_NEOFORGE`) that starts
+`boot112` instead of Fabric; stop FML's `exit` on a crash first.
+
 ## Cleanroom in the bridge's JVM
 
 What it is: Cleanroom = CleanroomLoader (FML's continuation) + patched Minecraft + Forge, with
 classes loaded by **Foundation** (a LaunchWrapper replacement: `top.outlands.foundation.boot
 .Foundation.main` with `--tweakClass net.minecraftforge.fml.common.launcher.FMLTweaker` or
 `FMLServerTweaker`), LWJGL 3.4.3 with **LWJGLY** (the LWJGL 2 API on LWJGL 3) and SDL 3 windows.
-It can run as a dedicated server too. Licence: Forge's (LGPL-2.1). It needs Mojang's 1.12.2
-jar, fetched like 26.3's (after sign-in, pinned in `research-lock.json`, never committed).
+It can run as a dedicated server too. **Licence: not LGPL.** Cleanroom's maven POM (0.7.14-alpha)
+says *CleanroomMC License 1.0*, "visible-source, not open source": running and using it is
+allowed, public redistribution of its jars is not, and CONTRIBUTING.md puts its source off
+limits (custom licence). So the player's machine downloads it from Cleanroom's maven, the bridge
+runs it as it is, and nobody reads its source. It needs Mojang's 1.12.2 jar, fetched like 26.3's
+(pinned in `research-lock.json`, never committed).
 
 How it would boot here:
 
