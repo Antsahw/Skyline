@@ -17,6 +17,8 @@ use std::{collections::HashMap, fs, io, path::Path, sync::Arc};
 #[path = "data/cache.rs"]
 mod cache;
 pub(super) use cache::set_dir as set_cache_dir;
+#[path = "data/streaming.rs"]
+mod streaming;
 
 /// Per-state flags read from vanilla accessors over an empty level.
 pub mod state_flags {
@@ -664,19 +666,6 @@ pub(super) fn load_with_gameplay<G: GameplayStateSource>(
     })
 }
 
-/// [`load_with_gameplay`] reading `block-behaviours.json` only when the snapshot misses (the
-/// caller need not keep its tree: a modded pack's ran to hundreds of MB).
-pub(super) fn load_with_gameplay_from_file<G: GameplayStateSource>(
-    registry: &BlockRegistry,
-    root: &Path,
-    gameplay_states: &[G],
-) -> io::Result<Behaviours> {
-    cached(registry, root, || {
-        let behaviour = read_json(&root.join("block-behaviours.json"))?;
-        build_with_gameplay(registry, root, &behaviour, gameplay_states)
-    })
-}
-
 /// The snapshot when it matches, else `build` and refresh the snapshot.
 fn cached(
     registry: &BlockRegistry,
@@ -701,114 +690,8 @@ fn build_with_behaviour_json(
     root: &Path,
     behaviour: &Value,
 ) -> io::Result<Behaviours> {
-    let gameplay = read_gameplay(&root.join("gameplay-facts.json"))?;
+    let gameplay = streaming::read_gameplay(&root.join("gameplay-facts.json"))?;
     build_with_gameplay(registry, root, behaviour, &gameplay.states)
-}
-
-/// `gameplay-facts.json`'s fields the behaviour tables read ([`GameplayStateSource`]), streamed
-/// from the file: the rest of each row (outline edges, the other sounds: most of the file) is
-/// skipped as it is read. As a JSON tree the file took ten times its size (3.4 GB for 208k
-/// states, a modded pack's), though the tables keep only tens of MB.
-fn read_gameplay(path: &Path) -> io::Result<GameplayFile> {
-    let file = io::BufReader::with_capacity(1 << 20, std::fs::File::open(path)?);
-    serde_json::from_reader(file).map_err(|e| invalid(format!("{}: {e}", path.display())))
-}
-
-#[derive(serde::Deserialize)]
-struct GameplayFile {
-    states: Vec<GameplayRow>,
-}
-
-/// One state's gameplay row, as [`GameplayStateSource for Value`] reads it (missing fields:
-/// false, 0, "", a sound's 1.0).
-#[derive(serde::Deserialize, Default)]
-#[serde(default)]
-struct GameplayRow {
-    replaceable: bool,
-    random_ticks: bool,
-    solid_render: bool,
-    liquid: bool,
-    block_entity: bool,
-    ignited_by_lava: bool,
-    can_occlude: bool,
-    full_collision: bool,
-    skylight_down: bool,
-    requires_tool: bool,
-    shape_occlusion: bool,
-    emission: u64,
-    dampening: u64,
-    hardness: f64,
-    push: Box<str>,
-    sound: GameplaySound,
-}
-
-#[derive(serde::Deserialize, Default)]
-#[serde(default)]
-struct GameplaySound {
-    volume: Option<f64>,
-    pitch: Option<f64>,
-    place: Option<SoundId>,
-    #[serde(rename = "break")]
-    break_sound: Option<SoundId>,
-    fall: Option<SoundId>,
-}
-
-#[derive(serde::Deserialize)]
-struct SoundId {
-    id: Box<str>,
-}
-
-impl GameplayStateSource for GameplayRow {
-    fn flag(&self, name: &str) -> bool {
-        match name {
-            "replaceable" => self.replaceable,
-            "random_ticks" => self.random_ticks,
-            "solid_render" => self.solid_render,
-            "liquid" => self.liquid,
-            "block_entity" => self.block_entity,
-            "ignited_by_lava" => self.ignited_by_lava,
-            "can_occlude" => self.can_occlude,
-            "full_collision" => self.full_collision,
-            "skylight_down" => self.skylight_down,
-            "requires_tool" => self.requires_tool,
-            "shape_occlusion" => self.shape_occlusion,
-            _ => false,
-        }
-    }
-    fn unsigned(&self, name: &str) -> u64 {
-        match name {
-            "emission" => self.emission,
-            "dampening" => self.dampening,
-            _ => 0,
-        }
-    }
-    fn number(&self, name: &str) -> f64 {
-        if name == "hardness" {
-            self.hardness
-        } else {
-            0.0
-        }
-    }
-    fn text(&self, name: &str) -> &str {
-        if name == "push" { &self.push } else { "" }
-    }
-    fn sound_number(&self, name: &str) -> f64 {
-        match name {
-            "volume" => self.sound.volume,
-            "pitch" => self.sound.pitch,
-            _ => None,
-        }
-        .unwrap_or(1.0)
-    }
-    fn sound_id(&self, name: &str) -> &str {
-        match name {
-            "place" => self.sound.place.as_ref(),
-            "break" => self.sound.break_sound.as_ref(),
-            "fall" => self.sound.fall.as_ref(),
-            _ => None,
-        }
-        .map_or("", |s| &s.id)
-    }
 }
 
 fn build_with_gameplay<G: GameplayStateSource>(

@@ -31,6 +31,8 @@ use std::{
     sync::Arc,
 };
 
+mod unsupported;
+
 pub const STEPS: [&str; 11] = [
     "raw_generation",
     "lakes",
@@ -551,30 +553,6 @@ impl StructureRegistry {
         self.sets
             .iter()
             .any(|set| matches!(set.placement, Placement::DimensionOrigin))
-    }
-
-    /// The structures the sets `sets` (indices) may place that Horizon can't generate: a
-    /// structure type of a mod's own (Friends & Foes' citadel), or a set placed in a way
-    /// Horizon doesn't know. (structure, its type or its set's placement), once each, in
-    /// the sets' order.
-    pub fn unsupported(&self, sets: &[usize]) -> Vec<(String, String)> {
-        let mut out: Vec<(String, String)> = Vec::new();
-        for set in sets.iter().filter_map(|&i| self.sets.get(i)) {
-            for &(index, _) in &set.structures {
-                let def = &self.structures[index];
-                let why = match &def.kind {
-                    StructureKind::Unsupported(kind) => kind.clone(),
-                    _ if matches!(set.placement, Placement::Unsupported) => {
-                        format!("{} placement", set.name)
-                    }
-                    _ => continue,
-                };
-                if !out.iter().any(|(name, _)| *name == def.name) {
-                    out.push((def.name.clone(), why));
-                }
-            }
-        }
-        out
     }
     /// ChunkGeneratorStructureState.generatePositions: the ring positions of
     /// each concentric-ring set among `possible_sets` before their biome
@@ -1585,6 +1563,7 @@ pub fn place_in_chunk<W: FeatureWorld + PlacementContext, R: RandomSource + 'sta
 mod tests {
     use super::*;
     use serde_json::json;
+    mod unsupported;
 
     fn registry(structures: &[(&str, Value)], sets: &[(&str, Value)]) -> StructureRegistry {
         let text = |l: &[(&str, Value)]| {
@@ -1712,58 +1691,6 @@ mod tests {
         assert!(r.is_structure_chunk(&r.sets[set(&r, "t:other")], 0, 2, 2, &Rings::new()));
         assert!(r.is_structure_chunk(&r.sets[set(&r, "t:origin")], 0, 2, 2, &Rings::new()));
         assert!(!r.is_structure_chunk(&r.sets[set(&r, "t:origin")], 0, 3, 2, &Rings::new()));
-    }
-
-    #[test]
-    fn unsupported_lists_mod_structure_types_of_the_sets_given() {
-        let spread = |structures: Value| {
-            json!({"structures": structures, "placement": {"type": "minecraft:random_spread",
-                "spacing": 8, "separation": 2, "salt": 1}})
-        };
-        let one = |s: &str| json!([{"structure": s, "weight": 1}]);
-        let r = registry(
-            &[
-                (
-                    "faf:citadel",
-                    json!({"type": "faf:citadel_structure", "biomes": "#t:one"}),
-                ),
-                (
-                    "faf:shack",
-                    json!({"type": "faf:shack_structure", "biomes": "#t:one"}),
-                ),
-                (
-                    "t:igloo",
-                    json!({"type": "minecraft:igloo", "biomes": "#t:one"}),
-                ),
-                (
-                    "t:far",
-                    json!({"type": "minecraft:igloo", "biomes": "#t:two"}),
-                ),
-            ],
-            &[
-                (
-                    "faf:a",
-                    spread(json!([{"structure": "faf:citadel", "weight": 1},
-                    {"structure": "t:igloo", "weight": 1}])),
-                ),
-                ("faf:b", spread(one("faf:shack"))),
-                ("t:igloos", spread(one("t:igloo"))),
-                (
-                    "t:odd",
-                    json!({"structures": one("t:far"),
-                    "placement": {"type": "mod:own_placement", "salt": 2}}),
-                ),
-            ],
-        );
-        let index = |name: &str| r.sets.iter().position(|s| s.name == name).unwrap();
-        assert_eq!(
-            r.unsupported(&[index("faf:a"), index("t:igloos"), index("t:odd")]),
-            [
-                ("faf:citadel".to_owned(), "faf:citadel_structure".to_owned()),
-                ("t:far".to_owned(), "t:odd placement".to_owned()),
-            ]
-        );
-        assert!(r.unsupported(&[index("t:igloos")]).is_empty());
     }
 
     #[test]

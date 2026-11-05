@@ -102,6 +102,7 @@ pub mod ticks;
 
 mod bonemeal;
 mod buckets;
+mod caller_precipitation;
 mod creaking;
 mod falling;
 mod feature_world;
@@ -810,15 +811,6 @@ impl Behaviours {
         data::load_with_gameplay(registry, resources_dir, behaviour, gameplay)
     }
 
-    /// [`Self::load_with_gameplay`], `block-behaviours.json` read only when the snapshot misses.
-    pub fn load_with_gameplay_from_file<G: GameplayStateSource>(
-        registry: &BlockRegistry,
-        resources_dir: &Path,
-        gameplay: &[G],
-    ) -> io::Result<Self> {
-        data::load_with_gameplay_from_file(registry, resources_dir, gameplay)
-    }
-
     pub fn load_with_behaviour_json(
         registry: &BlockRegistry,
         resources_dir: &Path,
@@ -962,16 +954,6 @@ impl Behaviours {
     /// A player breaking a block (`playerWillDestroy` + `Level.destroyBlock`
     /// without drops; the caller handles the player's loot/tool). Double
     /// blocks (doors, tall plants, beds) remove their other half as vanilla.
-    /// `ServerLevel.tickPrecipitation` at a column whose top and biome answers the caller
-    /// has (a Java mod's seasons answer them: horizon-client's Java mods).
-    pub fn precipitation_tick_with<L: LevelAccess + ?Sized>(
-        &self,
-        level: &mut L,
-        ticks: &mut Ticks,
-        info: Precipitation,
-    ) {
-        self.sim(level, ticks).precipitation_tick(info);
-    }
     pub fn player_destroy_block<L: LevelAccess + ?Sized>(
         &self,
         level: &mut L,

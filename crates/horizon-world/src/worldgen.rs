@@ -51,6 +51,7 @@ pub mod material_condition;
 pub mod material_extensions;
 pub mod material_stage;
 pub mod material_surface;
+mod noise_seed;
 pub mod ore_feature;
 pub mod overrides;
 pub mod placement;
@@ -80,6 +81,7 @@ pub mod vines;
 pub mod weighted;
 pub mod write_zone;
 use horizon_core::noise::{NoiseBuildError, NormalNoise, Normalization};
+pub use noise_seed::noise_seed;
 use serde_json::value::RawValue;
 use std::collections::BTreeMap;
 
@@ -219,14 +221,6 @@ fn double_range(
 /// Decode Java Edition 26.3's direct normal-noise parameters from strict JSON.
 /// Numeric tokens retain their decimal text; all rounding occurs at the target
 /// numeric width. Unknown object fields are ignored, as in vanilla's codec.
-/// The identifier a noise's random is hashed from when a mod seeds it under another than its
-/// own: `"horizon_seed"`, written by the Java bridge's noise export (Tectonic seeds
-/// `tectonic:parameter/<x>` as `minecraft:<x>`). None: its own.
-pub fn noise_seed(json: &str) -> Option<String> {
-    let value: serde_json::Value = serde_json::from_str(json).ok()?;
-    value.get("horizon_seed")?.as_str().map(str::to_owned)
-}
-
 pub fn decode_noise(json: &str) -> Result<NormalNoise, DecodeError> {
     let object: Object = serde_json::from_str(json)?;
     let base = int_range(required(&object, "base_octave")?, "base_octave", -32, 32)?;

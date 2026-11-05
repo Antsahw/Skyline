@@ -62,14 +62,17 @@ impl SeededContext {
         if let Some(noise) = instances.get(&id) {
             return Ok(noise.clone());
         }
-        let seed = entry.seed.as_deref().unwrap_or(&entry.name);
         let noise: Arc<dyn Noise> = match &self.factory {
-            Factory::Legacy(factory) => {
-                Arc::new(entry.definition.create(&mut factory.from_hash_of(seed))?)
-            }
-            Factory::Xoroshiro(factory) => {
-                Arc::new(entry.definition.create(&mut factory.from_hash_of(seed))?)
-            }
+            Factory::Legacy(factory) => Arc::new(
+                entry
+                    .definition
+                    .create(&mut factory.from_hash_of(entry.seed()))?,
+            ),
+            Factory::Xoroshiro(factory) => Arc::new(
+                entry
+                    .definition
+                    .create(&mut factory.from_hash_of(entry.seed()))?,
+            ),
         };
         instances.insert(id, noise.clone());
         Ok(noise)

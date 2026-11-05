@@ -7,7 +7,6 @@ use super::{
     update::{HORIZONTAL, above, below, rel},
 };
 use crate::{fluid::FluidKind, registry::BlockStateId};
-
 use horizon_core::{
     geometry::Direction,
     position::{BlockPos, ChunkPos},
