@@ -2391,6 +2391,7 @@ mod run {
                 kind,
                 attacker: by.and_then(|b| u32::try_from(b).ok()).map(Who::Mob),
                 from,
+                attacker_species: None,
             };
             let hurt = |m: &mut horizon_client::mobs::Mob| {
                 if !m.alive() || m.removed {

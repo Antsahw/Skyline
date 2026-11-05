@@ -1517,6 +1517,20 @@ Found in upstream sync 5 (2026-11-04, upstream `73d3ee3d2`):
   takes the set.
 - `horizon-world`'s `level/data.rs` no longer imports `File` (`std::fs::File` in ours).
 
+Found in upstream sync 6 (2026-11-05, upstream `41d5649ed`, 1539 commits):
+- **Mods' chunk tickets are upstream's `Streaming::mod_forced`** (native mods' NeoForge-style
+  tickets). Our separate `ticketed`/`kept` union is gone: `set_ticketed` (Java's tickets) now
+  adds and removes its own share in `mod_forced` and remembers it in `ticketed` to see what was
+  dropped. A chunk both a native and a Java mod hold is dropped when either lets go.
+- `Hub::open_container` takes `extra` (a `horizon:menu_extra` payload, sent only for a placed
+  container); our `open_unplaced_container` passes `None`.
+- Synced registries are NBT now (`Entries.data: Vec<Tag>`): mods' biome JSON goes through
+  `json_to_nbt`.
+- `Damage` has `attacker_species`; `MotionWorld` has `health` (`&game.health_resources`);
+  `Screen::JavaMod` must be in `debug_options_interrupts` (F3+F6 closes it, as `Mod`).
+- `game.rs`: moving pistons tick in their own `tick_moving_pistons`; `java_random_ticks` stays
+  right after the random ticks. Upstream's game-master-block check runs after `java_break`.
+
 - **Loot tables are parsed on first use** (`horizon_world::loot::LootTables`): the
   `native_loot_table_load` hook runs then, not at world load. Code that changes a table's file
   after reading it keeps the parsed copy.
