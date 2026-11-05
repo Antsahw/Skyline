@@ -2454,9 +2454,8 @@ player turns them on**, per instance:
   before Play; when it can't be had, Play refuses and says why instead of starting the plain game.
   Off: the plain build, no tab, `--java-mods` never passed, whatever `mods-java/` holds.
 - **CLI:** `horizon-launcher java-mods on|off|status [--instance X]`, and
-  `java-mods use-build <horizon-client> [--version TAG]` for a Java mods build of your own (no
-  release has `-java` assets yet: nightly-build.yml doesn't call game-build.yml with
-  `java_mods`, the maintainer's call). `instance list --json` has `java_mods`.
+  `java-mods use-build <horizon-client> [--version TAG]` for a Java mods build of your own
+  (upstream's releases have no `-java` assets; the fork's `java-mods` release does: below). `instance list --json` has `java_mods`.
 - **Tested headless:** `tools/java_bridge/launcher_switch_test.py --launcher <horizon-launcher>`
   (stand-in programs: off by default, plain program with jars in `mods-java/`; on with no build:
   Play refuses; `use-build`; off again). Its Play checks stop at the owner gate in a scratch home
@@ -2469,8 +2468,53 @@ player turns them on**, per instance:
   the process, no `.local/bridge` (nothing of Fabric's downloaded) and no Java runtime fetched;
   with `--java-mods`: Fabric and Farmer's Delight load, `/give @s farmersdelight:cooking_pot` works.
 
-What is left: release builds with `java-mods` published beside the plain ones (`-java` assets in
-the signed SHA256SUMS), which the maintainer turns on.
+Upstream's releases still carry no `-java` assets (the maintainer's call); until they do, the fork
+publishes its own (below).
+
+### Fabric mods releases (2026-11-05, bridge-release-1)
+
+Testers no longer build: the fork publishes **the `java-mods` pre-release** on iaxivers/horizon
+(`.github/workflows/java-mods-release.yml`), and the fork's launcher installs from it.
+- **Opt-in:** runs only in iaxivers/horizon, only when asked: push the commit to the branch
+  `java-mods-build` (`git push -f origin java-bridge:java-mods-build`), or a tag
+  `java-mods-build-<x>` on it, or `gh workflow run "java mods release" --ref java-bridge -f dry_run=false` (dispatch needs the
+  file on the default branch; the tag doesn't). Without the signing key it is a dry run.
+- **What it builds,** on GitHub's runners (no Minecraft jar there): the game with `java-mods` and
+  `HORIZON_BRIDGE_PLATFORM=source` (`horizon-{linux-x86_64,windows-x64}-java`, only
+  `horizon-client` + licences: the launcher plays it with the version's own tools and prepared
+  files; the package step fails on any other file), and the fork's launcher
+  (`horizon-launcher-{linux-x86_64.tar.gz,windows-x64.zip}`) built with
+  `HORIZON_LAUNCHER_NO_SELF_UPDATE` (compile time: `self_update_allowed`), so it never replaces
+  itself with upstream's, which has no switch. `java-mods.json`: the commit and the preparation
+  format (`horizon_prepare::OUTPUT_VERSION`) the build reads.
+- **Signed like the Nightly,** with the fork's own key for the `java-mods` channel (message
+  `horizon release java-mods`): secret `JAVA_MODS_SIGNING_KEY`, public half in
+  `launcher/java-mods-keys.txt` (never upstream's release-keys.txt). The sign job checks out only
+  `tools/ci/sign_release.sh`; publish verifies as launchers do, then replaces the release.
+  Set up once: `cargo run -q -p horizon-release-sign -- keygen --public-out java-mods.pub | gh secret
+  set JAVA_MODS_SIGNING_KEY -R iaxivers/horizon`, commit java-mods.pub's line in the keys file.
+  Sign-in needs the repository variable `HORIZON_MSA_CLIENT_ID` (as launcher.yml).
+- **The launcher** (`launcher/src/java_release.rs`, `java_variant::install_from_fork`): when the
+  version's own release has no `-java` build, past the owner gate, it takes the fork's: the
+  manifest's checksum, the archive's, both from SHA256SUMS signed by a key in java-mods-keys.txt,
+  and only if the installed version prepares the manifest's format (`fits`; else "install a
+  newer/older version"). The install marker (`java/.installed`) names `iaxivers/horizon@<commit>`;
+  before each Play (`ensure`) such a build is replaced by a newer one that fits (best effort). A
+  `use-build` build has an empty marker and is never replaced.
+- **Tested:** launcher unit tests `java_release::` (signed by a listed key for the channel; other
+  keys, the nightly channel, no key, a swapped manifest refused; format check). The workflow on
+  GitHub, dry run (branch `java-mods-build`, run 41995308602, ~45 min): both builds, both
+  launchers, signed with a throwaway key and verified; the Linux `-java` artifact played headless
+  here as the launcher installs it (`GAME=<it> tools/java_bridge/install_test.sh`): its platform
+  mod built from sources against the local 26.3, Fabric and Farmer's Delight loaded,
+  `/give @s farmersdelight:cooking_pot` held. Not tested: the launcher's download from a published
+  release (none until the key is set up), Windows' `-java` playing.
+- **Trap (release profile, llvmpipe):** `horizon-ctl … status` polled while a *fresh* game folder's
+  first start loads (install_test's `--wait`) segfaults the release build right after "control
+  socket" (no hs_err; the fast build doesn't; a direct start without polling, or the second start,
+  plays). Under gdb the SEGV shows in `vkEnumeratePhysicalDevices` (Mesa's device-select layer)
+  with the JVM up. Harness-only as far as seen (players don't poll the socket); not fixed. Work
+  around: start once without `--wait`, then test.
 
 ### Launcher only (2026-11-04, bridge-launcher-only)
 

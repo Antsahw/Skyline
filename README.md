@@ -59,15 +59,14 @@ How it works, the tick flow, 26.3 traps and the test tools: **[docs/java-bridge.
 
 ### Try it
 
-**Through the Horizon launcher only, signed in with a Microsoft account that owns Minecraft: Java Edition.** Nothing for the mods (the Fabric mods build, Java 25) is downloaded before that sign-in, and there is no offline way to play them. No release carries the Fabric mods build yet, so build the fork's game and launcher:
+**Through the Horizon launcher only, signed in with a Microsoft account that owns Minecraft: Java Edition.** Nothing for the mods (the Fabric mods build, Java 25) is downloaded before that sign-in, and there is no offline way to play them.
 
-```sh
-git clone -b java-bridge https://github.com/iaxivers/horizon && cd horizon
-cargo build --profile fast -p horizon-client --features horizon-client/java-mods
-cd launcher && cargo build --release && cd ..     # Fedora needs libxkbcommon-x11-devel
-```
+1. Download the fork's launcher from **[the `java-mods` release](https://github.com/iaxivers/horizon/releases/tag/java-mods)**: `horizon-launcher-linux-x86_64.tar.gz` or `horizon-launcher-windows-x64.zip`. It has the Fabric switch, and never updates itself into the main launcher.
+2. Start it, sign in, install a Horizon version and let it prepare from your Minecraft 26.3.
+3. Turn on **Fabric 26.3 mods (beta)** under **Launch…**: the launcher downloads the Fabric mods game build from the same release (signed, checked like the game) and Java 25 if you have none.
+4. Add jars in the **Java mods** tab and press **Play**.
 
-Start `launcher/target/release/horizon-launcher` with `HORIZON_LAUNCHER_NO_SELF_UPDATE=1`, sign in, install and prepare a Horizon version, then `horizon-launcher java-mods use-build target/fast/horizon-client`, turn on **Fabric 26.3 mods (beta)** under **Launch…**, add jars in the **Java mods** tab and press **Play**. Every step: the **[testers' guide](docs/java-bridge-beta.md)**.
+Every step: the **[testers' guide](docs/java-bridge-beta.md)**. From source instead: `git clone -b java-bridge https://github.com/iaxivers/horizon`, `cargo build --profile fast -p horizon-client --features horizon-client/java-mods`, build `launcher/`, then `horizon-launcher java-mods use-build target/fast/horizon-client`.
 
 **Tests:** `python3 tools/java_bridge/regress.py --jars <jars>` plays every scene that once worked, headless, with screenshots; `--pack <mods folder> bigpack` plays a whole pack. Add `HORIZON_JAVA_PROFILE=1` to see what the mods cost each tick.
 

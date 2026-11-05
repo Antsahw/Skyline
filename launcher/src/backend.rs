@@ -1440,7 +1440,7 @@ fn resources_compatible(from: &Path, to: &Path, manifest: &serde_json::Value) ->
 /// The `OUTPUT_VERSION` of a version folder's preparer: the constant in its sources, or for a
 /// preparer from before it, the number `LEGACY_OUTPUT_VERSIONS` gives its fingerprint. None for
 /// an unknown older preparer.
-fn output_version_at(dir: &Path) -> Option<u32> {
+pub(crate) fn output_version_at(dir: &Path) -> Option<u32> {
     output_version_in(dir, &LEGACY_OUTPUT_VERSIONS)
 }
 
@@ -3297,7 +3297,11 @@ fn launcher_asset_running_from(appimage: bool) -> Option<&'static str> {
 
 /// Development builds and `HORIZON_LAUNCHER_NO_SELF_UPDATE` never replace themselves.
 pub fn self_update_allowed() -> bool {
-    !cfg!(debug_assertions) && std::env::var_os("HORIZON_LAUNCHER_NO_SELF_UPDATE").is_none()
+    // A build with HORIZON_LAUNCHER_NO_SELF_UPDATE set at compile time (the java-bridge fork's
+    // launcher, java-mods-release.yml) never replaces itself with the main repository's.
+    !cfg!(debug_assertions)
+        && option_env!("HORIZON_LAUNCHER_NO_SELF_UPDATE").is_none()
+        && std::env::var_os("HORIZON_LAUNCHER_NO_SELF_UPDATE").is_none()
 }
 
 /// The version in `horizon-launcher --version`'s output (`horizon-launcher 0.1.5`).

@@ -1,0 +1,6 @@
+# Public keys the java-bridge fork's Fabric mods builds (release `java-mods`, java_release.rs) are
+# signed with: one base64 Ed25519 key per line. Never the main release keys (release-keys.txt).
+# A new key (docs/java-bridge.md, "Fabric mods releases"):
+#   cargo run -q -p horizon-release-sign -- keygen --public-out java-mods.pub \
+#     | gh secret set JAVA_MODS_SIGNING_KEY -R iaxivers/horizon
+# then add java-mods.pub's line below.

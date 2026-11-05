@@ -24,6 +24,7 @@ pub mod instances_mrpack;
 pub mod java;
 pub mod java_launch;
 pub mod java_mods;
+pub mod java_release;
 pub mod java_variant;
 pub mod launch;
 pub mod loaders;

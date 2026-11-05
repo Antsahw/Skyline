@@ -8,6 +8,7 @@
 # game jar and libraries, and fetches Fabric's libraries. Steps see G (horizon-ctl); a
 # screenshot after each in OUT (default /tmp): install-N.png.
 #   MODS=~/mods/fd tools/java_bridge/install_test.sh 'sleep 3'
+#   GAME=<horizon-client> ...: that game binary (a release's -java build) instead of target/fast
 #   KEEP_JAVA=1 ...: leave the PATH's Java (only the install layout is tested)
 #   NO_JAVA=1 ...: no Java passed and none to find: the game downloads none (that's the
 #   launcher's, after its sign-in) and says why the mods didn't start
@@ -29,7 +30,7 @@ I=$(mktemp -d /tmp/hz-install.XXXX); echo "$I" > /tmp/hz-bridge-install
 # The install: the game binary (its bridge jars built in) and what a preparation leaves.
 mkdir -p "$I/version/.local/minecraft/$V" "$I/version/.local/horizon-client" "$I/home/mods-java" \
   "$I/lh" "$I/data" "$I/conf"
-cp "$R/target/fast/horizon-client" "$I/version/horizon-client"
+cp "${GAME:-$R/target/fast/horizon-client}" "$I/version/horizon-client"
 cp "$R/research-lock.json" "$I/version/"
 for f in jars libraries manifest.json; do ln -s "$R/.local/minecraft/$V/$f" "$I/version/.local/minecraft/$V/$f"; done
 ln -s "$R/.local/horizon-client/$V" "$I/version/.local/horizon-client/$V"
