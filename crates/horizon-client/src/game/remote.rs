@@ -4676,19 +4676,31 @@ impl Game<'_> {
                 }
             }
             C::OpenScreen(p) => self.remote_open_screen(p),
-            C::CustomPayload(p) if p.channel == super::java_screen::CONFIG_MODS => {
+            C::CustomPayload(p)
+                if p.channel == super::java_screen::CONFIG_MODS
+                    && !super::java_screen::own_java_client() =>
+            {
                 self.remote_java_config_mods(&p.data)
             }
-            C::CustomPayload(p) if p.channel == super::java_screen::OVERLAY_CHANNEL => {
+            C::CustomPayload(p)
+                if p.channel == super::java_screen::OVERLAY_CHANNEL
+                    && !super::java_screen::own_java_client() =>
+            {
                 self.remote_java_overlay(&p.data)
             }
-            C::CustomPayload(p) if p.channel == super::java_screen::HUD_CHANNEL => {
+            C::CustomPayload(p)
+                if p.channel == super::java_screen::HUD_CHANNEL
+                    && !super::java_screen::own_java_client() =>
+            {
                 self.remote_java_hud(&p.data)
             }
             C::CustomPayload(p) if p.channel == super::java_screen::CHANNEL => {
                 self.remote_java_screen(&p.data)
             }
-            C::CustomPayload(p) if p.channel == super::java_screen::KEYS => {
+            C::CustomPayload(p)
+                if p.channel == super::java_screen::KEYS
+                    && !super::java_screen::own_java_client() =>
+            {
                 self.remote_java_keys(&p.data)
             }
             C::CustomPayload(p) if p.channel == super::java_entities::CHANNEL => {

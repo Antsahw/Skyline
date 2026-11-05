@@ -34,6 +34,14 @@ public final class HorizonDeviceMods {
         "alcCaptureOpenDevice", "alcOpenDevice", "javax/sound/sampled/TargetDataLine",
     };
 
+    /**
+     * HORIZON_JAVA_OWN_CLIENT=1: every mod's client half runs in each player's own game, as in
+     * vanilla (one client a process), not only the device mods'. A server's headless client then
+     * runs none of a guest's client (its ticks, HUD, key handlers), and a game connected to
+     * another's server runs all of its mods' client code for its player.
+     */
+    static final boolean OWN_CLIENT = "1".equals(System.getenv("HORIZON_JAVA_OWN_CLIENT"));
+
     private static volatile Set<String> mods;
     private static Thread scan;
 
@@ -94,6 +102,7 @@ public final class HorizonDeviceMods {
                 Natives.log("Java mods: couldn't read " + id + "'s classes for device use: " + t);
             }
         }
+        if (OWN_CLIENT) Natives.log("Java mods: every mod's client half runs in each player's own game");
         if (!out.isEmpty()) {
             Natives.log("Java mods: " + String.join(", ", out) + " use the player's own sound devices: their client half"
                     + " runs in each player's own game");
@@ -138,6 +147,18 @@ public final class HorizonDeviceMods {
      * (or when no player's client runs).
      */
     public static boolean runs(String mod) {
+        if (OWN_CLIENT) {
+            // A server's headless client runs none of the client of a player whose own game runs
+            // it; everything else runs as before (this game's own player, players whose game
+            // runs none, and in a game connected to another's server, its own player's client).
+            var mc = net.minecraft.client.Minecraft.getInstance();
+            var player = mc == null ? null : mc.player;
+            boolean theirs = player != null && RUN_THEIR_OWN.contains(player.getUUID());
+            if (theirs && DEBUG && SAID.add(mod + " " + player.getUUID())) {
+                Natives.log("device mods: " + mod + " is left out for " + player.getUUID() + " (their own game runs it)");
+            }
+            if (theirs) return false;
+        }
         if (mods().isEmpty()) return true;
         boolean device = mod != null && mods().contains(mod);
         if (HorizonDeviceClient.on()) return device;
@@ -156,7 +177,7 @@ public final class HorizonDeviceMods {
 
     /** {@link #runs} for code of a class (a listener, a lambda's class). */
     public static boolean runs(Class<?> owner) {
-        if (mods().isEmpty() && !HorizonDeviceClient.on()) return true;
+        if (!OWN_CLIENT && mods().isEmpty() && !HorizonDeviceClient.on()) return true;
         String name = owner.getName();
         int lambda = name.indexOf("$$");
         String mod = HorizonFailures.modOf(lambda > 0 ? name.substring(0, lambda) : name);
@@ -166,7 +187,7 @@ public final class HorizonDeviceMods {
 
     /** {@link #runs} for a mixin's handler merged into a game class. */
     public static boolean runs(Method handler) {
-        if (mods().isEmpty() && !HorizonDeviceClient.on()) return true;
+        if (!OWN_CLIENT && mods().isEmpty() && !HorizonDeviceClient.on()) return true;
         MixinMerged merged = handler.getAnnotation(MixinMerged.class);
         if (merged == null) return runs(handler.getDeclaringClass());
         return runs(HorizonFailures.modOf(merged.mixin()));
@@ -174,6 +195,9 @@ public final class HorizonDeviceMods {
 
     /** The mod a payload channel is for: its namespace when that is a device mod's id. */
     static boolean deviceChannel(net.minecraft.resources.Identifier channel) {
+        // Every mod's client half in its player's game: every channel but vanilla's and Horizon's
+        // (Fabric API's own, its client half's too).
+        if (OWN_CLIENT) return !channel.getNamespace().equals("minecraft") && !channel.getNamespace().equals("horizon");
         return device(channel.getNamespace());
     }
 }
