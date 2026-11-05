@@ -9,23 +9,29 @@ const PROBE_CLASSES: &[&str] = &[
     "net/fabricmc/fabric/api/event/lifecycle/v1/ServerTickEvents",
 ];
 
-/// Whether Fabric mods run in this game (`horizon_jvm::gate`): started by the launcher past its
-/// owner gate (`--java-mods` and `HORIZON_JAVA_MODS_OWNER`), or a developer's harness
+/// Whether Fabric mods run in this game (`horizon_jvm::gate`): started by the launcher for an
+/// owner (`--java-mods` and its owner record in `HORIZON_JAVA_MODS_OWNER`, confirmed with the
+/// Minecraft services), or, in a developer's build (`java-mods-dev`), a harness
 /// (`HORIZON_JAVA_MODS=1`). Otherwise a game built with Java mods plays as the plain one: no Java
 /// started, nothing downloaded (no Fabric, no Java), whatever `mods-java/` holds. `--java-mods`
-/// alone (the game started by hand) says the launcher is needed, once.
+/// without an owner the game confirms says the launcher is needed, once.
 pub(in crate::game) fn opted_in() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| {
-        let opt_in = horizon_jvm::gate::this_process();
+        use horizon_jvm::gate::{self, OptIn};
+        let opt_in = gate::this_process();
         match opt_in {
-            horizon_jvm::gate::OptIn::NoOwner => {
-                log::warn!("Java mods: off: {}", horizon_jvm::gate::NEEDS_LAUNCHER);
-                eprintln!("{}", horizon_jvm::gate::NEEDS_LAUNCHER);
+            OptIn::NoOwner(why) => {
+                log::warn!("Java mods: off: {} ({})", gate::NEEDS_LAUNCHER, why.detail());
+                eprintln!("{} ({})", gate::NEEDS_LAUNCHER, why.detail());
             }
-            horizon_jvm::gate::OptIn::Developer => log::info!(
+            OptIn::Launcher => {
+                log::info!("Java mods: on (the launcher's owner, confirmed by the Minecraft services)")
+            }
+            #[cfg(feature = "java-mods-dev")]
+            OptIn::Developer => log::info!(
                 "Java mods: on for a developer's run ({}=1)",
-                horizon_jvm::gate::DEV_VAR
+                gate::DEV_VAR
             ),
             _ => {}
         }
@@ -434,6 +440,7 @@ fn start_once(root: &Path, dir: &Path, jars: Vec<PathBuf>, side: horizon_jvm::Si
     }
     let started = std::time::Instant::now();
     let work = root.join(".local/bridge");
+    #[cfg(feature = "java-mods-prototypes")]
     if let Some(install) = neoforge_install() {
         return start_neoforge(&work, &install, &jars, started);
     }
@@ -526,7 +533,13 @@ fn start_once(root: &Path, dir: &Path, jars: Vec<PathBuf>, side: horizon_jvm::Si
 /// `HORIZON_NEOFORGE`: a folder NeoForge's installer ran in (`--installServer`), set up by
 /// `tools/java_bridge/neoforge/run_proto.sh`. The mods in `mods-java/` then load with
 /// NeoForge instead of Fabric: a prototype (docs/java-bridge-neoforge.md) that loads them and
-/// stops there, with no mirror, content or screens yet.
+/// stops there, with no mirror, content or screens yet. Only in builds with the prototypes
+/// (`java-mods-prototypes`): release builds run Fabric only.
+#[cfg(not(feature = "java-mods-prototypes"))]
+fn neoforge_install() -> Option<PathBuf> {
+    None
+}
+#[cfg(feature = "java-mods-prototypes")]
 fn neoforge_install() -> Option<PathBuf> {
     std::env::var_os("HORIZON_NEOFORGE")
         .filter(|v| !v.is_empty())
@@ -535,6 +548,7 @@ fn neoforge_install() -> Option<PathBuf> {
 
 /// NeoForge's start (prototype): FML's game folder is `.local/bridge/neoforge-game`, whose
 /// `mods/` holds copies of the jars in `mods-java/` and of the platform mod the setup built.
+#[cfg(feature = "java-mods-prototypes")]
 fn start_neoforge(
     work: &Path,
     install: &Path,

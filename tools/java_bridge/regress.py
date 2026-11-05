@@ -2038,7 +2038,7 @@ def build(java_only):
             sys.exit(f"Java build failed:\n{r.stderr[-2000:]}")
         return {"HORIZON_JAVA_JARS": r.stdout.strip().splitlines()[-1]}
     r = subprocess.run(["cargo", "build", "-q", "--profile", "fast", "-p", "horizon-client",
-                        "-p", "horizon-client-lib", "--features", "horizon-client/java-mods"], cwd=ROOT, env=env,
+                        "-p", "horizon-client-lib", "--features", "horizon-client/java-mods-dev"], cwd=ROOT, env=env,
                        capture_output=True, text=True)
     if r.returncode != 0:
         sys.exit(f"build failed:\n{r.stderr[-3000:]}")

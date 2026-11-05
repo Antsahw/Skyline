@@ -66,6 +66,27 @@ both are fixed. The user's decision: **players play only through Horizon's launc
    `bridge-generic-maps` (see Reports). Left for the other chat: REI, JEI, Jade, AppleSkin,
    Better Combat, Architectury, GeckoLib, Create...
 
+### Release testers (2026-11-05 night, Discord, release java-mods-2026-11-05-17d322a)
+
+All generic: fix the bridge, never the mod.
+
+- **Mods' key bindings missing from Horizon's Controls screen** (Zoomify's zoom key not listed; same as Spell
+  Engine's in the 72-mod log). List every `KeyMapping` mods register (Fabric's `KeyBindingHelper`) in Horizon's
+  Controls under the mod's category, rebindable, saved, and routed to the mod.
+- **Zoom / FOV from mods not applied** (Zoomify does nothing). Read the FOV the Java client computes
+  (`GameRenderer` FOV after mods' modifiers) each frame and use it for Horizon's camera.
+- **Xaero's Minimap/World Map look low-res.** The mod's map texture reaches Horizon at a lower resolution than it
+  draws (GPU/HUD capture scale); capture at the window's real size and GUI scale.
+- **3D Skin Layers draws wrong** (white blocks at the arms, screenshot from Azael). The mod's extra player-model
+  layers are drawn with the wrong parts or textures.
+- **Client mods on a multiplayer server** (Xaero's map works in single player, not on a server; which server
+  unknown). Get a log; client-side mods must work on any server, as on Fabric.
+- **Launcher/game build mismatch:** an old launcher auto-installed the new game build at Play, which then refused
+  mods (no owner word). Don't auto-refresh (bridge-gate-2), and only install a build the launcher matches.
+- **Fork launcher doesn't update itself:** testers must re-download it for every fix. Add an update check against
+  the fork's release (signed, as the game build).
+- **Windows SmartScreen blocks the launcher** (unsigned exe): document "More info → Run anyway" in the beta guide.
+
 ### Testers' Trello (2026-11-04, https://trello.com/b/2uhi4jkj)
 
 **State on 2026-11-05: "Retest 2" below** (what's fixed, what's left and why, by area).

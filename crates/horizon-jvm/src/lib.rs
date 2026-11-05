@@ -17,6 +17,7 @@
 //! A JVM can be created once per process (JNI allows no second one after a destroy), so
 //! [`start`] is idempotent: later calls return the running bridge.
 
+#[cfg(feature = "prototypes")]
 pub mod boot112;
 pub mod content;
 pub mod device;
@@ -25,6 +26,7 @@ pub mod facade;
 pub mod gate;
 pub mod gpu;
 pub mod libs;
+#[cfg(feature = "prototypes")]
 pub mod neoforge;
 pub mod platform;
 pub mod renderers;
