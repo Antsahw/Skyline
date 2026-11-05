@@ -257,6 +257,9 @@ public final class HorizonContent {
                     boxes(state.getShape(EmptyBlockGetter.INSTANCE, BlockPos.ZERO));
                     json.name("collision");
                     boxes(state.getCollisionShape(EmptyBlockGetter.INSTANCE, BlockPos.ZERO));
+                    // The faces it hides beside it (Block.shouldRenderFace): none when it can't occlude.
+                    json.name("occlusion");
+                    boxes(state.canOcclude() ? state.getOcclusionShape() : net.minecraft.world.phys.shapes.Shapes.empty());
                     if (mod && lootSample(block, state)) drops(state);
                     json.endObject();
                 }

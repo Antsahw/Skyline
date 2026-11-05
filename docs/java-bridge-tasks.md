@@ -120,6 +120,10 @@ By area:
 - ~~**Lava on water loops**, Create's fluid interactions~~: done in `bridge-mixins-11` (report
   below; the loop didn't reproduce there, lava's interactions are Create's own now).
   Was: **FIRST for `bridge-mixins-10`: lava on water loops** (tester, batch 10, Create Fly + Fabric
+  **Done (gpu-13 items, gpu-14 parts):** the pale square was the floor's face hidden under the
+  basin/burner (their stand-in vanilla state's full-cube occlusion): mod states carry their own
+  occlusion now. Mixer, saw blade, burner head draw (client copies of block entities).
+- **FIRST for `bridge-mixins-10`: lava on water loops** (tester, batch 10, Create Fly + Fabric
   API, videos): lava flowing onto water makes obsidian, which turns back into flowing lava,
   again and again (constant smoke). Vanilla behaviour broken: a regression, likely batch 10's
   fluids (mixins-9's `foreign_fluid`) or Create's mixin on `LiquidBlock.shouldSpreadLiquid`/
@@ -161,12 +165,16 @@ By area:
   a fluid in a GUI from its still sprite in the block atlas, tinted (Fabric's
   `FluidRenderHandler`/`FluidVariantRendering`, `GuiGraphics` blit of a `TextureAtlasSprite`):
   the screen path needs those sprites and the tint. gpu-13 (it did fluids in the world).
+  **Done (gpu-14):** vanilla's private `blitTiledSprite` injected; regress `jeifluids`.
 - **Create machines, tester batch 10 (gpu-13 checks logic first, then drawing):** a water wheel
   in flowing water doesn't spin (Create reads the neighbours' `FluidState` flow vectors in the
   mirror: are Horizon's flowing water levels and falling flags there, and does the kinetic
   network get a speed?); the mechanical mixer over a basin is "just bugged" (ask what: no
   mixing, no animation, or a drawing gap; his screenshot has a block between mixer and basin,
   check his setup). Confirmed working on batch 10: eating FD meals.
+  **gpu-14:** the wheel turns in Horizon's flowing and falling water (FlowScore -1, speed 8,
+  scene `waterwheel`); a wheel placed in the first ticks had no block entity (fixed). The mixer
+  draws its head now (client copies); ask what else was "bugged".
   Also: **crushing wheels** do nothing (they process item entities thrown between them: the
   same item-entity path as the depot, mixins); **fluid pipes draw broken** in water (a pipe
   through a water block: its middle segment missing, the outline bigger than the model;
@@ -223,6 +231,7 @@ By area:
 - **A broken block's moving parts stay** (tester, batch 10): break a cogwheel and the hand
   crank's handle on it keeps floating, drawn. A removed mod block entity must drop its
   renderer's instance (gpu-13: the recorder's per-block-entity draws on removal).
+  **Done (gpu-14):** Horizon's neighbour updates reach the mods' blocks (the crank pops off).
 - ~~**Breaking sounds twice**~~ and ~~**Chunky**~~: done in `bridge-mixins-10` (report below).
   Was: **Breaking sounds twice** (a tester, 2026-11-04: "dirt goes brrbrr"). Mods: Biomes O' Plenty,
   TerraBlender, GlitchCore, Terralith, Geophilic, Lithostitched, FallingTree, WorldEdit, Create
@@ -1935,3 +1944,36 @@ Test on the PC: `regress.py --jars <folder with create-fly*.jar, fabric-api*> cr
 in-game: right-click a depot with a mechanical arm, then place it; throw iron on a depot; place
 tracks with their item and a station on them; hold sandpaper with rose quartz in the off hand.
 
+
+### gpu 14: Create's parts, mods' own occlusion, neighbour updates, fluids in screens (2026-11-05, branch `bridge-gpu-14`; Claude for iaxivers)
+
+Jars: Create Fly `create-fly-26.3-6.0.9-unofficial.3.jar` (CurseForge 9321329), Fabric API
+0.165.2, JEI 31.17.0.108, Farmer's Delight 3.6.30. 2 cores, llvmpipe. gpu-13 was merged (batch
+11); its list's rest, all generic (java-bridge.md, "Create's parts, neighbour updates, own
+shapes, fluids in screens"):
+- **Pale blue-white square** (presses, mixers, blaze burners): not a sprite: the sky through
+  the floor's face under a basin/burner, hidden by its stand-in vanilla state's full-cube
+  occlusion. Own states now carry their own outline, collision and occlusion (Java exports
+  occlusion; content API 0.2 `outline`/`collision`/`occlusion`; FORMAT 16). Also the "outline
+  bigger than the model" (pipes).
+- **Wrong/missing parts**: the mixer's renderer NPE'd on the server's block entity (client-only
+  behaviours): renderers now draw the client's copy, loaded from the update packet and ticked as a
+  client's (FD's stove now smokes while cooking, as in vanilla). The saw had no renderer (no
+  sprites in its context): its blade draws. The blaze burner's head draws once in its cage
+  (`blaze=none` draws none, as Create). Not reproduced: a doubled head.
+- **Parts staying after breaking**: Horizon's neighbour updates now reach mods' blocks (mods'
+  `updateNeighborsAt` injections, shape updates, neighborChanged): the crank pops off.
+- **Fluids in screens**: `blitTiledSprite` injected: JEI's water is blue, not black.
+- **Water wheel**: turns in flowing and falling water (FlowScore -1). A mod block set in the
+  first ticks (before the mods' states are known) had no block entity: fixed.
+- **Ponder, contraptions**: researched, plans in java-bridge.md (Ponder: hovered stack + key
+  from Horizon's inventory, PonderUI as a mod screen, a real FeatureRenderDispatcher for its
+  picture-in-picture; contraptions: collision boxes from Java into Rust physics, actors untested).
+
+Regress pass: `createparts jeifluids` (new), `create createwhole createmachines contraption
+createitems fluids ber pot placed pot-jei scaffold kinetic nomodcode`. Unit tests: content
+own boxes (horizon-mods), carry boxes (port-pack), occlusion faces (mod_content, ignored set),
+neighbour hook (horizon-world).
+Test on the PC: `regress.py --jars <folder with create-fly*, fabric-api*, jei*> createparts
+jeifluids createmachines`; in game: a basin on the floor (no pale square), a mixer over it on a
+motor, a saw on a motor, a hand crank on a cogwheel then break the cogwheel, JEI search "water".

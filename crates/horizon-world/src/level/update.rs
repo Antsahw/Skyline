@@ -501,6 +501,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         update_flags: i32,
         limit: i32,
     ) {
+        self.level.observe_neighbours_updated(pos);
         for direction in UPDATE_SHAPE_ORDER {
             let neighbour = rel(pos, direction);
             self.neighbor_shape_changed(
@@ -525,6 +526,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         block: BlockId,
         orientation: Option<Orientation>,
     ) {
+        self.level.observe_neighbours_updated(pos);
         self.add_and_run(Update::Multi {
             source: pos,
             block,
@@ -541,6 +543,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         orientation: Option<Orientation>,
     ) {
         let index = usize::from(UPDATE_ORDER[0] == skip);
+        self.level.observe_neighbours_updated(pos);
         self.add_and_run(Update::Multi {
             source: pos,
             block,

@@ -31,12 +31,28 @@ pub fn compact_states(states: Vec<Value>) -> Value {
             Value::String(n) => n.clone(),
             _ => String::new(),
         };
-        let at = *shape_at.entry(shape.clone()).or_insert_with(|| {
-            shapes.push(if shape.is_empty() {
+        // A state's own boxes make its shape entry an object: `like` the vanilla state, then
+        // the boxes of its own.
+        let mut own = Map::new();
+        for k in ["outline", "collision", "occlusion"] {
+            if let Some(b) = s.get(k) {
+                own.insert(k.to_owned(), b.clone());
+            }
+        }
+        let entry = if own.is_empty() {
+            if shape.is_empty() {
                 Value::Null
             } else {
                 json!(shape)
-            });
+            }
+        } else {
+            if !shape.is_empty() {
+                own.insert("like".to_owned(), json!(shape));
+            }
+            Value::Object(own)
+        };
+        let at = *shape_at.entry(entry.to_string()).or_insert_with(|| {
+            shapes.push(entry);
             shapes.len() - 1
         });
         let mut row = vec![at];

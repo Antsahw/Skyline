@@ -579,6 +579,19 @@ fn encode_shape(shape: &VoxelShape) -> Tag {
     Tag::Compound(c)
 }
 
+/// A shape of boxes (`[min x, y, z, max x, y, z]`, block units).
+fn boxes_shape(boxes: &[[f64; 6]]) -> Result<VoxelShape> {
+    let mut shape = VoxelShape::empty();
+    for bounds in boxes {
+        let part = VoxelShape::from_box(Aabb::new(
+            Vec3::new(bounds[0], bounds[1], bounds[2]),
+            Vec3::new(bounds[3], bounds[4], bounds[5]),
+        ))?;
+        shape = shape.join_unoptimized(&part, ShapeOp::OR)?;
+    }
+    Ok(shape)
+}
+
 fn resolve_shapes<'a>(
     spec: &BlockShapes,
     block: &str,
@@ -616,15 +629,7 @@ fn resolve_shapes<'a>(
                 .as_ref()
                 .ok_or_else(|| format!("{block}: no shape for {key}"))?
         };
-        let mut shape = VoxelShape::empty();
-        for bounds in boxes {
-            let part = VoxelShape::from_box(Aabb::new(
-                Vec3::new(bounds[0], bounds[1], bounds[2]),
-                Vec3::new(bounds[3], bounds[4], bounds[5]),
-            ))?;
-            shape = shape.join_unoptimized(&part, ShapeOp::OR)?;
-        }
-        shapes.push(shape);
+        shapes.push(boxes_shape(boxes)?);
     }
     if used.len() != spec.values.len() {
         return Err(
@@ -1296,8 +1301,13 @@ impl<'a> Plan<'a> {
                         row.set("item", J::Str("minecraft:air".into()));
                     }
                     self.override_gameplay(b, combo, &mut row);
-                    if let Some(shapes) = &b.shapes {
-                        let shape = &shapes[state_index];
+                    let own_state = own.map(|o| &b.own[o]);
+                    if let Some(shape) = b
+                        .shapes
+                        .as_ref()
+                        .map(|s| &s[state_index])
+                        .or(own_state.and_then(|o| o.outline.as_ref()))
+                    {
                         let boxes = shape
                             .boxes()
                             .iter()
@@ -1320,8 +1330,13 @@ impl<'a> Plan<'a> {
                         row.set("outline", J::Arr(boxes));
                         row.set("outline_edges", J::Arr(shape_edges(shape)));
                     }
-                    if let Some(shapes) = b.collision_shapes.as_ref().or(b.shapes.as_ref()) {
-                        let shape = &shapes[state_index];
+                    if let Some(shape) = b
+                        .collision_shapes
+                        .as_ref()
+                        .or(b.shapes.as_ref())
+                        .map(|s| &s[state_index])
+                        .or(own_state.and_then(|o| o.collision.as_ref()))
+                    {
                         row.set(
                             "full_collision",
                             J::Bool(!shape.join_is_not_empty(&VoxelShape::block(), ShapeOp::XOR)?),
@@ -1676,17 +1691,55 @@ impl<'a> Plan<'a> {
     }
 
     fn collision_shapes(&self, tag: &mut Tag) -> Result<()> {
+        self.cached_shapes(tag, |b, i| {
+            b.collision_shapes
+                .as_ref()
+                .or(b.shapes.as_ref())
+                .map(|s| &s[i])
+                .or(b.own.get(i).and_then(|o| o.collision.as_ref()))
+        })?;
         let Tag::Compound(root) = tag else {
             return Err("collision table is not a compound".into());
         };
+        // Blocks with their template's rows: where a template state has no cached shape
+        // (scaffolding, bamboo...), its rule is the template's (`CachedCollisionRegistry::template`).
+        root.insert(JavaString::from("templates"), self.collision_templates());
+        Ok(())
+    }
+
+    /// The occlusion table (`occlusion.nbt`, the faces that hide their neighbours' faces): a
+    /// block with shapes of its own occludes with its outline, as vanilla's
+    /// `BlockBehaviour.getOcclusionShape` does, and a Java mod's own state with the occlusion
+    /// Java gave it, not with its template's or its stand-in vanilla state's (Create's basin
+    /// stood in by a full cube hid the floor's face under it: the sky showed through, a pale
+    /// square).
+    fn occlusion_shapes(&self, tag: &mut Tag) -> Result<()> {
+        self.cached_shapes(tag, |b, i| {
+            b.shapes
+                .as_ref()
+                .map(|s| &s[i])
+                .or(b.own.get(i).and_then(|o| o.occlusion.as_ref()))
+        })
+    }
+
+    /// Each new state's row of a cached shape table (`shapes` and their `cached_shapes`
+    /// mapping): the shape `of` gives its block, else the template's row stays.
+    fn cached_shapes<'b>(
+        &'b self,
+        tag: &mut Tag,
+        of: impl Fn(&'b NewBlock<'b>, usize) -> Option<&'b VoxelShape>,
+    ) -> Result<()> {
+        let Tag::Compound(root) = tag else {
+            return Err("shape table is not a compound".into());
+        };
         let mut indices = Vec::new();
         let Some(Tag::List(entries)) = root.get_mut(&JavaString::from("shapes")) else {
-            return Err("collision table has no shapes".into());
+            return Err("shape table has no shapes".into());
         };
         for block in &self.blocks {
-            if let Some(shapes) = block.collision_shapes.as_ref().or(block.shapes.as_ref()) {
-                let mut encoded = BTreeMap::new();
-                for (offset, shape) in shapes.iter().enumerate() {
+            let mut encoded = BTreeMap::new();
+            for offset in 0..block.count() as usize {
+                if let Some(shape) = of(block, offset) {
                     let key: Vec<_> = shape
                         .boxes()
                         .iter()
@@ -1711,12 +1764,11 @@ impl<'a> Plan<'a> {
             }
         }
         let Some(Tag::IntArray(mapping)) = root.get_mut(&JavaString::from("cached_shapes")) else {
-            return Err("collision table has no mapping".into());
+            return Err("shape table has no mapping".into());
         };
         for (state, id) in indices {
             mapping[state] = id;
         }
-        root.insert(JavaString::from("templates"), self.collision_templates());
         Ok(())
     }
 
@@ -2458,6 +2510,9 @@ fn tables(base: &Path, plan: &Plan, overlay: &Overlay<'_>) -> Result<()> {
             plan.nbt(&mut named.tag);
             if name == "cached-collision.nbt" || name == "worldgen/blocks/cached-collision.nbt" {
                 plan.collision_shapes(&mut named.tag)?;
+            }
+            if name == "occlusion.nbt" {
+                plan.occlusion_shapes(&mut named.tag)?;
             }
             nbt::write_named(&named, Limits::tables()).map_err(|e| format!("{name}: {e}"))?
         };

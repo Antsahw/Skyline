@@ -1201,6 +1201,9 @@ impl LevelAccess for GameLevel<'_> {
     fn liquid_interaction(&mut self, pos: BlockPos) -> bool {
         java_server::java_liquid_interaction(pos)
     }
+    fn observe_neighbours_updated(&self, source: BlockPos) {
+        java_server::java_neighbours_updated(source, |p| self.block_state(p));
+    }
     fn redstone_experiments(&self) -> bool {
         self.redstone_experiments
     }

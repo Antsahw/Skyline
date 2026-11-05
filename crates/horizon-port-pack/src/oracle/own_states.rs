@@ -6,6 +6,8 @@ use super::*;
 #[derive(Debug, Default)]
 pub(super) struct ShapeIndex {
     exact: BTreeMap<(String, String), String>,
+    /// Each state's outline, collision and occlusion (JSON text), by its full name.
+    by_name: std::collections::HashMap<String, [String; 3]>,
     /// Each state, its outline's bounds and its collision's.
     all: Vec<(String, Option<[f64; 6]>, Option<[f64; 6]>)>,
     /// `all` with one entry per (outline bounds, collision bounds): the first name of each
@@ -76,6 +78,17 @@ impl Facts {
                 }
                 for (key, st) in &v.states {
                     let full = format!("{name}[{}]", state_key(key));
+                    index.by_name.insert(
+                        full.clone(),
+                        [
+                            st.outline.to_string(),
+                            st.collision.to_string(),
+                            st.occlusion
+                                .as_ref()
+                                .map(Value::to_string)
+                                .unwrap_or_default(),
+                        ],
+                    );
                     index
                         .exact
                         .entry((st.outline.to_string(), st.collision.to_string()))
@@ -101,6 +114,7 @@ impl Facts {
             exact,
             distinct,
             nearest,
+            by_name,
             ..
         } = self.shapes.get().expect("built above");
         let default = state_key(&block.default);
@@ -147,6 +161,25 @@ impl Facts {
                 .map(|(k, v)| (k, Value::String(v)))
                 .collect();
             let mut v = json!({"properties": properties, "shape": shape});
+            // Its own boxes where the vanilla state's differ: the nearest state's outline and
+            // collision are a guess, and a state's occlusion (the faces it hides) need not be
+            // its stand-in's (a basin on a full cube's hid the floor under it).
+            let like = by_name.get(&shape);
+            let differs = |i: usize, own: &Value| {
+                let own = own.to_string();
+                like.is_none_or(|l| l[i] != own)
+            };
+            if differs(0, &st.outline) {
+                v["outline"] = st.outline.clone();
+            }
+            if differs(1, &st.collision) {
+                v["collision"] = st.collision.clone();
+            }
+            if let Some(occlusion) = &st.occlusion
+                && differs(2, occlusion)
+            {
+                v["occlusion"] = occlusion.clone();
+            }
             if st.emission != default_light {
                 v["light"] = json!(st.emission);
             }

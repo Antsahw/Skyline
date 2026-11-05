@@ -1133,6 +1133,80 @@ Generic fixes found with Create Fly; regress `createclick`, `createitemsin`, `cr
   survival; Create's `FluidTankBlock.useItemOn` takes buckets only from creative players or on
   creative tanks (`TRY_WITH_EMPTY_HAND` otherwise). In creative the tank fills.
 
+## Create's parts, neighbour updates, own shapes, fluids in screens (bridge-gpu-14)
+
+Generic fixes found with Create Fly; regress `createparts`, `jeifluids` (scenes `createparts`,
+`waterwheel`).
+- **Renderers draw the client's copy of a block entity** (`HorizonClientBlockEntities`), as a
+  vanilla client keeps its own: made with its type, on the client level, loaded from the
+  server's update packet through `ClientPacketListener`'s own lambda (so mods' wraps of
+  `handleBlockEntityData`'s `loadWithComponents` run: Create's `onDataPacket`), loaded again on
+  the server's `sendBlockUpdated`, ticked with its client ticker (once at its making, so mods set
+  their client state up before its first frame). Create keeps client-only behaviours there (the
+  mixer's head animation: its renderer NPE'd on the server's object). `HORIZON_JAVA_CLIENT_BE=0`
+  draws the server's again. A copy that can't be made falls back to the server's (logged once).
+- **The block entity renderers' context has the client's sprites** (`getSprites`): Create's saw
+  renderer read its blade's from `context.sprites()` (null: no renderer, a black hole).
+- **Horizon's neighbour updates reach the mods' blocks** (`LevelAccess::observe_neighbours_updated`
+  → `HorizonServer.neighbours`): where Horizon updates the neighbours of a position with a mod's
+  block among them, the mirror runs the mods' HEAD injections of `ServerLevel.updateNeighborsAt`
+  (Create's `NeighborUpdateListeningBlock`s), then each mod block's shape update
+  (`NeighborUpdater.executeShapeUpdate`: it may break, as `updateOrDestroy` does) and
+  `executeUpdate`. A hand crank pops off when its cogwheel breaks; any mod block reacting to a
+  neighbour (redstone, survival) does.
+- **A mod block's own states carry their own boxes** (content API 0.2: a state's `outline`,
+  `collision`, `occlusion`, or a `state_table` shape entry `{"like", "outline", ...}`). The carry
+  stood each own state in by the vanilla state of the same outline and collision, *else the
+  nearest*, and took its occlusion too: Create's basin (a floor short of its edges) took a full
+  cube's, which hid the floor's face under it, and the sky showed through round its feet (the
+  testers' pale blue-white square under basins, mixers, presses, blaze burners). Java now
+  exports each state's occlusion (none when it can't occlude); the carry writes the boxes that
+  differ from the stand-in's, and `occlusion.nbt`, `cached-collision.nbt` and the gameplay rows
+  take them. Also fixes outlines bigger than the model (fluid pipes). Content FORMAT 16.
+- **Fluids in screens**: vanilla's private `blitTiledSprite` (JEI's fluid entries, mods' tanks)
+  went to the headless GPU's atlas, which Horizon's window never sees (a black square). Now
+  `GuiGraphicsMixin` sends the sprite's own picture, tile by tile, tinted. Blits and GUI quads in
+  a real atlas's UVs (the block atlas, once the client's models load) are named by the sprite
+  holding them too (`HorizonGraphics.realSprite`).
+- **Mod blocks set before the mods' states are known** (the first ticks) are kept for the
+  mods: a blaze burner placed then never had a block entity.
+- Checked, working: the water wheel in Horizon's flowing and falling water (FlowScore -1,
+  speed 8: Create reads the mirror's `FluidState.getFlow`; scene `waterwheel`); the blaze
+  burner's head (one, in its cage; `blaze=none` draws no head, as in Create).
+- Not done (research below): Ponder, players colliding with contraptions, contraptions' actors.
+
+### Ponder (research)
+
+Create's Ponder (`com.zurrtum.create.client.ponder`) needs four things, in this order:
+1. The hold-W trigger: `PonderTooltipHandler` (via Create's `MinecraftMixin` tick and
+   `ItemStackMixin` tooltip line) reads the hovered stack of the open `AbstractContainerScreen`
+   and the key. Horizon's inventory isn't a Java screen: hand it the hovered stack and the held
+   key the way JEI's R/U over Horizon's slots already get them.
+2. `PonderUI` opens as a mod screen (Horizon shows those: `HorizonGraphics`).
+3. Its scenes are a `PictureInPictureRenderer` (`SceneRenderer`), as Xaero's minimap is, but
+   they submit block and entity nodes: `prepare` gets a `FeatureRenderDispatcher`, which
+   Horizon passes as null (`HorizonGraphics.prepare`). The headless client needs vanilla's
+   (made over the client's model and atlas managers; its shaders already compile on HorizonGpu)
+   and a `SubmitNodeStorage`.
+4. `SceneRenderer`'s own `GpuTexture`s are drawn into on the headless GPU: they become HUD
+   images as Xaero's target does (`HorizonGpu.drawnInto`).
+Steps 1-2 are client work; 3-4 gpu. Expect a few days; test with `ponder` scenes once 1 works.
+
+### Contraptions (research)
+
+gpu-13 made a bearing's contraption assemble, draw and turn. Left:
+- **Players collide with contraptions**: Create runs `ContraptionCollider` on the client for
+  the local player (and the server for others). Horizon's player moves in Rust: each tick, ask
+  Java for the world-space collision boxes of contraption entities near the player (their
+  blocks' shapes, posed) and add them to the Rust collision as solid boxes; carry a player
+  standing on one along with its motion (the contraption's delta per tick). Entities chat +
+  a small Java query.
+- **Actors** (drills, saws, harvesters on a moving contraption): they run in the contraption
+  entity's tick (`MovementBehaviour`) on the server mirror, breaking and placing through the
+  mirror's level (routed to Horizon). Untested; a bearing with a drill against stone is the
+  case to add.
+- **Trains** are contraptions on tracks: blocked first by the use order (track placement).
+
 ## 26.3 facts that cost time
 
 - **A client player made without its constructor never ages**: `LocalPlayer.tick` is what moves
@@ -1157,6 +1231,20 @@ Generic fixes found with Create Fly; regress `createclick`, `createitemsin`, `cr
   constructor needs a `PacketProcessor`.
 - `HorizonHooks.injected` left out every `dev.horizonlab.` mixin, the fixtures' too: only
   `dev.horizonlab.platform.` is Horizon's own.
+
+- **The client renders its own copy of a block entity.** Mods keep client-only state on it
+  (Create's behaviours added in `SmartBlockEntity.initialize` when `level.isClientSide()`);
+  drawing the server's object with a client renderer NPEs. Load the copy from
+  `getUpdatePacket()` through `ClientPacketListener.lambda$handleBlockEntityData$0` (mods wrap
+  the `loadWithComponents` call inside it), not a plain load.
+- **A carried state's stand-in vanilla state brings its occlusion along.** Shapes matched by
+  outline and collision only (or the nearest) gave Create's basin a full cube's occlusion:
+  holes in the floor under it. Occlusion is its own field; export it from Java.
+- **`blitTiledSprite` is private and goes straight to `innerTiledBlit`** (a
+  `TiledBlitRenderState` of the atlas's GPU texture), past every public `blit*` Horizon
+  overrides: inject it (GuiGraphicsMixin) or fluids draw black.
+- **The headless GPU's textures have null labels**: find an atlas by its texture object
+  (`AtlasManager.forEach`, `atlas.getTexture() == texture`), not by name.
 
 - **Anything that swaps the client connection's channel must answer a `LocalAddress`**
   (`HorizonClient.memoryConnection`, `HorizonPacketTap.open`): Simple Voice Chat connects its
@@ -1880,6 +1968,11 @@ sounds; a tester's client mods (Async Particles, Immersive Hotbar, EMF/ETF, Shul
 FancyMenu, Continuity, JEI's mezz_config, Xaero's World Map) start with no failures. See "The
 client from its start..."; regress `earlyclient`, `creategoggles`, `createvalue`,
 `createtoolbox`, `createsounds`, `modscroll`.
+bridge-gpu-14: the pale squares under basins and burners are gone (mods' own occlusion), the
+mixer's head, the saw's blade and the burner's head draw (renderers draw client copies, with the
+client's sprites), a hand crank pops off with its cogwheel (neighbour updates reach mod blocks),
+fluids draw in JEI and mods' screens; water wheels turn in flowing water. See "Create's parts,
+neighbour updates, own shapes, fluids in screens"; regress `createparts`, `jeifluids`.
 
 Nether and End (tested 2026-10-31 with BOP, BetterNether, BetterEnd, BCLib, WorldWeaver):
 both generate through the mods, the Nether with BetterNether's and BOP's biomes and blocks

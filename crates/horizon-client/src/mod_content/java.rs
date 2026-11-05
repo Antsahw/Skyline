@@ -8,6 +8,11 @@ pub(super) struct OwnState {
     pub(super) properties: Vec<(String, String)>,
     /// The vanilla state whose shapes it has.
     pub(super) shape: u32,
+    /// Its own outline, collision and occlusion, in place of `shape`'s (a Java mod's block
+    /// whose shapes no vanilla state has).
+    pub(super) outline: Option<VoxelShape>,
+    pub(super) collision: Option<VoxelShape>,
+    pub(super) occlusion: Option<VoxelShape>,
     light: Option<u8>,
     random_ticks: Option<bool>,
 }
@@ -34,12 +39,26 @@ pub(super) fn own_states(
             .into());
         }
         let by_key = by_key.get_or_insert_with(|| state_keys(facts));
+        // Own boxes shared over a block's states (a pipe's thousands have a few).
+        let mut own_shapes: HashMap<Vec<[u64; 6]>, VoxelShape> = HashMap::new();
         for st in &decl.states {
             let shape = match &st.shape {
                 None => states.start,
                 Some(name) => shape_state(by_key, name)
                     .ok_or_else(|| format!("{}: shape {name} is not a block state", decl.id))?,
             };
+            let mut boxed = |b: &Option<Vec<[f64; 6]>>| -> Result<Option<VoxelShape>> {
+                let Some(b) = b else { return Ok(None) };
+                let key: Vec<[u64; 6]> = b.iter().map(|x| x.map(f64::to_bits)).collect();
+                if let Some(v) = own_shapes.get(&key) {
+                    return Ok(Some(VoxelShape::clone(v)));
+                }
+                let v = boxes_shape(b)?;
+                own_shapes.insert(key, v.clone());
+                Ok(Some(v))
+            };
+            let (outline, collision, occlusion) =
+                (boxed(&st.outline)?, boxed(&st.collision)?, boxed(&st.occlusion)?);
             own.push(OwnState {
                 properties: st
                     .properties
@@ -47,6 +66,9 @@ pub(super) fn own_states(
                     .map(|(k, v)| (k.clone(), v.clone()))
                     .collect(),
                 shape,
+                outline,
+                collision,
+                occlusion,
                 light: st.light,
                 random_ticks: st.random_ticks,
             });

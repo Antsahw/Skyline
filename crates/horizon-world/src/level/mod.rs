@@ -348,6 +348,10 @@ pub trait LevelAccess {
     fn liquid_interaction(&mut self, _pos: BlockPos) -> bool {
         false
     }
+    /// The neighbours of `source` are about to be updated (`Level.updateNeighborsAt`,
+    /// `BlockState.updateNeighbourShapes`): blocks another engine runs (Java mods') hear it
+    /// there, as vanilla's own neighbour updater would tell them. The default: none.
+    fn observe_neighbours_updated(&self, _source: BlockPos) {}
     fn allow_fluid_level_change(
         &self,
         _pos: BlockPos,

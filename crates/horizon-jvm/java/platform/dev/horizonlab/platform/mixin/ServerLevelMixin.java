@@ -46,7 +46,7 @@ public abstract class ServerLevelMixin {
         HorizonServer.levelEvent((ServerLevel) (Object) this, source, type, pos, data);
     }
 
-    /** A block's update for clients: Horizon sends its own. */
+    /** A block's update for clients: Horizon sends its own; the client's block entity copies load theirs. */
     @Inject(method = "sendBlockUpdated", at = @At("HEAD"), cancellable = true)
     private void horizon$sendBlockUpdated(net.minecraft.core.BlockPos pos, net.minecraft.world.level.block.state.BlockState old,
                                           net.minecraft.world.level.block.state.BlockState now, int flags,

@@ -134,6 +134,8 @@ public final class HorizonEntityRender {
             if (blockContext != null) {
                 HorizonClient.set(net.minecraft.client.renderer.blockentity.BlockEntityRendererProvider.Context.class,
                         blockContext, "blockModelResolver", blocks);
+                HorizonClient.set(net.minecraft.client.renderer.blockentity.BlockEntityRendererProvider.Context.class,
+                        blockContext, "sprites", context.getSprites());
             }
             NO_RENDERER.clear();
             NO_BLOCK_RENDERER.clear();
@@ -179,8 +181,9 @@ public final class HorizonEntityRender {
 
     /**
      * The block entity renderers' context, as BlockEntityRenderDispatcher makes it on a
-     * resource reload: the entity renderers' item resolver and model set, the headless
-     * client's font; no block models or sprites (renderers that need them fail alone).
+     * resource reload: the entity renderers' item resolver, model set and sprites (the client's
+     * atlases: Create's saw reads its blade's), the headless client's font; block models once
+     * they load (modelsLoaded).
      */
     private static net.minecraft.client.renderer.blockentity.BlockEntityRendererProvider.Context blockContext()
             throws ReflectiveOperationException {
@@ -190,7 +193,7 @@ public final class HorizonEntityRender {
                 Natives.allocate(net.minecraft.client.renderer.blockentity.BlockEntityRenderDispatcher.class);
         blockContext = new net.minecraft.client.renderer.blockentity.BlockEntityRendererProvider.Context(
                 dispatcher, entities.getBlockModelResolver(), entities.getItemModelResolver(), entities.getEntityRenderDispatcher(),
-                entities.getModelSet(), entities.getFont(), null, null);
+                entities.getModelSet(), entities.getFont(), entities.getSprites(), null);
         return blockContext;
     }
 
@@ -209,6 +212,7 @@ public final class HorizonEntityRender {
             if (provider == null) {
                 // Most block entities draw only their block's model: Horizon's already.
                 NO_BLOCK_RENDERER.put(type, true);
+                if (DEBUG_BER) Natives.log("ber " + BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(type) + ": no renderer registered");
                 return null;
             }
             made = provider.create(blockContext());
@@ -243,7 +247,7 @@ public final class HorizonEntityRender {
             var renderer = blockRenderer(be.getType());
             if (renderer == null) continue;
             JsonArray itemsHere = new JsonArray();
-            JsonArray models = blockModels(renderer, be, itemsHere);
+            JsonArray models = blockModels(renderer, HorizonClientBlockEntities.of(be), itemsHere);
             if (DEBUG_BER) debugBlock(level, be, models.size(), itemsHere.size());
             // HORIZON_JAVA_DEBUG=ber: what each block state's renderer drew, once.
             if (DEBUG_BER && DRAWN_LOGGED.add(be.getBlockState())) {
@@ -1680,7 +1684,7 @@ public final class HorizonEntityRender {
     }
 
     /** A sprite's texture file: the headless sprite's (HorizonSprites), else by its name. */
-    private static String textureOf(net.minecraft.client.renderer.texture.TextureAtlasSprite sprite) {
+    static String textureOf(net.minecraft.client.renderer.texture.TextureAtlasSprite sprite) {
         var headless = HorizonSprites.at(sprite.getU0() + 1e-4F);
         if (headless != null && headless.atlasSprite() == sprite) return headless.texture();
         var name = sprite.contents().name();

@@ -76,6 +76,9 @@ pub struct State {
     pub sound: Value,
     pub outline: Value,
     pub collision: Value,
+    /// The faces it hides beside it (empty when it can't occlude), exporters that write it.
+    #[serde(default)]
+    pub occlusion: Option<Value>,
     /// What breaking the state drops, per tool (`hand`, `diamond_pickaxe`,
     /// `shears`, `silk_touch_pickaxe`...): item id → count.
     #[serde(default)]
@@ -675,6 +678,56 @@ mod tests {
             .unwrap();
         assert_eq!(tile.template, "minecraft:stone");
         assert_eq!(tile.differences[0], "sounds: no vanilla block has them");
+    }
+
+    #[test]
+    fn own_states_carry_the_boxes_their_stand_in_lacks() {
+        // A basin: open on top, its floor short of the block's edges, so it hides only the
+        // middle of the floor's face under it. Its nearest vanilla state is a full cube, whose
+        // occlusion hid the whole face (the sky showed through the gap round the basin's feet).
+        let cube = json!([[0, 0, 0, 1, 1, 1]]);
+        let basin = json!([
+            [0.125, 0, 0.125, 0.875, 0.125, 0.875],
+            [0, 0.125, 0, 1, 1, 1]
+        ]);
+        let with_occlusion = |mut s: Value, occlusion: &Value| {
+            s["occlusion"] = occlusion.clone();
+            s
+        };
+        let class = ["net.minecraft.world.level.block.Block"];
+        let facts: Facts = serde_json::from_value(json!({
+            "blocks": {
+                "minecraft:stone": block(&class, json!({}), json!({"": with_occlusion(state(1.5, "stone", cube.clone()), &cube)})),
+                "m:basin": block(&["m.Basin", class[0]], json!({"facing": ["down", "north"]}), json!({
+                    "facing=down": with_occlusion(state(1.5, "stone", basin.clone()), &basin),
+                    "facing=north": with_occlusion(state(1.5, "stone", cube.clone()), &json!([]))})),
+            },
+            "items": {}
+        }))
+        .unwrap();
+        let (_, states) = facts.own_states("m:basin", &|_: &str| true).unwrap();
+        let by = |facing: &str| {
+            states
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|s| s["properties"]["facing"] == json!(facing))
+                .unwrap()
+                .clone()
+        };
+        let down = by("down");
+        assert_eq!(down["shape"], json!("minecraft:stone[]"));
+        assert_eq!(down["outline"], basin);
+        assert_eq!(down["collision"], basin);
+        assert_eq!(down["occlusion"], basin);
+        // Stone's shapes exactly, but it occludes nothing (a noOcclusion block): only that.
+        let north = by("north");
+        assert!(north.get("outline").is_none() && north.get("collision").is_none());
+        assert_eq!(north["occlusion"], json!([]));
+        // Many states: the table's shape entries carry the boxes.
+        let table = compact_states(vec![down.clone(); STATE_TABLE_FROM]);
+        assert_eq!(table["shapes"][0]["like"], json!("minecraft:stone[]"));
+        assert_eq!(table["shapes"][0]["occlusion"], basin);
     }
 
     #[test]

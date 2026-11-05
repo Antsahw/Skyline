@@ -90,6 +90,22 @@ public final class HorizonClientBlockEntities {
         return copy.client;
     }
 
+    /**
+     * The client's copy of a mod's block entity for its renderer, from the server's (what the
+     * client draws: Create's mixer and press heads are client behaviours): the server's when
+     * there is none.
+     */
+    static BlockEntity of(BlockEntity server) {
+        Level level = server.getLevel();
+        if (level == null || level.isClientSide()) return server;
+        try {
+            BlockEntity copy = get(HorizonClient.clientLevel(level), server.getBlockPos());
+            return copy != null ? copy : server;
+        } catch (Throwable t) {
+            return server;
+        }
+    }
+
     /** ServerLevel.sendBlockUpdated on a mirror: what the server would send the client. */
     public static void updated(ServerLevel level, BlockPos pos) {
         for (var e : COPIES.entrySet()) {

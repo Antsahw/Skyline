@@ -198,9 +198,22 @@ public final class HorizonGraphics extends GuiGraphicsExtractor {
                 // (Within one sprite's square: a quad spanning several is no sprite of ours.)
                 var sprite = u1 > u0 && Math.floor(u0 + 1e-4) == Math.floor(u1 - 1e-4)
                         ? HorizonSprites.at(u0 + (u1 - u0) / 2) : null;
+                // Else a real atlas's sprite (the block atlas once the client's models load: a
+                // fluid's sprite tiled into JEI's list or a mod's tank): its own texture, its UVs.
+                String atlasName = !textured ? null
+                        : texture.texure0() instanceof HorizonTextures.View named ? named.name()
+                        : texture.texure0() != null && HorizonGpu.atlas(texture.texure0()) ? atlasName(texture.texure0().texture())
+                        : null;
+                var real = sprite == null && atlasName != null
+                        ? realSprite(atlasName, (u0 + u1) / 2, (v0 + v1) / 2) : null;
                 if (sprite != null) {
                     float k = (float) Math.floor(u0 + (u1 - u0) / 2);
                     owner.spriteQuad(sprite.texture(), x0, y0, x1, y1, u0 - k, u1 - k, v0, v1, top);
+                } else if (real != null) {
+                    float du = real.getU1() - real.getU0(), dv = real.getV1() - real.getV0();
+                    owner.spriteQuad(HorizonEntityRender.textureOf(real), x0, y0, x1, y1,
+                            (u0 - real.getU0()) / du, (u1 - real.getU0()) / du,
+                            (v0 - real.getV0()) / dv, (v1 - real.getV0()) / dv, top);
                 } else if (!textured) {
                     float[][] corners = {vertices.points().get(i), vertices.points().get(i + 1),
                             vertices.points().get(i + 2), vertices.points().get(i + 3)};
@@ -209,6 +222,34 @@ public final class HorizonGraphics extends GuiGraphicsExtractor {
                 }
             }
         }
+    }
+
+    private static final java.util.Map<Object, String> ATLAS_NAMES = java.util.Collections.synchronizedMap(new java.util.WeakHashMap<>());
+
+    /** The atlas a GPU texture is (`ns:textures/atlas/<name>.png`), else null. */
+    static String atlasName(com.mojang.renderpearl.api.textures.GpuTexture texture) {
+        String known = ATLAS_NAMES.get(texture);
+        if (known != null) return known.isEmpty() ? null : known;
+        String[] found = {null};
+        try {
+            net.minecraft.client.Minecraft.getInstance().getAtlasManager().forEach((id, atlas) -> {
+                if (atlas.getTexture() == texture) found[0] = atlas.location().toString();
+            });
+        } catch (RuntimeException e) {
+            return null;
+        }
+        if (found[0] != null) ATLAS_NAMES.put(texture, found[0]);
+        return found[0];
+    }
+
+    /** The real atlas sprite (`ns:textures/atlas/<name>.png`) holding a UV, if any. */
+    static net.minecraft.client.renderer.texture.TextureAtlasSprite realSprite(String atlas, float u, float v) {
+        int colon = atlas.indexOf(':');
+        if (colon < 0 || !atlas.contains("textures/atlas/") || u > 1 || v > 1) return null;
+        var id = Identifier.fromNamespaceAndPath(atlas.substring(0, colon),
+                atlas.substring(colon + 1).replace("textures/atlas/", "").replace(".png", ""));
+        var real = HorizonEntityRender.spriteAt(id, u, v);
+        return real != null && real.getU1() > real.getU0() && real.getV1() > real.getV0() ? real : null;
     }
 
     /** Whether a quad's corners make an upright rectangle (each edge level or plumb). */
@@ -276,6 +317,9 @@ public final class HorizonGraphics extends GuiGraphicsExtractor {
         }
     }
 
+    /** HORIZON_JAVA_DEBUG=tiled: each sprite blitTiledSprite draws, once. */
+    private static final boolean DEBUG_TILED = String.valueOf(System.getenv("HORIZON_JAVA_DEBUG")).contains("tiled");
+    private static final java.util.Set<String> TILED_LOGGED = java.util.concurrent.ConcurrentHashMap.newKeySet();
     private static final boolean DEBUG_GPU = "gpu".equals(System.getenv("HORIZON_JAVA_DEBUG"));
     /** How often a picture in picture is drawn and read back (ns): 10 a second. */
     private static final long PIP_INTERVAL = 100_000_000L;
@@ -776,6 +820,32 @@ public final class HorizonGraphics extends GuiGraphicsExtractor {
         if (color != -1) ops.get(ops.size() - 1).getAsJsonObject().addProperty("color", color);
     }
 
+    /**
+     * Vanilla's blitTiledSprite (GuiGraphicsMixin): the sprite's own texture, a blit per tile of
+     * {@code tileW} x {@code tileH} over the rectangle (the last ones cut), each tile the
+     * sprite's {@code u, v} square of {@code texW} x {@code texH}, tinted by {@code color}.
+     */
+    public void horizon$tiledSprite(net.minecraft.client.renderer.texture.TextureAtlasSprite sprite, int x, int y, int w, int h,
+                                    int u, int v, int tileW, int tileH, int texW, int texH, int color) {
+        if (w <= 0 || h <= 0 || tileW <= 0 || tileH <= 0 || texW <= 0 || texH <= 0) return;
+        String name = HorizonEntityRender.textureOf(sprite);
+        if (DEBUG_TILED && TILED_LOGGED.add(name)) Natives.log("gui: a tiled sprite, " + name + " tinted " + Integer.toHexString(color));
+        for (int ty = 0; ty < h; ty += tileH) {
+            int th = Math.min(tileH, h - ty);
+            for (int tx = 0; tx < w; tx += tileW) {
+                int tw = Math.min(tileW, w - tx);
+                JsonObject o = op("blit");
+                o.addProperty("texture", name);
+                rect(o, x + tx, y + ty, x + tx + tw, y + ty + th);
+                o.addProperty("u0", (float) u / texW);
+                o.addProperty("u1", (float) (u + tw) / texW);
+                o.addProperty("v0", (float) v / texH);
+                o.addProperty("v1", (float) (v + th) / texH);
+                if (color != -1) o.addProperty("color", color);
+            }
+        }
+    }
+
     @Override
     public void blit(Identifier texture, int x0, int y0, int x1, int y1, float u0, float u1, float v0, float v1) {
         String name = texture.toString();
@@ -788,6 +858,21 @@ public final class HorizonGraphics extends GuiGraphicsExtractor {
                 name = sprite.texture();
                 u0 -= k;
                 u1 -= k;
+            }
+        }
+        // A real atlas's sprite (the client's block atlas, once its models load: a fluid's still
+        // sprite JEI tiles into its list and mods into their tanks): the sprite's own texture,
+        // its UVs made the sprite's own, as block entity renderers' atlas meshes are. Left as the
+        // atlas, Horizon's window had no such picture and drew a black square.
+        if (name.contains("textures/atlas/")) {
+            var real = realSprite(name, (u0 + u1) / 2, (v0 + v1) / 2);
+            if (real != null && real.getU1() > real.getU0() && real.getV1() > real.getV0()) {
+                float du = real.getU1() - real.getU0(), dv = real.getV1() - real.getV0();
+                name = HorizonEntityRender.textureOf(real);
+                u0 = du == 0 ? 0 : (u0 - real.getU0()) / du;
+                u1 = du == 0 ? 0 : (u1 - real.getU0()) / du;
+                v0 = dv == 0 ? 0 : (v0 - real.getV0()) / dv;
+                v1 = dv == 0 ? 0 : (v1 - real.getV0()) / dv;
             }
         }
         JsonObject o = op("blit");

@@ -1980,6 +1980,69 @@ fn debug_density_line_lists_the_noise_settings_functions() {
 
 #[test]
 #[ignore = "full content root: needs prepared vanilla data"]
+fn own_states_boxes_drive_outline_collision_and_occlusion() {
+    use horizon_core::geometry::Direction;
+    use horizon_world::{collision::CachedCollisionRegistry, registry::BlockStateId};
+    let Some(base) = prepared() else {
+        return;
+    };
+    let scratch = std::env::temp_dir().join(format!("horizon-content-own-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&scratch);
+    // A basin (a Java mod's block with its own states, on stone's template): its floor short
+    // of the block's edges, stood in by a full cube's state. Lit: occludes nothing.
+    let basin = "[[0.125,0,0.125,0.875,0.125,0.875],[0,0.125,0,1,1,1]]";
+    let m = folder_mod(
+        &scratch.join("mod"),
+        &[
+            ("horizon-mod.toml", &manifest("owntest", "")),
+            (
+                "data/owntest/horizon/block/basin.json",
+                &format!(
+                    r#"{{"template":"minecraft:stone","states":[
+                    {{"properties":{{"lit":"false"}},"shape":"minecraft:stone","outline":{basin},"collision":{basin},"occlusion":{basin},"default":true}},
+                    {{"properties":{{"lit":"true"}},"shape":"minecraft:stone","occlusion":[]}}]}}"#
+                ),
+            ),
+        ],
+    );
+    let root = resource_root(&base, &[m], &scratch.join("cache")).unwrap();
+    let assets = Assets::load(&root).unwrap();
+    let registry = assets.registry;
+    let facts = BlockFacts::load(&root, registry).unwrap();
+    let state = |lit: &str| {
+        (0..registry.len())
+            .map(|i| BlockStateId(i as u32))
+            .find(|id| {
+                let s = registry.state(*id).unwrap();
+                s.name == "owntest:basin" && s.properties.get("lit").is_some_and(|v| v == lit)
+            })
+            .unwrap()
+    };
+    let (unlit, lit) = (state("false"), state("true"));
+    // Its own outline (nothing in the corner under its walls), not the stand-in's full cube.
+    let outline = &facts.get(unlit).outline;
+    let corner = |b: &[f64; 6]| b[0] <= 0.05 && b[1] <= 0.05 && b[2] <= 0.05;
+    assert!(!outline.is_empty() && !outline.iter().any(corner), "{outline:?}");
+    assert!(!facts.get(unlit).full_collision);
+    let (named, _) = nbt::read_named(
+        &fs::read(root.join("cached-collision.nbt")).unwrap(),
+        Limits::tables(),
+    )
+    .unwrap();
+    let collision = CachedCollisionRegistry::from_nbt(&named.tag, registry).unwrap();
+    assert_eq!(collision.cached_shape(unlit).unwrap().unwrap().boxes().len(), outline.len());
+    // Faces: the floor under the basin shows round its feet; under the lit one, all of it.
+    let mut visibility = crate::models::load_visibility(&root, registry).unwrap();
+    let stone = registry.default_state("minecraft:stone").unwrap();
+    assert!(visibility.should_render_face(stone, unlit, Direction::Up, false).unwrap());
+    assert!(visibility.should_render_face(stone, lit, Direction::Up, false).unwrap());
+    // Stone's stand-in state still hides it.
+    assert!(!visibility.should_render_face(stone, stone, Direction::Up, false).unwrap());
+    fs::remove_dir_all(scratch).unwrap();
+}
+
+#[test]
+#[ignore = "full content root: needs prepared vanilla data"]
 fn content_shapes_drive_outline_and_collision() {
     use horizon_core::{
         geometry::{Aabb, Axis, Vec3},
