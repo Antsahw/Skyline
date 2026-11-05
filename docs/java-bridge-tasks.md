@@ -304,6 +304,40 @@ chat with no head, Chunky's 0 chunks). The driver: one `screen_test.sh` per mod 
 (`/modconfig bettercombat`; `attack` a NoAI zombie; `chat`; `chunky start`; `key v`; give and
 use a gun; pause; `break` a dirt block in survival).
 
+### A tester's log (2026-11-05, ~60 mods, mostly client-side: GTX 1060, Linux)
+
+No crash: the world played ~4 minutes and closed normally. Mods: Continuity, Entity Model/Texture
+Features, Async Particles, FancyMenu, Immersive Hotbar, ShulkerBoxTooltip, Legendary Tooltips,
+Zoomify, Falling Leaves, Particle Effects, JEI, Jade, Xaero's, 3D Skin Layers, Lithium, Mouse
+Tweaks, The Sift... Failures, by what Horizon's headless client lacks (client chat; all generic):
+- **`mc.particleEngine` null** (Async Particles every tick; also Create's): a vanilla
+  `ParticleEngine` that hands particles to Horizon's.
+- **`ModelManager` / `ItemModelResolver` null** (EMF's entity models, the hands' tick, Immersive
+  Hotbar's `stack` null, the HUD's hotbar and item name): stand-ins the HUD and hands use.
+- **Options load fails: "Can't getDevice() before it was initialized"** and "the GPU device
+  failed to start" early: a mod reading options before the bridge's GPU device is up.
+- **Continuity (connected textures): "Invalid atlas id: minecraft:blocks"** in its reload: the
+  block atlas under its 26.3 id; then its CTM loader NPE.
+- **mezz_config gui atlas: "Unknown element id: minecraft:directory"** (an atlas sprite source
+  type) and "Fallback pipeline cache not yet set".
+- **ShulkerBoxTooltip: "Cannot register receiver while not in game"** at
+  `ClientPlayConnectionEvents.INIT` (the event fires before the client counts as in game).
+- **FancyMenu: packet send NPE** (`pendingActions` null: a connection field not made).
+- `Entity.vicinityCache` missing; "a client level has no chunk source: value 0 not in 1..32"
+  (a view distance of 0 given to the client level).
+
+Same tester, follow-up: JEI works now; The Sift's blocks appear in ancient cities now. But
+**mods' own dimensions don't exist**: The Sift's dimension isn't in `/execute in`, and its horn
+(summons "the singer" in an ancient city, which leads there) does nothing, with nothing in the
+log. Horizon makes one level per vanilla dimension (`levels.rs`); a mod's `dimension`/
+`dimension_type` (data pack JSON or registered in code) gets no level, so there's nothing to
+travel to, nothing in `/execute in`, and mod code asking `server.getLevel(key)` gets null (the
+horn then silently gives up). **Worldgen chat, high priority** (Twilight Forest, the Aether,
+mining dimensions all need it): a level per extra dimension in the mirror's registry, generated
+by the mods' generator (as `HorizonWorldgen.modded`), saved under `dimensions/<ns>/<path>`, in
+`/execute in`, `/tp`, portals and `changeDimension` from mod code. Also Xaero's World Map:
+`ModelManager.getBlockStateModelSet()` null (client chat, the ModelManager stand-in above).
+
 ### Later: upstream's launcher redesign (noted 2026-11-04)
 
 Upstream redesigned the launcher (the "glass" views). Batch 10 only added the Java mods tab to
