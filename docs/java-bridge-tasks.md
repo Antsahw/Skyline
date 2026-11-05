@@ -304,6 +304,28 @@ chat with no head, Chunky's 0 chunks). The driver: one `screen_test.sh` per mod 
 (`/modconfig bettercombat`; `attack` a NoAI zombie; `chat`; `chunky start`; `key v`; give and
 use a gun; pause; `break` a dirt block in survival).
 
+### A tester's log (2026-11-05, ~60 mods, mostly client-side: GTX 1060, Linux)
+
+No crash: the world played ~4 minutes and closed normally. Mods: Continuity, Entity Model/Texture
+Features, Async Particles, FancyMenu, Immersive Hotbar, ShulkerBoxTooltip, Legendary Tooltips,
+Zoomify, Falling Leaves, Particle Effects, JEI, Jade, Xaero's, 3D Skin Layers, Lithium, Mouse
+Tweaks, The Sift... Failures, by what Horizon's headless client lacks (client chat; all generic):
+- **`mc.particleEngine` null** (Async Particles every tick; also Create's): a vanilla
+  `ParticleEngine` that hands particles to Horizon's.
+- **`ModelManager` / `ItemModelResolver` null** (EMF's entity models, the hands' tick, Immersive
+  Hotbar's `stack` null, the HUD's hotbar and item name): stand-ins the HUD and hands use.
+- **Options load fails: "Can't getDevice() before it was initialized"** and "the GPU device
+  failed to start" early: a mod reading options before the bridge's GPU device is up.
+- **Continuity (connected textures): "Invalid atlas id: minecraft:blocks"** in its reload: the
+  block atlas under its 26.3 id; then its CTM loader NPE.
+- **mezz_config gui atlas: "Unknown element id: minecraft:directory"** (an atlas sprite source
+  type) and "Fallback pipeline cache not yet set".
+- **ShulkerBoxTooltip: "Cannot register receiver while not in game"** at
+  `ClientPlayConnectionEvents.INIT` (the event fires before the client counts as in game).
+- **FancyMenu: packet send NPE** (`pendingActions` null: a connection field not made).
+- `Entity.vicinityCache` missing; "a client level has no chunk source: value 0 not in 1..32"
+  (a view distance of 0 given to the client level).
+
 ### Later: upstream's launcher redesign (noted 2026-11-04)
 
 Upstream redesigned the launcher (the "glass" views). Batch 10 only added the Java mods tab to
