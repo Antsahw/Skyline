@@ -3,8 +3,9 @@ run-name: java mods release ${{ github.ref_name }}${{ inputs.dry_run && ' (dry r
 # The java-bridge fork's own Fabric 26.3 mods build (docs/java-bridge.md, "Fabric mods releases"), opt-in: it runs
 # only in iaxivers/horizon-java-bridge, and only when asked: by pushing the commit to build to the branch `java-mods-build`, or a
 # tag `java-mods-build-<anything>` on it, or by hand. It builds, on GitHub's own runners (no Minecraft jar there, nothing of Mojang's in the archives):
-# - the game with Fabric Java mods (feature java-mods, HORIZON_BRIDGE_PLATFORM=source: the platform mod's sources,
-#   built on the player's machine against their own game), Linux and Windows, as game-build.yml's `<asset>-java`;
+# - the game with Fabric Java mods (feature java-mods, HORIZON_BRIDGE_PLATFORM=source: the bridge's and the platform
+#   mod's sources, built on the player's machine against the Fabric Loader fetched there and their own game; this
+#   machine fetches and reads nothing of Fabric's), Linux and Windows, as game-build.yml's `<asset>-java`;
 # - the fork's launcher (the "Fabric 26.3 mods (beta)" switch), which never updates itself into the main repository's.
 # They go out as the moving pre-release `java-mods`, with java-mods.json (commit, the preparation format the build
 # reads) and SHA256SUMS signed for the `java-mods` channel with the fork's own key (secret JAVA_MODS_SIGNING_KEY;
@@ -134,6 +135,8 @@ jobs:
           bin=target-java/release/horizon-client${{ matrix.exe }}
           "$bin" --help | grep -q -- '--resources'
           ${{ runner.os == 'Windows' && 'python' || 'python3' }} tools/check_imports.py "$bin"
+          # The source build fetched and read nothing of Fabric's here (build.rs downloads only for a jar build).
+          [[ ! -e .local/bridge ]] || { echo "::error::Fabric's files were fetched on the build machine"; ls -R .local/bridge; exit 1; }
       - name: The fork's launcher (the Fabric switch; never self-updates into the main repository's)
         working-directory: launcher
         env:
@@ -170,6 +173,10 @@ jobs:
           # Exactly what was put in: no jar, no asset, nothing of Mojang's.
           stray=$(echo "$listing" | tr '\\' '/' | grep -v -E "^(${{ matrix.java_asset }}|${{ matrix.java_dir }}/?|${{ matrix.java_dir }}/(horizon-client(\.exe)?|LICENSE|THIRD_PARTY_NOTICES\.md))$" || true)
           [[ -z "$stray" ]] || { echo "::error::unexpected files: $stray"; exit 1; }
+          # Nothing of Fabric's (Loader, Mixin, Sat4j, ASM, Fabric API) in the repository or the archives:
+          # they are fetched on the player's machine (docs/java-bridge.md, "Ownership").
+          ${{ runner.os == 'Windows' && 'python' || 'python3' }} ../tools/java_bridge/check_no_fabric.py --tree \
+            "${{ matrix.java_asset }}" "${{ matrix.launcher_asset }}"
           ls -l
       - uses: actions/upload-artifact@v4
         with:

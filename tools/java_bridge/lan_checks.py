@@ -26,6 +26,8 @@ def game_setup(work, env):
     for jar in Path(E.JAVA_MODS).glob('*.jar'):
         shutil.copy(jar, work / 'mods-java' / jar.name)
     env['HORIZON_ROOT'] = str(E.ROOT)
+    # A developer's run: the explicit opt-in (horizon_jvm::gate), as launch.sh sets it.
+    env['HORIZON_JAVA_MODS'] = '1'
 
 
 def java_entities(game, kind):

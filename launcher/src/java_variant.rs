@@ -19,8 +19,13 @@ use std::process::Command;
 pub const DIR: &str = "java";
 /// What tells the game to run the Fabric mods (`game/java_mods.rs`, `opted_in`).
 pub const OPT_IN_ARG: &str = "--java-mods";
-/// The game's variable that turns Fabric mods on as [`OPT_IN_ARG`] does (developers' scripts).
+/// The game's variable that turns Fabric mods on for developers' harnesses
+/// (`horizon_jvm::gate::DEV_VAR`): never passed by the launcher.
 const OPT_IN_VAR: &str = "HORIZON_JAVA_MODS";
+/// What tells the game, beside [`OPT_IN_ARG`], that this command passed the owner gate
+/// (`horizon_jvm::gate::OWNER_VAR`): without it the game runs no Fabric mods and downloads
+/// nothing for them. Set only by [`switch_command`], which runs on Play's command after the gate.
+pub const OWNER_VAR: &str = "HORIZON_JAVA_MODS_OWNER";
 /// Written once the build is all there.
 const COMPLETE: &str = ".installed";
 /// The Java home the game runs the mods on (`horizon_jvm::JAVA_HOME_VAR`).
@@ -339,7 +344,7 @@ pub fn apply(cmd: &mut Command, instance: &crate::instances::Instance) -> Result
     } else {
         // Off means off: a `HORIZON_JAVA_MODS=1` the launcher itself was started with (a
         // developer's shell) would turn them on in the game it starts.
-        cmd.env_remove(OPT_IN_VAR);
+        cmd.env_remove(OPT_IN_VAR).env_remove(OWNER_VAR);
     }
     Ok(())
 }
@@ -382,6 +387,10 @@ pub fn switch_command(cmd: &mut Command) -> Result<(), String> {
             next.env(JAVA_HOME_VAR, home);
         }
     }
+    // Play builds this command only past the owner gate (`client_as`, the window's session,
+    // MCP's `play`): the game runs the mods only with this beside the argument. A developer's
+    // `HORIZON_JAVA_MODS=1` in the launcher's own environment doesn't reach it.
+    next.env_remove(OPT_IN_VAR).env(OWNER_VAR, "1");
     next.arg(OPT_IN_ARG);
     *cmd = next;
     Ok(())
@@ -440,6 +449,9 @@ mod tests {
         let envs: Vec<_> = cmd.get_envs().collect();
         assert!(envs.contains(&("HORIZON_HOME".as_ref(), Some(scratch.as_os_str()))));
         assert!(envs.contains(&("GONE".as_ref(), None)));
+        // The owner gate's word for the game, and never the developers' opt-in.
+        assert!(envs.contains(&(OWNER_VAR.as_ref(), Some("1".as_ref()))));
+        assert!(envs.contains(&(OPT_IN_VAR.as_ref(), None)));
         let _ = fs::remove_dir_all(&scratch);
     }
 }

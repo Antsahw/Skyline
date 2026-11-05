@@ -88,7 +88,7 @@ pub fn start(config: &NeoForge) -> Result<&'static Bridge, String> {
         return Ok(bridge);
     }
     let launch = launch(&config.install)?;
-    let bridge_jar = write_jar(&config.work, "horizon-bridge.jar", crate::BRIDGE_JAR)?;
+    let bridge_jar = crate::bridge_jar(&config.work, &config.home)?;
     let mut class_path = vec![bridge_jar];
     class_path.extend(launch.class_path.iter().cloned());
     let log_config = write_jar(

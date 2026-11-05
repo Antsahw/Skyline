@@ -2739,7 +2739,8 @@ the game folder (HORIZON_HOME). `OFF=1` runs it without `--java-mods`: no Java m
 
 For upstream (Ludovic asked for the bridge in the main repo), Java mods are **off unless the
 player turns them on**, per instance:
-- **The game** (built with `java-mods`) starts Java only when opted in: `--java-mods`, or
+- **The game** (built with `java-mods`) starts Java only when opted in: `--java-mods` from the
+  launcher past its owner gate (with `HORIZON_JAVA_MODS_OWNER`, "Ownership" below), or
   `HORIZON_JAVA_MODS=1` (developers' scripts, servers). Every read of `mods-java/` goes through
   `java_mods::mod_jars()`, which has no jars otherwise (one log line says how many it left off).
   So no Java start, no Java 25 download, no Fabric download without the switch. The tools set it:
@@ -2872,6 +2873,43 @@ download of the server jar. What holds now:
 without them, and its log says why: a player would take the world for modded, and a modded world
 opened without its mods loses their blocks and items. `HORIZON_JAVA_OPTIONAL=1` goes on without
 them, as it used to.
+
+### Ownership and licences (2026-11-05, bridge-ownership-1)
+
+The maintainers' conditions, and what holds them:
+- **(a) Fabric Loader, Mixin, Sat4j, ASM and Fabric API are never shipped, vendored, copied or read
+  by Horizon's builds.** The repository has none of their files (`check_no_fabric.py --tree`; Python
+  test `tests/test_check_no_fabric.py`). A release build (`HORIZON_BRIDGE_PLATFORM=source`, as
+  `java-mods-release.yml` and `package_java_variant.sh` build) now carries **the bridge's own
+  sources too** (`horizon-bridge-src.zip`), not only the platform mod's: build.rs fetches and reads
+  nothing of Fabric's, and both steps fail if `.local/bridge` appears on the build machine or an
+  archive holds a class or jar of theirs (`check_no_fabric.py <archives>`). On the player's machine,
+  the first start fetches Fabric's jars from maven.fabricmc.net (SHA-256 pinned, unchanged) and
+  compiles the bridge (`platform::ensure_bridge`, 7 sources, a few seconds) then the platform mod against them
+  (`work/bridge/<key>/`, `work/platform/<key>/`). A developer's build (no `source`) still compiles
+  against the jars it fetches into the checkout's `.local/bridge/lib`, on the developer's machine.
+- **(b) Nothing plays without owning the game, nothing of Mojang's is downloaded for a non-owner.**
+  The game downloads nothing of Mojang's, ever (no Java, jars or assets: the game jar is the player's
+  own preparation). Fabric mods run only when `horizon_jvm::gate` says so: `--java-mods` **with**
+  `HORIZON_JAVA_MODS_OWNER`, which only the launcher's `switch_command` sets, on Play's command, after
+  the strict owner gate; or `HORIZON_JAVA_MODS=1`, the developers' explicit opt-in (regress,
+  `launch.sh`, `lan_test.sh`, `server_test.sh`, `lan_e2e --java-mods`). `--java-mods` alone (the game
+  started by hand) runs no mods and fetches nothing: the log and stderr say "Fabric 26.3 mods run only
+  when Horizon's launcher starts the game for a signed-in account that owns Minecraft: Java Edition
+  …", and the game plays without them (no exit 78). The launcher fetches the Java mods build and
+  Mojang's Java 25 only past `owner_signed_in` (`ensure`, `follow`, `java-mods on`). These are local
+  checks, as in every launcher: they keep Horizon from offering a path, not a determined user out.
+- **(c)** Startup and frame time with the bridge off: [java-bridge-perf.md](java-bridge-perf.md),
+  "The bridge switched off" (`tools/java_bridge/perf_off.sh`).
+- **Checks:** unit `horizon-jvm gate::` (by hand → no mods; launcher marker → mods; dev opt-in);
+  launcher unit `java_variant::…the_command_becomes_the_java_builds…` (the marker on the gated
+  command, never `HORIZON_JAVA_MODS`); `launcher_switch_test.py` (no owner: nothing downloaded;
+  Play passes the marker; off: none); regress **`direct`** (`install_test.sh DIRECT=1`: scratch
+  install, `--java-mods`, no marker: the message, no `.local/bridge`, no Java runtime, no `libjvm`
+  in the process, the world plays) and **`owner`** (with the marker: Fabric fetched into the install,
+  the fixture loads).
+- **Trap:** a script of your own that starts the game with `--java-mods` now runs no mods: add
+  `HORIZON_JAVA_MODS=1` (developer) or `HORIZON_JAVA_MODS_OWNER=1` (as the launcher, `install_test.sh`).
 
 ### Windows
 

@@ -9,8 +9,14 @@
 //!   Fabric API (`fabric-api.tsv`). Without a prepared game it is left empty, and the game runs
 //!   Fabric with no game events for mods.
 //!
+//! `HORIZON_BRIDGE_PLATFORM=source` (a release build) compiles neither and reads nothing of
+//! Fabric's: both jars are left empty and their sources are carried instead (`horizon-bridge-src.zip`,
+//! `horizon-platform-src.zip`), built on the player's machine against the Fabric Loader, Fabric API
+//! and game jar fetched or prepared there (`src/platform.rs`). The build machine then downloads,
+//! reads and ships nothing of Fabric's (Loader, Mixin, Sat4j, ASM, Fabric API).
+//!
 //! Needs a JDK at build time (JDK 25 for Horizon; any JDK 21 or newer compiles these):
-//! `JAVA_HOME`, else `javac` on the PATH.
+//! `JAVA_HOME`, else `javac` on the PATH. A source build needs none.
 
 #[allow(dead_code)]
 #[path = "src/libs.rs"]
@@ -67,6 +73,10 @@ fn sources(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
+/// The service file that lets Fabric Loader find the bridge's game provider.
+const SERVICE: &str = "META-INF/services/net.fabricmc.loader.impl.game.GameProvider";
+const PROVIDER: &[u8] = b"dev.horizonlab.bridge.fabric.HorizonGameProvider\n";
+
 fn main() {
     println!("cargo:rerun-if-changed=java/dev");
     println!("cargo:rerun-if-changed=fabric-libs.tsv");
@@ -74,8 +84,39 @@ fn main() {
     println!("cargo:rerun-if-changed=src/libs.rs");
     println!("cargo:rerun-if-env-changed=JAVA_HOME");
     println!("cargo:rerun-if-env-changed=HORIZON_BRIDGE_LIBS");
+    println!("cargo:rerun-if-env-changed=HORIZON_BRIDGE_PLATFORM");
     let manifest =
         PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
+    let out = PathBuf::from(std::env::var_os("OUT_DIR").expect("OUT_DIR"));
+    // A release build: only the sources, nothing of Fabric's fetched or read here.
+    if std::env::var("HORIZON_BRIDGE_PLATFORM").is_ok_and(|v| v == "source") {
+        let dev = manifest.join("java/dev");
+        let mut zip = zip::ZipWriter::new(
+            std::fs::File::create(out.join("horizon-bridge-src.zip")).expect("bridge sources"),
+        );
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated)
+            .last_modified_time(zip::DateTime::default());
+        let mut all = Vec::new();
+        collect(&dev, &mut all);
+        all.sort();
+        for file in all {
+            let name = file
+                .strip_prefix(&dev)
+                .unwrap()
+                .to_string_lossy()
+                .replace('\\', "/");
+            zip.start_file(name, options).unwrap();
+            zip.write_all(&std::fs::read(&file).unwrap()).unwrap();
+        }
+        zip.start_file(SERVICE, options).unwrap();
+        zip.write_all(PROVIDER).unwrap();
+        zip.finish().unwrap();
+        std::fs::write(out.join("horizon-bridge.jar"), b"").unwrap();
+        carry_platform_sources(&manifest.join("java/platform"), &out);
+        return;
+    }
+    std::fs::write(out.join("horizon-bridge-src.zip"), b"").unwrap();
     let libs_dir = std::env::var_os("HORIZON_BRIDGE_LIBS")
         .map(PathBuf::from)
         .unwrap_or_else(|| manifest.join("../../.local/bridge/lib"));
@@ -87,7 +128,6 @@ fn main() {
         )
     });
 
-    let out = PathBuf::from(std::env::var_os("OUT_DIR").expect("OUT_DIR"));
     let classes = out.join("classes");
     let _ = std::fs::remove_dir_all(&classes);
     std::fs::create_dir_all(&classes).expect("create OUT_DIR/classes");
@@ -141,13 +181,8 @@ fn main() {
         zip.start_file(name, options).unwrap();
         zip.write_all(&std::fs::read(&file).unwrap()).unwrap();
     }
-    zip.start_file(
-        "META-INF/services/net.fabricmc.loader.impl.game.GameProvider",
-        options,
-    )
-    .unwrap();
-    zip.write_all(b"dev.horizonlab.bridge.fabric.HorizonGameProvider\n")
-        .unwrap();
+    zip.start_file(SERVICE, options).unwrap();
+    zip.write_all(PROVIDER).unwrap();
     zip.finish().unwrap();
 
     platform(&manifest, &out, &libs, &classes, &javac);
@@ -201,42 +236,15 @@ fn platform(manifest: &Path, out: &Path, libs: &[PathBuf], bridge_classes: &Path
     let root = manifest.join("../..");
     let sources_dir = manifest.join("java/platform");
     let src_path = out.join("horizon-platform-src.zip");
-    println!("cargo:rerun-if-env-changed=HORIZON_BRIDGE_PLATFORM");
-    // HORIZON_BRIDGE_PLATFORM=source: the sources even with a prepared game (what a release
-    // build without the game carries; to test the player-side build).
-    let source_only = std::env::var("HORIZON_BRIDGE_PLATFORM").is_ok_and(|v| v == "source");
-    let prepared = if source_only {
-        None
-    } else {
-        prepared_game(&root)
-    };
-    let Some((game, game_libraries)) = prepared else {
-        // No game to build against (a release build): the sources go in the binary and are
-        // built on the player's machine against their own game jar (src/platform.rs).
-        if !source_only {
-            println!(
-                "cargo:warning=horizon-jvm: no prepared game in .local/minecraft: the platform mod's \
-                 sources are carried and built on the player's machine at the first start."
-            );
-        }
-        let mut zip = zip::ZipWriter::new(std::fs::File::create(&src_path).unwrap());
-        let options = zip::write::SimpleFileOptions::default()
-            .compression_method(zip::CompressionMethod::Deflated)
-            .last_modified_time(zip::DateTime::default());
-        let mut all = Vec::new();
-        collect(&sources_dir, &mut all);
-        all.sort();
-        for file in all {
-            let name = file
-                .strip_prefix(&sources_dir)
-                .unwrap()
-                .to_string_lossy()
-                .replace('\\', "/");
-            zip.start_file(name, options).unwrap();
-            zip.write_all(&std::fs::read(&file).unwrap()).unwrap();
-        }
-        zip.finish().unwrap();
-        std::fs::write(&jar_path, b"").unwrap();
+    // (HORIZON_BRIDGE_PLATFORM=source never comes here: `main` carries both sources.)
+    let Some((game, game_libraries)) = prepared_game(&root) else {
+        // No game to build against: the sources go in the binary and are built on the player's
+        // machine against their own game jar (src/platform.rs).
+        println!(
+            "cargo:warning=horizon-jvm: no prepared game in .local/minecraft: the platform mod's \
+             sources are carried and built on the player's machine at the first start."
+        );
+        carry_platform_sources(&sources_dir, out);
         return;
     };
     std::fs::write(&src_path, b"").unwrap();
@@ -303,6 +311,30 @@ fn platform(manifest: &Path, out: &Path, libs: &[PathBuf], bridge_classes: &Path
             .unwrap();
     }
     zip.finish().unwrap();
+}
+
+/// The platform mod's sources in `horizon-platform-src.zip`, its jar left empty.
+fn carry_platform_sources(sources_dir: &Path, out: &Path) {
+    println!("cargo:rerun-if-changed=java/platform");
+    let mut zip =
+        zip::ZipWriter::new(std::fs::File::create(out.join("horizon-platform-src.zip")).unwrap());
+    let options = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated)
+        .last_modified_time(zip::DateTime::default());
+    let mut all = Vec::new();
+    collect(sources_dir, &mut all);
+    all.sort();
+    for file in all {
+        let name = file
+            .strip_prefix(sources_dir)
+            .unwrap()
+            .to_string_lossy()
+            .replace('\\', "/");
+        zip.start_file(name, options).unwrap();
+        zip.write_all(&std::fs::read(&file).unwrap()).unwrap();
+    }
+    zip.finish().unwrap();
+    std::fs::write(out.join("horizon-platform.jar"), b"").unwrap();
 }
 
 fn collect_ext(dir: &Path, ext: &str, out: &mut Vec<PathBuf>) {
