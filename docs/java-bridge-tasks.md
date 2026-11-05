@@ -1942,7 +1942,9 @@ with 5 s: the wait is 4 s now). `tacz`: fires (ammo 30 → 28) but only 2 shots 
 box, the zombie lives: retest on the PC. `createclick`: arm and chain pass, the train station
 steps (and once the sandpaper) fail; mixins-11's own Java on this build fails the same, so not
 the click merge; trello-2 saw track placing miss too. `rei-lan` fails as generic-2 reported.
-`voice_test.sh`: both directions heard (17/39, 23/39). Game build 18 min; launcher built.
+`voice_test.sh`: both directions heard (17/39, 23/39). Game build 18 min; launcher built (needs
+`libxkbcommon-dev libxkbcommon-x11-dev` here), its `java_` tests pass (33; upstream's new mrpack
+test needed `java_mods`), `launcher_switch_test.py` passes.
 
 ### Generic 2: Better Combat, a client per player's game (2026-11-05, branch `bridge-generic-2`; Claude for iaxivers)
 
