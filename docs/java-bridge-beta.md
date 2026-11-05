@@ -70,7 +70,7 @@ After a `git pull`, build again and run `use-build` again.
 
 1. **Sign in:** in the launcher, add your Microsoft account (or `horizon-launcher account sign-in`).
 2. **Install a Horizon version** on Home and let the launcher prepare it from your Minecraft 26.3.
-3. **Turn on Fabric mods:** Home > **Launch…** > **Fabric 26.3 mods (beta)**
+3. **Turn on Fabric mods:** on Home, the **Fabric mods** switch next to **Play** (or Play's **⋯** menu)
    (or `horizon-launcher java-mods on`). A **Java mods** tab appears on Home. "reads prepared files
    of format N": the build and your Horizon version are too far apart; update the version (or
    wait for the next build).
