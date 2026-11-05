@@ -218,6 +218,61 @@ pub(super) fn java_precipitation(top: horizon_core::position::BlockPos) -> bool 
     }
 }
 
+/// Horizon's items a Java mod's block holds (`HorizonItems`' held: crushing wheels pulling one
+/// in): the mirror moves them, by vanilla's tick, so Horizon's item tick leaves them.
+#[cfg(feature = "java-mods")]
+static JAVA_HELD_ITEMS: std::sync::Mutex<std::collections::BTreeSet<u32>> =
+    std::sync::Mutex::new(std::collections::BTreeSet::new());
+
+/// Whether the item entity `id` is held by a Java mod's block this tick (its tick is theirs).
+pub(super) fn java_holds_item(id: u32) -> bool {
+    #[cfg(feature = "java-mods")]
+    {
+        JAVA_HELD_ITEMS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .contains(&id)
+    }
+    #[cfg(not(feature = "java-mods"))]
+    {
+        let _ = id;
+        false
+    }
+}
+
+/// Lava blocks whose fluid interactions are the mods' (`events::routed_actions`'
+/// "liquid_interactions"), kept for the end of the level's block tick
+/// (Game::java_random_ticks).
+#[cfg(feature = "java-mods")]
+static JAVA_LIQUIDS: std::sync::Mutex<Vec<[i32; 3]>> = std::sync::Mutex::new(Vec::new());
+
+/// `LevelAccess::liquid_interaction`: the lava at `pos` is kept for the Java mods' own fluid
+/// interactions (true), when they patch `LiquidBlock.shouldSpreadLiquid`.
+pub(super) fn java_liquid_interaction(pos: horizon_core::position::BlockPos) -> bool {
+    #[cfg(feature = "java-mods")]
+    {
+        if !JAVA_ROUTED
+            .get()
+            .is_some_and(|r| r.iter().any(|a| a == "liquid_interactions"))
+        {
+            return false;
+        }
+        let mut kept = JAVA_LIQUIDS.lock().unwrap_or_else(|e| e.into_inner());
+        if kept.len() >= 4096 {
+            return false;
+        }
+        if !kept.contains(&[pos.x, pos.y, pos.z]) {
+            kept.push([pos.x, pos.y, pos.z]);
+        }
+        true
+    }
+    #[cfg(not(feature = "java-mods"))]
+    {
+        let _ = pos;
+        false
+    }
+}
+
 /// True when the tick is the mods' instead of Horizon's (a routed vanilla block's).
 #[cfg(not(feature = "java-mods"))]
 pub(super) fn java_random_tick(
@@ -256,7 +311,9 @@ pub(super) fn java_random_tick(
 /// Blocks only Java mods know that a world's `set` placed or removed, for the mods (their block
 /// entities exist from their placement, as vanilla's do: Game::java_random_ticks).
 #[cfg(feature = "java-mods")]
-static JAVA_SETS: std::sync::Mutex<Vec<[i32; 3]>> = std::sync::Mutex::new(Vec::new());
+/// Each with the state it replaced (None: a fluid's neighbour changed, nothing was set there).
+static JAVA_SETS: std::sync::Mutex<Vec<([i32; 3], Option<u32>)>> =
+    std::sync::Mutex::new(Vec::new());
 
 /// The states that hold a Java mod's fluid (its `LiquidBlock`s: BuildCraft's oil, Create's
 /// honey), by state id: made with JAVA_STATES. The mods' mirror runs their flow
@@ -287,7 +344,7 @@ pub(super) fn java_fluid_changed(pos: horizon_core::position::BlockPos) {
     {
         let mut sets = JAVA_SETS.lock().unwrap_or_else(|e| e.into_inner());
         if sets.len() < 65_536 {
-            sets.push([pos.x, pos.y, pos.z]);
+            sets.push(([pos.x, pos.y, pos.z], None));
         }
     }
     #[cfg(not(feature = "java-mods"))]
@@ -304,7 +361,7 @@ pub(super) fn java_block_set(pos: (i32, i32, i32), previous: u32, state: u32) {
     if java(previous) || java(state) {
         let mut sets = JAVA_SETS.lock().unwrap_or_else(|e| e.into_inner());
         if sets.len() < 65_536 {
-            sets.push([pos.0, pos.1, pos.2]);
+            sets.push(([pos.0, pos.1, pos.2], Some(previous)));
         }
     }
 }
@@ -1421,6 +1478,7 @@ mod run {
             // The entities' snapshot in the same view as the tick: what the tick read of the
             // world (whole sections, HorizonServer.section) serves it too.
             let neighbours = self.java_neighbours_json(&players);
+            let items = self.java_items_json(&players);
             let (ticked, entities) = self.with_java_world(|| {
                 if let Some(rules) = &rules
                     && let Err(e) = horizon_jvm::events::game_rules(rules)
@@ -1430,6 +1488,10 @@ mod run {
                 // Horizon's mobs near players, for the mods' mobs to see (HorizonNeighbours).
                 if let Err(e) = horizon_jvm::events::horizon_mobs(&neighbours) {
                     log::warn!("Java mods: Horizon's mobs not passed: {e}");
+                }
+                // Horizon's item entities near players, for the mods' blocks (HorizonItems).
+                if let Err(e) = horizon_jvm::events::horizon_items(&items) {
+                    log::warn!("Java mods: Horizon's items not passed: {e}");
                 }
                 // What the server sent the window's own player, for the mods' client
                 // connection (recording mods read it there): before the tick, whose client
@@ -1954,6 +2016,9 @@ mod run {
                             Self::send_java_screen_frame(host, conn, window, &frame);
                         }
                     }
+                    horizon_jvm::events::Action::ItemsChanged { json } => {
+                        self.java_items_changed(&json);
+                    }
                     horizon_jvm::events::Action::OverlayFrame { uuid, frame } => {
                         let Some(host) = host.as_deref_mut().or(self.lan.as_mut()) else {
                             continue;
@@ -2441,6 +2506,172 @@ mod run {
                 && let Some(m) = level.mobs.iter_mut().find(|m| m.id == id)
             {
                 hurt(m);
+            }
+        }
+
+        /// Horizon's item entities within 32 blocks of a player, per dimension, for the mods'
+        /// blocks and machines (`HorizonItems`: a depot or a belt an item lands on, crushing
+        /// wheels it falls between, a fan blowing on it): `{"<dimension>": [[id, x, y, z, vx,
+        /// vy, vz, on_ground, age, pickup_delay, "stack snbt"]]}`, at most 256 a level.
+        #[cfg(feature = "java-mods")]
+        fn java_items_json(&self, players: &[horizon_jvm::events::Player]) -> String {
+            use std::fmt::Write;
+            // Each item's stack as SNBT, kept while it doesn't change (most don't, tick to tick).
+            static SNBT: std::sync::Mutex<
+                Option<std::collections::HashMap<u32, (horizon_client::items::ItemStack, String)>>,
+            > = std::sync::Mutex::new(None);
+            let mut cache = SNBT.lock().unwrap_or_else(|e| e.into_inner());
+            let old = cache.take().unwrap_or_default();
+            let mut kept = std::collections::HashMap::new();
+            let mut out = String::from("{");
+            let mut level =
+                |out: &mut String, dim: &str, items: &[horizon_client::entities::ItemEntity]| {
+                    let near: Vec<[f64; 3]> = players
+                        .iter()
+                        .filter(|p| p.dimension == dim)
+                        .map(|p| p.position)
+                        .collect();
+                    if near.is_empty() {
+                        return;
+                    }
+                    if out.len() > 1 {
+                        out.push(',');
+                    }
+                    let _ = write!(out, "{}:[", serde_json::to_string(dim).unwrap_or_default());
+                    let mut n = 0;
+                    for d in items {
+                        let at = [d.position.x, d.position.y, d.position.z];
+                        if !near.iter().any(|p| {
+                            (p[0] - at[0]).powi(2) + (p[1] - at[1]).powi(2) + (p[2] - at[2]).powi(2)
+                                <= 32.0 * 32.0
+                        }) {
+                            continue;
+                        }
+                        let snbt = match old.get(&d.id) {
+                            Some((stack, snbt)) if *stack == d.stack => snbt.clone(),
+                            _ => horizon_client::snbt::to_snbt(
+                                &horizon_items::item_nbt::item_to_nbt(&d.stack),
+                            ),
+                        };
+                        if n > 0 {
+                            out.push(',');
+                        }
+                        let _ = write!(
+                            out,
+                            "[{},{},{},{},{},{},{},{},{},{},{}]",
+                            d.id,
+                            at[0],
+                            at[1],
+                            at[2],
+                            d.velocity.x,
+                            d.velocity.y,
+                            d.velocity.z,
+                            u8::from(d.on_ground),
+                            d.age,
+                            d.pickup_delay.clamp(-32768, 32767),
+                            serde_json::to_string(&snbt).unwrap_or_default()
+                        );
+                        kept.insert(d.id, (d.stack.clone(), snbt));
+                        n += 1;
+                        if n >= 256 {
+                            break;
+                        }
+                    }
+                    out.push(']');
+                };
+            level(&mut out, self.dim.id(), &self.dropped);
+            for dim in self.levels.parked_dims() {
+                if let Some(items) = self.levels.parked_items(dim) {
+                    level(&mut out, dim.id(), items);
+                }
+            }
+            *cache = Some(kept);
+            out.push('}');
+            out
+        }
+
+        /// What the mods did to Horizon's items they were shown (`Action::ItemsChanged`): an
+        /// item a mod's block took in leaves the level; one a mod changed (a fan's smelting,
+        /// what a block left of it) takes its new stack; one pushed or moved (a fan's wind, a
+        /// crushing wheel pulling it in) takes its new velocity and place.
+        #[cfg(feature = "java-mods")]
+        fn java_items_changed(&mut self, json: &str) {
+            let Ok(report) = serde_json::from_str::<Value>(json) else {
+                return;
+            };
+            if let Some(Value::Array(held)) = report.get("held") {
+                let mut ids = super::JAVA_HELD_ITEMS
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner());
+                ids.clear();
+                ids.extend(held.iter().filter_map(Value::as_u64).map(|id| id as u32));
+            }
+            let Some(Value::Array(changes)) = report.get("changes") else {
+                return;
+            };
+            let vec3 = |v: &Value| -> Option<horizon_core::geometry::Vec3> {
+                let a = v.as_array()?;
+                Some(horizon_core::geometry::Vec3::new(
+                    a.first()?.as_f64()?,
+                    a.get(1)?.as_f64()?,
+                    a.get(2)?.as_f64()?,
+                ))
+            };
+            for change in changes {
+                let (Some(dim), Some(id)) = (
+                    change.get("d").and_then(Value::as_str),
+                    change.get("id").and_then(Value::as_u64),
+                ) else {
+                    continue;
+                };
+                let id = id as u32;
+                let removed = change.get("removed").and_then(Value::as_bool) == Some(true);
+                let position = change.get("pos").and_then(vec3);
+                let velocity = change.get("vel").and_then(vec3);
+                let new_stack: Option<Option<horizon_client::items::ItemStack>> =
+                    match change.get("stack") {
+                        Some(Value::String(snbt)) => match horizon_world::nbt::parse_snbt(snbt) {
+                            Ok((tag, _)) => Some(horizon_items::item_nbt::item_from_nbt(&tag)),
+                            Err(_) => None,
+                        },
+                        // An emptied stack: the item is gone.
+                        Some(Value::Null) => Some(None),
+                        _ => None,
+                    };
+                let gone = removed || matches!(new_stack, Some(None));
+                let apply = |d: &mut horizon_client::entities::ItemEntity| {
+                    if let Some(Some(stack)) = &new_stack {
+                        d.stack = stack.clone();
+                    }
+                    if let Some(p) = position {
+                        d.position = p;
+                    }
+                    if let Some(v) = velocity {
+                        d.velocity = v;
+                    }
+                    d.needs_sync = true;
+                };
+                if self.dim.id() == dim {
+                    let Some(i) = self.dropped.iter().position(|d| d.id == id) else {
+                        continue;
+                    };
+                    if gone {
+                        self.remove_dropped(i);
+                    } else if let Some(d) = self.dropped.get_mut(i) {
+                        apply(d);
+                    }
+                    continue;
+                }
+                let dim = super::super::Dim::from_id(dim);
+                if let Some(items) = self.levels.parked_items_mut(dim)
+                    && let Some(i) = items.iter().position(|d| d.id == id)
+                {
+                    if gone {
+                        items.remove(i);
+                    } else if let Some(d) = items.get_mut(i) {
+                        apply(d);
+                    }
+                }
             }
         }
 
@@ -2962,8 +3193,21 @@ mod run {
                 );
                 if !sets.is_empty() {
                     let dim = self.dim.id();
-                    let ran =
-                        self.with_java_world(|| horizon_jvm::events::block_entities(dim, &sets));
+                    // What each block replaced, by name ("" when nothing was set there): the
+                    // mods' blocks' onPlace and affectNeighborsAfterRemoval run with it.
+                    let registry = self.pack.assets.registry;
+                    let previous: Vec<String> = sets
+                        .iter()
+                        .map(|(_, p)| {
+                            p.and_then(|id| registry.state(BlockStateId(id)))
+                                .map(|s| s.name.to_string())
+                                .unwrap_or_default()
+                        })
+                        .collect();
+                    let positions: Vec<[i32; 3]> = sets.iter().map(|(p, _)| *p).collect();
+                    let ran = self.with_java_world(|| {
+                        horizon_jvm::events::block_entities(dim, &positions, &previous)
+                    });
                     if let Err(e) = ran {
                         log::warn!("Java mods: block entities failed: {e}");
                     }
@@ -2971,6 +3215,21 @@ mod run {
                 // The routed actions are asked once Fabric runs (precipitation's flag too).
                 let _ = super::java_routed("precipitation");
                 self.java_precipitation_ticks();
+                // Lava the mods' fluid interactions took this tick: theirs run now.
+                let liquids = std::mem::take(
+                    &mut *super::JAVA_LIQUIDS
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner()),
+                );
+                if !liquids.is_empty() {
+                    let dim = self.dim.id();
+                    let ran = self.with_java_world(|| {
+                        horizon_jvm::events::liquid_interactions(dim, &liquids)
+                    });
+                    if let Err(e) = ran {
+                        log::warn!("Java mods: fluid interactions failed: {e}");
+                    }
+                }
                 let ticks = std::mem::take(
                     &mut *super::JAVA_RANDOM_TICKS
                         .lock()

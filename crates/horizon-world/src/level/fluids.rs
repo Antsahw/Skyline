@@ -685,10 +685,17 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         if !b.is_lava_fluid(b.fluid(state).kind()) || self.level.foreign_fluid(state) {
             return true;
         }
+        // The mods' own interactions replace lava's (they run it on their side).
+        if self.level.liquid_interaction(pos) {
+            return true;
+        }
         let over_soul_soil = b.is_block(self.below_state(pos), b.named.soul_soil);
         for direction in POSSIBLE_FLOW_DIRECTIONS {
             let neighbour = rel(pos, direction.opposite());
-            if b.is_water_fluid(self.fluid_at(neighbour).kind()) {
+            // A Java mod's fluid carried with water's template isn't water (honey).
+            if b.is_water_fluid(self.fluid_at(neighbour).kind())
+                && !self.level.foreign_fluid(self.state(neighbour))
+            {
                 let block = if self.fluid_at(pos).is_source() {
                     b.named.obsidian
                 } else {

@@ -17,6 +17,7 @@ saying something works.
 | JVM, JNI natives, Rust→Java calls | `crates/horizon-jvm/src/lib.rs` (natives: `native_*`), `events.rs` (every call into Java: `server_tick`, `use_block`, `menu_click`, `screen_input`, `random_ticks`, `block_entities`, `game_time`, `export_*`), `content.rs` (content build + cache, `FORMAT`), `libs.rs` (Fabric's libraries) |
 | Boot | `java/dev/horizonlab/bridge/Boot.java`, `fabric/FabricBoot.java` (Knot, entrypoints, headless client boot), `Natives.java` (Java→Rust) |
 | Server mirror | `java/platform/.../HorizonServer.java`: set-up (`setUp`, `level`), the tick (`tick`: players, events, hooks, menus, block entities, frames), menus shown in Horizon's window (`syncMenus`, `SHOWN`), payloads (`payload`), `syncInventories` (end of every call) |
+| Horizon's items for mods' blocks | `HorizonItems.java` (shadows, block callbacks, held items, changes back); Rust `java_server.rs` (`java_items_json`, `java_items_changed`, `JAVA_HELD_ITEMS`) |
 | Mod block entities | `HorizonBlockEntities.java`: `LIVE` (mods' own, ticked, saved in `horizon-java/block_entities/`), `COPIES` (Horizon's vanilla ones as lasting copies, refreshed each tick, written back on change), Fabric load/unload events |
 | Ticks, light, data, hooks | `HorizonTicks.java`, `HorizonLight.java`, `HorizonData.java` (data packs, recipes), `HorizonHooks.java` (mods' injections fired by name), `HorizonMixinTable.java` (every patch of every kind, where it runs, which actions go to the mirror), `HorizonTickets.java` (mods' chunk tickets → Horizon's kept chunks), `HorizonChunkLoads.java` (chunks loaded through vanilla's chunk system: pregenerators) |
 | Headless client | `HorizonClient.java`: an allocated `Minecraft` (options, font, gui, window, language with mods' translations, sound/text-input managers, game mode), a `LocalPlayer` per player, screens (`openScreen`, client menus, `frame`, `input`, `tickScreen`), client-only screens (`setScreen` via `GuiMixin`, `CLIENT_ONLY`), the client half of item use (`useItem`), the client's tick (`clientTick`), `/modconfig`, `as(player, …)` swaps `minecraft.player` and `gui.screen` |
@@ -1068,6 +1069,70 @@ Generic fixes for a tester's ~60 client mods and Create's client items (regress 
   level renderer: gpu); looping sounds repeat; the toolbox's 3D drawer in its screen.
 - `HORIZON_JAVA_DEBUG=cbe` (client copies), `=sounds` (each sound sent), `=loop` (mods' packets).
 
+## Clicks, items and fluids that mods' blocks take (bridge-mixins-11)
+
+Generic fixes found with Create Fly; regress `createclick`, `createitemsin`, `createfluids`.
+- **The client's half of a block click comes first** (`HorizonClient.useBlockFirst`, from
+  `HorizonServer.useBlock` before the server's `useItemOn`). A vanilla client runs
+  `MultiPlayerGameMode.useItemOn` before it sends anything, and mods end clicks there: Create
+  picks a mechanical arm's points, a chain's first conveyor, value boxes, glue corners and
+  ejector targets by injecting before `startPrediction`; the server never hears of such a click.
+  The mods' injections at `useItemOn`'s head and before `startPrediction` run on the player's
+  headless client (Fabric's own left out: its `UseBlockCallback` client half stays in
+  `useBlock`); one that sets a result takes the click (a consuming one fills `CLICK_TAKEN`).
+  Then those inside `performUseItemOn` (the prediction: `HorizonHooks.fireMergedInside`, every
+  HEAD and INVOKE point, locals by type) before the server's half. Vanilla's bodies stay the
+  server's (the inventory is shared).
+- **Mods' own packet types** (`HorizonLoop.packetToServer`/`packetToClient`). Create registers
+  its packets into the play protocol (records with `handle(listener)`), not as custom payloads:
+  both directions were dropped (`ClientCommonPacketListenerMixin`, `PacketListenerMixin`). A
+  packet whose class isn't Minecraft's, Fabric's or the bridge's now goes to the other half as
+  a payload does: carried through its class's static `StreamCodec` field when it has one, the
+  server half handled on the mirrored player's connection, the client half at flush as that
+  player. Their handlers check their thread with `PacketUtils.ensureRunningOnSameThread`:
+  `Minecraft.packetProcessor` and `MinecraftServer.packetProcessor` (made in the skipped
+  constructors) are made on the loop's thread.
+- **A mod's block gets `onPlace` and `affectNeighborsAfterRemoval`** (`HorizonServer.blockEntities`,
+  with what each block replaced: `JAVA_SETS` keeps the old state, sent by name). Neither the
+  mirror's `setBlock` nor Horizon's world ran them, so Create's tracks never joined the railway
+  graph (`TrackBlock.onPlace` schedules `TrackPropagator.onRailAdded`): a station's item said
+  "Cannot target this track here", then "Right-click the targeted train track first". Only
+  classes that declare them in a mod's class (`ownsVanilla`): a mod block of a vanilla class
+  is Horizon's template's.
+- **Horizon's items in the mirror** (`HorizonItems`, Rust `java_items_json`/`java_items_changed`).
+  Each tick Horizon lists its items within 32 blocks of a player; each stands in the mirrored
+  level as an `ItemEntity` with Horizon's id, kept tick to tick (mods hold on to the item they
+  work on), listed by `HorizonServer.entities` (a fan's air current finds it). Before the block
+  entities tick: an item on a mod's block gets vanilla's `Entity.move` with no movement (the
+  move's patches with the block under it: Create's depot, belt and millstone take what lands on
+  them there; the move's own effects on it undone), and the mod blocks it is in their
+  `entityInside` (inside shape checked, as `checkInsideBlocks`). After: removed, new stack,
+  place, motion go back (`Natives.itemsChanged`). An item a mod moved or changed while it
+  touches a mod's block is **held**: Horizon skips its tick (`java_holds_item`) and the mirror
+  runs vanilla's `ItemEntity.tick` for it, so blocks whose collision depends on the entity
+  (crushing wheels let the item they process fall through) work. Not done: players and mobs
+  in fans' currents (only items), items dropped by Java code lose their components
+  (`Natives.dropItem` passes id and count).
+- **Mod items used over time** (`HorizonServer.tickUse`, `USE_HELD`): a mod item that isn't a
+  consumable and that the mirror started using (Create's sandpaper) stays the mirror's:
+  `updatingUsingItem` each tick (its `onUseTick`, `finishUsingItem`). Horizon's game doesn't
+  know the item is used over time, so it asks again every 4 ticks while the button is held
+  (those asks are the held button, not new uses) and never sends the release: 6 ticks without
+  one is the release (`releaseUsingItem`). Gaps: the hand pose of a use isn't shown, the release
+  is a few ticks late (a mod's bow fires late).
+- **Lava's interactions when mods patch them** (routed action `liquid_interactions`,
+  `LevelAccess::liquid_interaction`, `HorizonServer.liquidInteractions`). Create injects at the
+  head of `LiquidBlock.shouldSpreadLiquid` and runs its own registry (honey or chocolate by
+  flowing lava make limestone or scoria; water as vanilla's). Horizon's lava keeps a placed or
+  updated lava block for the mods and schedules its tick; at the end of the block tick vanilla's
+  `shouldSpreadLiquid` runs there on the mirror, the mods first. Without such a mod, Horizon's
+  own conversions no longer take a mod's fluid with water's template for water (honey made
+  cobblestone). The tester's "obsidian turns back into lava" didn't reproduce on this branch
+  (Create, survival and creative): lava over still water converts once and stays.
+- Not a bridge bug: a water bucket on Create's fluid tank places the water beside it in
+  survival; Create's `FluidTankBlock.useItemOn` takes buckets only from creative players or on
+  creative tanks (`TRY_WITH_EMPTY_HAND` otherwise). In creative the tank fills.
+
 ## 26.3 facts that cost time
 
 - **A client player made without its constructor never ages**: `LocalPlayer.tick` is what moves
@@ -1804,6 +1869,10 @@ Layers draws its layers (see "Create, Flywheel, OBJ models, mods' fluids, 3D Ski
 bridge-gpu-13: press, millstone, deployer and belts work; a bearing's contraption assembles,
 draws and turns; the wrench and the creative tab's blank items draw (Java's item models). See
 "Create's machines, contraptions and items"; regress `createmachines`, `contraption`, `createitems`.
+bridge-mixins-11: mechanical arms' points, chain conveyors, stations and signals on tracks placed
+with their item, thrown items into depots, millstones, crushing wheels and fans, sandpaper, and
+Create's lava interactions work. See "Clicks, items and fluids that mods' blocks take"; regress
+`createclick`, `createitemsin`, `createfluids`.
 
 Create's client side (2026-11-05, bridge-client-14): goggles' overlay, value boxes (hold
 right-click: the settings board; the speed changes), the toolbox's screen, frogport and machine
@@ -3088,6 +3157,15 @@ surface draws as streaks from inside (client).
 - Commit as the user (`iaxivers`) with the Co-Authored-By line; never commit `.local/`.
 - Write comments like the code around: what vanilla does and why the mirror does it.
 
+- **Mods' own packet types (26.3 trap).** Not every mod talks through custom payloads: Create
+  registers ~100 packet records into the play protocol (a GameProtocols mixin), each handling
+  itself (`handle(listener)`), and checks its thread with `PacketUtils.ensureRunningOnSameThread
+  (packet, listener, minecraft.packetProcessor())`. A dropped one fails silently: the click
+  "works" on the client and nothing happens on the server (an arm placed with no points).
+- **Shapes that depend on the entity (trap).** Horizon carries one collision shape per state; a
+  mod block's `getCollisionShape(…, EntityCollisionContext)` may answer per entity (Create's
+  crushing wheel controller is empty for the item it processes). Such items are moved by the
+  mirror while held (`HorizonItems`).
 - **What the mirror's constructors skipped (trap).** The server, levels and chunk maps are
   allocated: their final fields are null unless set. `MinecraftServer.getRunningThread()` was
   null, so code that moves itself onto the server thread unless already on it (Chunky's

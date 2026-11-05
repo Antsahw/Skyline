@@ -93,17 +93,16 @@ public abstract class PacketListenerMixin {
             }
             if (info.actions().size() == 1) return;
         }
-        // A mod's own packet type (a Packet class of its own in the play protocol: Create's
-        // menu openings) is for the mod's client code: the player's client connection takes it.
-        if (self instanceof ServerGamePacketListenerImpl game && game.player != null
-                && !packet.getClass().getName().startsWith("net.minecraft.")
-                && !packet.getClass().getName().startsWith("net.fabricmc.")
-                && dev.horizonlab.platform.HorizonLoop.toClientPacket(game.player, packet)) {
-            return;
-        }
         // Sounds and particles (mods' mobs' steps, hurts, deaths): Horizon sends them on.
         if (self instanceof ServerGamePacketListenerImpl game && game.player != null
                 && dev.horizonlab.platform.HorizonPackets.forward(game.player, packet)) {
+            return;
+        }
+        // A packet type of a mod's own (registered into the game protocol, its own handle):
+        // to the mod's client code on the player's headless client, as a payload goes.
+        if (self instanceof ServerGamePacketListenerImpl game && game.player != null
+                && dev.horizonlab.platform.HorizonLoop.modPacket(packet)
+                && dev.horizonlab.platform.HorizonLoop.packetToClient(game.player, packet)) {
             return;
         }
         HorizonServer.dropped(packet);

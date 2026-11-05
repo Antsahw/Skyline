@@ -173,6 +173,12 @@ pub enum Action {
     /// What mods draw over a player's inventory (REI's item list), drawn in the headless
     /// client's inventory screen while the player's is open: sent when it changes.
     OverlayFrame { uuid: String, frame: String },
+    /// What the mods did this tick to Horizon's item entities they were shown
+    /// (`HorizonItems`: a depot or crushing wheel took one in, a fan pushed or processed it):
+    /// `{"changes": [{"d": dimension, "id": n, "removed": bool, "stack": snbt|null,
+    /// "pos": [x, y, z]|null, "vel": [x, y, z]|null}], "held": [id, ...]}`; the items a mod's
+    /// block holds, which the mirror moves (Horizon leaves their tick), until the next report.
+    ItemsChanged { json: String },
     /// A mod fed (or starved) a player: its `FoodData` now (a pie's slice).
     Food {
         uuid: String,
@@ -1543,6 +1549,27 @@ pub fn random_ticks(dimension: &str, positions: &[[i32; 3]]) -> Result<(), Strin
     Ok(())
 }
 
+/// Lava blocks whose `LiquidBlock.shouldSpreadLiquid` the mods patch (their own fluid
+/// interactions: Create's honey and chocolate with lava), placed or next to a change this tick:
+/// vanilla's `shouldSpreadLiquid` runs there on the mirror, the mods' injections first; what it
+/// sets (obsidian, a mod's stone) comes back as the mods' block writes.
+pub fn liquid_interactions(dimension: &str, positions: &[[i32; 3]]) -> Result<(), String> {
+    let flat: Vec<i32> = positions.iter().flatten().copied().collect();
+    with_server(|env, class| {
+        let dimension = env.new_string(dimension)?;
+        let array = env.new_int_array(flat.len() as sys::jsize)?;
+        env.set_int_array_region(&array, 0, &flat)?;
+        env.call_static_method(
+            class,
+            "liquidInteractions",
+            "(Ljava/lang/String;[I)V",
+            &[JValue::Object(&dimension), JValue::Object(&array)],
+        )?;
+        Ok(())
+    })?;
+    Ok(())
+}
+
 /// The world's game time (`Level.getGameTime`, which mods time their work by: Tom's Storage's
 /// connectors scan every second of it), set before each tick.
 pub fn game_time(time: i64, seed: i64) -> Result<(), String> {
@@ -1592,17 +1619,26 @@ pub fn not_needed(lines: &[String]) -> Result<(), String> {
 
 /// Java mods' blocks placed or removed at `positions` of `dimension`: their block entities made
 /// (or, gone, put away), so they tick from their placement as vanilla's do.
-pub fn block_entities(dimension: &str, positions: &[[i32; 3]]) -> Result<(), String> {
+pub fn block_entities(
+    dimension: &str,
+    positions: &[[i32; 3]],
+    previous: &[String],
+) -> Result<(), String> {
     let flat: Vec<i32> = positions.iter().flatten().copied().collect();
     with_server(|env, class| {
         let dimension = env.new_string(dimension)?;
         let array = env.new_int_array(flat.len() as sys::jsize)?;
         env.set_int_array_region(&array, 0, &flat)?;
+        let previous = env.new_string(previous.join("\n"))?;
         env.call_static_method(
             class,
             "blockEntities",
-            "(Ljava/lang/String;[I)V",
-            &[JValue::Object(&dimension), JValue::Object(&array)],
+            "(Ljava/lang/String;[ILjava/lang/String;)V",
+            &[
+                JValue::Object(&dimension),
+                JValue::Object(&array),
+                JValue::Object(&previous),
+            ],
         )?;
         Ok(())
     })?;
@@ -1889,6 +1925,23 @@ pub fn entities() -> Result<String, String> {
         ))
     })?;
     Ok(json.unwrap_or_else(|| "{}".into()))
+}
+
+/// Horizon's item entities near its players this tick, for the mods' blocks and machines
+/// (`HorizonItems.update`): `{"<dimension>": [[id, x, y, z, vx, vy, vz, on_ground, age,
+/// pickup_delay, "stack snbt"], ...]}`.
+pub fn horizon_items(json: &str) -> Result<(), String> {
+    with_server(|env, class| {
+        let json = env.new_string(json)?;
+        env.call_static_method(
+            class,
+            "horizonItems",
+            "(Ljava/lang/String;)V",
+            &[JValue::Object(&json)],
+        )?;
+        Ok(())
+    })?;
+    Ok(())
 }
 
 /// Horizon's mobs near its players this tick, for the mods' mobs (`HorizonNeighbours.update`):

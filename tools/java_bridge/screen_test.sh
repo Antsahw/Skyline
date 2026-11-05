@@ -260,6 +260,39 @@ case "$SCENE" in
     'q "setblock $((X+3)) $((Y+1)) $Z create:mechanical_bearing[facing=up]"' \
     'q "setblock $((X+3)) $((Y+2)) $Z minecraft:oak_planks"' \
     'echo $X $Y $Z > $S/pos' 'q "tp @s ~ ~ ~ -90 10"' 'sleep 3' ;;
+  # Create, clicks a block takes first and timed use (bridge-mixins-11): a depot two blocks
+  # ahead-right, two chain conveyors six apart behind it; the player in survival, its block in
+  # $S/pos. The case places tracks with their item (their railway graph is made in onPlace).
+  createclick) "$R/tools/java_bridge/around.sh" \
+    'q "gamemode survival"' 'q "clear @s"' \
+    'q "setblock $((X+2)) $Y $((Z-2)) create:depot"' \
+    'q "setblock $((X-3)) $Y $((Z-3)) create:chain_conveyor"' \
+    'q "setblock $((X+3)) $Y $((Z-3)) create:chain_conveyor"' \
+    'echo $X $Y $Z > $S/pos' 'sleep 1' ;;
+  # Create, Horizon's items into its blocks (bridge-mixins-11): a depot, a millstone on a
+  # motor, crushing wheels on two motors (their controller between, facing down), a fan on a
+  # motor blowing north through lava; $S/pos the player's block.
+  createitemsin) "$R/tools/java_bridge/around.sh" \
+    'q "gamemode creative"' 'q "tp @s $X $Y $Z 0 20"' \
+    'q "setblock $((X+2)) $Y $((Z-2)) create:depot"' \
+    'q "setblock $((X+3)) $Y $((Z+1)) create:creative_motor[facing=up]"' \
+    'q "setblock $((X+3)) $((Y+1)) $((Z+1)) create:millstone"' \
+    'q "setblock $((X-3)) $((Y+1)) $((Z-2)) create:crushing_wheel[axis=z]"' \
+    'q "setblock $((X-1)) $((Y+1)) $((Z-2)) create:crushing_wheel[axis=z]"' \
+    'q "setblock $((X-3)) $((Y+1)) $((Z-1)) create:creative_motor[facing=north]"' \
+    'q "setblock $((X-1)) $((Y+1)) $((Z-3)) create:creative_motor[facing=south]"' \
+    'q "setblock $((X-2)) $Y $((Z+4)) create:creative_motor[facing=north]"' \
+    'q "setblock $((X-2)) $Y $((Z+3)) create:encased_fan[facing=north]"' \
+    'q "setblock $((X-2)) $Y $((Z+2)) minecraft:lava"' \
+    'echo $X $Y $Z > $S/pos' 'sleep 3' ;;
+  # Lava's interactions with Create (bridge-mixins-11): a 2x2 pool of still water in the floor
+  # at the north-west (the case pours lava on it, then honey and chocolate at the north-east
+  # meet lava); $S/pos the player's block.
+  createfluids) "$R/tools/java_bridge/around.sh" \
+    'q "gamemode creative"' 'q "tp @s $X $((Y+1)) $Z 0 50"' \
+    'q "fill $((X-4)) $((Y-2)) $((Z-4)) $((X-1)) $((Y-2)) $((Z-1)) stone"' \
+    'q "fill $((X-3)) $((Y-1)) $((Z-3)) $((X-2)) $((Y-1)) $((Z-2)) water"' \
+    'echo $X $Y $Z > $S/pos' 'sleep 2' ;;
   none) ;;
 esac
 # For steps: aim FILE looks at the block whose "x y z" FILE holds (a small one too: a flower),

@@ -117,7 +117,9 @@ By area:
   parts: grey cylinders and a pale blue-white flat square where its moving parts' textures
   should be (a sprite or atlas mixed up for its block-entity parts, or a partial model). Not an
   entity problem: item renderers and block-entity parts.
-- **FIRST for `bridge-mixins-10`: lava on water loops** (tester, batch 10, Create Fly + Fabric
+- ~~**Lava on water loops**, Create's fluid interactions~~: done in `bridge-mixins-11` (report
+  below; the loop didn't reproduce there, lava's interactions are Create's own now).
+  Was: **FIRST for `bridge-mixins-10`: lava on water loops** (tester, batch 10, Create Fly + Fabric
   API, videos): lava flowing onto water makes obsidian, which turns back into flowing lava,
   again and again (constant smoke). Vanilla behaviour broken: a regression, likely batch 10's
   fluids (mixins-9's `foreign_fluid`) or Create's mixin on `LiquidBlock.shouldSpreadLiquid`/
@@ -126,7 +128,10 @@ By area:
   vanilla gives obsidian/cobblestone once. Without Create too. Then **Create's own fluid
   interactions** (honey + lava makes limestone, chocolate + lava makes scoria): what a mod adds
   to lava's interactions must happen once, through the mod's code.
-- **Items placed on stations don't show** (tester, batch 10): right-click with an item on
+- ~~**Use order, thrown items into mod blocks, sandpaper**~~: done in `bridge-mixins-11` (arm,
+  chain conveyor, station/track, item entities into depot/millstone/crushing wheels/fans; the
+  tank's bucket is Create's own survival rule). Was:
+  **Items placed on stations don't show** (tester, batch 10): right-click with an item on
   Create's depot puts nothing visible on top; "like Farmer's Delight" (its cutting board,
   skillet, stove show items on top through their block-entity renderers). First find which
   half fails: is the item in the block entity (Java's `LIVE`, `HORIZON_JAVA_DEBUG=ber`) and
@@ -1898,4 +1903,35 @@ see the run below for the old cases.
 Test on the PC: `regress.py --jars <folder with the jars above, create-fly*, fabric-api*>
 earlyclient creategoggles createvalue createtoolbox createsounds modscroll`; in-game with
 Create: goggles on, look at a motor; hold right-click on its side, drag, let go; open a toolbox.
+
+
+### Mixins 11: clicks mods' blocks take first, items into mods' blocks, timed use, lava (2026-11-05, branch `bridge-mixins-11`; Claude for iaxivers)
+
+Jars: Create Fly `create-fly-26.3-6.0.9-unofficial.3.jar` (CurseForge file 9321329, from
+`edge.forgecdn.net`), Fabric API 0.165.2. 2 cores, llvmpipe. Mixins-10 had done the double break
+sound and Chunky only. All generic (java-bridge.md, "Clicks, items and fluids that mods' blocks
+take"):
+- **Click order**: the client's half of a block click now runs first (mods' injections in
+  `MultiPlayerGameMode.useItemOn`/`performUseItemOn`), and **mods' own packet types** go between
+  the halves (Create's ~100 were dropped both ways). Mechanical arm: points chosen on a depot,
+  the placed arm has them. Chain conveyors join. Stations/signals: the real cause of "Right-click
+  the targeted train track first" was the track never joining the railway graph (mods' blocks
+  never got `onPlace`/`affectNeighborsAfterRemoval`): fixed, the station binds. Depot: worked
+  already (gpu-13). Fluid tank + bucket: Create's own rule (creative only), not a bug. Belts:
+  worked (gpu-13). Metal brackets: applied (the shaft's block entity keeps it, one taken) but
+  not drawn on the shaft: gpu (the bracketed block's extra model).
+- **Thrown items into mods' blocks**: Horizon's items stand in the mirror (`HorizonItems`): depot,
+  millstone, crushing wheels (held: moved by the mirror), fans (pushed, processed) work.
+- **Sandpaper** (any mod item used over time that isn't food): runs in the mirror while held.
+- **Lava**: Create's own interactions (honey → limestone, chocolate → scoria) through vanilla's
+  `shouldSpreadLiquid` on the mirror; lava over water converts once and stays.
+- Touched outside mixins' files (small): `game.rs` (one skip in the item tick, one LevelAccess
+  method), `levels.rs` (parked items accessors), horizon-world `fluids.rs`/`level/mod.rs` (the
+  `liquid_interaction` hook), `HorizonLoop` (packets), `HorizonClient.useBlockFirst`.
+Regress (2 cores, llvmpipe): `createclick createitemsin createfluids` (new) and `create
+createmachines contraption createitems fluids kinetic scaffold pot placed eat breaksound droppers
+hud jei rei join` pass.
+Test on the PC: `regress.py --jars <folder with create-fly*.jar, fabric-api*> createclick createitemsin createfluids`;
+in-game: right-click a depot with a mechanical arm, then place it; throw iron on a depot; place
+tracks with their item and a station on them; hold sandpaper with rose quartz in the off hand.
 

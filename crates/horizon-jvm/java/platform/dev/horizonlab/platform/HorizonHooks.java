@@ -922,7 +922,51 @@ public final class HorizonHooks {
 
     /** As {@link #fireMerged(Object, Class, String, String, Object...)}, Fabric API's own left out with {@code skipFabric}. */
     public static Result fireMergedSkipping(Object self, Class<?> owner, String method, String at, boolean skipFabric, Object... args) {
-        List<Method> handlers = merged(owner, method, at);
+        return fireHandlers(self, owner, method, at, merged(owner, method, at), skipFabric, args);
+    }
+
+    /**
+     * The mods' @Injects at {@code owner.method}'s HEAD and at any call inside it (INVOKE
+     * points), in that order: for a vanilla method whose body the bridge doesn't run but whose
+     * injections must (the client half of a click, MultiPlayerGameMode.performUseItemOn). Each
+     * gets the arguments of {@code args} it takes by type (the method's own and its locals).
+     */
+    public static Result fireMergedInside(Object self, Class<?> owner, String method, boolean skipFabric, Object... args) {
+        return fireHandlers(self, owner, method, "inside", mergedInside(owner, method), skipFabric, args);
+    }
+
+    /** Whether mods inject at {@code owner.method}'s HEAD or inside it (see fireMergedInside). */
+    public static boolean hasMergedInside(Class<?> owner, String method) {
+        return !mergedInside(owner, method).isEmpty();
+    }
+
+    private static List<Method> mergedInside(Class<?> owner, String method) {
+        return MERGED_RESOLVED.computeIfAbsent(owner.getName() + "." + method + "|inside", k -> {
+            List<Method> heads = new ArrayList<>(), inside = new ArrayList<>();
+            for (Method m : owner.getDeclaredMethods()) {
+                MixinMerged info = m.getAnnotation(MixinMerged.class);
+                if (info == null || info.mixin().startsWith("dev.horizonlab.platform.")) continue;
+                for (String[] inject : mixinInjects(info.mixin())) {
+                    if (!inject[0].equals(method) || !handlerNamed(m.getName(), inject[1])) continue;
+                    if ("HEAD".equals(inject[2])) heads.add(m);
+                    else if (inject[2].startsWith("INVOKE ")) inside.add(m);
+                    else continue;
+                    m.setAccessible(true);
+                    break;
+                }
+            }
+            heads.sort(Comparator.comparing(Method::getName));
+            inside.sort(Comparator.comparing(Method::getName));
+            heads.addAll(inside);
+            if (!heads.isEmpty()) {
+                Natives.log("Horizon's client: " + heads.size() + " mod injection(s) inside " + owner.getSimpleName() + "." + method);
+            }
+            return heads;
+        });
+    }
+
+    private static Result fireHandlers(Object self, Class<?> owner, String method, String at, List<Method> handlers,
+                                       boolean skipFabric, Object... args) {
         if (handlers.isEmpty()) return Result.NONE;
         // One callback for the call, as Mixin gives the method's injections: a cancel ends it.
         CallbackInfo info = null;

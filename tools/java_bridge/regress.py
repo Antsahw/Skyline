@@ -381,6 +381,91 @@ CASES = {
                 check_log(r"horizon_kinetic: scroll -1\.0 passed", "the mod let it pass over dirt"),
                 check_json("passed.json", ["selected"], 3, "the hotbar moved")],
     ),
+    "createclick": dict(
+        about="Create's clicks a block takes first (bridge-mixins-11): a mechanical arm's point chosen by "
+              "right-clicking a depot (Create's client code ends the click before its packet: the client's "
+              "half runs first), the arm placed asks the client for it (a mod's own packets, both ways); "
+              "train tracks placed with their item (onPlace joins them to the railway graph), a station "
+              "bound to the track it targets (no 'Right-click the targeted train track first'); two chain "
+              "conveyors joined with a chain; sandpaper held on the rose quartz in the other hand polishes it "
+              "(a mod item's use over time runs in the mirror while the button is held)",
+        mods=["create"], optional=["fabric-api"], scene="createclick", env={"HORIZON_JAVA_DEBUG": "ber"}, timeout=900,
+        steps=['read X Y Z < $S/pos; $C command "give @s create:mechanical_arm" >/dev/null; sleep 1; '
+               '$C look-at block $((X+2)) $Y $((Z-2)) up >/dev/null; sleep 0.5; $C mouse right click >/dev/null; sleep 1; '
+               '$C messages 1 > $S/arm_msg.json; '
+               '$C look-at block $((X+1)) $((Y-1)) $((Z-1)) up >/dev/null; sleep 0.5; $C mouse right click >/dev/null; sleep 2',
+               'read X Y Z < $S/pos; $C command "clear @s" >/dev/null; $C command "give @s create:track 16" >/dev/null; sleep 1; '
+               'for dx in -3 -2 -1 0 1 2 3; do $C command "tp @s $((X+dx)) $Y $((Z+1)) -90 70" >/dev/null; sleep 0.4; '
+               '$C look-at block $((X+dx+1)) $((Y-1)) $((Z+2)) up >/dev/null; sleep 0.3; $C mouse right click >/dev/null; sleep 0.6; done; '
+               '$C command "tp @s $X $Y $Z 0 30" >/dev/null; $C command "clear @s" >/dev/null; '
+               '$C command "give @s create:track_station" >/dev/null; sleep 1; '
+               '$C look-at block $((X+1)) $Y $((Z+2)) up >/dev/null; sleep 0.5; $C mouse right click >/dev/null; sleep 1; '
+               '$C messages 1 > $S/station1.json; '
+               '$C look-at block $((X+1)) $((Y-1)) $((Z+1)) up >/dev/null; sleep 0.5; $C mouse right click >/dev/null; sleep 2; '
+               '$C messages 1 > $S/station2.json; $C block $((X+1)) $Y $((Z+1)) > $S/station.json',
+               'read X Y Z < $S/pos; $C command "clear @s" >/dev/null; $C command "give @s minecraft:iron_chain 32" >/dev/null; sleep 1; '
+               '$C look-at block $((X-3)) $Y $((Z-3)) up >/dev/null; sleep 0.5; $C mouse right click >/dev/null; sleep 1; '
+               '$C look-at block $((X+3)) $Y $((Z-3)) up >/dev/null; sleep 0.5; $C mouse right click >/dev/null; sleep 2',
+               'read X Y Z < $S/pos; $C command "clear @s" >/dev/null; $C command "give @s create:sand_paper" >/dev/null; '
+               '$C command "item replace entity @s weapon.offhand with create:rose_quartz 1" >/dev/null; '
+               '$C command "tp @s $X $Y $Z 0 -60" >/dev/null; sleep 1; '
+               '$C mouse right down >/dev/null; sleep 3; $C mouse right up >/dev/null; sleep 1; $C inventory > $S/sand.json'],
+        checks=[check_file("arm_msg.json", r'"actionbar":"Take items from Depot"', "the arm's client chose the depot"),
+                check_log(r'ber create:mechanical_arm at .*InteractionPoints:\[\{Mode:"take",Pos:\[[^]]*\],Type:"create:depot"',
+                          "the placed arm has the depot as its point (its client sent it)"),
+                check_file("station1.json", r'"actionbar":"Targeted track selected"', "the station's item took the track"),
+                check_file("station2.json", r'"actionbar":"Successfully bound to targeted track"', "the station was bound"),
+                check_file("station.json", r"create:track_station", "the station stands"),
+                check_log(r"ber create:chain_conveyor at .*Connections:\[\[I;-?6,0,0\]\]", "the conveyors are joined"),
+                check_file("sand.json", r'"create:polished_rose_quartz":1\b', "the sandpaper polished the rose quartz")],
+        forbid=[r"Right-click the targeted train track first", r"failed to tick", r"PacketProcessor"],
+        look="createclick-0..3: the arm by its depot, the station on its track, the chain between the conveyors",
+    ),
+    "createitemsin": dict(
+        about="Horizon's items into Create's blocks (bridge-mixins-11: they stand in the mirror, HorizonItems): "
+              "iron ingots thrown on a depot go onto it, wheat on a turning millstone into it, cobblestone "
+              "between crushing wheels is pulled in (held: the mirror moves it, the controller's shape lets it "
+              "through) and crushed, raw iron blown by a fan through lava is smelted",
+        mods=["create"], optional=["fabric-api"], scene="createitemsin", env={"HORIZON_JAVA_DEBUG": "ber"}, timeout=900,
+        steps=["read X Y Z < $S/pos; at(){ awk \"BEGIN{print $1}\"; }; "
+               "$C command \"summon item $(at $X+2.5) $((Y+2)) $(at $Z-1.5) {Item:{id:'minecraft:iron_ingot',count:3},PickupDelay:200}\" >/dev/null; "
+               "$C command \"summon item $(at $X+3.5) $((Y+3)) $(at $Z+1.5) {Item:{id:'minecraft:wheat',count:2},PickupDelay:200}\" >/dev/null; "
+               "$C command \"summon item $(at $X-1.5) $((Y+3)) $(at $Z-1.5) {Item:{id:'minecraft:cobblestone',count:2},PickupDelay:200}\" >/dev/null; "
+               "$C command \"summon item $(at $X-1.5) $Y $(at $Z+1.5) {Item:{id:'minecraft:raw_iron',count:1},PickupDelay:200}\" >/dev/null; "
+               "sleep 15; $C entities 12 > $S/items.json; $C look-at block $((X+2)) $Y $((Z-2)) up >/dev/null; sleep 1"],
+        checks=[check_log(r'ber create:depot at .*Item:\{count:3,id:"minecraft:iron_ingot"\}', "the depot holds the thrown ingots"),
+                check_log(r"ber create:millstone at .*(minecraft:wheat|create:wheat_flour)", "the millstone took the wheat"),
+                check_file("items.json", r'"minecraft:gravel"', "the crushing wheels made gravel of the cobblestone"),
+                check_file("items.json", r'"minecraft:iron_ingot"', "the fan smelted the raw iron")],
+        forbid=[r"failed to tick", r"Horizon's items can't stand in the mirror"],
+        look="createitemsin-1: the ingots on the depot",
+    ),
+    "createfluids": dict(
+        about="Lava's interactions are Create's when it patches them (bridge-mixins-11: LiquidBlock."
+              "shouldSpreadLiquid on the mirror): lava over still water makes obsidian, cobblestone and stone "
+              "once and stays (no loop); flowing lava by honey makes limestone, by chocolate scoria, a lava "
+              "source by honey obsidian",
+        mods=["create"], optional=["fabric-api"], scene="createfluids", timeout=900,
+        steps=['read X Y Z < $S/pos; $C command "setblock $((X-4)) $((Y-1)) $((Z-3)) lava" >/dev/null; sleep 1; '
+               '$C command "setblock $((X-2)) $((Y+1)) $((Z-2)) lava" >/dev/null; sleep 16; '
+               '$C blocks $((X-4)) $((Y-1)) $((Z-4)) $((X-1)) $((Y+1)) $((Z-1)) > $S/lava1.json; sleep 10; '
+               '$C blocks $((X-4)) $((Y-1)) $((Z-4)) $((X-1)) $((Y+1)) $((Z-1)) > $S/lava2.json; '
+               '(cmp -s $S/lava1.json $S/lava2.json && echo same || echo changed) > $S/stable.txt',
+               'read X Y Z < $S/pos; $C command "setblock $((X+2)) $Y $((Z-3)) create:honey" >/dev/null; '
+               '$C command "setblock $((X+3)) $Y $((Z-3)) create:chocolate" >/dev/null; sleep 0.3; '
+               '$C command "setblock $((X+2)) $Y $((Z-2)) minecraft:lava[level=2]" >/dev/null; '
+               '$C command "setblock $((X+3)) $Y $((Z-2)) minecraft:lava[level=2]" >/dev/null; '
+               '$C command "setblock $((X+1)) $Y $((Z-3)) minecraft:lava" >/dev/null; sleep 3; '
+               '$C blocks $((X+1)) $Y $((Z-3)) $((X+3)) $Y $((Z-2)) > $S/honey.json',
+               'read X Y Z < $S/pos; $C command "tp @s $X $((Y+3)) $((Z+2)) 180 50" >/dev/null; sleep 2'],
+        checks=[check_file("lava1.json", r"minecraft:obsidian", "lava by water made obsidian"),
+                check_file("stable.txt", r"^same", "and nothing changed after (no loop)"),
+                check_file("lava2.json", r"minecraft:obsidian", "the obsidian stays"),
+                check_file("honey.json", r'"create:limestone"', "flowing lava by honey made limestone"),
+                check_file("honey.json", r'"create:scoria"', "flowing lava by chocolate made scoria"),
+                check_file("honey.json", r'"minecraft:obsidian"', "a lava source by honey made obsidian")],
+        look="createfluids-3: the pool (obsidian, cobblestone under the lava) on the left, limestone and scoria on the right",
+    ),
     "createitems": dict(
         about="Create's items drawn by its own item model types (the wrench, the extendo grip, the backtanks' "
               "OBJ with `map_Kd 0`): the quads its Java models make reach Horizon's item renderer; the "
