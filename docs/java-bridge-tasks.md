@@ -1760,3 +1760,7 @@ reported: `rei-lan` (per-player REI), `maps-lan` (per-player maps), `bettercomba
 `maps-server` failed in the long run (the player's client still loading) and passed alone.
 `reiscreen` fails here also on generic-ui's own tip (REI's search bar, no list): this box, or
 a flake; run it on the PC. Not run: TACZ (entities-10, no jar here).
+Simple Voice Chat broke in the merge (`voice_test.sh`: 0 tones; voice-1's own tip 31/39):
+replay-1's `HorizonPacketTap` gave the host's client connection a plain EmbeddedChannel, and
+SVC's host client couldn't read its address. The tap's channel answers a `LocalAddress` now, as
+`memoryConnection`'s does: 34/39 and 36/39; `replaymod flashback pot` pass again.

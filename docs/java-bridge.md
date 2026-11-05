@@ -971,6 +971,11 @@ Generic fixes found with Create Fly (no Create-specific code); regress `createma
 
 ## 26.3 facts that cost time
 
+- **Anything that swaps the client connection's channel must answer a `LocalAddress`**
+  (`HorizonClient.memoryConnection`, `HorizonPacketTap.open`): Simple Voice Chat connects its
+  voice to the connection's remote address; a plain EmbeddedChannel's makes it fail
+  ("Failed to connect to voice chat server") and no one hears anyone (merge batch 11).
+
 - **Mods hook vanilla's input with `@WrapOperation`, not events.** Architectury's
   `ClientScreenInputEvent` fires from wraps of `Screen.mouseClicked`/`keyPressed`/... inside
   `MouseHandler.onButton`/`KeyboardHandler.keyPress`: `HorizonHooks.fire` (HEAD/TAIL injects)

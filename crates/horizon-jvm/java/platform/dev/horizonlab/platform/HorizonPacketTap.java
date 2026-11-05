@@ -184,7 +184,19 @@ public final class HorizonPacketTap {
                 Connection.configureSerialization(channel.pipeline(), PacketFlow.CLIENTBOUND, false, null);
                 c.configurePacketHandler(channel.pipeline());
             }
-        });
+        }) {
+            // Its address as vanilla's memory channel answers (HorizonClient.memoryConnection):
+            // Simple Voice Chat connects its voice to the address of the game's connection.
+            @Override
+            protected java.net.SocketAddress remoteAddress0() {
+                return new io.netty.channel.local.LocalAddress("horizon-server");
+            }
+
+            @Override
+            protected java.net.SocketAddress localAddress0() {
+                return new io.netty.channel.local.LocalAddress("horizon-client");
+            }
+        };
         connection = c;
         channel = ch;
         packets = 0;
