@@ -135,6 +135,15 @@ pub(super) fn send_soul_particle(host: &super::lan::LanHost, at: [f64; 3], veloc
     }
 }
 
+impl Game<'_> {
+    /// A snowflake from a vehicle (`PowderSnowBlock.entityInside`), to every player around.
+    pub(super) fn lan_snowflake(&self, at: [f64; 3], velocity: [f64; 3]) {
+        if let Some(host) = self.lan.as_ref() {
+            send_snowflake_particle(host, at, velocity);
+        }
+    }
+}
+
 /// `PowderSnowBlock.entityInside`'s `ServerLevel.sendParticles` of one
 /// snowflake (`count` 1, no spread, `RandomizationType.ALTERNATIVE`).
 pub(super) fn send_snowflake_particle(
@@ -951,6 +960,7 @@ mod tests {
                 sender: PlayerSender::new(tx_near, std::sync::Arc::default()),
                 latency: std::sync::Arc::new(std::sync::atomic::AtomicI32::new(0)),
                 address: "127.0.0.1:25565".parse().unwrap(),
+                expected: false,
             },
             1,
             [5.0, 64.0, 5.0],
@@ -972,6 +982,7 @@ mod tests {
                 sender: PlayerSender::new(tx_far, std::sync::Arc::default()),
                 latency: std::sync::Arc::new(std::sync::atomic::AtomicI32::new(0)),
                 address: "127.0.0.1:25566".parse().unwrap(),
+                expected: false,
             },
             2,
             [100.0, 64.0, 100.0],

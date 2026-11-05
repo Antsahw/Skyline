@@ -302,7 +302,7 @@ impl Game<'_> {
                     continue;
                 }
                 MotionEvent::Health(HealthEvent::RecordedDamage { source, amount }) => {
-                    let Some(d) = self.motion.health.damage.definition(*source) else {
+                    let Some(d) = self.health_resources.damage.definition(*source) else {
                         continue;
                     };
                     (d.name.clone(), *amount)
@@ -401,7 +401,7 @@ impl Game<'_> {
         }
     }
     fn damage_in_tag(&self, name: &str, tag: &str) -> bool {
-        let damage = &self.motion.health.damage;
+        let damage = &self.health_resources.damage;
         damage.id(name).is_some_and(|id| {
             damage.in_tag(id, tag) || damage.in_tag(id, &format!("minecraft:{tag}"))
         })
@@ -479,11 +479,10 @@ impl Game<'_> {
             return Text::translate("death.attack.generic", &[me]);
         };
         let def = self
-            .motion
-            .health
+            .health_resources
             .damage
             .id(&killing.damage_type)
-            .and_then(|id| self.motion.health.damage.definition(id))
+            .and_then(|id| self.health_resources.damage.definition(id))
             .map(|d| (d.message_id.clone(), d.death_message_type.clone()))
             .unwrap_or_else(|| ("generic".into(), "default".into()));
         self.combat.entries = entries;
