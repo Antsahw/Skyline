@@ -2757,6 +2757,12 @@ player turns them on**, per instance:
   install or update of a version an instance with the switch plays (`java_variant::follow`), and
   before Play; when it can't be had, Play refuses and says why instead of starting the plain game.
   Off: the plain build, no tab, `--java-mods` never passed, whatever `mods-java/` holds.
+- **Home (glass look, 2026-11-05):** upstream's redesign dropped Launch…, so the switch is a
+  chip on Home's play row (between the version picker and the puzzle, `glass_home.rs`
+  `glass_java_mods_chip`) and an item in Play's ⋯ menu, both on `flip_java_mods`. Lit in the
+  accent while on; dimmed with the reason (`java_mods_lock`: no `-java` asset for this platform,
+  no signed-in owner) while it can't be turned on; turning off always works. Its second line
+  (`java_mods_state`) shows On/Off, the build's download or its error.
 - **CLI:** `horizon-launcher java-mods on|off|status [--instance X]`, and
   `java-mods use-build <horizon-client> [--version TAG]` for a Java mods build of your own
   (upstream's releases have no `-java` assets; the fork's `java-mods` release does: below). `instance list --json` has `java_mods`.

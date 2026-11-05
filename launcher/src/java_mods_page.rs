@@ -61,7 +61,7 @@ impl Launcher {
 
     /// Turns the selected instance's Fabric 26.3 mods on or off, saved at once. On: its
     /// `mods-java/` is made, and its version's Java mods build downloads unless it's there.
-    fn flip_java_mods(&mut self) {
+    pub(super) fn flip_java_mods(&mut self) {
         let Some(i) = self.selected_instance().cloned() else {
             return;
         };
@@ -95,6 +95,37 @@ impl Launcher {
             let result = java_variant::ensure(&tag, |_| {});
             let _ = tx.send(Msg::JavaBuild(tag, result));
         });
+    }
+
+    /// Why the selected instance's Fabric 26.3 mods can't be turned on now, if they can't: no
+    /// Java mods build for this system, or no signed-in account that owns the game. Turning
+    /// them off is never refused.
+    pub(super) fn java_mods_lock(&self) -> Option<&'static str> {
+        let i = self.selected_instance()?;
+        if i.java_mods {
+            return None;
+        }
+        if !java_variant::available() {
+            return Some(tr("No build for this platform"));
+        }
+        if self.owner != Some(true) {
+            return Some(tr("Sign in with a Minecraft account first."));
+        }
+        None
+    }
+
+    /// What Home's switches say under their name, and whether it is a failure: why it can't be
+    /// turned on, the build's download, or On and Off.
+    pub(super) fn java_mods_state(&self) -> (String, bool) {
+        if let Some(reason) = self.java_mods_lock() {
+            return (reason.to_string(), false);
+        }
+        let on = self.selected_instance().is_some_and(|i| i.java_mods);
+        match self.java_mods.build.as_ref().map(|b| &b.done) {
+            Some(None) => (tr("Downloading the Fabric mods build…").to_string(), false),
+            Some(Some(Err(e))) => (e.clone(), true),
+            _ => (tr(if on { "On" } else { "Off" }).to_string(), false),
+        }
     }
 
     /// A switch's download ended.

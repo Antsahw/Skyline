@@ -58,6 +58,7 @@ impl Launcher {
             .gap(px(10.))
             .child(self.play_group(tag, prepared || java.is_some(), cx))
             .children(java.is_none().then(|| self.glass_picker(cx)))
+            .children(self.glass_java_mods_chip(cx))
             .children(wide.then_some(mods))
             .children(self.folder_group(java.is_none(), cx))
             .when(wide, |d| d.child(div().flex_1().min_w(px(22.))))
@@ -441,6 +442,19 @@ impl Launcher {
                     PlayItem::Prepare,
                 ));
             }
+            let java_mods = self
+                .selected_instance()
+                .filter(|i| i.java.is_none())
+                .map(|i| i.java_mods);
+            if java_mods.is_some() {
+                items.push((
+                    "play-java-mods",
+                    tr("Fabric 26.3 mods (beta)").into(),
+                    self.java_mods_state().0,
+                    self.java_mods_lock().is_some(),
+                    PlayItem::JavaMods,
+                ));
+            }
             if update.is_some() {
                 items.push((
                     "play-skip",
@@ -492,6 +506,16 @@ impl Launcher {
             for (key, label, note, locked, what) in items {
                 let id = id.clone();
                 let item = ui::menu_item(key, label, note, locked, &t);
+                let item = match (what, java_mods) {
+                    (PlayItem::JavaMods, Some(on)) => item.child(ui::toggle(
+                        "play-java-mods-s",
+                        on,
+                        self.look.accent,
+                        self.look.on_accent,
+                        &t,
+                    )),
+                    _ => item,
+                };
                 menu = menu.child(if locked {
                     item
                 } else {
@@ -500,6 +524,7 @@ impl Launcher {
                         match what {
                             PlayItem::Prepare => this.prepare(backend::MinecraftFrom::Install),
                             PlayItem::Play => this.play(),
+                            PlayItem::JavaMods => this.flip_java_mods(),
                             PlayItem::Shortcut => {
                                 if let Some((id, name)) = id.clone() {
                                     this.toggle_shortcut(id, name);
@@ -641,6 +666,84 @@ impl Launcher {
             );
         }
         wrap
+    }
+
+    /// The Fabric 26.3 mods switch beside the version, for a Horizon instance
+    /// (`java_mods_page`): lit in the accent while on; dimmed, with the reason, while it can't be
+    /// turned on (no build for this system, no signed-in owner).
+    fn glass_java_mods_chip(&self, cx: &mut Context<Self>) -> Option<Stateful<Div>> {
+        let t = self.theme;
+        let on = self
+            .selected_instance()
+            .filter(|i| i.java.is_none())?
+            .java_mods;
+        let lock = self.java_mods_lock();
+        let (state, failed) = self.java_mods_state();
+        let accent = ui::color(self.look.accent);
+        let wide = self.window_width >= WIDE;
+        let quiet_state = lock.is_some() || failed;
+        let chip = div()
+            .id("home-java-mods")
+            .flex()
+            .items_center()
+            .gap(px(14.))
+            .h(px(TALL))
+            .flex_none()
+            .max_w(px(if wide { 280. } else { 210. }))
+            .px(px(16.))
+            .rounded(px(radius::LARGE))
+            .border_1()
+            .when(on, |d| {
+                d.bg(accent.opacity(0.22)).border_color(accent.opacity(0.6))
+            })
+            .when(!on, |d| {
+                d.bg(white(fill::BUTTON))
+                    .border_color(gpui::transparent_black())
+            })
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .min_w_0()
+                    .child(
+                        ui::text(12., FontWeight::NORMAL, ink::QUIET)
+                            .line_height(px(18.))
+                            .truncate()
+                            .child(tr("Fabric 26.3 mods (beta)")),
+                    )
+                    .child(
+                        ui::text(
+                            if quiet_state { 13. } else { 15. },
+                            FontWeight::MEDIUM,
+                            ink::FULL,
+                        )
+                        .line_height(px(22.))
+                        .truncate()
+                        .when(failed, |d| d.text_color(ui::danger()))
+                        .child(state),
+                    ),
+            )
+            .child(ui::toggle(
+                "home-java-mods-s",
+                on,
+                self.look.accent,
+                self.look.on_accent,
+                &t,
+            ));
+        Some(match lock {
+            Some(_) => chip.opacity(0.5),
+            None => keyboard(
+                chip.cursor_pointer()
+                    .when(on, |d| d.hover(|s| s.bg(accent.opacity(0.3))))
+                    .when(!on, |d| d.hover(|s| s.bg(white(fill::ACTIVE))))
+                    .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                        this.flip_java_mods();
+                        cx.notify();
+                    })),
+                &t,
+            ),
+        })
     }
 
     /// The folder button and its ⋯ (`FolderGroup`), which shows under the pointer or while its
@@ -926,6 +1029,8 @@ fn since(ago: Duration, days: i64, date: &str) -> String {
 enum PlayItem {
     Prepare,
     Play,
+    /// The Fabric 26.3 mods switch (`java_mods_page`).
+    JavaMods,
     Shortcut,
     Command,
 }
