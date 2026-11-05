@@ -2767,6 +2767,14 @@ player turns them on**, per instance:
   with the switch on, the launcher plays its program with `--java-mods` (nothing to download;
   `use-build` still overrides it). **Trap:** a build imported before 2026-11-04 has no opt-in and
   runs `mods-java/` whatever the switch says: import a fresh one.
+  It also needs the version's `.local/minecraft/26.3/jars/client.jar` (Fabric's game jar): an
+  import copies the selected version, which may not have it ("Fabric can't start: no …
+  client.jar"): Prepare again, or copy `.local/minecraft` and `.local/bridge` from a version
+  that played the mods.
+- **Trap: a launcher you build yourself replaces itself with upstream's** (release profile:
+  `self_update_allowed`), which has no switch and no `java-mods` command, while cargo still
+  says it's fresh. Build it with `HORIZON_LAUNCHER_NO_SELF_UPDATE=1 cargo run --release`
+  (compile time; the variable change makes cargo rebuild).
 - **CLI:** `horizon-launcher java-mods on|off|status [--instance X]`, and
   `java-mods use-build <horizon-client> [--version TAG]` for a Java mods build of your own
   (upstream's releases have no `-java` assets; the fork's `java-mods` release does: below). `instance list --json` has `java_mods`.
