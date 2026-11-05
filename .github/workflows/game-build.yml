@@ -34,10 +34,7 @@ on:
         type: boolean
         default: true
       java_mods:
-        # Opt-in (the java-bridge fork): Linux and Windows also build the game with Fabric Java mods
-        # (feature java-mods), packaged beside the plain one as <asset>-java. The build has no Minecraft
-        # jar: the bridge carries its platform mod's sources and builds them on the player's machine
-        # against their own game (crates/horizon-jvm/src/platform.rs).
+        # Opt-in: the game with Fabric Java mods too, as <asset>-java (tools/java_bridge/package_java_variant.sh).
         description: Also build the Java mods variant (Linux, Windows)
         type: boolean
         default: false
@@ -304,25 +301,7 @@ jobs:
       - name: The Java mods variant (feature java-mods; its platform mod is built on the player's machine)
         if: inputs.java_mods && matrix.java_asset
         shell: bash
-        env:
-          # The sources, never a platform jar: this machine must not build against a Minecraft jar.
-          HORIZON_BRIDGE_PLATFORM: source
-          CARGO_TARGET_DIR: target-java
-        run: |
-          set -euo pipefail
-          cargo build --release --locked ${{ matrix.target && format('--target {0}', matrix.target) || '' }} -p horizon-client --features java-mods --bin horizon-client
-          bin="target-java/${{ matrix.target && format('{0}/', matrix.target) || '' }}release"
-          "$bin/horizon-client${{ matrix.exe }}" --help | grep -q -- '--resources'
-          # The other programs are the plain build's (package takes them from beside the game).
-          for tool in horizon-ctl horizon-prepare horizon-server; do cp "$BIN/$tool${{ matrix.exe }}" "$bin/"; done
-          cargo run --locked -p xtask -- package "$bin/horizon-client${{ matrix.exe }}" "dist/${{ matrix.java_dir }}"
-          cd dist
-          rm -f "${{ matrix.java_asset }}"
-          case "${{ matrix.java_asset }}" in
-            *.tar.gz) tar czf "${{ matrix.java_asset }}" "${{ matrix.java_dir }}" ;;
-            *) 7z a -tzip "${{ matrix.java_asset }}" "${{ matrix.java_dir }}" > /dev/null ;;
-          esac
-          ls -l "${{ matrix.java_asset }}"
+        run: tools/java_bridge/package_java_variant.sh "${{ matrix.target }}" "${{ matrix.exe }}" "${{ matrix.java_dir }}" "${{ matrix.java_asset }}"
       - uses: actions/upload-artifact@v4
         if: inputs.java_mods && matrix.java_asset
         with:
