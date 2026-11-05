@@ -2504,6 +2504,16 @@ Ecologics spawned around), the client tick 5–10 ms, level hooks ~2 ms; the res
 work done on the server thread's calls (proto 35–65 ms). Entities are the first thing to
 look at for a big pack.
 
+**Measuring a whole pack** (2026-11-05, bridge-perf-1): `tools/java_bridge/perf_measure.sh`
+(start time, RSS, the JVM's heap and native memory, live heap classes, `/tick query`, a JFR
+recording); the 81-jar test pack's numbers, where its time and memory go and the next cheap
+wins: [java-bridge-perf.md](java-bridge-perf.md). Fixed there: the packet tap kept a packet's
+unread rest in Netty's decoder for good, so each later packet was copied onto megabytes (up to
+795 MB of direct buffers, a third of the mirror tick, mods' packets misread); HUD sprites
+looked up through every jar each frame. `HORIZON_JAVA_TAP=0` turns the tap off (default on).
+Trap: jcmd attaches to the bridge's JVM only with `HORIZON_JVM_OPTIONS=-XX:+StartAttachListener`
+(it runs with `-Xrs`).
+
 ### Mod mobs' cost (2026-10-31, bridge-mob-perf)
 
 `HORIZON_JAVA_PROFILE=1` now also logs per entity type the tick and snapshot time

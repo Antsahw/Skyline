@@ -94,7 +94,11 @@ public final class HorizonPacketTap {
         if (wanted != null) return wanted;
         boolean found = false;
         var mods = new java.util.TreeSet<String>();
-        if (HorizonClient.headless()) {
+        // HORIZON_JAVA_TAP=0: never (a pack whose connection mixins aren't recorders: each packet
+        // the player gets is decoded again here, chunks too).
+        boolean off = "0".equals(System.getenv("HORIZON_JAVA_TAP"));
+        if (off) Natives.log("Horizon's client: the client's packets aren't passed to mods (HORIZON_JAVA_TAP=0)");
+        if (HorizonClient.headless() && !off) {
             for (Class<?> owner : new Class<?>[] {Connection.class, ClientHandshakePacketListenerImpl.class}) {
                 for (Method m : owner.getDeclaredMethods()) {
                     var merged = m.getAnnotation(org.spongepowered.asm.mixin.transformer.meta.MixinMerged.class);
@@ -163,8 +167,43 @@ public final class HorizonPacketTap {
             } catch (Throwable t) {
                 fault("a packet couldn't be read", t);
             }
+            dropLeftover();
             // What the mods' handlers wrote outbound (none goes anywhere: the player's game sends).
             if (channel != null) channel.releaseOutbound();
+        }
+    }
+
+    private static java.lang.reflect.Field cumulation;
+
+    /**
+     * Each body is one whole packet, so whatever a decoder kept of it is a packet it couldn't
+     * read to its end (a mod's payload over vanilla's 1 MiB, a packet it reads otherwise):
+     * dropped. ByteToMessageDecoder keeps unread bytes for the next read, and every later packet
+     * was appended to them (a new zeroed direct buffer of megabytes each, the 81-jar pack: a
+     * third of the mirror tick) and read from the wrong place.
+     */
+    private static void dropLeftover() {
+        if (channel == null) return;
+        for (var entry : channel.pipeline()) {
+            if (!(entry.getValue() instanceof io.netty.handler.codec.ByteToMessageDecoder decoder)) continue;
+            try {
+                if (cumulation == null) {
+                    var f = io.netty.handler.codec.ByteToMessageDecoder.class.getDeclaredField("cumulation");
+                    f.setAccessible(true);
+                    cumulation = f;
+                }
+                // Skipped, not released: the decoder lets an empty one go at its next read.
+                if (cumulation.get(decoder) instanceof ByteBuf left && left.isReadable()) {
+                    if (FAILURES.merge("leftover", 1, Integer::sum) <= 3) {
+                        Natives.log("Horizon's client: " + left.readableBytes() + " bytes the " + entry.getKey()
+                                + " didn't read dropped");
+                    }
+                    left.skipBytes(left.readableBytes());
+                }
+            } catch (ReflectiveOperationException e) {
+                fault("a decoder's leftover couldn't be dropped", e);
+                return;
+            }
         }
     }
 
