@@ -328,6 +328,14 @@ pub(in crate::game) fn level_named(id: &str) -> super::super::Dim {
     super::super::Dim::from_id(id)
 }
 
+/// The window and the Java mods' GPU device use one Vulkan instance, whichever makes it first:
+/// a second instance's device enumeration crashed in the Vulkan loader (Fedora 43, RADV, the
+/// user's PC, 2026-11-05: the game died opening its window after Java's device was up).
+fn share_vulkan_instance() {
+    let _ = horizon_client::gfx::SHARED_INSTANCE.set(horizon_jvm::gpu::instance);
+    let _ = horizon_jvm::gpu::SHARED_INSTANCE.set(horizon_client::gfx::own_instance);
+}
+
 /// Set once Java's start has ended, whether it started or not.
 static SETTLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
@@ -408,6 +416,7 @@ fn not_started(reason: &str) {
 }
 
 fn start_once(root: &Path, dir: &Path, jars: Vec<PathBuf>, side: horizon_jvm::Side) -> bool {
+    share_vulkan_instance();
     if horizon_jvm::get().is_some() {
         return true;
     }

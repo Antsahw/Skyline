@@ -2120,6 +2120,22 @@ async fn open_with_retry(
         Ok(opened) => Ok(opened),
     }
 }
+/// Where another part of the process (the Java mods' GPU device) keeps a Vulkan instance it
+/// made, for the window to use too (`open_backend`). Unset: the window makes its own.
+pub static SHARED_INSTANCE: std::sync::OnceLock<fn() -> Option<wgpu::Instance>> =
+    std::sync::OnceLock::new();
+
+/// The window's own Vulkan instance, once made: [`own_instance`].
+static OWN_INSTANCE: std::sync::Mutex<Option<wgpu::Instance>> = std::sync::Mutex::new(None);
+
+/// The window's Vulkan instance, if it made one, for another device in the process to share.
+pub fn own_instance() -> Option<wgpu::Instance> {
+    OWN_INSTANCE
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+}
+
 /// Opens a device on `backends` alone: its surface, adapter and device, or what
 /// stopped it. `allow_nonconformant` is `open_with_retry`'s second try; a
 /// software adapter is taken only when `allow_cpu`.
@@ -2132,11 +2148,32 @@ async fn open_backend(
     allow_cpu: bool,
 ) -> std::result::Result<Opened, NoDevice> {
     let name = backends_name(backends);
-    let instance = wgpu::Instance::new(instance_descriptor(
-        backends,
-        Some(window),
-        allow_nonconformant,
-    ));
+    // One Vulkan instance a process: the Java mods' GPU device may have made one already, and
+    // a second instance's device enumeration crashed in the Vulkan loader on a Fedora 43 PC
+    // with RADV (linux_read_sorted_physical_devices).
+    let vulkan = backends.contains(wgpu::Backends::VULKAN) && !allow_nonconformant;
+    let shared = if vulkan {
+        SHARED_INSTANCE.get().and_then(|from| from())
+    } else {
+        None
+    };
+    let instance = match shared {
+        Some(instance) => {
+            log::info!("Horizon: the window shares the Java mods' Vulkan instance");
+            instance
+        }
+        None => {
+            let instance = wgpu::Instance::new(instance_descriptor(
+                backends,
+                Some(window),
+                allow_nonconformant,
+            ));
+            if vulkan {
+                *OWN_INSTANCE.lock().unwrap_or_else(|e| e.into_inner()) = Some(instance.clone());
+            }
+            instance
+        }
+    };
     let surface = if offscreen {
         None
     } else {

@@ -23,6 +23,22 @@ use std::ffi::c_void;
 use std::sync::Mutex;
 
 static GPU: Mutex<Option<Gpu>> = Mutex::new(None);
+/// Where the game keeps its window's Vulkan instance, for this device to share: a second
+/// instance's device enumeration crashed in the Vulkan loader (Fedora 43, RADV). Set by the game.
+pub static SHARED_INSTANCE: std::sync::OnceLock<fn() -> Option<wgpu::Instance>> =
+    std::sync::OnceLock::new();
+
+/// This device's instance, once made, for the game's window to share: [`instance`].
+static OWN_INSTANCE: Mutex<Option<wgpu::Instance>> = Mutex::new(None);
+
+/// The Vulkan instance this device made, if it did.
+pub fn instance() -> Option<wgpu::Instance> {
+    OWN_INSTANCE
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+}
+
 /// `HORIZON_GPU_TRACE=1`: each pass is logged (its targets, draws and pipelines).
 static TRACE: std::sync::LazyLock<bool> =
     std::sync::LazyLock::new(|| std::env::var_os("HORIZON_GPU_TRACE").is_some());
@@ -279,9 +295,17 @@ struct Gpu {
 
 impl Gpu {
     fn open() -> Result<Gpu, String> {
-        let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
-        descriptor.backends = (wgpu::Backends::VULKAN | wgpu::Backends::GL).with_env();
-        let instance = wgpu::Instance::new(descriptor.with_env());
+        // One Vulkan instance a process (see SHARED_INSTANCE): the window's when it has one.
+        let instance = match SHARED_INSTANCE.get().and_then(|from| from()) {
+            Some(instance) => instance,
+            None => {
+                let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
+                descriptor.backends = (wgpu::Backends::VULKAN | wgpu::Backends::GL).with_env();
+                let instance = wgpu::Instance::new(descriptor.with_env());
+                *OWN_INSTANCE.lock().unwrap_or_else(|e| e.into_inner()) = Some(instance.clone());
+                instance
+            }
+        };
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
             compatible_surface: None,
