@@ -68,6 +68,8 @@ both are fixed. The user's decision: **players play only through Horizon's launc
 
 ### Testers' Trello (2026-11-04, https://trello.com/b/2uhi4jkj)
 
+**State on 2026-11-05: "Retest 2" below** (what's fixed, what's left and why, by area).
+
 **CRASH, first of all (2026-11-04, tester, batch 10, Create + Fabric API):** placing a
 scaffolding stops the server thread: "Horizon: unsupported block collision state 36126"
 (`horizon-world/src/block_collision.rs`: `collision_shape` has no cached shape and no `dynamic`
@@ -362,6 +364,82 @@ mining dimensions all need it): a level per extra dimension in the mirror's regi
 by the mods' generator (as `HorizonWorldgen.modded`), saved under `dimensions/<ns>/<path>`, in
 `/execute in`, `/tp`, portals and `changeDimension` from mod code. Also Xaero's World Map:
 `ModelManager.getBlockStateModelSet()` null (client chat, the ModelManager stand-in above).
+
+#### Retest 2 on java-bridge 6a252e94f (bridge-trello-2, 2026-11-05)
+
+The board read this time (`curl https://trello.com/b/2uhi4jkj.json` works from the shell): 11
+cards, none newer than the list above. Card notes not in it: Better Combat "dual wielded weapons
+are not functional", Flashback "laggy settings". Jars as in retest 1 (Modrinth, Fabric API
+0.165.2), Create Fly `unofficial.3` (CurseForge's newest, 2026-10-25, from `edge.forgecdn.net`).
+Each mod alone; regress (25 cases) plus hand-driven steps (`screen_test.sh`'s helpers,
+`HORIZON_JAVA_DEBUG=ber` for Create's block entities). 2 cores, llvmpipe. No code changed.
+
+Board cards:
+
+| Card | Now | Evidence / why |
+|---|---|---|
+| JEI | works | regress `jei`, `pot-jei` |
+| Farmer's Delight ("janky") | works | `pot`, `ber`, `eat` |
+| Cloth Config ("lags") | fixed | `cloth` (moves throttled) |
+| Chunky | fixed | `chunky` |
+| ReplayMod ("doesn't load") | fixed: records; Horizon plays `.mcpr` | `replaymod` |
+| Flashback | told "not supported" at join | `flashback`; needs vanilla's client world |
+| Simple Voice Chat ("UI doesn't load") | fixed: V opens its setup/menu | screenshot; voice itself: `voice_test.sh` (not run here) |
+| Chat Heads | chat shows, no heads | Horizon draws its own chat (plan in java-bridge.md). **New:** at join it says "Your client's packets go to Chat Heads (recordings save…) … ReplayMod's .mcpr": the packet tap's join line names any mod with a `Connection` mixin as a recorder (client) |
+| TACZ | half: gun drawn in first person, ammo HUD and crosshair; the zombie shot once lost health | the hotbar icon is blank, its name is `block.tacz.modern_kinetic_gun`, ammo count never drops, after the first shot clicks fire nothing (entities/client) |
+| Better Combat | broken | `bettercombat` fails (its swing never sends its attack); animations and dual wield not checked |
+| Create Fly | see below | |
+
+Create (tester's reports):
+
+| Report | Now | Why / where |
+|---|---|---|
+| Scaffolding stops the game | fixed | `scaffold` |
+| Flywheel, shafts, press, millstone, deployer, belts, bearing, wrench, tab items | work | `create`, `createwhole`, `createmachines`, `contraption`, `createitems`, `create-client`, `fluids` |
+| Item on a depot by right-click | fixed (top face) | screenshot |
+| Thrown items into depot / crushing wheels / fan | broken | items lie on top (crushers turn the right ways, controller `valid=true`); a fan at speed 16 moves neither items nor the player: Horizon's item entities aren't in the mirror (mixins) |
+| Water bucket on a fluid tank | broken | survival: the bucket empties into the world (water all around), tank stays empty; creative: nothing. Horizon's bucket use runs before the block's `useItemOn` (mixins) |
+| Train track: "Right-click the targeted track first" | fixed | first click selects ("Place track or select a second point"), Create answers "Turn too sharp"/"Can only turn up to 90°"; a curve not placed in 4 tries (my aim?). **New:** client tick NPE while choosing (`TrackPlacementClient.clientTick:165`, `info.axis1` null) |
+| Metal bracket | half | it's in the block entity (`Bracket:{…}`), not drawn: Create draws brackets in the block's model from block-entity data (gpu) |
+| Lava on water loops | changed: with Create, lava and water never react | a lava source set beside water became water; flowing water stops beside a lava source (no obsidian, no cobblestone). Without Create (FD + Fabric API) vanilla's cobblestone and obsidian form. Create's fluid-interaction mixin is routed and does nothing (mixins) |
+| Honey/chocolate + lava → limestone/scoria | broken | they flow into each other, nothing forms (same cause) |
+| Motor speed by scroll; value boxes | broken | the wheel scrolls the hotbar; no value box drawn (client) |
+| Goggles' overlay | broken | nothing drawn looking at a turning cog (client) |
+| Fluids black in JEI | broken | honey and water entries are black squares (gpu) |
+| Water wheel | fixed | `Speed:8`, `FlowScore:2` in falling water |
+| Mixer over basin | broken | 0 speed under a turning shaft or motor (a shaft between turns at -16); drawn without its head, `drawing create:mechanical_mixer` NPE (`MechanicalMixerAnimationBehaviour` null); the pale square under it (gpu, then kinetics) |
+| Pale blue-white square (press, mixer, burner) | reproduced | under the mixer and the windmill bearing (tinted), and **fluid pipes draw as see-through holes**: faces missing, the sky shows (gpu) |
+| Fluid pipes | broken drawing | pipe states all six sides `true` whatever's beside (mod blocks' `updateShape` not asked: mixins), drawn as holes |
+| Mechanical pump | fixed | pump + pipes moved a water source into a tank (`Fluid:{amount:11664}`) |
+| Saw blade | broken | `no renderer for create:saw`: `BlockEntityRendererProvider.Context.sprites()` is null (gpu: easy) |
+| Ponder | missing | no screen on W over a tooltip; not started |
+| Belts | fixed | `createmachines` |
+| Chain conveyor | broken | chain on one then the other: no message, `Connections:[]` (Create's client click handler: client) |
+| ParticleEngine NPE | fixed | `createmachines` forbids it |
+| Blaze burner | half | head drawn once; the flat square under it |
+| Frogport sound NPE | broken | same `FrogportAudioBehaviour.open` NPE on use (client) |
+| Mechanical arm | broken | no "selected" message, `InteractionPoints:[]` after placing (client click handler) |
+| Windmill bearing | half | assembles with 8+ sails, `Running:1b`, generates speed; the sails aren't drawn (contraption of sails: gpu) |
+| Super glue | broken | two clicks: no message, no glue entity (client click handler) |
+| Toolbox screen | broken | lid opens, then "A mod sent a player a ClientboundContainerClosePacket; Horizon doesn't send those yet": no screen (client) |
+| Cardboard disguise | broken | full set + sneak: a zombie hits (entities); drawing not checked |
+| Sandpaper | half | the use starts (quartz goes into the paper's `sand_paper_polishing`), never finishes: no polished quartz after 4 s (mixins: use duration) |
+| Hand crank floats after its cog breaks | broken | stays (mod block `canSurvive` not asked: mixins) |
+| Breaking sounds twice | fixed generically | `breaksound`; not rechecked with Create |
+| Casings, drill, FD meals | work (tester) | not rerun |
+
+Three buckets cover most of what's left: **(1) Create's client click handlers** (chain conveyor,
+arm, glue, value boxes and scroll, goggles: Create reads `Minecraft.hitResult` and its client
+input events, then sends a packet); **(2) Horizon's item entities and entity motion in the
+mirror** (depot, crushers, fans); **(3) mod blocks' shape/survival updates** (pipes' states, the
+crank) and the routed fluid interaction (lava). Drawing: block-entity-data models (brackets),
+the BER context's sprites (saw), the see-through square, fluids in screens.
+
+Tooling: `regress.py`'s `join-lan` and `join-server` leave their second game running
+(`/tmp/hz-guest.*`, `/tmp/hz-player.*`): on this 8 GB box the next game was OOM-killed.
+Kill them after a run (`pkill -f hz-guest; pkill -f hz-player`).
+
+Screenshots: `/tmp/trello/shots/` of that run.
 
 ### Later: upstream's launcher redesign (noted 2026-11-04)
 
