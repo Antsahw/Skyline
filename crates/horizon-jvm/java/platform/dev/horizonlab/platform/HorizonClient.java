@@ -1251,6 +1251,7 @@ public final class HorizonClient {
         HorizonPacketTap.left(id);
         JOINED.remove(id);
         HorizonDeviceMods.RUN_THEIR_OWN.remove(id);
+        HorizonLoop.forget(id);
         CLIENT_CHUNKS.remove(id);
         HorizonClientState.forget(id);
         var overlay = OVERLAYS.remove(id);
@@ -2104,6 +2105,8 @@ public final class HorizonClient {
                             new net.minecraft.client.multiplayer.ServerData("Horizon", "horizon",
                                     net.minecraft.client.multiplayer.ServerData.Type.OTHER));
                 }
+                // This game's own client (connected to another's server): that server.
+                HorizonDeviceClient.ownConnection(copy);
                 return copy;
             } catch (Throwable t) {
                 Natives.log("Horizon's client: no connection of its own for " + player.getName().getString() + ": " + t);

@@ -1193,18 +1193,31 @@ CASES = {
         look="pot-0: Raw Beef's tooltip: title centred, a white border (common rarity), not vanilla's purple; pot-1: the Iron Sword's tooltip with the sword's 3D model in its box",
     ),
     "maps-lan": dict(
-        about="JourneyMap and VoxelMap per player: a host and a LAN guest 40 blocks east, each map their own",
-        mods=["journeymap", "voxelmap"], scene="none", lan=True,
-        steps=['$H command "tp Guest ~40 ~ ~" >/dev/null; sleep 100; $G state > $S/guest.json',
-               '$G quit >/dev/null; sleep 10'],
+        about="JourneyMap per player, as in vanilla: the LAN guest's own game runs every mod's client half "
+              "(HORIZON_JAVA_OWN_CLIENT), so its minimap maps its own world around it, 40 blocks east of the host's, "
+              "its map data and waypoints are in its own game folder under the server it joined, and its client leaves with it",
+        mods=["journeymap"], scene="none", lan=True, env={"HORIZON_JAVA_OWN_CLIENT": "1"},
+        steps=['$H command "tp Guest ~40 ~ ~" >/dev/null; sleep 100; $G state > $S/guest.json; '
+               '$H screenshot $S/h.png >/dev/null; $G screenshot $S/g.png >/dev/null; '
+               # The minimap's square (top right): mapped (colours, not black) on both, each its own.
+               'python3 -c "import sys; from PIL import Image, ImageStat; c=lambda p: Image.open(p).convert(\'RGB\').crop((1070, 100, 1260, 230)); '
+               'm=lambda i: (sum(ImageStat.Stat(i).mean) / 3, sum(ImageStat.Stat(i).stddev) / 3); h, g = c(sys.argv[1]), c(sys.argv[2]); '
+               'd=sum(ImageStat.Stat(__import__(\'PIL.ImageChops\', fromlist=[\'x\']).difference(h, g)).mean) / 3; '
+               'print(\'host\', \'mapped\' if m(h)[0] > 40 and m(h)[1] > 15 else \'empty\', \'guest\', \'mapped\' if m(g)[0] > 40 and m(g)[1] > 15 else \'empty\', '
+               '\'own\' if d > 12 else \'same\', m(h), m(g), d)" $S/h.png $S/g.png > $S/maps.txt; '
+               'ls -d $GS/journeymap/data/mp/*/waypoints > $S/guest-folders.txt 2>&1; '
+               'grep -c "every mod.s client half runs here for this player" $GS/home/logs/latest.log > $S/guest-own.txt',
+               '$G disconnect >/dev/null; sleep 10; grep -c "own client left" $GS/home/logs/latest.log > $S/guest-left.txt'],
         checks=[check_file("guest.json", r'"screen":"playing"', "the guest plays"),
                 check_log(r"Guest\S* joined the game", "the guest joined"),
-                check_log(r"a new player's JourneyMap waypoints, from their own folder", "the guest's JourneyMap waypoints are theirs"),
-                check_log(r"VoxelMap's map of a player who left stopped its thread", "the guest's VoxelMap thread stops as they leave")],
-        forbid=[r"per-player state couldn't be swapped", r"couldn't change player", r"StackOverflowError",
-                r"couldn't be read again", r"JourneyMap waypoints couldn't load", r"JourneyMap's settings can't be kept"],
-        look="lan-1-host.png and lan-1-guest.png: each minimap centred on its own player "
-             "(the guest's coordinates 40 more in x), JourneyMap's and VoxelMap's full",
+                check_file("guest-own.txt", r"^[1-9]", "the guest's own game runs its mods' client half"),
+                check_file("maps.txt", r"host mapped", "the host's minimap is mapped"),
+                check_file("maps.txt", r"guest mapped", "the guest's minimap is mapped (its own game's chunks)"),
+                check_file("maps.txt", r" own ", "each minimap is its own player's (they differ)"),
+                check_file("guest-folders.txt", r"journeymap/data/mp/localhost[^/]*/waypoints", "the guest's map data and waypoints: its own folder, by the server it joined"),
+                check_file("guest-left.txt", r"^[1-9]", "the guest's client leaves with it")],
+        forbid=[r"StackOverflowError", r"this game's own client has no mirror"],
+        look="lan-1-host.png and lan-1-guest.png: each minimap centred on its own player (the guest's coordinates 40 more in x)",
     ),
     "server": dict(
         about="A dedicated server with Java mods starts, its player joins at once and gets the HUD mods (Jade, AppleSkin) and Xaero's minimap",
@@ -1237,9 +1250,13 @@ CASES = {
         look="server-1.png: JourneyMap's minimap top right, Xaero's top left; server-2.png: Xaero's World Map",
     ),
     "rei-lan": dict(
-        about="REI per player: a LAN guest with 4 oak logs turns on its craftable-only filter and sees what it can craft; the host's stays off, its list full",
-        mods=["rei", "architectury", "cloth", "fd"], scene="none", lan=True,
-        steps=['$H command "gamemode survival @a" >/dev/null; $H command "give Guest minecraft:oak_log 4" >/dev/null; sleep 1; '
+        about="REI per player, as in vanilla (each game runs its own client: HORIZON_JAVA_OWN_CLIENT): a LAN guest with 4 oak logs turns on its craftable-only filter and sees what it can craft; the host's stays off, its list full",
+        mods=["rei", "architectury", "cloth", "fd"], scene="none", lan=True, env={"HORIZON_JAVA_OWN_CLIENT": "1"},
+        steps=[# The guest's own client (its JVM starts as it joins) and its REI reload at its join.
+               'for i in $(seq 240); do awk \'/client half runs here/{f=1} f&&/REIClientPlugin finished post-reload for END/{e=1} END{exit !e}\' '
+               '$GS/home/logs/latest.log && break; sleep 1; done; sleep 3; '
+               'grep -c "every mod.s client half runs here for this player" $GS/home/logs/latest.log > $S/guest-own.txt; '
+               '$H command "gamemode survival @a" >/dev/null; $H command "give Guest minecraft:oak_log 4" >/dev/null; sleep 1; '
                '$G key e tap; sleep 20; $G key escape tap; sleep 2; $G key e tap; sleep 5',
                # The filter button beside REI's search box (GUI 270 227): green when on.
                '$G click-at 270 227; sleep 5; $G screenshot $S/g.png >/dev/null; $H key e tap; sleep 8; $H screenshot $S/h.png >/dev/null; '
@@ -1247,10 +1264,11 @@ CASES = {
                'e=lambda p: sum(Image.open(p).convert(\'L\').filter(ImageFilter.FIND_EDGES).crop((930, 90, 1280, 620)).getdata()); print(\'guest\', \'on\' if on(sys.argv[1]) else \'off\', \'few\' if e(sys.argv[1]) < 2700000 else \'full\', '
                '\'host\', \'on\' if on(sys.argv[2]) else \'off\', \'few\' if e(sys.argv[2]) < 2700000 else \'full\')" '
                '$S/g.png $S/h.png > $S/filters.txt'],
-        checks=[check_file("filters.txt", r"guest on", "the guest's filter is on"),
+        checks=[check_file("guest-own.txt", r"^[1-9]", "the guest's own game runs its mods' client half"),
+                check_file("filters.txt", r"guest on", "the guest's filter is on"),
                 check_file("filters.txt", r"host off", "the host's filter is off"),
-                check_file("filters.txt", r"guest few", "the guest's list: what 4 oak logs craft"),
-                check_file("filters.txt", r"host full", "the host's list: everything")],
+                check_file("filters.txt", r"guest \w+ few", "the guest's list: what 4 oak logs craft"),
+                check_file("filters.txt", r"host \w+ full", "the host's list: everything")],
         forbid=[r"settings can't be kept per player", r"search failed"],
         look="lan-2-guest.png: the filter green, planks; lan-3-host.png: red, the whole list",
     ),

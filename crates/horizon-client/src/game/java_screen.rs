@@ -154,6 +154,19 @@ fn stack(o: &Value) -> Option<ItemStack> {
     horizon_items::item_nbt::item_from_nbt(&tag)
 }
 
+/// Whether this game's own JVM runs every mod's client half (java_device): the server's HUD,
+/// overlay, keys and settings list are then not this game's.
+pub(super) fn own_java_client() -> bool {
+    #[cfg(feature = "java-mods")]
+    {
+        super::java_device::own_client()
+    }
+    #[cfg(not(feature = "java-mods"))]
+    {
+        false
+    }
+}
+
 impl Game<'_> {
     // ---- The player's game ----------------------------------------------------------------
 
@@ -181,9 +194,13 @@ impl Game<'_> {
         self.settings.save(&Self::options_path());
         self.screen = Screen::Playing;
         self.java_overlay.mods_page = true;
-        let data = json!({"kind": "modconfig", "mod": id})
-            .to_string()
-            .into_bytes();
+        let input = json!({"kind": "modconfig", "mod": id});
+        #[cfg(feature = "java-mods")]
+        if Self::own_client_takes(&input) {
+            self.own_client_input(&input);
+            return;
+        }
+        let data = input.to_string().into_bytes();
         self.send(S::CustomPayload(CustomPayload {
             channel: INPUT.into(),
             data,
@@ -218,10 +235,15 @@ impl Game<'_> {
             }
             #[cfg(feature = "java-mods")]
             super::java_device::key(code, sdl_keycode(key, code), mods, pressed);
-            let data = json!({"kind": "bind", "key": code, "keycode": sdl_keycode(key, code),
-                "mods": mods, "down": pressed})
-            .to_string()
-            .into_bytes();
+            let input = json!({"kind": "bind", "key": code, "keycode": sdl_keycode(key, code),
+                "mods": mods, "down": pressed});
+            // This game's own client has the mods' key bindings.
+            #[cfg(feature = "java-mods")]
+            if Self::own_client_takes(&input) {
+                self.own_client_input(&input);
+                return;
+            }
+            let data = input.to_string().into_bytes();
             self.send(S::CustomPayload(CustomPayload {
                 channel: INPUT.into(),
                 data,
@@ -916,6 +938,12 @@ impl Game<'_> {
         #[cfg(feature = "java-mods")]
         if window == CLIENT_WINDOW && super::java_device::screen_open() {
             self.device_screen_input(&input);
+            return;
+        }
+        // This game's own client (every mod's client half here): its windows' input.
+        #[cfg(feature = "java-mods")]
+        if Self::own_client_takes(&input) {
+            self.own_client_input(&input);
             return;
         }
         let data = input.to_string().into_bytes();

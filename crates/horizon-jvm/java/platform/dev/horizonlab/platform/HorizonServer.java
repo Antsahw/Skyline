@@ -952,6 +952,133 @@ public final class HorizonServer {
         return new ArrayList<>(LEVELS.values());
     }
 
+    /** Player {@code i} of a tick's arrays, mirrored as Horizon gives it (made the first time). */
+    private static ServerPlayer mirrorPlayer(int i, String[] ids, String[] names, String[] dimensions, double[] motion,
+                                             int[] modes, float[] health, float[] food, int[] permissions,
+                                             String[] inventories, long tick) {
+        UUID uuid = UUID.fromString(ids[i]);
+        ServerLevel level = level(dimensions[i]);
+        ServerPlayer player = player(uuid, names[i], level);
+        HorizonServices.known(uuid, names[i]);
+        if (player.level() != level) ((EntityAccess) player).horizon$setLevel(level);
+        player.setPosRaw(motion[i * 5], motion[i * 5 + 1], motion[i * 5 + 2]);
+        // Its box follows (setPosRaw leaves it): mods find players by it (a cabinet's viewers).
+        player.setBoundingBox(player.getDimensions(player.getPose()).makeBoundingBox(player.position()));
+        player.setYRot((float) motion[i * 5 + 3]);
+        player.setXRot((float) motion[i * 5 + 4]);
+        // A player's head and body face where Horizon's player looks.
+        player.setYHeadRot((float) motion[i * 5 + 3]);
+        player.setYBodyRot((float) motion[i * 5 + 3]);
+        player.setHealth(health[i]);
+        if (food != null && food.length >= (i + 1) * 2) {
+            var data = player.getFoodData();
+            data.setFoodLevel((int) food[i * 2]);
+            data.setSaturation(food[i * 2 + 1]);
+            FOOD_SEEN.put(uuid, new float[] {food[i * 2], food[i * 2 + 1]});
+        }
+        MODES.put(uuid, modes[i]);
+        // Horizon's game mode, so mods see it (ServerPlayer.setGameMode: abilities
+        // follow, and a mod that grants flight hears of the change).
+        if (player.gameMode().getId() != modes[i]) {
+            // What vanilla tells clients of the change, Horizon already did.
+            syncing = true;
+            try {
+                player.setGameMode(net.minecraft.world.level.GameType.byId(modes[i]));
+            } finally {
+                syncing = false;
+            }
+        }
+        // The permission level (low 8 bits) and the sneak key (bit 8).
+        PERMISSIONS.put(uuid, permissions[i] & 0xff);
+        // tickCount moves with Horizon's ticks (the mirror isn't ticked): Carry On
+        // refuses a second action on the tick of the last one, which was every tick.
+        player.tickCount = (int) tick;
+        boolean sneaking = ((permissions[i] >> 8) & 1) != 0;
+        player.setShiftKeyDown(sneaking);
+        // isCrouching is the pose (the mirror isn't ticked: updatePlayerPose doesn't
+        // run): Veinminer's "sneak to mine a vein" reads it.
+        var pose = player.getPose();
+        if (sneaking && pose == net.minecraft.world.entity.Pose.STANDING) player.setPose(net.minecraft.world.entity.Pose.CROUCHING);
+        else if (!sneaking && pose == net.minecraft.world.entity.Pose.CROUCHING) player.setPose(net.minecraft.world.entity.Pose.STANDING);
+        // The movement keys (bits 16-22, the PlayerInput packet's flags): a mod's mob
+        // it rides steers by them (getRiddenInput reads xxa and zza, as the rider's
+        // client would set them; RiderAuthorityMixin lets the mirror move the mob).
+        int keys = (permissions[i] >> 16) & 0x7f;
+        player.setLastClientInput(new net.minecraft.world.entity.player.Input((keys & 1) != 0, (keys & 2) != 0,
+                (keys & 4) != 0, (keys & 8) != 0, (keys & 16) != 0, (keys & 32) != 0, (keys & 64) != 0));
+        if (player.getVehicle() != null) {
+            player.zza = ((keys & 1) != 0 ? 1.0F : 0.0F) - ((keys & 2) != 0 ? 1.0F : 0.0F);
+            player.xxa = ((keys & 4) != 0 ? 1.0F : 0.0F) - ((keys & 8) != 0 ? 1.0F : 0.0F);
+            player.setJumping((keys & 16) != 0);
+            HorizonEntities.ridingJump(player, (keys & 16) != 0);
+        } else {
+            player.xxa = 0.0F;
+            player.zza = 0.0F;
+            player.setJumping(false);
+        }
+        mirrorInventory(player, inventories, i);
+        return player;
+    }
+
+    /**
+     * The mirror of a game connected to another's server whose own JVM runs its mods' client
+     * half (HorizonDeviceMods.OWN_CLIENT): its player alone, where its game sees it, and its
+     * levels over the game's own world (the chunks it was sent). Nothing of the server runs
+     * here (no server events, ticks or block entities: the server is the other's); the mirror
+     * only gives the headless client what it runs on, so the client is this player's alone, as
+     * a vanilla client is, and its tick, frame, HUD and screens are the host's own code.
+     */
+    static void ownClientTick(long tick, String id, String name, String dimension, double[] motion, int mode,
+                              float health, float[] food, int permission, String[] inventory) {
+        Thread.currentThread().setContextClassLoader(HorizonServer.class.getClassLoader());
+        serverThread = Thread.currentThread();
+        try {
+            if (server == null) {
+                // A server's mirror, not single player's: the client is connected to another's
+                // (mods name their per-server data by it, not by a world folder of this game's).
+                setUp(true);
+                HorizonHooks.scan();
+                Natives.log("Java mods: this game's own client runs on a mirror of what it sees");
+            }
+        } catch (Throwable t) {
+            Natives.log("Java mods: this game's own client has no mirror: " + t);
+            return;
+        }
+        ((MinecraftServerAccess) server).horizon$setTickCount((int) tick);
+        try {
+            ServerPlayer player = mirrorPlayer(0, new String[] {id}, new String[] {name}, new String[] {dimension}, motion,
+                    new int[] {mode}, new float[] {health}, food, new int[] {permission}, inventory, tick);
+            if (!BY_UUID.containsKey(player.getUUID())) {
+                PLAYERS.add(player);
+                BY_UUID.put(player.getUUID(), player);
+            }
+            for (ServerLevel level : LEVELS.values()) LEVEL_PLAYERS.computeIfAbsent(level, l -> {
+                List<ServerPlayer> list = new ArrayList<>();
+                ((ServerLevelAccess) l).horizon$setPlayers(list);
+                return list;
+            }).clear();
+            if (player.level() instanceof ServerLevel level) {
+                List<ServerPlayer> list = LEVEL_PLAYERS.get(level);
+                if (list != null) list.add(player);
+            }
+        } catch (Throwable t) {
+            if (FAILURES.merge("mirroring this game's player", 1, Integer::sum) <= 10) {
+                Natives.log("Java mods: this game's player couldn't be mirrored: " + t);
+            }
+            return;
+        }
+        if (client) HorizonClient.clientTick();
+        if (client) HorizonClient.sendFrames();
+        HorizonLoop.flush();
+    }
+
+    /** The game left the server: its player's client goes (ownClientTick's). */
+    static void ownClientLeft(UUID id) {
+        ServerPlayer player = BY_UUID.remove(id);
+        if (player != null) PLAYERS.remove(player);
+        if (client) HorizonClient.left(id);
+    }
+
     /** A mirrored player by id; null when Horizon doesn't list them. */
     public static ServerPlayer player(UUID uuid) {
         return BY_UUID.get(uuid);
@@ -1349,68 +1476,8 @@ public final class HorizonServer {
         Map<UUID, ServerPlayer> now = new LinkedHashMap<>();
         for (int i = 0; i < ids.length; i++) {
             try {
-                UUID uuid = UUID.fromString(ids[i]);
-                ServerLevel level = level(dimensions[i]);
-                ServerPlayer player = player(uuid, names[i], level);
-                HorizonServices.known(uuid, names[i]);
-                if (player.level() != level) ((EntityAccess) player).horizon$setLevel(level);
-                player.setPosRaw(motion[i * 5], motion[i * 5 + 1], motion[i * 5 + 2]);
-                // Its box follows (setPosRaw leaves it): mods find players by it (a cabinet's viewers).
-                player.setBoundingBox(player.getDimensions(player.getPose()).makeBoundingBox(player.position()));
-                player.setYRot((float) motion[i * 5 + 3]);
-                player.setXRot((float) motion[i * 5 + 4]);
-                // A player's head and body face where Horizon's player looks.
-                player.setYHeadRot((float) motion[i * 5 + 3]);
-                player.setYBodyRot((float) motion[i * 5 + 3]);
-                player.setHealth(health[i]);
-                if (food != null && food.length >= (i + 1) * 2) {
-                    var data = player.getFoodData();
-                    data.setFoodLevel((int) food[i * 2]);
-                    data.setSaturation(food[i * 2 + 1]);
-                    FOOD_SEEN.put(uuid, new float[] {food[i * 2], food[i * 2 + 1]});
-                }
-                MODES.put(uuid, modes[i]);
-                // Horizon's game mode, so mods see it (ServerPlayer.setGameMode: abilities
-                // follow, and a mod that grants flight hears of the change).
-                if (player.gameMode().getId() != modes[i]) {
-                    // What vanilla tells clients of the change, Horizon already did.
-                    syncing = true;
-                    try {
-                        player.setGameMode(net.minecraft.world.level.GameType.byId(modes[i]));
-                    } finally {
-                        syncing = false;
-                    }
-                }
-                // The permission level (low 8 bits) and the sneak key (bit 8).
-                PERMISSIONS.put(uuid, permissions[i] & 0xff);
-                // tickCount moves with Horizon's ticks (the mirror isn't ticked): Carry On
-                // refuses a second action on the tick of the last one, which was every tick.
-                player.tickCount = (int) tick;
-                boolean sneaking = ((permissions[i] >> 8) & 1) != 0;
-                player.setShiftKeyDown(sneaking);
-                // isCrouching is the pose (the mirror isn't ticked: updatePlayerPose doesn't
-                // run): Veinminer's "sneak to mine a vein" reads it.
-                var pose = player.getPose();
-                if (sneaking && pose == net.minecraft.world.entity.Pose.STANDING) player.setPose(net.minecraft.world.entity.Pose.CROUCHING);
-                else if (!sneaking && pose == net.minecraft.world.entity.Pose.CROUCHING) player.setPose(net.minecraft.world.entity.Pose.STANDING);
-                // The movement keys (bits 16-22, the PlayerInput packet's flags): a mod's mob
-                // it rides steers by them (getRiddenInput reads xxa and zza, as the rider's
-                // client would set them; RiderAuthorityMixin lets the mirror move the mob).
-                int keys = (permissions[i] >> 16) & 0x7f;
-                player.setLastClientInput(new net.minecraft.world.entity.player.Input((keys & 1) != 0, (keys & 2) != 0,
-                        (keys & 4) != 0, (keys & 8) != 0, (keys & 16) != 0, (keys & 32) != 0, (keys & 64) != 0));
-                if (player.getVehicle() != null) {
-                    player.zza = ((keys & 1) != 0 ? 1.0F : 0.0F) - ((keys & 2) != 0 ? 1.0F : 0.0F);
-                    player.xxa = ((keys & 4) != 0 ? 1.0F : 0.0F) - ((keys & 8) != 0 ? 1.0F : 0.0F);
-                    player.setJumping((keys & 16) != 0);
-                    HorizonEntities.ridingJump(player, (keys & 16) != 0);
-                } else {
-                    player.xxa = 0.0F;
-                    player.zza = 0.0F;
-                    player.setJumping(false);
-                }
-                mirrorInventory(player, inventories, i);
-                now.put(uuid, player);
+                ServerPlayer player = mirrorPlayer(i, ids, names, dimensions, motion, modes, health, food, permissions, inventories, tick);
+                now.put(player.getUUID(), player);
             } catch (Throwable t) {
                 if (FAILURES.merge("mirroring players", 1, Integer::sum) <= 10) {
                     Natives.log("Mirroring player " + names[i] + " failed: " + t);

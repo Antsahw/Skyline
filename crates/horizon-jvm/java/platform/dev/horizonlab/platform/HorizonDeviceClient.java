@@ -41,15 +41,89 @@ public final class HorizonDeviceClient {
         return on;
     }
 
+    // ---- Every mod's client half here (HorizonDeviceMods.OWN_CLIENT) -------------------------
+
+    /** The player whose own client this process runs, for every mod (null: none). */
+    private static volatile UUID own;
+    private static String ownName;
+    private static String ownServer, ownHost;
+    private static int ownPort;
+
+    /** Whether this process runs every mod's client half for its player, connected to another's server. */
+    public static boolean own() {
+        return own != null;
+    }
+
+    /**
+     * Every mod's client half for this game's player: the host's own client code, run on a
+     * mirror of what this game sees (HorizonServer.ownClientTick), with the mods' messages over
+     * this game's connection. Returns "*" and the mods' ids.
+     */
+    private static String ownJoin(String host, int port, String uuid, String name) {
+        Thread.currentThread().setContextClassLoader(HorizonDeviceClient.class.getClassLoader());
+        own = UUID.fromString(uuid);
+        ownName = name;
+        ownServer = host + ":" + port;
+        ownHost = host;
+        ownPort = port;
+        HorizonLoop.ownPlayer(uuid);
+        Natives.log("Java mods: every mod's client half runs here for this player, on " + ownServer);
+        java.util.List<String> ids = new java.util.ArrayList<>();
+        for (var mod : net.fabricmc.loader.api.FabricLoader.getInstance().getAllMods()) ids.add(mod.getMetadata().getId());
+        return "*," + String.join(",", ids);
+    }
+
+    /** The server this game plays on, as its own client names it (host:port), or null. */
+    static String ownServer() {
+        return own != null ? ownServer : null;
+    }
+
+    /**
+     * The own client's connection is to the server this game plays on, as a vanilla client's
+     * is: its address (mods name their per-server maps and waypoints by it) and its server
+     * entry (Minecraft.getCurrentServer).
+     */
+    static void ownConnection(ClientPacketListener listener) throws ReflectiveOperationException {
+        if (own == null) return;
+        Class<?> common = net.minecraft.client.multiplayer.ClientCommonPacketListenerImpl.class;
+        HorizonClient.set(common, listener, "connection", serverConnection(ownHost, ownPort));
+        HorizonClient.set(common, listener, "serverData", new net.minecraft.client.multiplayer.ServerData(
+                ownHost, ownServer, net.minecraft.client.multiplayer.ServerData.Type.OTHER));
+    }
+
+    private static void ownTick(JsonObject state) {
+        if (state.has("w") && state.has("h")) {
+            int w = state.get("w").getAsInt(), h = state.get("h").getAsInt();
+            if (w > 0 && h > 0 && (w != HorizonClient.width || h != HorizonClient.height)) {
+                HorizonClient.width = w;
+                HorizonClient.height = h;
+                HorizonClient.windowSize();
+            }
+        }
+        double[] motion = {state.get("x").getAsDouble(), state.get("y").getAsDouble(), state.get("z").getAsDouble(),
+                state.get("yaw").getAsDouble(), state.get("pitch").getAsDouble()};
+        String[] inventory = null;
+        if (state.has("inv")) {
+            var slots = state.getAsJsonArray("inv");
+            inventory = new String[slots.size()];
+            for (int i = 0; i < inventory.length; i++) inventory[i] = slots.get(i).getAsString();
+        }
+        HorizonServer.ownClientTick(state.get("tick").getAsLong(), own.toString(), ownName, state.get("dim").getAsString(),
+                motion, state.get("mode").getAsInt(), state.get("health").getAsFloat(),
+                new float[] {state.get("food").getAsFloat(), state.get("sat").getAsFloat()}, state.get("perm").getAsInt(), inventory);
+    }
+
     /**
      * The game joined another's server at {@code host}:{@code port} as {@code uuid}: the device
      * mods' client joins. Returns the device mods' ids (comma-separated) for the game to tell the
      * server, or "" when there are none (nothing is started).
      */
     public static String join(String host, int port, String uuid, String name) {
+        if (!HorizonClient.headless()) return "";
+        if (on || own != null) leave();
+        if (HorizonDeviceMods.OWN_CLIENT) return ownJoin(host, port, uuid, name);
         var mods = HorizonDeviceMods.mods();
-        if (mods.isEmpty() || !HorizonClient.headless()) return "";
-        if (on) leave();
+        if (mods.isEmpty()) return "";
         Thread.currentThread().setContextClassLoader(HorizonDeviceClient.class.getClassLoader());
         Minecraft mc = Minecraft.getInstance();
         try {
@@ -141,6 +215,15 @@ public final class HorizonDeviceClient {
      * shows ({"hud": ops, "screen": ops, "close": true}, each only when it changed), or "{}".
      */
     public static String tick(String json) {
+        if (own != null) {
+            try {
+                ownTick(JsonParser.parseString(json).getAsJsonObject());
+            } catch (Throwable t) {
+                Natives.log("Java mods: this game's own client's tick failed: " + t);
+                HorizonFailures.report("the client's tick", t);
+            }
+            return "{}";
+        }
         if (!on) return "{}";
         try {
             JsonObject state = JsonParser.parseString(json).getAsJsonObject();
@@ -327,6 +410,16 @@ public final class HorizonDeviceClient {
     /** A device mod's message from the server (its channel, its body). */
     @SuppressWarnings({"unchecked", "rawtypes"})
     public static void payload(String channel, byte[] body) {
+        if (own != null) {
+            var player = HorizonServer.player(own);
+            var server = HorizonServer.server();
+            if (player == null || server == null) return;
+            CustomPacketPayload received = HorizonLoop.read(channel, body,
+                    net.fabricmc.fabric.impl.networking.PayloadTypeRegistryImpl.CLIENTBOUND_PLAY, server.registryAccess());
+            // To the mods' client receivers as their player's, delivered with the client's next tick.
+            if (received != null) HorizonLoop.toClient(player, received);
+            return;
+        }
         if (!on) return;
         CustomPacketPayload payload = HorizonLoop.read(channel, body,
                 net.fabricmc.fabric.impl.networking.PayloadTypeRegistryImpl.CLIENTBOUND_PLAY, registries);
@@ -357,7 +450,8 @@ public final class HorizonDeviceClient {
     /** A device mod's message to the server: over Horizon's connection. */
     static void send(CustomPacketPayload payload) {
         if (!HorizonDeviceMods.deviceChannel(payload.type().id())) return;
-        byte[] body = HorizonLoop.write(payload, net.fabricmc.fabric.impl.networking.PayloadTypeRegistryImpl.SERVERBOUND_PLAY, registries);
+        var access = own != null && HorizonServer.server() != null ? HorizonServer.server().registryAccess() : registries;
+        byte[] body = HorizonLoop.write(payload, net.fabricmc.fabric.impl.networking.PayloadTypeRegistryImpl.SERVERBOUND_PLAY, access);
         if (body != null) Natives.devicePayload(payload.type().id().toString(), body);
     }
 
@@ -372,6 +466,31 @@ public final class HorizonDeviceClient {
 
     /** The game left the server: the device mods' client disconnects (Minecraft.disconnect). */
     public static void leave() {
+        if (own != null) {
+            UUID id = own;
+            var player = HorizonServer.player(id);
+            Minecraft mc = Minecraft.getInstance();
+            try {
+                if (player != null) {
+                    // Minecraft.disconnect and Fabric's DISCONNECT, as this player's client leaves.
+                    HorizonClient.as(player, () -> {
+                        HorizonHooks.fire(mc, Minecraft.class, "disconnect", "(Lnet/minecraft/client/gui/screens/Screen;ZZ)V", "HEAD",
+                                new Object[] {null, false, false}, null, true);
+                        var listener = HorizonClient.connection(player);
+                        HorizonServer.fireEach("ClientPlayConnectionEvents.DISCONNECT",
+                                net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents.DISCONNECT,
+                                l -> l.onPlayDisconnect(listener, mc));
+                        HorizonClient.tasks();
+                    });
+                }
+            } catch (Throwable t) {
+                Natives.log("Java mods: this game's own client couldn't leave cleanly: " + t);
+            }
+            HorizonServer.ownClientLeft(id);
+            own = null;
+            Natives.log("Java mods: this game's own client left " + ownServer);
+            return;
+        }
         if (!on) return;
         Minecraft mc = Minecraft.getInstance();
         try {
