@@ -260,6 +260,30 @@ case "$SCENE" in
     'q "setblock $((X+3)) $((Y+1)) $Z create:mechanical_bearing[facing=up]"' \
     'q "setblock $((X+3)) $((Y+2)) $Z minecraft:oak_planks"' \
     'echo $X $Y $Z > $S/pos' 'q "tp @s ~ ~ ~ -90 10"' 'sleep 3' ;;
+  # Create's parts drawn by their renderers, east of the player (looking east): north, a
+  # blaze burner under a basin, a mixer over it (a gap) turned by a motor above; middle, a
+  # press over a basin; south, a saw on a motor and a hand crank on a cogwheel. Positions in
+  # $S/pos.
+  createparts) "$R/tools/java_bridge/around.sh" \
+    'q "fill $((X+2)) $Y $((Z-4)) $((X+4)) $((Y+5)) $((Z+4)) air"' \
+    'q "setblock $((X+4)) $Y $((Z-3)) create:blaze_burner[blaze=kindled]"' \
+    'q "setblock $((X+4)) $((Y+1)) $((Z-3)) create:basin"' \
+    'q "setblock $((X+4)) $((Y+3)) $((Z-3)) create:mechanical_mixer"' \
+    'q "setblock $((X+4)) $((Y+4)) $((Z-3)) create:creative_motor[facing=down]"' \
+    'q "setblock $((X+4)) $Y $Z create:basin"' \
+    'q "setblock $((X+4)) $((Y+2)) $Z create:mechanical_press[facing=south]"' \
+    'q "setblock $((X+4)) $((Y+2)) $((Z-1)) create:creative_motor[facing=south]"' \
+    'q "setblock $((X+4)) $Y $((Z+2)) create:creative_motor[facing=up]"' \
+    'q "setblock $((X+4)) $((Y+1)) $((Z+2)) create:mechanical_saw[facing=up]"' \
+    'q "setblock $((X+2)) $Y $((Z+2)) create:cogwheel[axis=y]"' \
+    'q "setblock $((X+2)) $((Y+1)) $((Z+2)) create:hand_crank[facing=up]"' \
+    'echo $X $Y $Z > $S/pos' 'q "tp @s ~ ~ ~ -90 20"' 'sleep 4' ;;
+  # A water wheel (axis east-west) two blocks east, a water source above its north side: the
+  # water falls past the wheel and spreads on the floor. Its position in $S/pos.
+  waterwheel) "$R/tools/java_bridge/around.sh" \
+    'q "setblock $((X+3)) $Y $Z create:water_wheel[facing=east]"' \
+    'q "setblock $((X+3)) $((Y+1)) $((Z-1)) minecraft:water"' \
+    'echo $((X+3)) $Y $Z > $S/pos' 'q "tp @s ~ ~ ~ -90 20"' 'sleep 4' ;;
   none) ;;
 esac
 # For steps: aim FILE looks at the block whose "x y z" FILE holds (a small one too: a flower),

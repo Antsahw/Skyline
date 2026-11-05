@@ -278,13 +278,66 @@ pub(super) fn java_fluid_changed(pos: horizon_core::position::BlockPos) {
     let _ = pos;
 }
 
+/// Positions whose neighbours Horizon updated with a Java mod's block among them
+/// (`LevelAccess::observe_neighbours_updated`): the mods' blocks there hear it in the mirror
+/// (`HorizonServer.neighbours`: their shape updates and neighbour changes, as vanilla's own
+/// neighbour updater runs them; a hand crank pops off when its cogwheel breaks).
+#[cfg(feature = "java-mods")]
+static JAVA_NEIGHBOURS: std::sync::Mutex<Vec<[i32; 3]>> = std::sync::Mutex::new(Vec::new());
+
+/// `LevelAccess::observe_neighbours_updated`: kept for the mods when a neighbour of `source`
+/// is a Java mod's block (`state_at` reads the level).
+pub(super) fn java_neighbours_updated(
+    source: horizon_core::position::BlockPos,
+    state_at: impl Fn(horizon_core::position::BlockPos) -> horizon_world::registry::BlockStateId,
+) {
+    #[cfg(feature = "java-mods")]
+    {
+        let Some(states) = JAVA_STATES.get() else {
+            return;
+        };
+        let java = |id: u32| states.get(id as usize).copied().unwrap_or(false);
+        let near = [
+            (1, 0, 0),
+            (-1, 0, 0),
+            (0, 1, 0),
+            (0, -1, 0),
+            (0, 0, 1),
+            (0, 0, -1),
+        ]
+        .iter()
+        .any(|&(x, y, z)| {
+            java(
+                state_at(horizon_core::position::BlockPos::new(
+                    source.x + x,
+                    source.y + y,
+                    source.z + z,
+                ))
+                .0,
+            )
+        });
+        if near {
+            let mut all = JAVA_NEIGHBOURS.lock().unwrap_or_else(|e| e.into_inner());
+            let p = [source.x, source.y, source.z];
+            if all.len() < 65_536 && all.last() != Some(&p) {
+                all.push(p);
+            }
+        }
+    }
+    #[cfg(not(feature = "java-mods"))]
+    let _ = (source, state_at);
+}
+
 /// horizon_client::world::SET_HOOK: a Java mod's block placed or removed is kept for the mods.
 #[cfg(feature = "java-mods")]
 pub(super) fn java_block_set(pos: (i32, i32, i32), previous: u32, state: u32) {
-    let Some(states) = JAVA_STATES.get() else {
-        return;
+    // Before the mods' states are known (the first ticks), every set is kept: the mods look
+    // at what is there (a blaze burner placed then had no block entity, ever).
+    let java = |id: u32| {
+        JAVA_STATES
+            .get()
+            .is_none_or(|states| states.get(id as usize).copied().unwrap_or(false))
     };
-    let java = |id: u32| states.get(id as usize).copied().unwrap_or(false);
     if java(previous) || java(state) {
         let mut sets = JAVA_SETS.lock().unwrap_or_else(|e| e.into_inner());
         if sets.len() < 65_536 {
@@ -2940,6 +2993,21 @@ mod run {
                         self.with_java_world(|| horizon_jvm::events::block_entities(dim, &sets));
                     if let Err(e) = ran {
                         log::warn!("Java mods: block entities failed: {e}");
+                    }
+                }
+                // Neighbours Horizon updated beside the mods' blocks: they hear it.
+                let mut updated = std::mem::take(
+                    &mut *super::JAVA_NEIGHBOURS
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner()),
+                );
+                updated.dedup();
+                if !updated.is_empty() {
+                    let dim = self.dim.id();
+                    let ran =
+                        self.with_java_world(|| horizon_jvm::events::neighbours(dim, &updated));
+                    if let Err(e) = ran {
+                        log::warn!("Java mods: neighbour updates failed: {e}");
                     }
                 }
                 // The routed actions are asked once Fabric runs (precipitation's flag too).

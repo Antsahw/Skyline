@@ -117,6 +117,9 @@ By area:
   parts: grey cylinders and a pale blue-white flat square where its moving parts' textures
   should be (a sprite or atlas mixed up for its block-entity parts, or a partial model). Not an
   entity problem: item renderers and block-entity parts.
+  **Done (gpu-13 items, gpu-14 parts):** the pale square was the floor's face hidden under the
+  basin/burner (their stand-in vanilla state's full-cube occlusion): mod states carry their own
+  occlusion now. Mixer, saw blade, burner head draw (client copies of block entities).
 - **FIRST for `bridge-mixins-10`: lava on water loops** (tester, batch 10, Create Fly + Fabric
   API, videos): lava flowing onto water makes obsidian, which turns back into flowing lava,
   again and again (constant smoke). Vanilla behaviour broken: a regression, likely batch 10's
@@ -156,12 +159,16 @@ By area:
   a fluid in a GUI from its still sprite in the block atlas, tinted (Fabric's
   `FluidRenderHandler`/`FluidVariantRendering`, `GuiGraphics` blit of a `TextureAtlasSprite`):
   the screen path needs those sprites and the tint. gpu-13 (it did fluids in the world).
+  **Done (gpu-14):** vanilla's private `blitTiledSprite` injected; regress `jeifluids`.
 - **Create machines, tester batch 10 (gpu-13 checks logic first, then drawing):** a water wheel
   in flowing water doesn't spin (Create reads the neighbours' `FluidState` flow vectors in the
   mirror: are Horizon's flowing water levels and falling flags there, and does the kinetic
   network get a speed?); the mechanical mixer over a basin is "just bugged" (ask what: no
   mixing, no animation, or a drawing gap; his screenshot has a block between mixer and basin,
   check his setup). Confirmed working on batch 10: eating FD meals.
+  **gpu-14:** the wheel turns in Horizon's flowing and falling water (FlowScore -1, speed 8,
+  scene `waterwheel`); a wheel placed in the first ticks had no block entity (fixed). The mixer
+  draws its head now (client copies); ask what else was "bugged".
   Also: **crushing wheels** do nothing (they process item entities thrown between them: the
   same item-entity path as the depot, mixins); **fluid pipes draw broken** in water (a pipe
   through a water block: its middle segment missing, the outline bigger than the model;
@@ -215,6 +222,7 @@ By area:
 - **A broken block's moving parts stay** (tester, batch 10): break a cogwheel and the hand
   crank's handle on it keeps floating, drawn. A removed mod block entity must drop its
   renderer's instance (gpu-13: the recorder's per-block-entity draws on removal).
+  **Done (gpu-14):** Horizon's neighbour updates reach the mods' blocks (the crank pops off).
 - ~~**Breaking sounds twice**~~ and ~~**Chunky**~~: done in `bridge-mixins-10` (report below).
   Was: **Breaking sounds twice** (a tester, 2026-11-04: "dirt goes brrbrr"). Mods: Biomes O' Plenty,
   TerraBlender, GlitchCore, Terralith, Geophilic, Lithostitched, FallingTree, WorldEdit, Create

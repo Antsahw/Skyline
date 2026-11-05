@@ -266,7 +266,7 @@ struct BlockFile {
 #[serde(deny_unknown_fields)]
 struct StateTable {
     properties: Vec<(String, Vec<String>)>,
-    shapes: Vec<Option<String>>,
+    shapes: Vec<TableShape>,
     rows: Vec<Vec<u32>>,
     #[serde(default)]
     light: BTreeMap<usize, u8>,
@@ -274,6 +274,28 @@ struct StateTable {
     random_ticks: Vec<usize>,
     #[serde(default)]
     default: Option<usize>,
+}
+
+/// A [`StateTable`]'s shape entry: a vanilla state's name (null: the template's), or the
+/// boxes of the state's own (`like` the vanilla state it stands in for otherwise).
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum TableShape {
+    Named(Option<String>),
+    Own(OwnShapes),
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct OwnShapes {
+    #[serde(default)]
+    like: Option<String>,
+    #[serde(default)]
+    outline: Option<Vec<[f64; 6]>>,
+    #[serde(default)]
+    collision: Option<Vec<[f64; 6]>>,
+    #[serde(default)]
+    occlusion: Option<Vec<[f64; 6]>>,
 }
 
 impl StateTable {
@@ -286,11 +308,19 @@ impl StateTable {
                     "state_table: a row has {width} indices (shape, then one per property)"
                 ));
             }
-            let shape = self
+            let entry = self
                 .shapes
                 .get(row[0] as usize)
-                .ok_or("state_table: a row's shape is past shapes")?
-                .clone();
+                .ok_or("state_table: a row's shape is past shapes")?;
+            let (shape, outline, collision, occlusion) = match entry {
+                TableShape::Named(n) => (n.clone(), None, None, None),
+                TableShape::Own(o) => (
+                    o.like.clone(),
+                    o.outline.clone(),
+                    o.collision.clone(),
+                    o.occlusion.clone(),
+                ),
+            };
             let mut properties = BTreeMap::new();
             for ((name, values), &i) in self.properties.iter().zip(&row[1..]) {
                 let v = values
@@ -301,6 +331,9 @@ impl StateTable {
             out.push(State {
                 properties,
                 shape,
+                outline,
+                collision,
+                occlusion,
                 light: None,
                 random_ticks: None,
                 default: false,
@@ -336,6 +369,17 @@ pub struct State {
     /// template's.
     #[serde(default)]
     pub shape: Option<String>,
+    /// Its own outline boxes (`[min x, y, z, max x, y, z]`, block units), in place of
+    /// `shape`'s: a Java mod's block whose shape no vanilla state has.
+    #[serde(default)]
+    pub outline: Option<Vec<[f64; 6]>>,
+    /// Its own collision boxes, in place of `shape`'s.
+    #[serde(default)]
+    pub collision: Option<Vec<[f64; 6]>>,
+    /// Its own occlusion boxes (the faces it hides beside it; empty: none), in place of
+    /// `shape`'s.
+    #[serde(default)]
+    pub occlusion: Option<Vec<[f64; 6]>>,
     /// Light emitted, 0 to 15; unset, the block's.
     #[serde(default)]
     pub light: Option<u8>,
@@ -1820,6 +1864,34 @@ capabilities = ["registries"]
         let both = br#"{"template": "minecraft:stone", "states": [{"properties": {"a": "b"}}],
             "state_table": {"properties": [], "shapes": [null], "rows": [[0]]}}"#;
         assert!(read("table-both", both).unwrap_err().contains("not both"));
+    }
+
+    #[test]
+    fn own_states_read_their_own_boxes_in_either_form() {
+        let array = br#"{"template": "minecraft:stone", "states": [
+            {"properties": {"lit": "false"}, "shape": "minecraft:stone", "occlusion": [], "default": true},
+            {"properties": {"lit": "true"}, "outline": [[0, 0, 0, 1, 0.5, 1]], "collision": [[0, 0, 0, 1, 0.5, 1]],
+             "occlusion": [[0, 0, 0, 1, 0.5, 1]]}]}"#;
+        let table = br#"{"template": "minecraft:stone", "state_table": {
+            "properties": [["lit", ["false", "true"]]],
+            "shapes": [{"like": "minecraft:stone", "occlusion": []},
+                       {"outline": [[0, 0, 0, 1, 0.5, 1]], "collision": [[0, 0, 0, 1, 0.5, 1]], "occlusion": [[0, 0, 0, 1, 0.5, 1]]}],
+            "rows": [[0, 0], [1, 1]], "default": 0}}"#;
+        let read = |name: &str, text: &[u8]| {
+            let files: &[(&str, &[u8])] = &[("data/ruby/horizon/block/lamp.json", text)];
+            hmod(name, MANIFEST_TEXT, files).map(|c| c.blocks[0].states.clone())
+        };
+        let states = read("own-boxes-array", array).unwrap();
+        assert_eq!(states[0].shape.as_deref(), Some("minecraft:stone"));
+        assert_eq!(states[0].occlusion, Some(vec![]));
+        assert_eq!(
+            states[1].outline,
+            Some(vec![[0.0, 0.0, 0.0, 1.0, 0.5, 1.0]])
+        );
+        assert_eq!(read("own-boxes-table", table).unwrap(), states);
+        let unknown = br#"{"template": "minecraft:stone", "state_table": {
+            "properties": [], "shapes": [{"like": "minecraft:stone", "glow": 1}], "rows": [[0]]}}"#;
+        assert!(read("own-boxes-unknown", unknown).is_err());
     }
 
     #[test]

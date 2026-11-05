@@ -2618,6 +2618,48 @@ public final class HorizonServer {
         }
     }
 
+    /**
+     * Horizon updated the neighbours of these positions (a block set or removed there) with a
+     * mod's block among them. The mirror has no neighbour updater of its own (MirrorUpdatesMixin),
+     * so the mods' blocks hear it here, as vanilla's updateNeighbourShapes and updateNeighborsAt
+     * tell them: the mods' own injections at the head of ServerLevel.updateNeighborsAt (Create's
+     * neighbour listeners: a hand crank whose cogwheel broke), then each mod block's shape update
+     * toward the position (NeighborUpdater.executeShapeUpdate: it may break, as vanilla's
+     * updateOrDestroy does) and its neighborChanged (executeUpdate). Vanilla's blocks are
+     * Horizon's.
+     */
+    public static void neighbours(String dimension, int[] positions) {
+        Thread.currentThread().setContextClassLoader(HorizonServer.class.getClassLoader());
+        if (server == null) return;
+        ServerLevel level = level(dimension);
+        if (level == null) return;
+        for (int i = 0; i + 2 < positions.length; i += 3) {
+            BlockPos from = new BlockPos(positions[i], positions[i + 1], positions[i + 2]);
+            BlockState source = level.getBlockState(from);
+            var block = source.getBlock();
+            fire("Block (neighbours updated)", () -> HorizonHooks.fireMergedSkipping(level, ServerLevel.class,
+                    "updateNeighborsAt", "HEAD", true, from, block));
+            for (var direction : net.minecraft.world.level.redstone.NeighborUpdater.UPDATE_ORDER) {
+                BlockPos pos = from.relative(direction);
+                BlockState state = level.getBlockState(pos);
+                if (!modBlock(state)) continue;
+                fire("Block (neighbour changed)", () -> {
+                    net.minecraft.world.level.redstone.NeighborUpdater.executeShapeUpdate(level, direction.getOpposite(),
+                            pos, from, source, net.minecraft.world.level.block.Block.UPDATE_ALL, 511);
+                    BlockState now = level.getBlockState(pos);
+                    if (now == state) {
+                        net.minecraft.world.level.redstone.NeighborUpdater.executeUpdate(level, now, pos, block, null, false);
+                    }
+                });
+            }
+        }
+    }
+
+    /** Whether a block state is a mod's (its behaviour runs here; vanilla's is Horizon's). */
+    static boolean modBlock(BlockState state) {
+        return !BuiltInRegistries.BLOCK.getKey(state.getBlock()).getNamespace().equals("minecraft");
+    }
+
     /** Whether a fluid is a mod's (its flow is the mirror's; vanilla's water and lava are Horizon's). */
     static boolean modFluid(net.minecraft.world.level.material.Fluid fluid) {
         return fluid != net.minecraft.world.level.material.Fluids.EMPTY

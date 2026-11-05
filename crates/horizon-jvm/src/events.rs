@@ -1609,6 +1609,25 @@ pub fn block_entities(dimension: &str, positions: &[[i32; 3]]) -> Result<(), Str
     Ok(())
 }
 
+/// Horizon updated the neighbours of `positions` of `dimension` beside Java mods' blocks: the
+/// mods' blocks hear it (`HorizonServer.neighbours`).
+pub fn neighbours(dimension: &str, positions: &[[i32; 3]]) -> Result<(), String> {
+    let flat: Vec<i32> = positions.iter().flatten().copied().collect();
+    with_server(|env, class| {
+        let dimension = env.new_string(dimension)?;
+        let array = env.new_int_array(flat.len() as sys::jsize)?;
+        env.set_int_array_region(&array, 0, &flat)?;
+        env.call_static_method(
+            class,
+            "neighbours",
+            "(Ljava/lang/String;[I)V",
+            &[JValue::Object(&dimension), JValue::Object(&array)],
+        )?;
+        Ok(())
+    })?;
+    Ok(())
+}
+
 /// Input to the player's open mod screen (JSON: `size`, `move`, `press`, `release`, `drag`,
 /// `scroll`, `key`, `char`), run by the screen's own code.
 /// The keys Java mods' key bindings are set to (`KeyMapping`s they registered), as 26.3's

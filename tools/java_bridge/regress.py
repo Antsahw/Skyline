@@ -279,6 +279,36 @@ CASES = {
         forbid=[r"no renderer for create:", r"Cannot invoke \"net\.minecraft\.world\.level\.redstone\.CollectingNeighborUpdater", r"failed to tick"],
         look="contraption-1 and contraption-2: the planks on the bearing, turned by different angles",
     ),
+    "createparts": dict(
+        about="Create's parts their renderers draw, and its blocks beside others (scene createparts): the saw's "
+              "blade (its renderer reads the client's sprites from its context), the mixer's head (a client "
+              "behaviour: renderers draw the client's copy of a block entity, made from its update packet and "
+              "ticked as a client's), the blaze burner's head; no pale square under the basin or the burner "
+              "(a mod block's own occlusion, not its stand-in vanilla state's full cube); a hand crank pops "
+              "off when its cogwheel goes (Horizon's neighbour updates reach the mods' blocks)",
+        mods=["create"], optional=["fabric-api"], scene="createparts", env={"HORIZON_JAVA_DEBUG": "ber"}, timeout=900,
+        steps=['sleep 6',
+               'read X Y Z < $S/pos; $C command "setblock $((X+2)) $Y $((Z+2)) air" >/dev/null; sleep 4; '
+               '$C block $((X+2)) $((Y+1)) $((Z+2)) > $S/crank.json; '
+               '$C command "tp @s $((X+1)) $((Y+1)) $((Z-1)) -60 30" >/dev/null; sleep 3'],
+        checks=[check_log(r"ber create:saw at .*: [1-9]\d* model\(s\)", "the saw's renderer draws its blade"),
+                check_log(r"ber create:mechanical_mixer at .*: [1-9]\d* model\(s\)", "the mixer's renderer draws (its client copy)"),
+                check_log(r"ber create:blaze_heater at .*: [1-9]\d* model\(s\)", "the blaze burner's head draws"),
+                check_file("crank.json", r'"block":"minecraft:air"', "the hand crank broke with its cogwheel")],
+        forbid=[r"no renderer for create:saw", r"no client copy of create:", r"Java mods: drawing create:mechanical_mixer"],
+        look="createparts-0: the burner under its basin, the mixer over it, the press over a basin, the saw "
+             "with its blade, no pale squares on the floor under them; createparts-2 from closer",
+    ),
+    "jeifluids": dict(
+        about="Fluids in screens: JEI's list draws water from its still sprite (vanilla's blitTiledSprite, "
+              "through the client's real block atlas), tinted, not as a black square",
+        mods=["jei"], optional=["fabric-api", "create"], scene="none", env={"HORIZON_JAVA_DEBUG": "tiled"}, timeout=900,
+        steps=['$C command "gamemode survival" >/dev/null; sleep 10; $C key e tap >/dev/null; sleep 12; '
+               '$C click-at 357 223 >/dev/null; sleep 1; for k in w a t e r; do $C key $k tap >/dev/null; sleep 0.4; done; sleep 4'],
+        checks=[check_log(r"gui: a tiled sprite, minecraft:textures/block/water_still\.png tinted [0-9a-f]*3f76e4",
+                          "JEI's water is its still sprite, tinted (water's colour)")],
+        look="jeifluids-1: JEI's list for \"water\": the water fluid a blue square beside the bucket and potions",
+    ),
     "createitems": dict(
         about="Create's items drawn by its own item model types (the wrench, the extendo grip, the backtanks' "
               "OBJ with `map_Kd 0`): the quads its Java models make reach Horizon's item renderer; the "

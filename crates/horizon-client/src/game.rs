@@ -1157,6 +1157,9 @@ impl LevelAccess for GameLevel<'_> {
     fn foreign_fluid_changed(&mut self, pos: BlockPos) {
         java_server::java_fluid_changed(pos);
     }
+    fn observe_neighbours_updated(&self, source: BlockPos) {
+        java_server::java_neighbours_updated(source, |p| self.block_state(p));
+    }
     fn redstone_experiments(&self) -> bool {
         self.redstone_experiments
     }

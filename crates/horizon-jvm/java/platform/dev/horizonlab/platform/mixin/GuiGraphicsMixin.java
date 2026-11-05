@@ -27,4 +27,21 @@ public abstract class GuiGraphicsMixin {
         ci.cancel();
         graphics.horizon$innerBlit(pipeline, texture, x0, x1, y0, y1, u0, u1, v0, v1, color);
     }
+
+    /**
+     * Its private blitTiledSprite (blitSprite's tiled scaling; JEI's fluids, mods' tanks): the
+     * sprite's own picture tiled, as Horizon draws named textures; the atlas's texture and a
+     * tiled blit through it are the headless client's GPU's, which Horizon's window never sees
+     * (a fluid was a black square).
+     */
+    @Inject(method = "blitTiledSprite(Lcom/mojang/renderpearl/api/pipeline/RenderPipeline;Lnet/minecraft/client/renderer/texture/TextureAtlasSprite;IIIIIIIIIII)V",
+            at = @At("HEAD"), cancellable = true)
+    private void horizon$tiledSprite(RenderPipeline pipeline, net.minecraft.client.renderer.texture.TextureAtlasSprite sprite,
+                                     int x, int y, int w, int h, int u, int v, int tileW, int tileH, int texW, int texH,
+                                     int color, CallbackInfo ci) {
+        HorizonGraphics graphics = HorizonGraphicsWrappers.of(this);
+        if (graphics == null) return;
+        ci.cancel();
+        graphics.horizon$tiledSprite(sprite, x, y, w, h, u, v, tileW, tileH, texW, texH, color);
+    }
 }

@@ -339,6 +339,10 @@ pub trait LevelAccess {
     /// A foreign fluid at `pos` was placed or a neighbour of it changed: where vanilla's
     /// `LiquidBlock` schedules its fluid tick, the engine running it does.
     fn foreign_fluid_changed(&mut self, _pos: BlockPos) {}
+    /// The neighbours of `source` are about to be updated (`Level.updateNeighborsAt`,
+    /// `BlockState.updateNeighbourShapes`): blocks another engine runs (Java mods') hear it
+    /// there, as vanilla's own neighbour updater would tell them. The default: none.
+    fn observe_neighbours_updated(&self, _source: BlockPos) {}
     fn allow_fluid_level_change(
         &self,
         _pos: BlockPos,

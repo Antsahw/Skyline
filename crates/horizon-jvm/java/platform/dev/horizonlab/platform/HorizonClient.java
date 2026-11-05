@@ -1600,6 +1600,7 @@ public final class HorizonClient {
     public static void clientTick() {
         if (minecraft == null || minecraft.font == null) return;
         Thread.currentThread().setContextClassLoader(HorizonClient.class.getClassLoader());
+        HorizonClientBlockEntities.newTick();
         renderThread();
         // The game renderer's GPU parts, made on the render thread (the client's) once.
         if (!gpuParts) {
@@ -1662,6 +1663,8 @@ public final class HorizonClient {
                     long t = HorizonProfile.start();
                     tickOnce();
                     ATTACK_HELD.computeIfPresent(player.getUUID(), (u, n) -> n > 1 ? n - 1 : null);
+                    // The client's copies of the mods' block entities in their level (their renderers').
+                    HorizonClientBlockEntities.tick(player.level());
                     t = HorizonProfile.add("client: tick", t);
                     // The chunks mods asked for on their own threads (JourneyMap's mapping).
                     HorizonChunks.serveWanted(64);
