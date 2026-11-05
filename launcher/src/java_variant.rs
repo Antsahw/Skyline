@@ -390,7 +390,7 @@ mod tests {
         let staged = scratch.join("staged");
         fs::create_dir_all(&staged).unwrap();
         fs::write(staged.join(CLIENT), "").unwrap();
-        place(&staged, &version.join(DIR)).unwrap();
+        place(&staged, &version.join(DIR), "").unwrap();
         switch_command(&mut cmd).unwrap();
         assert_eq!(
             PathBuf::from(cmd.get_program()),
