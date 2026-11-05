@@ -31,6 +31,20 @@ pub(super) enum JavaBreak {
     /// its removal, drops and the tool's wear come as Java's actions; nothing more to do.
     Java,
 }
+impl JavaBreak {
+    /// Whether the game breaks the block (`Some`, with `after`), at
+    /// `Game::break_block_as_player`'s `ServerPlayerGameMode.destroyBlock`: Java mods'
+    /// injections at destroyBlock's head and Fabric's PlayerBlockBreakEvents.BEFORE may stop
+    /// the break (the client puts the block back on the server's acknowledgement); a mod that
+    /// patches the inside of breaking (a vein miner) has vanilla's whole break run on the Java
+    /// side instead.
+    pub(super) fn horizon(self) -> Option<bool> {
+        match self {
+            JavaBreak::Cancelled | JavaBreak::Java => None,
+            JavaBreak::Horizon { after } => Some(after),
+        }
+    }
+}
 
 /// What players did during a tick, for the Java mods at its end.
 #[cfg_attr(not(feature = "java-mods"), allow(dead_code))]
@@ -178,7 +192,9 @@ static JAVA_PRECIPITATION: std::sync::Mutex<Vec<horizon_core::position::BlockPos
     std::sync::Mutex::new(Vec::new());
 
 /// The precipitation tick at the column topped by `top` is kept for the Java mods (true), when
-/// they patch the biomes' weather (`events::routed_actions`' "precipitation").
+/// they patch the biomes' weather (`events::routed_actions`' "precipitation"): Java mods that
+/// do (Serene Seasons) answer it at the end of the level's tick (`Game::java_random_ticks`),
+/// and `GameLevel::precipitation` (game.rs) has none for it.
 pub(super) fn java_precipitation(top: horizon_core::position::BlockPos) -> bool {
     #[cfg(feature = "java-mods")]
     {
@@ -4139,6 +4155,98 @@ mod run {
                         overlay: false,
                     }),
                 );
+            }
+        }
+    }
+}
+
+#[cfg(feature = "java-mods")]
+impl Game<'_> {
+    /// A mob a routed attack hit (Java mods' `Player.attack`, `game/java_server.rs`): hurt
+    /// by the player with what its copy's `hurtServer` got, pushed as its `knockback` was
+    /// (the strength and direction the mods left), and the hit's sounds and particles. The
+    /// weapon's wear and the exhaustion were the mirror's (they come back as slots and food).
+    pub(super) fn routed_hit(
+        &mut self,
+        index: usize,
+        amount: f32,
+        knockback: f64,
+        knock_x: f64,
+        knock_z: f64,
+        primary: bool,
+    ) {
+        let from = self
+            .player
+            .as_ref()
+            .map(|p| [p.position.x, p.position.y, p.position.z]);
+        self.combat.last_hurt_mob = Some((self.mobs[index].id, self.world.game_time));
+        let old_health = self.mobs[index].health;
+        let source = match from {
+            Some(f) => self.attack_source(f),
+            None => horizon_client::mobs::Damage::of(horizon_client::mobs::DamageKind::Generic),
+        };
+        let landed = amount > 0.0 && self.hurt_by_player(index, amount, source);
+        if !landed {
+            if primary {
+                self.audio
+                    .play("minecraft:entity.player.attack.nodamage", from, 1.0, 1.0);
+            }
+            return;
+        }
+        let victim = self.mob_entity(&self.mobs[index]);
+        self.player_hit(
+            &victim,
+            super::creatures::damage_type(source.kind, true),
+            None,
+            amount,
+        );
+        if knockback > 0.0 {
+            self.mobs[index].knockback(knockback, knock_x, knock_z, &source);
+        }
+        let mob = &self.mobs[index];
+        let actual = old_health - mob.health;
+        let (feet, height) = (
+            [mob.position.x, mob.position.y, mob.position.z],
+            mob.kind.height,
+        );
+        self.stats
+            .custom("damage_dealt", (actual * 10.0).round() as i32);
+        if actual > 2.0 {
+            let indicator = horizon_client::particles::ParticleOptions::simple(
+                horizon_client::particles::ParticleType::DamageIndicator,
+            );
+            let at = [feet[0], feet[1] + height * 0.5, feet[2]];
+            self.particles.send_particles(
+                &indicator,
+                at,
+                [0.1, 0.0, 0.1],
+                0.2,
+                (actual * 0.5) as u32,
+            );
+            self.lan_send_particles(super::lan_particles::QueuedParticle {
+                dimension: self.dim.id(),
+                options: indicator,
+                state: None,
+                at,
+                spread: [0.1, 0.0, 0.1],
+                speed: [0.2; 3],
+                count: (actual * 0.5) as u32 as i32,
+                randomization: 0,
+            });
+        }
+        self.last_hurt_by_player
+            .insert(self.mobs[index].id, self.lan_acting);
+        if primary {
+            self.audio
+                .play("minecraft:entity.player.attack.strong", from, 1.0, 1.0);
+        }
+        for event in std::mem::take(&mut self.mobs[index].outbox) {
+            match event {
+                horizon_client::mobs::MobEvent::Sound(s, at, volume, pitch) => {
+                    self.audio
+                        .play(&format!("minecraft:{s}"), Some(at), volume, pitch);
+                }
+                other => self.mobs[index].outbox.push(other),
             }
         }
     }

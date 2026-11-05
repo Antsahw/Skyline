@@ -1,6 +1,8 @@
 //! Prepare local worlds without blocking the window's event loop.
 use super::*;
 
+mod java;
+
 pub(super) struct WorldRequest {
     pub save_root: PathBuf,
     pub folder: String,
@@ -604,20 +606,14 @@ fn worldgen_overrides_of(
 ) {
     let packs = horizon_client::datapack::discover_with_features(world_root, resources);
     let enabled = horizon_client::datapack::enabled_ids(world_root, &packs, enabled_features);
-    let mut list: Vec<_> = Vec::new();
-    // The Java mods' data under the world's packs, as Fabric's mod packs sit below them:
-    // their structures, structure sets and pieces (a dimension whose own generation they
-    // change runs on the Java side, java_worldgen.rs).
-    #[cfg(feature = "java-mods")]
-    let mods = super::java_worldgen::mod_structure_packs();
-    #[cfg(feature = "java-mods")]
-    list.extend(mods.iter());
-    list.extend(
-        enabled
-            .iter()
-            .filter_map(|id| packs.iter().find(|p| &p.id == id)),
-    );
-    horizon_client::datapack::worldgen_overrides(&list, |b| biomes.contains(b))
+    let enabled: Vec<_> = enabled
+        .iter()
+        .filter_map(|id| packs.iter().find(|p| &p.id == id))
+        .collect();
+    // The Java mods' data under the world's packs (world_loading/java.rs).
+    let mods = java::mod_structure_packs();
+    let enabled: Vec<_> = mods.iter().chain(enabled).collect();
+    horizon_client::datapack::worldgen_overrides(&enabled, |b| biomes.contains(b))
 }
 
 /// The shapes of the world's levels: their dimension types, the world's
@@ -865,34 +861,20 @@ pub(super) fn make_streaming(
         locator = Some(inner.clone());
         // With Java mods, the mods' chunk steps generate the dimensions they change.
         #[cfg(feature = "java-mods")]
-        if let Some(java) = super::java_worldgen::JavaTerrain::wrap(
-            inner.clone(),
-            dim.id(),
+        if let Some(mut streaming) = java::streaming(
+            &inner,
+            res,
+            pack,
+            options,
+            world_root,
+            dim,
             seed,
             structures,
-            world_root,
-            pack.assets.clone(),
-            res.biomes().clone(),
-            super::java_worldgen::NoiseWorld {
-                bundle: options.resources.join("worldgen"),
-                resources: options.resources.clone(),
-                world_root: world_root.to_path_buf(),
-                enabled_features: enabled_features.to_vec(),
-                preset: preset.to_string(),
-                biomes: biomes.clone(),
-                seed,
-            },
+            enabled_features,
+            preset,
+            &biomes,
+            &save,
         ) {
-            let mut streaming = Streaming::new(
-                Arc::new(Persistent {
-                    inner: Arc::new(java),
-                    save: save.clone(),
-                    registry: pack.assets.clone(),
-                    biomes: res.biomes().clone(),
-                }),
-                pack.context.clone(),
-                res.threads(),
-            );
             finish_streaming(&mut streaming, &save, settings, options, dim, seed);
             return Ok((streaming, save, locator));
         }

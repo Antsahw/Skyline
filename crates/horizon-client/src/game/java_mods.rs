@@ -8,6 +8,27 @@
 use super::Game;
 use std::path::{Path, PathBuf};
 
+/// The Java mods' state in the game (the `java` field of `Game`).
+#[derive(Default)]
+pub(super) struct JavaGame {
+    /// The open window's Java mod screen, as its last frame drew it (game/java_screen.rs).
+    pub(super) screen: Option<super::java_screen::JavaScreen>,
+    /// The keys the server's Java mods bind (game/java_screen.rs).
+    pub(super) binds: super::java_screen::JavaBinds,
+    /// What Java mods last drew on the HUD (game/java_screen.rs).
+    pub(super) hud: Option<super::java_screen::JavaHud>,
+    pub(super) overlay: super::java_screen::JavaOverlay,
+    /// Java mods' dynamic textures in the atlas (game/java_screen.rs).
+    pub(super) images: super::java_screen::JavaImages,
+    /// Java mods' entities the server last sent (game/java_entities.rs).
+    pub(super) entities: super::java_entities::JavaEntities,
+    /// Whether the spawn search asked the Java mods' generator for its origin (they move it).
+    pub(super) spawn_origin_asked: bool,
+    /// Players who joined while the Java mods' data-pack load functions hadn't run, with the
+    /// ticks they have waited, and the ticks since the functions ran (`hold_join`).
+    pub(super) held_joins: Vec<(u32, u32, u32)>,
+}
+
 /// Game and Fabric API classes loaded once through Fabric, to check the setup works.
 const PROBE_CLASSES: &[&str] = &[
     "net/minecraft/world/level/block/Blocks",

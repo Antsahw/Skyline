@@ -7,6 +7,7 @@
 //! another level: a Respawn packet keeping all data, then a teleport to the
 //! exit once the destination has loaded around them.
 
+mod java;
 use super::end::GatewayJob;
 use super::nether_portal::{PLAYER_DELAY, Plan};
 use super::respawn_anchor::RespawnConfig;
@@ -433,16 +434,10 @@ impl Game<'_> {
         let Some(i) = host.hub.guests.iter().position(|g| g.conn == conn) else {
             return;
         };
-        // ServerPlayer.teleport's head (Entity.teleport from handlePortal): a Java mod
-        // that cancels it keeps the player here; the portal asks again next tick, as
-        // vanilla's does (java_server.rs).
-        let (uuid, look, here) = {
-            let g = &host.hub.guests[i];
-            (g.uuid, [g.yaw, g.pitch], g.position)
-        };
-        if self.java_player_teleport(uuid, target.id(), here, look, false) {
+        // ServerPlayer.teleport's head: a Java mod may cancel it (server_travel/java.rs).
+        let Some((uuid, look)) = self.java_portal_teleport(host, i, target) else {
             return;
-        }
+        };
         if target != self.dim {
             drop_hook(host, conn);
         }
@@ -856,13 +851,8 @@ impl Game<'_> {
                 continue;
             };
             let source = self.dim;
-            // ServerPlayer.teleport's head: a Java mod that cancels it keeps the player
-            // in its level (java_server.rs).
-            let (uuid, look) = {
-                let g = &host.hub.guests[i];
-                (g.uuid, t.rotation.unwrap_or([g.yaw, g.pitch]))
-            };
-            if self.java_player_teleport(uuid, t.dim.id(), t.at, look, false) {
+            // ServerPlayer.teleport's head: a Java mod may cancel it (server_travel/java.rs).
+            if self.java_level_teleport_refused(host, i, &t) {
                 continue;
             }
             if t.dim != source {

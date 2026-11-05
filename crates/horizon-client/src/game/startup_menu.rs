@@ -1298,6 +1298,7 @@ mod tests {
             title_drawn: false,
             menu: StartupMenu::default(),
             error: None,
+            drawn_at: None,
         }
     }
 

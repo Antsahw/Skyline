@@ -1174,10 +1174,7 @@ impl Game<'_> {
         if self.screen == Screen::Options {
             return self.options_key(key, None);
         }
-        if self.java_screen_takes(key) {
-            // A scripted press types its letter or digit, as the window's would.
-            let text = super::java_screen::key_text(key);
-            self.java_screen_key(key, text.as_deref());
+        if self.java_screen_scripted_key(key) {
             return Ok(());
         }
         if self.screen == Screen::CommandBlock {

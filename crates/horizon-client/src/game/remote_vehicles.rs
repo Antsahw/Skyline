@@ -224,45 +224,6 @@ impl Game<'_> {
         }
     }
 
-    /// This game's player sits on a Java mod's mob (the server says so each tick).
-    /// The Java mod's mob it rides jumps as a horse (the bar charges with the jump key).
-    pub(super) fn java_mount_jumps(&self) -> bool {
-        #[cfg(feature = "java-mods")]
-        {
-            self.riding_java_mob() && self.java_entities.ride.is_some_and(|r| r.jump)
-        }
-        #[cfg(not(feature = "java-mods"))]
-        {
-            false
-        }
-    }
-
-    /// The Java mod's mob it rides: its health and max health when it shows hearts.
-    pub(super) fn java_mount_health(&self) -> Option<[f32; 2]> {
-        #[cfg(feature = "java-mods")]
-        {
-            self.java_entities
-                .ride
-                .filter(|_| self.riding.is_none())
-                .and_then(|r| r.hp)
-        }
-        #[cfg(not(feature = "java-mods"))]
-        {
-            None
-        }
-    }
-
-    pub(super) fn riding_java_mob(&self) -> bool {
-        #[cfg(feature = "java-mods")]
-        {
-            self.riding.is_none() && self.java_entities.ride.is_some()
-        }
-        #[cfg(not(feature = "java-mods"))]
-        {
-            false
-        }
-    }
-
     /// Camera.alignWithEntity's NewMinecartBehavior branch: sample the
     /// vehicle's curved path at this frame, then apply the player's seat
     /// attachment. Camera's own eye-height interpolation still runs afterwards.
@@ -282,23 +243,9 @@ impl Game<'_> {
     /// The local player's tick in its vehicle, in place of its own movement:
     /// false when it rides nothing.
     pub(super) fn remote_ride(&mut self, keys: Keys) -> bool {
-        // A Java mod's mob (game/java_entities.rs): the server's mirror moves it by this
-        // player's keys (PlayerInput) and says where the seat is; the player sits there, and
-        // its position packets carry the seat.
+        // A Java mod's mob (mounts/java.rs).
         #[cfg(feature = "java-mods")]
-        if self.riding.is_none()
-            && let Some(ride) = self.java_entities.ride
-        {
-            // The jump bar (the server's mirror charges the jump itself from the keys).
-            if ride.jump {
-                self.mount.charge_jump(keys.jump);
-            }
-            if let Some(p) = self.player.as_mut() {
-                self.previous_position = p.position;
-                p.position = Vec3::new(ride.p[0], ride.p[1], ride.p[2]);
-                p.velocity = Vec3::ZERO;
-                p.fall_distance = 0.0;
-            }
+        if self.java_remote_ride(keys.jump) {
             return true;
         }
         let Some(id) = self.riding else {

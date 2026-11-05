@@ -34,6 +34,8 @@ use horizon_protocol::{
 use horizon_world::entity_move::EntityMoveWorld;
 use winit::keyboard::KeyCode;
 
+mod java;
+
 /// Per-guest state of the gameplay code that lives outside `Guest`.
 #[derive(Default)]
 pub(super) struct GuestPlay {
@@ -577,8 +579,7 @@ impl Game<'_> {
             self.lan_acting_permission.replace(g.permission),
             self.lan_acting_entity.replace(g.entity_id as u32),
         );
-        let java_actor =
-            super::java_server::set_java_actor(Some(horizon_protocol::crypto::uuid_string(g.uuid)));
+        let java_actor = java::set_actor(g.uuid);
         let packets = std::mem::take(&mut self.guest_packets);
         let entity_events = std::mem::take(&mut self.guest_entity_events);
         let equipment_breaks = std::mem::take(&mut self.guest_equipment_breaks);
@@ -986,7 +987,6 @@ impl Game<'_> {
         self.pitch = pitch;
         self.eye = eye.1;
         std::mem::swap(&mut self.player, &mut player);
-        let mut java_teleport = None;
         if let Some(mut m) = player {
             g.health = m.health.health();
             g.food = m.health.food.food;
@@ -1010,14 +1010,9 @@ impl Game<'_> {
             let mut teleported = std::mem::take(&mut m.teleported);
             let mut moved: f64 = (0..3).map(|k| (at[k] - g.position[k]).powi(2)).sum();
             let mut turned = turned;
-            // ServerPlayer.teleport's head: a Java mod that cancels it leaves the guest
-            // where it was, facing as it did (java_server.rs).
-            if g.vehicle.is_none() && (moved > 0.0001 || teleported) && {
-                let dim = self.dim.id();
-                self.java_player_teleport(g.uuid, dim, at, [g.yaw, g.pitch], false)
-            } {
-                m.position = Vec3::new(g.position[0], g.position[1], g.position[2]);
-                [g.yaw, g.pitch] = old_look;
+            // ServerPlayer.teleport's head: a Java mod may cancel it (lan_actions/java.rs).
+            let moves = moved > 0.0001 || teleported;
+            if self.java_guest_teleport_refused(g, &mut m, at, old_look, moves) {
                 (teleported, moved, turned) = (false, 0.0, false);
             }
             let at = if moved > 0.0 { at } else { g.position };
@@ -1039,18 +1034,12 @@ impl Game<'_> {
                     passengers: Vec::new(),
                 }));
             }
-            // What moves the guest during an action is a teleport (commands set the position).
-            if g.vehicle.is_none() && (moved > 0.0001 || teleported) {
-                java_teleport = Some((g.uuid, at, [g.yaw, g.pitch]));
-            }
+            let java_teleport = (g.vehicle.is_none() && (moved > 0.0001 || teleported))
+                .then_some((g.uuid, at, [g.yaw, g.pitch]));
             if g.vehicle.is_none() && (moved > 0.0001 || turned || teleported) {
                 host.hub.teleport(i, Some(at));
             }
-        }
-        // Java mods hear the teleport (ServerPlayer.teleport; java_server.rs).
-        if let Some((uuid, at, look)) = java_teleport {
-            let dim = self.dim.id();
-            self.java_player_teleport(uuid, dim, at, look, true);
+            self.java_guest_teleported(java_teleport);
         }
         let g = &mut host.hub.guests[i];
         if let Some(head) = g.bed.filter(|_| fell_asleep) {
@@ -2000,17 +1989,7 @@ impl Game<'_> {
             },
             // handleSetCarriedItem: a new slot stops a main-hand use.
             S::SetCarriedItem(p) => {
-                // Java mods' heads of Inventory.setSelectedSlot (Carry On while carrying): a
-                // cancel keeps the old slot, which the game is told.
-                let slot = i32::from(p.slot);
-                if (0..9).contains(&p.slot)
-                    && self
-                        .as_guest(host, conn, |g| g.java_select_slot(slot))
-                        .unwrap_or(false)
-                {
-                    let kept = host.hub.guests[gi].selected as i32;
-                    host.hub
-                        .send_to(conn, &C::SetHeldSlot(play::SetHeldSlot { slot: kept }));
+                if self.java_guest_slot_refused(host, conn, gi, p.slot) {
                     return;
                 }
                 if !(0..9).contains(&p.slot) {
@@ -2283,15 +2262,7 @@ impl Game<'_> {
                         g.swings_started != swings
                     });
                     self.lan_swing_back(host, conn, swung);
-                    // Java mods' heads of Entity.startRiding: a cancel takes the guest off.
-                    if let Some(vehicle) = host.hub.guests[gi].vehicle
-                        && before != Some(vehicle)
-                        && self
-                            .as_guest(host, conn, |g| g.java_ride(vehicle))
-                            .unwrap_or(false)
-                    {
-                        self.as_guest(host, conn, |g| g.stop_riding());
-                        host.hub.guests[gi].vehicle = before;
+                    if self.java_guest_ride_refused(host, conn, gi, before) {
                         return;
                     }
                     self.guest_boarded(host, conn, before);
@@ -2513,11 +2484,7 @@ impl Game<'_> {
                 self.guest_far_terrain(host, conn, &p.data)
             }
             #[cfg(feature = "java-mods")]
-            S::CustomPayload(p) if p.channel == horizon_jvm::device::RUNS_OWN_CHANNEL => {
-                self.java_device_runs_own(host, conn)
-            }
-            #[cfg(feature = "java-mods")]
-            S::CustomPayload(p) => self.java_device_from_game(host, conn, &p.channel, &p.data),
+            S::CustomPayload(p) => self.java_device_payload(host, conn, &p.channel, &p.data),
             S::ChatCommandSigned(p) => self.guest_signed_command(host, conn, p),
             S::ChangeDifficulty(p) if host.hub.guests[gi].permission >= 2 => {
                 if !self.level.difficulty_locked && (0..=3).contains(&p.difficulty) {
@@ -4430,20 +4397,9 @@ impl Game<'_> {
         }
         let mut soul = None;
         let mut jumps = 0;
-        // Where a jump a Java mod cancelled took off: the guest is put back there.
-        let mut refused_from = None;
+        let mut refused = java::JumpsRefused::default();
         let events = self.as_guest(host, conn, |game| {
-            // LivingEntity.jumpFromGround's heads, before the moves: the Java mods may
-            // cancel each jump the moves make (java_server.rs).
-            let mut refused = Vec::new();
-            let mut ground = from_ground;
-            for (moved, on_ground) in &moves {
-                if ground && !on_ground && moved[1] > 0.0 {
-                    refused.push(game.java_jump_refused());
-                }
-                ground = *on_ground;
-            }
-            let mut refused = refused.into_iter();
+            refused.ask(game, from_ground, &moves);
             let (rules, motion) = (game.world.health_rules, game.motion);
             let health = &motion.health;
             let freeze_immune = game.wears_freeze_immune();
@@ -4479,7 +4435,6 @@ impl Game<'_> {
             let tick_movement = travelled.iter().fold(Vec3::ZERO, |sum, d| {
                 sum.add_vector(Vec3::new(d[0], d[1], d[2]))
             });
-            let mut jumped = false;
             // Entity.move's movementThisTick: each move, from where the
             // tick's first one started.
             let end = w.player.position;
@@ -4503,19 +4458,13 @@ impl Game<'_> {
             let mut from = start;
             for (moved, on_ground) in moves {
                 let movement = Vec3::new(moved[0], moved[1], moved[2]);
-                if w.player.ground.on_ground && !on_ground && moved[1] > 0.0 {
-                    if refused.next().unwrap_or(false) {
-                        // A mod cancelled the jump: no jump on the server, and the
-                        // guest goes back to where it took off.
-                        refused_from.get_or_insert([from.x, from.y, from.z]);
-                    } else {
-                        // ServerGamePacketListenerImpl.handlePlayerPositionChange:
-                        // the server's copy jumps with the player, so the velocity
-                        // it sends them keeps the jump.
-                        jumps += 1;
-                        let _ = w.jump_from_ground();
-                        jumped = true;
-                    }
+                if w.player.ground.on_ground && !on_ground && moved[1] > 0.0 && refused.allows(from)
+                {
+                    // ServerGamePacketListenerImpl.handlePlayerPositionChange:
+                    // the server's copy jumps with the player, so the velocity
+                    // it sends them keeps the jump.
+                    jumps += 1;
+                    let _ = w.jump_from_ground();
                 }
                 from = from.add_vector(movement);
                 let landed = (|| -> horizon_client::Result<()> {
@@ -4571,11 +4520,11 @@ impl Game<'_> {
                     game.cauldron_extinguish(*pos);
                 }
             }
-            // Entity.baseTick: rain puts out a burning player.
             // Java mods hear the jump (java_server.rs).
-            if jumped {
+            if jumps > 0 {
                 game.java_jumped();
             }
+            // Entity.baseTick: rain puts out a burning player.
             game.rain_extinguish_player();
             // WitherRoseBlock.entityInside along those moves.
             for event in &events {
@@ -4627,55 +4576,8 @@ impl Game<'_> {
                     game.award_custom_stat("fall_one_cm", *cm);
                 }
             }
-            // Java mods patch fall damage (PlayerMotion::route_fall): each landing that would
-            // hurt is theirs to judge, then dealt here.
-            let routed: Vec<_> = events
-                .iter()
-                .filter_map(|e| match e {
-                    MotionEvent::Fall(horizon_client::landing::FallEvent::Routed {
-                        distance,
-                        multiplier,
-                        source,
-                        safe,
-                        damage_multiplier,
-                        contact,
-                    }) => Some((
-                        *distance,
-                        *multiplier,
-                        *source,
-                        *safe,
-                        *damage_multiplier,
-                        *contact,
-                    )),
-                    _ => None,
-                })
-                .collect();
-            for (distance, multiplier, source, safe, damage_multiplier, contact) in routed {
-                let stalagmite = source == horizon_world::block_landing::LandingDamage::Stalagmite;
-                let damage = game
-                    .java_fall(distance, multiplier, stalagmite, safe, damage_multiplier)
-                    .unwrap_or_else(|| {
-                        ((distance + 1.0e-6 - safe) * f64::from(multiplier) * damage_multiplier)
-                            .floor()
-                            .max(0.0) as f32
-                    });
-                let Some(player) = game.player.as_mut() else {
-                    break;
-                };
-                let _ = MotionWorld {
-                    entities: &[],
-                    player,
-                    scene: &mut game.world,
-                    assets: &game.pack.assets,
-                    collision_binding: game.collision,
-                    resources: game.motion,
-                }
-                .routed_fall_damage(damage, source, contact);
-                events.append(&mut player.events);
-            }
-            if let Some(player) = game.player.as_mut() {
-                player.route_fall = false;
-            }
+            // Java mods patch fall damage (lan_actions/java.rs).
+            game.java_routed_falls(&mut events);
             game.record_combat(&events);
             game.wear_armor(&events);
             (events, velocity)
@@ -4683,11 +4585,7 @@ impl Game<'_> {
         let Some((events, marked)) = events else {
             return;
         };
-        if let Some(at) = refused_from
-            && let Some(i) = host.hub.guests.iter().position(|g| g.conn == conn)
-        {
-            host.hub.teleport(i, Some(at));
-        }
+        refused.put_back(host, conn);
         if jumps > 0
             && !horizon_client::mod_api::mods().is_empty()
             && let Some((uuid, name)) = host.hub.guest(conn).map(|g| (g.uuid, g.name.clone()))
@@ -5150,18 +5048,9 @@ impl Game<'_> {
             let stack = self.dropped[i].stack.clone();
             let before = stack.count;
             let thrower = self.dropped[i].thrower;
-            // A Java mod patches item pickup: vanilla's ItemEntity.playerTouch with its
-            // patches takes what it takes (into the guest's slots).
-            let item = self.dropped[i].clone();
-            let java = self
-                .as_guest(host, conn, |g| g.java_item_touch(&item))
-                .flatten();
-            let rest = match java {
-                Some(0) => None,
-                Some(left) => Some(horizon_client::items::ItemStack {
-                    count: left.min(before),
-                    ..stack
-                }),
+            // A Java mod may take the pickup (lan_actions/java.rs).
+            let rest = match self.java_guest_item_touch(host, conn, i) {
+                Some(rest) => rest,
                 None => self.as_guest(host, conn, |g| g.give(stack)).flatten(),
             };
             match rest {
@@ -5306,36 +5195,11 @@ impl Game<'_> {
             .random
             .next_int_bound(touching.len() as i32)
             .unwrap_or(0) as usize;
-        // A merged orb gives its value once per count and goes at zero.
-        let orb = self.orbs[touching[pick]].clone();
-        // A Java mod patches the orbs' pickup (Clumps: all of it at once, no delay): vanilla's
-        // playerTouch with its patches gives the experience and repairs.
-        if let Some((left, delay)) = self
-            .as_guest(host, conn, |game| game.java_orb_touch(&orb))
-            .flatten()
-        {
-            let play = host.play.entry(conn).or_default();
-            play.xp_delay = delay.max(0) as u32;
-            if left >= orb.count {
-                return;
-            }
-            if left == 0 {
-                self.orbs.remove(touching[pick]);
-            } else {
-                self.orbs[touching[pick]].count = left;
-            }
-            host.hub.take_item(orb.id as i32, id, 1, at);
-            let pitch =
-                (self.world.random.next_float() - self.world.random.next_float()) * 0.35 + 0.9;
-            let p = orb.position;
-            self.audio.play(
-                "minecraft:entity.experience_orb.pickup",
-                Some([p.x, p.y, p.z]),
-                0.1,
-                pitch,
-            );
+        // A Java mod may take the pickup (lan_actions/java.rs).
+        if self.java_guest_orb_touch(host, conn, touching[pick], id, at) {
             return;
         }
+        // A merged orb gives its value once per count and goes at zero.
         let index = touching[pick];
         let mut orb = self.orbs[index].clone();
         let mut canceled = false;

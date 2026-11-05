@@ -518,8 +518,8 @@ impl Game<'_> {
     /// The server's Java entities of this tick ([`CHANNEL`]).
     pub(super) fn remote_java_entities(&mut self, data: &[u8]) {
         let _timed = super::java_profile::Timed::named("(Rust) entities: the player's game reads");
-        let whole = self.java_entities.receive(data);
-        for (name, mut image) in std::mem::take(&mut self.java_entities.images) {
+        let whole = self.java.entities.receive(data);
+        for (name, mut image) in std::mem::take(&mut self.java.entities.images) {
             image["name"] = Value::from(name);
             self.store_java_image(&image);
         }
@@ -537,7 +537,7 @@ impl Game<'_> {
         }
         // Other players on mods' mobs sit there (HumanoidModel's riding pose), as a
         // passengers packet would put them on a vehicle of Horizon's.
-        let riders = &self.java_entities.riders;
+        let riders = &self.java.entities.riders;
         for m in &mut self.mobs {
             if let Some(&mob) = riders.get(&m.id) {
                 m.extra.mount = Some(mob);
@@ -557,7 +557,7 @@ impl Game<'_> {
         alpha: f64,
         out: &mut Vec<Vertex>,
     ) {
-        let java = &self.java_entities;
+        let java = &self.java.entities;
         if java.now.is_empty() && java.own.is_empty() {
             return;
         }
@@ -631,18 +631,24 @@ impl Game<'_> {
     }
 
     /// What mods draw in first person (Carry On's carried block or mob in the hands): view
-    /// space through `to_world` (the hands' own transform, game.rs `hand_geometry`).
+    /// space through `to_world` (the hands' own transform, game.rs `hand_geometry`). Returns
+    /// the hands they draw instead of vanilla's arm and item (vanilla's draw skips them).
     pub(super) fn java_hand_geometry(
         &self,
         to_world: glam::Mat4,
         packed: u32,
         out: &mut Vec<Vertex>,
-    ) {
-        if let Some(h) = &self.java_entities.hands {
+    ) -> [bool; 2] {
+        if let Some(h) = &self.java.entities.hands {
             self.draw_look(
                 -1, &h.models, &h.meshes, &h.items, None, to_world, packed, 1.0, out,
             );
         }
+        self.java
+            .entities
+            .hands
+            .as_ref()
+            .map_or([false; 2], |h| h.hide)
     }
 
     /// One entity's look (its models posed between the last two ticks, its custom geometry and
@@ -660,7 +666,7 @@ impl Game<'_> {
         t: f32,
         out: &mut Vec<Vertex>,
     ) {
-        let java = &self.java_entities;
+        let java = &self.java.entities;
         for (i, m) in models.iter().enumerate() {
             let Some(tree) = java.trees.get(&m.key) else {
                 continue;
@@ -742,13 +748,20 @@ impl Game<'_> {
         }
     }
 
-    /// Where each Java entity's shadow is (between the last two ticks) and its radius.
-    pub(super) fn java_entity_shadows(&self, alpha: f64) -> Vec<(glam::DVec3, f32)> {
-        let java = &self.java_entities;
+    /// Where each Java entity's shadow is (between the last two ticks), its radius and its
+    /// strength (1).
+    pub(super) fn java_entity_shadows(&self, alpha: f64) -> Vec<(glam::DVec3, f32, f32)> {
+        let java = &self.java.entities;
         java.now
             .iter()
             .filter(|s| s.shadow > 0.0 && !s.block)
-            .map(|s| (glam::DVec3::from_array(java.position(s, alpha)), s.shadow))
+            .map(|s| {
+                (
+                    glam::DVec3::from_array(java.position(s, alpha)),
+                    s.shadow,
+                    1.0,
+                )
+            })
             .collect()
     }
 
@@ -758,7 +771,7 @@ impl Game<'_> {
         &self,
         alpha: f64,
     ) -> Vec<(i32, glam::DVec3, f64, horizon_client::text::Text, bool)> {
-        let java = &self.java_entities;
+        let java = &self.java.entities;
         java.now
             .iter()
             .filter_map(|s| {
@@ -773,7 +786,8 @@ impl Game<'_> {
     /// The Java mods' entities shown now (not block entities): id, type, position, for
     /// horizon-ctl's `entities`.
     pub(super) fn java_entity_list(&self) -> Vec<(i32, &str, [f64; 3])> {
-        self.java_entities
+        self.java
+            .entities
             .now
             .iter()
             .filter(|e| !e.block)
@@ -785,7 +799,7 @@ impl Game<'_> {
         let eye = self.eye_position()?;
         let dir = super::view_vector(self.yaw, self.pitch);
         let reach: f64 = if self.creative { 5.0 } else { 3.0 };
-        let java = &self.java_entities;
+        let java = &self.java.entities;
         // Not the mob it rides (ProjectileUtil.getEntityHitResult skips the shooter's vehicle).
         let riding = java.ride.map(|r| r.id);
         java.now
@@ -800,7 +814,7 @@ impl Game<'_> {
     pub(super) fn java_entity_location(&self, id: i32, distance: f64) -> [f64; 3] {
         let (Some(eye), Some(s)) = (
             self.eye_position(),
-            self.java_entities.now.iter().find(|s| s.id == id),
+            self.java.entities.now.iter().find(|s| s.id == id),
         ) else {
             return [0.0; 3];
         };

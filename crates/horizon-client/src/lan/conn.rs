@@ -33,6 +33,7 @@ use std::{
     },
     time::{Duration, Instant},
 };
+mod java;
 
 /// ServerCommonPacketListenerImpl.keepConnectionAlive: a keep-alive every 15 s,
 /// and a client that has not answered the last one by the next is dropped.
@@ -278,9 +279,7 @@ impl PlayerSender {
         self.held.lock().unwrap_or_else(PoisonError::into_inner)
     }
     pub fn send(&self, body: Vec<u8>) {
-        if self.tapped {
-            super::packet_tap::keep(&body);
-        }
+        self.tap(&body);
         self.pending.fetch_add(body.len(), Ordering::Relaxed);
         if HOLDING.get() {
             self.held().push(body);
@@ -301,9 +300,7 @@ impl PlayerSender {
         }
         let mut held = self.held();
         for body in bodies {
-            if self.tapped {
-                super::packet_tap::keep(&body);
-            }
+            self.tap(&body);
             self.pending.fetch_add(body.len(), Ordering::Relaxed);
             held.push(body);
         }
@@ -854,23 +851,20 @@ fn login_and_configure(
             .map_err(e)?;
         c.set_compression(threshold);
     }
-    let finished = login::Clientbound::LoginFinished(login::LoginFinished {
-        profile: login::GameProfile {
-            uuid,
-            name: name.to_owned(),
-            properties: properties.clone(),
-        },
-        session: uuid,
-    })
-    .encode();
-    // The window's own player: what it is sent from here is kept for the Java mods' client
-    // (`packet_tap`).
-    let memory = c.is_memory();
-    if memory {
-        super::packet_tap::begin(uuid);
-        super::packet_tap::keep(&finished);
-    }
-    c.send(&finished).map_err(e)?;
+    java::send_login_finished(
+        c,
+        uuid,
+        &login::Clientbound::LoginFinished(login::LoginFinished {
+            profile: login::GameProfile {
+                uuid,
+                name: name.to_owned(),
+                properties: properties.clone(),
+            },
+            session: uuid,
+        })
+        .encode(),
+    )
+    .map_err(e)?;
     // The client may send its settings before acknowledging the login.
     loop {
         let (id, payload) = c.recv().map_err(e)?;
@@ -884,12 +878,9 @@ fn login_and_configure(
     // Configuration.
     let sync_data = shared.sync();
     let sync: &SyncData = &sync_data;
+    let memory = c.is_memory();
     let send = |c: &mut Connection, p: cfg::Clientbound| {
-        let body = p.encode();
-        if memory {
-            super::packet_tap::keep(&body);
-        }
-        c.send(&body).map_err(e)
+        java::send_tapped(c, memory, &p.encode()).map_err(e)
     };
     send(
         c,
@@ -1581,11 +1572,8 @@ pub(super) fn frame_body(
     body: &[u8],
     out: &mut Vec<u8>,
 ) -> horizon_protocol::Result<()> {
-    // The window's own player over an in-memory pipe: no 21-bit frame (a big pack's join).
     if writer.wide {
-        let contents = horizon_protocol::frame::unbounded_contents(body, writer.threshold)?;
-        writer.frame_into(&contents, out);
-        return Ok(());
+        return java::wide_frame(writer, body, out);
     }
     match writer.threshold {
         Some(t) if body.len() >= t.max(SHARED_FRAME_MIN) => {

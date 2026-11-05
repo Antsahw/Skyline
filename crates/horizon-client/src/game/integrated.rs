@@ -8,6 +8,7 @@
 //!
 //! Every single-player world runs this way; LAN guests and dedicated servers
 //! use the same server code.
+mod thread_end;
 use super::{
     Dim, Game, Options, PackResources, Resources, UiResources, WorldIcon,
     execution_role::ExecutionRole,
@@ -427,20 +428,7 @@ impl Game<'_> {
             .spawn(move || {
                 // MinecraftServer.spin's Thread.setPriority(8).
                 horizon_threads::favour_current();
-                // Says how the thread ended when nothing else did (a thread that left
-                // without an error or a panic message: the 81-jar pack, 2026-11-03).
-                struct Ends;
-                impl Drop for Ends {
-                    fn drop(&mut self) {
-                        if std::thread::panicking() {
-                            log::error!("Horizon: the server thread ends by unwinding");
-                        } else {
-                            log::info!("Horizon: the server thread ends");
-                        }
-                        horizon_client::logging::flush();
-                    }
-                }
-                let _ends = Ends;
+                let _ends = thread_end::Ends;
                 let result = serve(
                     &res,
                     pack,

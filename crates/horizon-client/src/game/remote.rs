@@ -56,6 +56,8 @@ use std::{
 };
 use winit::{event::MouseButton, keyboard::KeyCode};
 
+mod java;
+
 type BuiltinCache = Vec<(std::path::PathBuf, Arc<Builtin>)>;
 static BUILTIN: std::sync::Mutex<BuiltinCache> = std::sync::Mutex::new(Vec::new());
 
@@ -970,10 +972,7 @@ impl Game<'_> {
         self.apply_settings();
         self.clear_waypoints();
         self.boss_overlay.reset();
-        // A new server: its Java mods (if any) say which keys they bind once we're in.
-        self.java_binds = Default::default();
-        self.java_overlay = Default::default();
-        self.settings.mods.java.clear();
+        self.java_new_server();
         // The chat's tree until the server sends its own, or forever when it
         // sends none: the game's own, plus the commands native mods own.
         let chat_tree = self.chat_tree_for(None);
@@ -4501,31 +4500,7 @@ impl Game<'_> {
                 }
             }
             C::OpenScreen(p) => self.remote_open_screen(p),
-            C::CustomPayload(p) if p.channel == super::java_screen::CONFIG_MODS => {
-                self.remote_java_config_mods(&p.data)
-            }
-            C::CustomPayload(p) if p.channel == super::java_screen::OVERLAY_CHANNEL => {
-                self.remote_java_overlay(&p.data)
-            }
-            C::CustomPayload(p) if p.channel == super::java_screen::HUD_CHANNEL => {
-                self.remote_java_hud(&p.data)
-            }
-            C::CustomPayload(p) if p.channel == super::java_screen::CHANNEL => {
-                self.remote_java_screen(&p.data)
-            }
-            C::CustomPayload(p) if p.channel == super::java_screen::KEYS => {
-                self.remote_java_keys(&p.data)
-            }
-            C::CustomPayload(p) if p.channel == super::java_entities::CHANNEL => {
-                self.remote_java_entities(&p.data)
-            }
-            C::CustomPayload(p) if p.channel == super::java_entities::PARTICLES => {
-                self.remote_java_particles(&p.data)
-            }
-            #[cfg(feature = "java-mods")]
-            C::CustomPayload(p) if super::java_device::takes(&p.channel) => {
-                super::java_device::payload(&p.channel, &p.data)
-            }
+            C::CustomPayload(p) if self.remote_java_payload(&p.channel, &p.data) => {}
             C::MountScreenOpen(p) => self.remote_open_mount(p),
             C::RecipeBookAdd(p) => self.remote_recipe_book_add(p),
             C::RecipeBookRemove(p) => self.remote_recipe_book_remove(p),
@@ -7487,29 +7462,9 @@ impl Game<'_> {
             }
             return true;
         }
-        // A Java mod's entity: the server's mods use it (Player.interactOn); this client has
-        // no copy of it to ask, so the click ends here, unless the hand holds what is aimed
-        // past entities (a bow, a snowball: no vanilla mob takes those, Mob.interact passes):
-        // the item is used too, as vanilla's PASS goes on to useItem.
-        if let Some((id, distance)) = self.java_entity_hit()
-            && self.mob_hit().is_none_or(|(_, d)| distance < d)
-            && self.before_block(distance)
-        {
-            if hand == Hand::Off {
-                return false;
-            }
-            self.send(S::Interact(play::Interact {
-                id,
-                hand: hand_id(hand),
-                location: self.java_entity_location(id, distance),
-                secondary: sneaking,
-            }));
-            let item = self.stack_in(self.selected).map_or("", |s| &*s.item);
-            if super::java_entities::used_past_entities(item) {
-                return false;
-            }
-            self.swing_arm();
-            return true;
+        // A Java mod's entity (remote/java.rs).
+        if let Some(used) = self.remote_use_java_entity(hand, sneaking) {
+            return used;
         }
         if let Some((i, distance)) = self.mob_hit()
             && self.before_block(distance)
@@ -8834,13 +8789,8 @@ impl Game<'_> {
             // a painting broken or an EndCrystal hurtServer: the server decides.
             self.send(S::Attack(play::Attack { id: hit.id }));
             self.reset_attack_strength();
-        } else if let Some((id, distance)) = self.java_entity_hit()
-            && self.mob_hit().is_none_or(|(_, d)| distance < d)
-            && self.before_block(distance)
-        {
-            // A Java mod's entity: the server's mods attack it (Player.attack).
-            self.send(S::Attack(play::Attack { id }));
-            self.reset_attack_strength();
+        } else if self.remote_attack_java_entity() {
+            // A Java mod's entity: the server's mods attack it (remote/java.rs).
         } else if let Some((i, distance)) = self.mob_hit()
             && self.before_block(distance)
         {
