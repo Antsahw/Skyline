@@ -2586,6 +2586,13 @@ HUD).
 
 ## Hooks in Horizon's shared files (after the upstream sync)
 
+**Since bridge-upstream-prep-2 (2026-11-05):** logic left Horizon's files for `<file>/java.rs`
+child modules and `game/java_*.rs`; Game's `java_*` fields are one `java: JavaGame`
+(`game/java_mods.rs`); `routed_hit` is in `java_server.rs`; the plain build compiles again
+(`java_mods/off.rs`). Every remaining hook, file by file, and the PR series:
+[java-bridge-upstream.md](java-bridge-upstream.md). New code goes in our files the same way:
+a child module next to the file it hooks, one-line calls in Horizon's file.
+
 Since the 2026-11-01 sync with upstream `main`, the bridge's calls from Horizon's own files are
 one-line calls into `game/java_server.rs` (upstream deleted `server_mods.rs` with WebAssembly code
 mods: our half of it is that file now). Where they are, and what upstream's native mod hook points
