@@ -16,18 +16,26 @@ What runs with the switch off, by reading the code: `opted_in()` once (arguments
 one `mods-java/` listing for the log line, nothing else: no JVM, no thread, no library loaded, no
 file of the bridge written. The build adds the bridge's code and its carried sources to the binary.
 
-**Numbers: not measured yet.** The cloud container these branches are worked in has no prepared
-26.3 (Mojang's files can't be downloaded there, and no agent may), so `--benchmark` can't run there.
-Run the script on a machine with the player's own preparation and put its `table.md` here:
+Machine: AMD Ryzen 5 9600X, AMD Radeon RX 9070 XT (RADV, Vulkan), Fedora 43 (kernel 6.19.12). Upstream
+a27b7f20f, fork 8cff8dbc4. `--benchmark standard`, mean ± stdev over 5 runs each (frames: over every scene's
+flight). Measured 2026-11-05 with `tools/java_bridge/perf_off.sh 5`.
 
 | | Upstream main | java-bridge, no feature | java-mods build, switch off |
 |---|---|---|---|
-| Start to title (ms) | — | — | — |
-| Start to in-world (ms) | — | — | — |
-| Average FPS | — | — | — |
-| Frame p50 / p99 (ms) | — | — | — |
-| Peak RSS (MB) | — | — | — |
-| Binary (MB) | — | — | — |
+| Runs | 5 | 5 | 5 |
+| Start to title (ms) | 772 ± 259 | 687 ± 8 | 676 ± 22 |
+| Start to in-world (ms) | 2678 ± 300 | 2492 ± 68 | 2462 ± 110 |
+| Average FPS | 3699 ± 338 | 3707 ± 383 | 3597 ± 379 |
+| Frame p50 (ms) | 0.25 ± 0.02 | 0.25 ± 0.02 | 0.25 ± 0.02 |
+| Frame p99 (ms) | 0.74 ± 0.13 | 0.74 ± 0.16 | 0.77 ± 0.16 |
+| 1% low FPS | 856 ± 161 | 847 ± 161 | 827 ± 169 |
+| Peak RSS (MB) | 1119 ± 11 | 1116 ± 15 | 1114 ± 12 |
+| Binary (MB) | 89.9 | 87.9 | 93.4 |
+
+**Reading it:** every difference is inside one standard deviation, so with the switch off the bridge costs
+nothing measurable in start time, frame time or memory. The only real cost is the binary: +3.5 MB for the
+`java-mods` build (the bridge's code and its Java sources). The plain build (no feature), which is what upstream
+releases ship, is the same as main.
 
 ## The 81-jar test pack (2026-11-05, bridge-perf-1)
 
