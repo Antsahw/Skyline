@@ -2432,7 +2432,18 @@ Testers no longer build: the fork publishes **the `java-mods` pre-release** on i
   `use-build` build has an empty marker and is never replaced.
 - **Tested:** launcher unit tests `java_release::` (signed by a listed key for the channel; other
   keys, the nightly channel, no key, a swapped manifest refused; format check). The workflow on
-  GitHub, dry run (branch `java-mods-build`): see Status below.
+  GitHub, dry run (branch `java-mods-build`, run 41995308602, ~45 min): both builds, both
+  launchers, signed with a throwaway key and verified; the Linux `-java` artifact played headless
+  here as the launcher installs it (`GAME=<it> tools/java_bridge/install_test.sh`): its platform
+  mod built from sources against the local 26.3, Fabric and Farmer's Delight loaded,
+  `/give @s farmersdelight:cooking_pot` held. Not tested: the launcher's download from a published
+  release (none until the key is set up), Windows' `-java` playing.
+- **Trap (release profile, llvmpipe):** `horizon-ctl … status` polled while a *fresh* game folder's
+  first start loads (install_test's `--wait`) segfaults the release build right after "control
+  socket" (no hs_err; the fast build doesn't; a direct start without polling, or the second start,
+  plays). Under gdb the SEGV shows in `vkEnumeratePhysicalDevices` (Mesa's device-select layer)
+  with the JVM up. Harness-only as far as seen (players don't poll the socket); not fixed. Work
+  around: start once without `--wait`, then test.
 
 ### Launcher only (2026-11-04, bridge-launcher-only)
 
