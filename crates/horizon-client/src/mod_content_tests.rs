@@ -2022,7 +2022,10 @@ fn own_states_boxes_drive_outline_collision_and_occlusion() {
     // Its own outline (nothing in the corner under its walls), not the stand-in's full cube.
     let outline = &facts.get(unlit).outline;
     let corner = |b: &[f64; 6]| b[0] <= 0.05 && b[1] <= 0.05 && b[2] <= 0.05;
-    assert!(!outline.is_empty() && !outline.iter().any(corner), "{outline:?}");
+    assert!(
+        !outline.is_empty() && !outline.iter().any(corner),
+        "{outline:?}"
+    );
     assert!(!facts.get(unlit).full_collision);
     let (named, _) = nbt::read_named(
         &fs::read(root.join("cached-collision.nbt")).unwrap(),
@@ -2030,14 +2033,34 @@ fn own_states_boxes_drive_outline_collision_and_occlusion() {
     )
     .unwrap();
     let collision = CachedCollisionRegistry::from_nbt(&named.tag, registry).unwrap();
-    assert_eq!(collision.cached_shape(unlit).unwrap().unwrap().boxes().len(), outline.len());
+    assert_eq!(
+        collision
+            .cached_shape(unlit)
+            .unwrap()
+            .unwrap()
+            .boxes()
+            .len(),
+        outline.len()
+    );
     // Faces: the floor under the basin shows round its feet; under the lit one, all of it.
     let mut visibility = crate::models::load_visibility(&root, registry).unwrap();
     let stone = registry.default_state("minecraft:stone").unwrap();
-    assert!(visibility.should_render_face(stone, unlit, Direction::Up, false).unwrap());
-    assert!(visibility.should_render_face(stone, lit, Direction::Up, false).unwrap());
+    assert!(
+        visibility
+            .should_render_face(stone, unlit, Direction::Up, false)
+            .unwrap()
+    );
+    assert!(
+        visibility
+            .should_render_face(stone, lit, Direction::Up, false)
+            .unwrap()
+    );
     // Stone's stand-in state still hides it.
-    assert!(!visibility.should_render_face(stone, stone, Direction::Up, false).unwrap());
+    assert!(
+        !visibility
+            .should_render_face(stone, stone, Direction::Up, false)
+            .unwrap()
+    );
     fs::remove_dir_all(scratch).unwrap();
 }
 

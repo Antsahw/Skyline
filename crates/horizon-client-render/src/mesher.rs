@@ -28,9 +28,9 @@ use horizon_world::{
     fluid::{FluidKind, FluidState},
     registry::BlockStateId,
 };
+pub use java::{ModFluidLook, hide_model_drawn_by_block_entity, set_mod_fluids, set_mod_tints};
 #[cfg(test)]
 pub(crate) use sides::sort_tinted;
-pub use java::{ModFluidLook, hide_model_drawn_by_block_entity, set_mod_fluids, set_mod_tints};
 pub use sides::{Part, Sides, group_parts};
 use std::sync::Arc;
 

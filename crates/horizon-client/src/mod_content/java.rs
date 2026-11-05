@@ -57,8 +57,11 @@ pub(super) fn own_states(
                 own_shapes.insert(key, v.clone());
                 Ok(Some(v))
             };
-            let (outline, collision, occlusion) =
-                (boxed(&st.outline)?, boxed(&st.collision)?, boxed(&st.occlusion)?);
+            let (outline, collision, occlusion) = (
+                boxed(&st.outline)?,
+                boxed(&st.collision)?,
+                boxed(&st.occlusion)?,
+            );
             own.push(OwnState {
                 properties: st
                     .properties

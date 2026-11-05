@@ -178,11 +178,13 @@ impl Levels {
     }
 
     /// The item entities of a parked level.
+    #[cfg(feature = "java-mods")]
     pub(super) fn parked_items(&self, dim: Dim) -> Option<&[ItemEntity]> {
         self.parked.get(&dim).map(|level| level.dropped.as_slice())
     }
 
     /// The item entities of a parked level, to change.
+    #[cfg(feature = "java-mods")]
     pub(super) fn parked_items_mut(&mut self, dim: Dim) -> Option<&mut Vec<ItemEntity>> {
         self.parked.get_mut(&dim).map(|level| &mut *level.dropped)
     }

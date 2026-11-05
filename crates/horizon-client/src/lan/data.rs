@@ -846,10 +846,22 @@ fn extra_dimension_type(mut base: Tag, level: &crate::chunk::ExtraLevel) -> Tag 
     if let Tag::Compound(fields) = &mut base {
         fields.insert("min_y".into(), Tag::Int(level.shape.min_y));
         fields.insert("height".into(), Tag::Int(level.shape.height));
-        fields.insert("logical_height".into(), Tag::Int(level.shape.logical_height));
-        fields.insert("has_skylight".into(), Tag::Byte(i8::from(level.shape.sky_light)));
-        fields.insert("has_ceiling".into(), Tag::Byte(i8::from(level.shape.has_ceiling)));
-        fields.insert("coordinate_scale".into(), Tag::Double(level.coordinate_scale));
+        fields.insert(
+            "logical_height".into(),
+            Tag::Int(level.shape.logical_height),
+        );
+        fields.insert(
+            "has_skylight".into(),
+            Tag::Byte(i8::from(level.shape.sky_light)),
+        );
+        fields.insert(
+            "has_ceiling".into(),
+            Tag::Byte(i8::from(level.shape.has_ceiling)),
+        );
+        fields.insert(
+            "coordinate_scale".into(),
+            Tag::Double(level.coordinate_scale.to_bits()),
+        );
     }
     base
 }

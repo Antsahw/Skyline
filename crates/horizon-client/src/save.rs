@@ -52,9 +52,9 @@ use std::{
 pub const VERSION_NAME: &str = horizon_core::VANILLA_VERSION;
 
 mod gateway;
+mod java;
 #[cfg(test)]
 mod loot_tests;
-mod java;
 use java::PresetDimensions;
 pub use java::{PRESET_KEY, preset_dimensions};
 

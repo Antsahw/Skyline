@@ -256,7 +256,7 @@ impl Game<'_> {
     /// The hotbar moves at once as vanilla's would; `slot` is where it was, which Java puts
     /// back when a mod takes the turn.
     pub(super) fn java_bind_scroll(&mut self, x: f64, y: f64, slot: usize) {
-        if !self.java_binds.keys.contains(&-200) || self.remote.is_none() {
+        if !self.java.binds.keys.contains(&-200) || self.remote.is_none() {
             return;
         }
         let data = json!({"kind": "bind", "scroll": y, "x": x, "slot": slot})

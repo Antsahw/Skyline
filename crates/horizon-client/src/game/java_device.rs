@@ -315,7 +315,7 @@ impl Game<'_> {
     /// and frame there; what it draws shows here, what it sends goes to the server.
     fn tick_own_client(&mut self) {
         // Its key bindings, again now and then (mods register some as their client starts).
-        if self.ticks % 100 == 0
+        if self.ticks.is_multiple_of(100)
             && let Ok(keys) = horizon_jvm::events::bound_keys()
         {
             self.remote_java_keys(&serde_json::to_vec(&keys).unwrap_or_default());
@@ -403,11 +403,11 @@ impl Game<'_> {
                         self.remote_java_screen(close.as_bytes());
                     }
                 }
-                horizon_jvm::events::Action::ScreenFrame { frame, .. } => {
-                    if DEVICE.lock().unwrap_or_else(|e| e.into_inner()).screen {
-                        let frame = format!("{{\"window\":{window},\"ops\":{frame}}}");
-                        self.remote_java_screen(frame.as_bytes());
-                    }
+                horizon_jvm::events::Action::ScreenFrame { frame, .. }
+                    if DEVICE.lock().unwrap_or_else(|e| e.into_inner()).screen =>
+                {
+                    let frame = format!("{{\"window\":{window},\"ops\":{frame}}}");
+                    self.remote_java_screen(frame.as_bytes());
                 }
                 _ => {}
             }
