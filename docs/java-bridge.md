@@ -2404,9 +2404,9 @@ publishes its own (below).
 
 Testers no longer build: the fork publishes **the `java-mods` pre-release** on iaxivers/horizon
 (`.github/workflows/java-mods-release.yml`), and the fork's launcher installs from it.
-- **Opt-in:** runs only in iaxivers/horizon, only when asked: push a tag `java-mods-build-<x>` on
-  the commit (`git tag java-mods-build-$(date +%F) && git push origin java-mods-build-$(date +%F)`),
-  or `gh workflow run "java mods release" --ref java-bridge -f dry_run=false` (dispatch needs the
+- **Opt-in:** runs only in iaxivers/horizon, only when asked: push the commit to the branch
+  `java-mods-build` (`git push -f origin java-bridge:java-mods-build`), or a tag
+  `java-mods-build-<x>` on it, or `gh workflow run "java mods release" --ref java-bridge -f dry_run=false` (dispatch needs the
   file on the default branch; the tag doesn't). Without the signing key it is a dry run.
 - **What it builds,** on GitHub's runners (no Minecraft jar there): the game with `java-mods` and
   `HORIZON_BRIDGE_PLATFORM=source` (`horizon-{linux-x86_64,windows-x64}-java`, only
@@ -2432,7 +2432,7 @@ Testers no longer build: the fork publishes **the `java-mods` pre-release** on i
   `use-build` build has an empty marker and is never replaced.
 - **Tested:** launcher unit tests `java_release::` (signed by a listed key for the channel; other
   keys, the nightly channel, no key, a swapped manifest refused; format check). The workflow on
-  GitHub, dry run (tag `java-mods-build-test-1`): see Status below.
+  GitHub, dry run (branch `java-mods-build`): see Status below.
 
 ### Launcher only (2026-11-04, bridge-launcher-only)
 
