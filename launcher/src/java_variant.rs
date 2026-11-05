@@ -217,9 +217,55 @@ fn place(from: &Path, to: &Path, marker: &str) -> Result<(), String> {
         use std::os::unix::fs::PermissionsExt;
         let _ = fs::set_permissions(from.join(CLIENT), fs::Permissions::from_mode(0o755));
     }
-    let _ = fs::remove_dir_all(to);
-    fs::rename(from, to).map_err(|e| e.to_string())?;
-    fs::write(to.join(COMPLETE), marker).map_err(|e| e.to_string())
+    fs::write(from.join(COMPLETE), marker).map_err(|e| e.to_string())?;
+    swap(from, to, &|a, b| fs::rename(a, b))
+}
+
+/// What replacing the build says while the game runs from it (Windows locks a running program's
+/// folder).
+pub const CLOSE_GAME_FIRST: &str =
+    "Close the game first: it is running from the Fabric mods build this replaces.";
+
+/// Moves `from` in as `to` without ever leaving `to` half there: the old build is moved aside
+/// first (refused whole while the game runs from it), the new one moved in (the old one moved
+/// back if that fails), and only then is the old one deleted. `rename` is `fs::rename`.
+fn swap(
+    from: &Path,
+    to: &Path,
+    rename: &dyn Fn(&Path, &Path) -> std::io::Result<()>,
+) -> Result<(), String> {
+    let name = to
+        .file_name()
+        .map(|n| n.to_string_lossy())
+        .unwrap_or_default();
+    let aside = to.with_file_name(format!(".{name}.old"));
+    // A crash between the moves leaves it; it is never the build in use.
+    let _ = fs::remove_dir_all(&aside);
+    let had = to.exists();
+    if had {
+        rename(to, &aside).map_err(|e| {
+            if in_use(&e) {
+                crate::i18n::tr(CLOSE_GAME_FIRST).to_string()
+            } else {
+                format!("{}: {e}", to.display())
+            }
+        })?;
+    }
+    if let Err(e) = rename(from, to) {
+        if had {
+            let _ = rename(&aside, to);
+        }
+        return Err(format!("{}: {e}", to.display()));
+    }
+    let _ = fs::remove_dir_all(&aside);
+    Ok(())
+}
+
+/// Whether moving or deleting a file failed because a program (the game) holds it: Windows
+/// answers "access denied" or a sharing violation (32) or lock violation (33).
+pub(crate) fn in_use(e: &std::io::Error) -> bool {
+    e.kind() == std::io::ErrorKind::PermissionDenied
+        || (cfg!(windows) && matches!(e.raw_os_error(), Some(32 | 33)))
 }
 
 /// A Java mods build the player has (built from a checkout with `--features java-mods`, or from
@@ -467,6 +513,67 @@ mod tests {
     }
 
     #[cfg(not(target_os = "macos"))]
+    /// Replacing the build never leaves it half there: refused whole while the game holds it,
+    /// moved back when the new one can't go in, and the old one gone once it did.
+    #[test]
+    fn a_build_is_replaced_whole_or_not_at_all() {
+        let scratch = std::env::temp_dir().join(format!("hz-java-swap-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&scratch);
+        let (new, to) = (scratch.join("new"), scratch.join(DIR));
+        let reset = || {
+            for (dir, file) in [(&new, "new.txt"), (&to, "old.txt")] {
+                let _ = fs::remove_dir_all(dir);
+                fs::create_dir_all(dir).unwrap();
+                fs::write(dir.join(file), "").unwrap();
+            }
+        };
+        let only = |dir: &Path, file: &str| {
+            let names: Vec<_> = fs::read_dir(dir)
+                .unwrap()
+                .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+                .collect();
+            assert_eq!(names, [file], "{}", dir.display());
+        };
+        let leftovers = || {
+            let mut names: Vec<_> = fs::read_dir(&scratch)
+                .unwrap()
+                .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+                .collect();
+            names.sort();
+            names
+        };
+
+        reset();
+        let held = |a: &Path, b: &Path| {
+            if a.ends_with(DIR) {
+                Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied))
+            } else {
+                fs::rename(a, b)
+            }
+        };
+        assert_eq!(swap(&new, &to, &held), Err(CLOSE_GAME_FIRST.to_string()));
+        only(&to, "old.txt");
+        only(&new, "new.txt");
+
+        reset();
+        let full = |a: &Path, b: &Path| {
+            if a.ends_with("new") {
+                Err(std::io::Error::other("disk full"))
+            } else {
+                fs::rename(a, b)
+            }
+        };
+        assert!(swap(&new, &to, &full).unwrap_err().contains("disk full"));
+        only(&to, "old.txt");
+        assert_eq!(leftovers(), [DIR, "new"]);
+
+        reset();
+        swap(&new, &to, &|a, b| fs::rename(a, b)).unwrap();
+        only(&to, "new.txt");
+        assert_eq!(leftovers(), [DIR]);
+        let _ = fs::remove_dir_all(&scratch);
+    }
+
     #[test]
     fn the_command_becomes_the_java_builds_with_its_arguments() {
         let scratch = std::env::temp_dir().join(format!("hz-java-variant-{}", std::process::id()));

@@ -368,7 +368,7 @@ fn call_tick(
     players: &[Player],
     events: &[Event],
 ) -> jni::errors::Result<()> {
-    let world = env.new_string(world.to_string_lossy())?;
+    let world = env.new_string(crate::plain_path(world).to_string_lossy())?;
     let ids: Vec<&str> = players.iter().map(|p| p.uuid.as_str()).collect();
     let names: Vec<&str> = players.iter().map(|p| p.name.as_str()).collect();
     let dims: Vec<&str> = players.iter().map(|p| p.dimension.as_str()).collect();
@@ -2113,7 +2113,7 @@ pub fn worldgen_start(
 ) -> Result<bool, String> {
     let modded = with_server(|env, class| {
         let dimension = env.new_string(dimension)?;
-        let world = env.new_string(world.to_string_lossy())?;
+        let world = env.new_string(crate::plain_path(world).to_string_lossy())?;
         // "structure type" for each structure Horizon's generator can't make there.
         let cannot = env.new_object_array(
             horizon_cannot.len() as i32,

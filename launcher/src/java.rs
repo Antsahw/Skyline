@@ -145,6 +145,9 @@ pub fn mojang_runtimes(dir: &Path) -> Vec<Runtime> {
         .collect()
 }
 
+/// The `java` program in a Java home's `bin`.
+const JAVA_EXE: &str = if cfg!(windows) { "java.exe" } else { "java" };
+
 /// Java homes installed on this computer: JAVA_HOME, the PATH's, then the folders installers use,
 /// each once.
 pub fn installed() -> Vec<Runtime> {
@@ -154,7 +157,9 @@ pub fn installed() -> Vec<Runtime> {
         homes.extend(
             std::env::split_paths(&path)
                 .filter(|dir| dir.file_name().is_some_and(|n| n == "bin"))
-                .filter_map(|dir| fs::canonicalize(dir.join("java")).ok())
+                .map(|dir| dir.join(JAVA_EXE))
+                .filter(|java| java.is_file())
+                .map(horizon_prepare::java::real_path)
                 .filter_map(|java| Some(java.parent()?.parent()?.to_path_buf())),
         );
     }
@@ -170,7 +175,9 @@ pub fn installed() -> Vec<Runtime> {
     }
     let mut found: Vec<Runtime> = Vec::new();
     for home in homes {
-        let home = fs::canonicalize(&home).unwrap_or(home);
+        // Without Windows' `\\?\` prefix: the home goes to the game in HORIZON_JAVA_HOME, and
+        // HotSpot loaded from a verbatim path finds no `lib\modules` ("jimage file name is null").
+        let home = horizon_prepare::java::real_path(home);
         if !found.iter().any(|r| r.home == home) {
             found.extend(runtime(home, Source::Installed));
         }

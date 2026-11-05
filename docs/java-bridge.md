@@ -2926,6 +2926,19 @@ headless. What's different there:
 
 - JNI reads JVM options in the system's code page, not UTF-8: `create_vm` converts them, and a class
   path entry with a character the code page lacks goes by its short name (a user name like `Ivér`).
+  HotSpot and javac's launcher find their own Java home the same way (from their file's path,
+  through the code page): the home's `jvm.dll` and `javac.exe` go by `option_path` too. Where a
+  drive has 8.3 names off, Windows gives the long name back: `option_path` then fails with a
+  "move the launcher's data folder" error instead of a garbled class path.
+- Every stripper of `\\?\` (`horizon_prepare::java::without_verbatim`, which `plain_path`, the
+  launcher's `backend::plain` and `data_location` use) also turns `\\?\UNC\server\share` into
+  `\\server\share`. The launcher's Java homes (`java::installed`) are stripped before they reach
+  `HORIZON_JAVA_HOME`.
+- Windows locks a running program's folder and a jar Java has open: the launcher replaces the Java
+  mods build by moving the old one aside first (`java_variant::swap`), and removing a held jar says
+  "close the game first".
+- Fabric's folder scan takes `.jar` only, case-sensitively: `horizon_jvm::jars` and the launcher's
+  list do too, and the launcher adds `Foo.JAR` as `Foo.jar`.
 
 Not tested on Windows: the launcher's Java mods tab. The `tools/java_bridge/*.sh` scripts are developers' and Linux-only (Xvfb,
 mktemp).

@@ -55,8 +55,16 @@ pub fn real_path(path: PathBuf) -> PathBuf {
     }
 }
 
-fn without_verbatim(path: PathBuf) -> PathBuf {
-    match path.to_str().and_then(|s| s.strip_prefix(r"\\?\")) {
+/// `path` without Windows' verbatim prefix: `\\?\C:\...` as `C:\...`, `\\?\UNC\server\share\...`
+/// as `\\server\share\...`. Other paths (a volume GUID, which has no plain form) are kept.
+pub fn without_verbatim(path: PathBuf) -> PathBuf {
+    let Some(s) = path.to_str() else {
+        return path;
+    };
+    if let Some(share) = s.strip_prefix(r"\\?\UNC\") {
+        return PathBuf::from(format!(r"\\{share}"));
+    }
+    match s.strip_prefix(r"\\?\") {
         Some(rest) if rest.as_bytes().get(1) == Some(&b':') => PathBuf::from(rest),
         _ => path,
     }
@@ -413,9 +421,17 @@ mod tests {
             without_verbatim(PathBuf::from(format!(r"\\?\{jdk}"))),
             PathBuf::from(jdk)
         );
-        // A UNC share keeps its verbatim form: stripping it would leave no valid path.
-        let unc = r"\\?\UNC\server\jdk\bin\javac.exe";
-        assert_eq!(without_verbatim(PathBuf::from(unc)), PathBuf::from(unc));
+        // A share's verbatim form is its plain `\\server\share` one.
+        assert_eq!(
+            without_verbatim(PathBuf::from(r"\\?\UNC\server\jdk\bin\javac.exe")),
+            PathBuf::from(r"\\server\jdk\bin\javac.exe")
+        );
+        // A volume GUID path has no plain form.
+        let volume = r"\\?\Volume{0b1c}\jdk";
+        assert_eq!(
+            without_verbatim(PathBuf::from(volume)),
+            PathBuf::from(volume)
+        );
         assert_eq!(
             without_verbatim(PathBuf::from("/usr/lib/jvm/bin/javac")),
             PathBuf::from("/usr/lib/jvm/bin/javac")

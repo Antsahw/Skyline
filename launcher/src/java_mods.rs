@@ -47,7 +47,7 @@ pub fn list(home: &Path) -> Vec<JavaMod> {
             entries
                 .flatten()
                 .map(|e| e.path())
-                .filter(|p| p.is_file() && is_jar(p))
+                .filter(|p| p.is_file() && loaded_jar(p))
                 .map(|p| describe(&p))
                 .collect()
         })
@@ -60,6 +60,19 @@ fn is_jar(path: &Path) -> bool {
     path.extension()
         .is_some_and(|e| e.eq_ignore_ascii_case("jar"))
 }
+
+/// A jar the game loads from the folder: Fabric's folder scan takes a lower-case `.jar` only.
+fn loaded_jar(path: &Path) -> bool {
+    path.extension().is_some_and(|e| e == "jar")
+}
+
+/// `name` with a lower-case `.jar`, as the folder keeps it (`Foo.JAR` → `Foo.jar`).
+fn folder_name(name: &std::ffi::OsStr) -> std::ffi::OsString {
+    Path::new(name).with_extension("jar").into_os_string()
+}
+
+/// What removing a jar says while the game holds it (Windows keeps a jar Java has open).
+pub const CLOSE_GAME_FIRST: &str = "Close the game first: it has {mod} open.";
 
 /// A jar's file name, size and Fabric facts.
 fn describe(path: &Path) -> JavaMod {
@@ -111,7 +124,8 @@ pub fn add(home: &Path, jar: &Path) -> Result<JavaMod, String> {
     let name = jar.file_name().ok_or("The jar has no file name")?;
     let folder = dir(home);
     std::fs::create_dir_all(&folder).map_err(|e| format!("{}: {e}", folder.display()))?;
-    let target = folder.join(name);
+    let name = folder_name(name);
+    let target = folder.join(&name);
     if target.exists() {
         return Err(format!("{} is already in {DIR}", name.to_string_lossy()));
     }
@@ -131,8 +145,32 @@ pub fn remove(home: &Path, which: &str) -> Result<JavaMod, String> {
                     .is_some_and(|n| n.eq_ignore_ascii_case(which))
         })
         .ok_or_else(|| format!("No Java mod {which} in {DIR}"))?;
-    crate::desktop_seams::to_trash(&dir(home).join(&found.file))?;
+    let path = dir(home).join(&found.file);
+    let held = || crate::i18n::trf(CLOSE_GAME_FIRST, &[("mod", found.title())]);
+    if held_open(&path) {
+        return Err(held());
+    }
+    crate::desktop_seams::to_trash(&path).map_err(|e| if held_open(&path) { held() } else { e })?;
     Ok(found)
+}
+
+/// Whether another program (the game's Java) has `path` open: on Windows, which then refuses to
+/// move it, the file can't be opened for itself alone. Elsewhere a held file moves freely.
+fn held_open(path: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        let alone = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(path);
+        matches!(alone, Err(e) if crate::java_variant::in_use(&e))
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = path;
+        false
+    }
 }
 
 /// What went wrong with the Java mods in the game's last run (`logs/latest.log` in `home`):
@@ -220,6 +258,22 @@ mod tests {
         assert!(list(&home).is_empty());
         assert!(root.join("trash/FarmersDelight.jar").is_file());
         assert!(remove(&home, "farmersdelight").is_err());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Fabric's folder scan skips `Foo.JAR`: added, it is renamed `Foo.jar`, and one put there
+    /// by hand is not listed as a mod the game runs.
+    #[test]
+    fn an_upper_case_jar_is_added_as_the_game_loads_it() {
+        let root = scratch("upper");
+        let home = root.join("home");
+        let upper = root.join("Upper.JAR");
+        jar(&upper, Some(r#"{"id":"upper"}"#));
+        assert_eq!(add(&home, &upper).unwrap().file, "Upper.jar");
+        assert!(dir(&home).join("Upper.jar").is_file());
+        std::fs::copy(&upper, dir(&home).join("Other.JAR")).unwrap();
+        let files: Vec<String> = list(&home).into_iter().map(|m| m.file).collect();
+        assert_eq!(files, ["Upper.jar"]);
         let _ = std::fs::remove_dir_all(&root);
     }
 

@@ -168,13 +168,17 @@ fn build(
     files.sort();
     let class_path = class_path(&dir)?;
     // An argument file: the class path and the sources are longer than a Windows command line.
-    let quote = |p: &Path| format!("\"{}\"", p.display().to_string().replace('\\', "/"));
+    // Plain paths (no `\\?\`): javac's file manager takes no verbatim one.
+    let spelled = |p: &Path| {
+        crate::plain_path(p)
+            .display()
+            .to_string()
+            .replace('\\', "/")
+    };
+    let quote = |p: &Path| format!("\"{}\"", spelled(p));
     let separator = if cfg!(windows) { ";" } else { ":" };
     let mut args = String::from("--release 21 -encoding UTF-8 -nowarn -proc:none\n");
-    let joined: Vec<String> = class_path
-        .iter()
-        .map(|p| p.display().to_string().replace('\\', "/"))
-        .collect();
+    let joined: Vec<String> = class_path.iter().map(|p| spelled(p)).collect();
     args += &format!(
         "-cp \"{}\"\n-d {}\n",
         joined.join(separator),
@@ -188,8 +192,9 @@ fn build(
     // javac reads this file as UTF-8, whatever the system, but its launcher reads the command
     // line in the system's code page: only the file's own path needs care (a user name like Ivér).
     std::fs::write(&argfile, args).map_err(|e| format!("{}: {e}", argfile.display()))?;
-    let output = std::process::Command::new(&javac)
-        .arg(format!("@{}", crate::option_path(&argfile).display()))
+    // javac's launcher finds its Java home from its own path, read through the code page too.
+    let output = std::process::Command::new(crate::option_path(&javac)?)
+        .arg(format!("@{}", crate::option_path(&argfile)?.display()))
         .output()
         .map_err(|e| format!("running {}: {e}", javac.display()))?;
     if !output.status.success() {

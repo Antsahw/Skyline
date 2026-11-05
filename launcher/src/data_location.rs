@@ -473,15 +473,13 @@ fn checked_path(path: &Path) -> Result<PathBuf> {
     Ok(plain_drive(current))
 }
 
-/// `canonicalize`'s verbatim `\\?\C:\…` as the plain drive path the other roots use.
+/// `canonicalize`'s verbatim `\\?\C:\…` (or `\\?\UNC\…`) as the plain path the other roots use.
 fn plain_drive(path: PathBuf) -> PathBuf {
-    #[cfg(windows)]
-    if let Some(rest) = path.to_str().and_then(|s| s.strip_prefix(r"\\?\")) {
-        if rest.as_bytes().get(1) == Some(&b':') {
-            return PathBuf::from(rest);
-        }
+    if cfg!(windows) {
+        crate::backend::plain(path)
+    } else {
+        path
     }
-    path
 }
 
 /// The pointer and its lock sit in the platform config folder, which may be a link (a

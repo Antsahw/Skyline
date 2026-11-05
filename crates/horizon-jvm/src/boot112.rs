@@ -180,7 +180,7 @@ pub fn start(config: &Cleanroom) -> Result<(&'static Bridge, String), String> {
         "log4j2-horizon.xml",
         crate::LOG4J_CONFIG.as_bytes(),
     )?;
-    let natives = crate::option_path(&launch.natives);
+    let natives = crate::option_path(&launch.natives)?;
     let options = [
         format!("-Djava.library.path={}", natives.display()),
         format!("-Dorg.lwjgl.librarypath={}", natives.display()),

@@ -223,6 +223,8 @@ pub fn set_log_sink(sink: Option<fn(&str)>) {
 }
 
 /// The `.jar` files in `dir`, sorted by name, as absolute paths. A missing folder has none.
+/// Lower-case `.jar` only, as Fabric's folder scan takes them (`Foo.JAR` it skips, and the
+/// launcher renames such a jar when it adds it).
 pub fn jars(dir: &Path) -> Vec<PathBuf> {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();
@@ -230,7 +232,7 @@ pub fn jars(dir: &Path) -> Vec<PathBuf> {
     let mut jars: Vec<PathBuf> = entries
         .flatten()
         .map(|e| e.path())
-        .filter(|p| p.is_file() && p.extension().is_some_and(|e| e.eq_ignore_ascii_case("jar")))
+        .filter(|p| p.is_file() && p.extension().is_some_and(|e| e == "jar"))
         // Without Windows' `\?\` prefix: Java's paths reject it, and these go to Fabric.
         .map(horizon_prepare::java::real_path)
         .collect();
@@ -242,13 +244,7 @@ pub fn jars(dir: &Path) -> Vec<PathBuf> {
 /// `canonicalize` adds. HotSpot can't take it: loaded from `\\?\C:\...\jvm.dll`, it finds no
 /// `lib\modules` and stops at start ("jimage file name is null", a Windows tester, Oracle JDK 25).
 pub fn plain_path(path: &Path) -> PathBuf {
-    match path.to_str() {
-        Some(s) if s.starts_with(r"\\?\UNC\") => PathBuf::from(format!(r"\\{}", &s[8..])),
-        Some(s) if s.starts_with(r"\\?\") && s.as_bytes().get(5) == Some(&b':') => {
-            PathBuf::from(&s[4..])
-        }
-        _ => path.to_path_buf(),
-    }
+    horizon_prepare::java::without_verbatim(path.to_path_buf())
 }
 
 /// The Java home to run mods with: `HORIZON_JAVA_HOME`, else a Java [`JAVA_MAJOR`] or newer
@@ -493,31 +489,58 @@ fn code_page_bytes(text: &str) -> Option<Vec<u8>> {
     Some(out)
 }
 
-/// A class path entry the JVM can read: as it is, else, with a character the system's code page
-/// lacks, the file's short name (`C:\\Users\\ABCDEF~1\\...`), which is plain ASCII.
+/// A path the JVM can read, in an option or as its own home: without Windows' `\\?\` prefix, as
+/// it is, else, with a character the system's code page lacks, the file's short name
+/// (`C:\\Users\\ABCDEF~1\\...`), which is plain ASCII. HotSpot and Java's launchers read their
+/// options and their own location through the code page.
 #[cfg(windows)]
-pub(crate) fn option_path(path: &Path) -> PathBuf {
+pub(crate) fn option_path(path: &Path) -> Result<PathBuf, String> {
     use std::os::windows::ffi::{OsStrExt, OsStringExt};
     use windows_sys::Win32::Storage::FileSystem::GetShortPathNameW;
-    let path = &plain_path(path);
-    if path.to_str().is_some_and(|s| code_page_bytes(s).is_some()) {
-        return path.to_path_buf();
-    }
-    let wide: Vec<u16> = path.as_os_str().encode_wide().chain([0]).collect();
-    let mut short = vec![0u16; 32768];
-    // SAFETY: `wide` ends in a NUL, and `short` is valid for the length given.
-    let written =
-        unsafe { GetShortPathNameW(wide.as_ptr(), short.as_mut_ptr(), short.len() as u32) };
-    if written == 0 || written as usize >= short.len() {
-        return path.to_path_buf();
-    }
-    short.truncate(written as usize);
-    PathBuf::from(std::ffi::OsString::from_wide(&short))
+    let short = |path: &Path| {
+        let wide: Vec<u16> = path.as_os_str().encode_wide().chain([0]).collect();
+        let mut short = vec![0u16; 32768];
+        // SAFETY: `wide` ends in a NUL, and `short` is valid for the length given.
+        let written =
+            unsafe { GetShortPathNameW(wide.as_ptr(), short.as_mut_ptr(), short.len() as u32) };
+        if written == 0 || written as usize >= short.len() {
+            return None;
+        }
+        short.truncate(written as usize);
+        Some(PathBuf::from(std::ffi::OsString::from_wide(&short)))
+    };
+    pick_option_path(&plain_path(path), |s| code_page_bytes(s).is_some(), short)
 }
 
 #[cfg(not(windows))]
-pub(crate) fn option_path(path: &Path) -> PathBuf {
-    path.to_path_buf()
+pub(crate) fn option_path(path: &Path) -> Result<PathBuf, String> {
+    Ok(plain_path(path))
+}
+
+/// [`option_path`]'s choice: `path` when the code page can spell it (`spellable`), else its
+/// `short` name when that can be spelled. Windows gives the long name back as the short one
+/// where 8.3 names are off (a setting per drive): then no spelling of the path reaches Java
+/// intact, and passing it on would garble the class path into "class not found" errors.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn pick_option_path(
+    path: &Path,
+    spellable: impl Fn(&str) -> bool,
+    short: impl FnOnce(&Path) -> Option<PathBuf>,
+) -> Result<PathBuf, String> {
+    let ok = |p: &Path| p.to_str().is_some_and(&spellable);
+    if ok(path) {
+        return Ok(path.to_path_buf());
+    }
+    match short(path) {
+        Some(short) if ok(&short) => Ok(short),
+        _ => Err(format!(
+            "{}: this path has characters Java can't read on this system (Windows' language \
+             for non-Unicode programs lacks them) and Windows keeps no short name for it. Move \
+             the launcher's data folder (or this file) to a folder whose name has only plain \
+             letters, or turn on \"Beta: Use Unicode UTF-8\" in Windows' region settings",
+            path.display()
+        )),
+    }
 }
 
 /// Java's log4j config: the console only. Mojang's (in the game's libraries) adds a file
@@ -547,7 +570,10 @@ fn create_vm(
     log_config: &Path,
     extra: &[String],
 ) -> Result<JavaVM, String> {
-    let home = &plain_path(home);
+    // HotSpot finds its home (`lib\modules`) from where its library was loaded, read through
+    // the code page: a home under a user name like `Ivér` on a system without it is loaded
+    // by its short name.
+    let home = &option_path(home)?;
     let path = libjvm(home)?;
     #[cfg(windows)]
     dll_search_path(home);
@@ -563,8 +589,11 @@ fn create_vm(
     // A JVM never unloads: keep its library mapped for the life of the process.
     std::mem::forget(library);
 
-    let joined = std::env::join_paths(class_path.iter().map(|p| option_path(p)))
-        .map_err(|e| format!("class path: {e}"))?;
+    let class_path: Vec<PathBuf> = class_path
+        .iter()
+        .map(|p| option_path(p))
+        .collect::<Result<_, _>>()?;
+    let joined = std::env::join_paths(&class_path).map_err(|e| format!("class path: {e}"))?;
     let mut options = vec![
         // Leave SIGINT, SIGTERM and SIGHUP to the game: Ctrl+C and shutdown stay Horizon's.
         "-Xrs".to_string(),
@@ -572,7 +601,7 @@ fn create_vm(
         "-Dhorizon.bridge=1".into(),
         format!(
             "-Dlog4j2.configurationFile={}",
-            option_path(log_config).display()
+            option_path(log_config)?.display()
         ),
         format!("-Djava.class.path={}", joined.to_string_lossy()),
         // The heap gives back what it doesn't use: G1 keeps all it ever grew to otherwise (a
@@ -590,8 +619,8 @@ fn create_vm(
         options.push("-XX:+AutoCreateSharedArchive".into());
         // It may not exist yet, and only what exists has a short name: its folder does.
         let archive = match (archive.parent(), archive.file_name()) {
-            (Some(dir), Some(name)) => option_path(dir).join(name),
-            _ => archive.to_path_buf(),
+            (Some(dir), Some(name)) => option_path(dir)?.join(name),
+            _ => option_path(archive)?,
         };
         options.push(format!("-XX:SharedArchiveFile={}", archive.display()));
         // Classes from signed jars (Fabric's own sat4j) can't be archived: said once each.
@@ -915,19 +944,15 @@ fn start_fabric(
         Side::Server => "server",
     })?;
     let version = env.new_string(&fabric.version)?;
-    let game_jar = env.new_string(fabric.game_jar.to_string_lossy())?;
-    let mods = env.new_string(fabric.mods.to_string_lossy())?;
-    let game_dir = env.new_string(fabric.game_dir.to_string_lossy())?;
-    let libraries: Vec<String> = fabric
-        .libraries
-        .iter()
-        .map(|l| l.to_string_lossy().into_owned())
-        .collect();
+    // Java strings (UTF-16 through JNI): any character goes, but no `\\?\` path (Java's
+    // `Path` refuses it).
+    let java = |p: &Path| plain_path(p).to_string_lossy().into_owned();
+    let game_jar = env.new_string(java(&fabric.game_jar))?;
+    let mods = env.new_string(java(&fabric.mods))?;
+    let game_dir = env.new_string(java(&fabric.game_dir))?;
+    let libraries: Vec<String> = fabric.libraries.iter().map(|l| java(l)).collect();
     let libraries = strings(env, &libraries)?;
-    let add_mods: Vec<String> = add_mods
-        .iter()
-        .map(|m| m.to_string_lossy().into_owned())
-        .collect();
+    let add_mods: Vec<String> = add_mods.iter().map(|m| java(m)).collect();
     let add_mods = strings(env, &add_mods)?;
     let loaded = env
         .call_static_method(
@@ -1963,7 +1988,29 @@ extern "system" fn native_allocate<'local>(
 
 #[cfg(test)]
 mod plain_path_tests {
-    use super::plain_path;
+    use super::{pick_option_path, plain_path};
+
+    /// A code page without `é` (as Windows-1251 lacks it), with or without 8.3 names.
+    #[test]
+    fn an_unspellable_path_goes_by_its_short_name_or_fails_clearly() {
+        let ascii = |s: &str| s.is_ascii();
+        let long = Path::new(r"C:\Users\Ivér\AppData\Roaming\horizon-launcher\a.jar");
+        let short = PathBuf::from(r"C:\Users\IVR~1\AppData\Roaming\HORIZO~1\a.jar");
+        // Spellable as it is: kept, no short name asked for.
+        let plain = Path::new(r"C:\Users\me\a.jar");
+        assert_eq!(
+            pick_option_path(plain, ascii, |_| panic!("asked for a short name")),
+            Ok(plain.to_path_buf())
+        );
+        assert_eq!(
+            pick_option_path(long, ascii, |_| Some(short.clone())),
+            Ok(short)
+        );
+        // 8.3 names off: Windows hands the long name back; no short name at all.
+        let off = pick_option_path(long, ascii, |p| Some(p.to_path_buf())).unwrap_err();
+        assert!(off.contains("Ivér") && off.contains("Move"), "{off}");
+        assert!(pick_option_path(long, ascii, |_| None).is_err());
+    }
     use std::path::{Path, PathBuf};
 
     #[test]
