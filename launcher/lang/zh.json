@@ -1147,5 +1147,6 @@
   "Open Settings and sign in under Account.": "Open Settings and sign in under Account.",
   "Sign in with `horizon-launcher account sign-in`.": "Sign in with `horizon-launcher account sign-in`.",
   "The Founder Set is yours.": "创始者套装已归你所有。",
-  "{file} unpacks to more than {limit}: it isn't imported.": "{file} unpacks to more than {limit}: it isn't imported."
+  "{file} unpacks to more than {limit}: it isn't imported.": "{file} unpacks to more than {limit}: it isn't imported.",
+  "Bug report copied. Paste it in a new issue at {link}, with what you did.": "错误报告已复制。请粘贴到 {link} 的新 issue 中，并说明你做了什么。"
 }

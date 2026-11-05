@@ -257,6 +257,23 @@ impl Launcher {
         .detach();
     }
 
+    /// "Copy bug report": the selected instance's report (`java_bug_report`) to the clipboard.
+    fn copy_bug_report(&mut self, cx: &mut Context<Self>) {
+        let Some(i) = self.selected_instance().cloned() else {
+            return;
+        };
+        let text = horizon_launcher::java_bug_report::for_instance(&i);
+        copy_to_clipboard(cx, gpui::ClipboardItem::new_string(text));
+        let said = trf(
+            "Bug report copied. Paste it in a new issue at {link}, with what you did.",
+            &[("link", horizon_launcher::java_bug_report::ISSUES)],
+        );
+        // In place of the toast's "Copied <the whole report>".
+        crate::glass_toast::say(said.clone());
+        self.java_mods.note = Some(Ok(said));
+        cx.notify();
+    }
+
     fn remove_java_mod(&mut self, home: PathBuf, file: String) {
         self.java_mods.confirm_remove = None;
         self.java_mods.note = Some(
@@ -276,6 +293,7 @@ impl Launcher {
         let home = self.selected_instance()?.home.clone();
         self.load_java_mods(home.clone());
         let folder = java_mods::dir(&home);
+        let logs = home.join("logs");
         let pick = home.clone();
         let buttons = div()
             .flex()
@@ -291,6 +309,18 @@ impl Launcher {
             .child(
                 button("java-mods-folder", "Open folder", Kind::Ghost, &t)
                     .on_click(move |_, _, cx| cx.open_with_system(&folder)),
+            )
+            .child(
+                button("java-mods-report", "Copy bug report", Kind::Ghost, &t)
+                    .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.copy_bug_report(cx))),
+            )
+            .child(
+                button("java-mods-logs", "Open logs folder", Kind::Ghost, &t).on_click(
+                    move |_, _, cx| {
+                        let _ = std::fs::create_dir_all(&logs);
+                        crate::glass_toast::open(cx, &logs);
+                    },
+                ),
             )
             .child(
                 button("java-mods-refresh", "Refresh", Kind::Ghost, &t).on_click(cx.listener(
