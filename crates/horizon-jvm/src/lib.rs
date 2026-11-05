@@ -240,12 +240,25 @@ pub fn jars(dir: &Path) -> Vec<PathBuf> {
     jars
 }
 
+/// `path` without Windows' verbatim prefix (`\\?\C:\...`, `\\?\UNC\server\...`), which Rust's
+/// `canonicalize` adds. HotSpot can't take it: loaded from `\\?\C:\...\jvm.dll`, it finds no
+/// `lib\modules` and stops at start ("jimage file name is null", a Windows tester, Oracle JDK 25).
+pub fn plain_path(path: &Path) -> PathBuf {
+    match path.to_str() {
+        Some(s) if s.starts_with(r"\\?\UNC\") => PathBuf::from(format!(r"\\{}", &s[8..])),
+        Some(s) if s.starts_with(r"\\?\") && s.as_bytes().get(5) == Some(&b':') => {
+            PathBuf::from(&s[4..])
+        }
+        _ => path.to_path_buf(),
+    }
+}
+
 /// The Java home to run mods with: `HORIZON_JAVA_HOME`, else a Java [`JAVA_MAJOR`] or newer
 /// from `JAVA_HOME`, the PATH, Minecraft's own runtimes (`horizon_prepare::java`) or the ones
 /// Horizon's launcher downloaded ([`runtime::runtime_dir`]).
 pub fn find_java_home() -> Result<PathBuf, String> {
     if let Some(home) = std::env::var_os(JAVA_HOME_VAR).filter(|h| !h.is_empty()) {
-        return Ok(PathBuf::from(home));
+        return Ok(plain_path(Path::new(&home)));
     }
     let minecraft = horizon_prepare::artifacts::minecraft_dir(None);
     let mut runtimes = horizon_prepare::java::minecraft_runtimes(&minecraft.join("runtime"));
@@ -272,6 +285,7 @@ pub fn find_java_home() -> Result<PathBuf, String> {
 
 /// The JVM library inside a Java home.
 pub fn libjvm(home: &Path) -> Result<PathBuf, String> {
+    let home = &plain_path(home);
     let candidates = [
         "lib/server/libjvm.so",
         "lib/server/libjvm.dylib",
@@ -487,6 +501,7 @@ fn code_page_bytes(text: &str) -> Option<Vec<u8>> {
 pub(crate) fn option_path(path: &Path) -> PathBuf {
     use std::os::windows::ffi::{OsStrExt, OsStringExt};
     use windows_sys::Win32::Storage::FileSystem::GetShortPathNameW;
+    let path = &plain_path(path);
     if path.to_str().is_some_and(|s| code_page_bytes(s).is_some()) {
         return path.to_path_buf();
     }
@@ -534,6 +549,7 @@ fn create_vm(
     log_config: &Path,
     extra: &[String],
 ) -> Result<JavaVM, String> {
+    let home = &plain_path(home);
     let path = libjvm(home)?;
     #[cfg(windows)]
     dll_search_path(home);
@@ -1945,4 +1961,30 @@ extern "system" fn native_allocate<'local>(
             .unwrap_or(std::ptr::null_mut())
     }))
     .unwrap_or(std::ptr::null_mut())
+}
+
+#[cfg(test)]
+mod plain_path_tests {
+    use super::plain_path;
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn windows_verbatim_prefixes_are_dropped_and_other_paths_kept() {
+        assert_eq!(
+            plain_path(Path::new(r"\\?\C:\Program Files\Java\jdk-25")),
+            PathBuf::from(r"C:\Program Files\Java\jdk-25")
+        );
+        assert_eq!(
+            plain_path(Path::new(r"\\?\UNC\server\share\jdk")),
+            PathBuf::from(r"\\server\share\jdk")
+        );
+        assert_eq!(
+            plain_path(Path::new("/usr/lib/jvm/java-25")),
+            PathBuf::from("/usr/lib/jvm/java-25")
+        );
+        assert_eq!(
+            plain_path(Path::new(r"\\?\Volume{x}\jdk")),
+            PathBuf::from(r"\\?\Volume{x}\jdk")
+        );
+    }
 }

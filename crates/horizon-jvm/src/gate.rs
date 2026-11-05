@@ -224,7 +224,9 @@ fn services_check_with(agent: &ureq::Agent, base: &str, record: &Record) -> Serv
         {
             Ok(r) => {
                 let mut body = Vec::new();
-                r.into_reader().take(1 << 20).read_to_end(&mut body)
+                r.into_reader()
+                    .take(1 << 20)
+                    .read_to_end(&mut body)
                     .map_err(|e| e.to_string())?;
                 serde_json::from_slice(&body)
                     .map(Some)
