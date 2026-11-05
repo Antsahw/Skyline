@@ -2111,6 +2111,61 @@ pub fn worldgen_origin(dimension: &str) -> Result<Option<WorldgenOrigin>, String
     Ok(found.flatten())
 }
 
+/// A level stem beyond vanilla's three (a mod's or data pack's dimension), as the mirror's
+/// registries have it (`HorizonServer.extraLevels`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExtraLevel {
+    pub id: String,
+    pub dimension_type: String,
+    pub min_y: i32,
+    pub height: i32,
+    pub logical_height: i32,
+    pub has_skylight: bool,
+    pub has_ceiling: bool,
+    pub coordinate_scale: f64,
+}
+
+/// The level stems the mirror's registries hold besides the Overworld, the Nether and the
+/// End: the levels a server with these mods has (`MinecraftServer.createLevels`).
+pub fn extra_levels() -> Result<Vec<ExtraLevel>, String> {
+    let json = with_server(|env, class| {
+        let value = env
+            .call_static_method(class, "extraLevels", "()Ljava/lang/String;", &[])?
+            .l()?;
+        if value.is_null() {
+            return Ok(String::from("[]"));
+        }
+        Ok(env.get_string(&JString::from(value))?.into())
+    })?;
+    let Some(json) = json else {
+        return Ok(Vec::new());
+    };
+    let list: Vec<serde_json::Value> = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+    Ok(list.iter().filter_map(extra_level).collect())
+}
+
+fn extra_level(v: &serde_json::Value) -> Option<ExtraLevel> {
+    let int = |k: &str| v.get(k)?.as_i64().and_then(|n| i32::try_from(n).ok());
+    let flag = |k: &str| {
+        v.get(k)
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false)
+    };
+    Some(ExtraLevel {
+        id: v.get("id")?.as_str()?.to_owned(),
+        dimension_type: v.get("type")?.as_str()?.to_owned(),
+        min_y: int("min_y")?,
+        height: int("height")?,
+        logical_height: int("logical_height")?,
+        has_skylight: flag("has_skylight"),
+        has_ceiling: flag("has_ceiling"),
+        coordinate_scale: v
+            .get("coordinate_scale")
+            .and_then(serde_json::Value::as_f64)
+            .unwrap_or(1.0),
+    })
+}
+
 /// Whether the mods' data-pack load functions have run on the mirror (or there is nothing to
 /// run, or they can't): `HorizonServer.functionsReady`.
 pub fn functions_ready() -> bool {

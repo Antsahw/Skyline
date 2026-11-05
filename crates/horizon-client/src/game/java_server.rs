@@ -1376,7 +1376,15 @@ mod run {
                     }
                 }
             }
-            let (ticks, root) = (self.ticks as i64, self.save.root.clone());
+            // The Java side's world folder: the Overworld's, whichever level is in place (a
+            // player alone in the Nether or a mod's level ticks only that one). Its files (mods'
+            // block entities and entities by level, saved data) have always been there; the
+            // level in place's folder made the mirror take a level change for a new world (its
+            // entities unloaded mid-iteration: a ConcurrentModificationException each tick).
+            let (ticks, root) = (
+                self.ticks as i64,
+                horizon_client::save::dimension_dir(&self.world_root, "minecraft:overworld"),
+            );
             // The level in place keeps what Java mods' chunk loaders last asked for, though its
             // streaming was made after they asked (a world loading, a level swapped in).
             let wanted = super::java_tickets(self.dim.id());

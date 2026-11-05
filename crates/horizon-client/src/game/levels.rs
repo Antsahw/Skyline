@@ -629,14 +629,14 @@ impl Game<'_> {
     }
 
     /// The levels this server tick runs, in `MinecraftServer.levels` order
-    /// (the Overworld, the Nether, the End): every level with a player in
+    /// (the Overworld, the Nether, the End, then mods' levels): every level with a player in
     /// it, forced chunks or a `/pregen` task, or the Overworld while idle.
     pub(super) fn levels_to_tick(&self) -> Vec<Dim> {
         let guests = self
             .lan
             .as_ref()
             .map_or(&[][..], |h| h.hub.guests.as_slice());
-        let mut dims: Vec<Dim> = [Dim::Overworld, Dim::Nether, Dim::End]
+        let mut dims: Vec<Dim> = Dim::all()
             .into_iter()
             .filter(|d| {
                 // `/forceload`ed chunks, or a native or Java mod's tickets.
@@ -754,7 +754,7 @@ impl Game<'_> {
     /// (`MinecraftServer.stopServer`'s `level.close()` loop), in vanilla's
     /// order of its levels: the Overworld, the Nether, the End.
     pub(super) fn native_levels_closing(&mut self) {
-        for dim in [Dim::Overworld, Dim::Nether, Dim::End] {
+        for dim in Dim::all() {
             self.native_level_closed(dim);
         }
     }

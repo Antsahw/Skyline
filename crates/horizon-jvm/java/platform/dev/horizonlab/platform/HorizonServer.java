@@ -201,6 +201,23 @@ public final class HorizonServer {
             } catch (ReflectiveOperationException e) {
                 // A player-less one still answers progress.
             }
+            // The list a grant's announcement goes to (a mod awarding its own advancement: The
+            // Sift's rift; a null list failed the mod's whole teleport). Horizon announces
+            // advancements itself: PlayerListMixin drops the mirror's. Progress changed here
+            // isn't Horizon's (the routed award, HorizonVanillaActions.award, is).
+            try {
+                java.lang.reflect.Field list = net.minecraft.server.PlayerAdvancements.class.getDeclaredField("playerList");
+                list.setAccessible(true);
+                if (list.get(advancements) == null) list.set(advancements, playerList);
+                // And the tree its grants mark for a visibility update (the server's).
+                java.lang.reflect.Field tree = net.minecraft.server.PlayerAdvancements.class.getDeclaredField("tree");
+                tree.setAccessible(true);
+                if (tree.get(advancements) == null && HorizonData.loaded != null) {
+                    tree.set(advancements, HorizonData.loaded.reloadable().getAdvancements().tree());
+                }
+            } catch (ReflectiveOperationException e) {
+                // Announcements fail as before.
+            }
             return advancements;
         });
     }
@@ -359,7 +376,7 @@ public final class HorizonServer {
                 Natives.log("Horizon's server mirror has no resources: " + e);
             }
         }
-        for (String dimension : new String[] {"minecraft:overworld", "minecraft:the_nether", "minecraft:the_end"}) {
+        for (String dimension : levelIds()) {
             level(dimension);
         }
     }
@@ -868,10 +885,13 @@ public final class HorizonServer {
         ensureServer();
         // Once a world: the Nether's and the End's starts come while the server ticks, and
         // world() makes the stores the tick reads (a second time mid-tick: a
-        // ConcurrentModificationException in the tick).
-        if (world != null && !world.isEmpty()
-                && !java.nio.file.Paths.get(world).toAbsolutePath().normalize().equals(worldDir)) {
-            world(world);
+        // ConcurrentModificationException in the tick). The tick names the folder of the level
+        // in place (dimensions/<ns>/<path>), inside the world's: a world opened in a mod's
+        // dimension starts its generation only when a chunk there isn't saved, ticks later.
+        if (world != null && !world.isEmpty()) {
+            java.nio.file.Path dir = java.nio.file.Paths.get(world).toAbsolutePath().normalize();
+            java.nio.file.Path current = worldDir;
+            if (current == null || !current.startsWith(dir)) world(world);
         }
         return HorizonWorldgen.start(dimension, seed, structures, horizonCannot);
     }
@@ -890,6 +910,67 @@ public final class HorizonServer {
 
     public static String[] worldgenLodColumns(String dimension, int[] xz) {
         return HorizonWorldgen.lodColumns(dimension, xz);
+    }
+
+    /** The level stems of the data packs beyond vanilla's three, sorted (mods' dimensions). */
+    static List<Identifier> extraStems() {
+        HorizonData.Loaded data = HorizonData.loaded;
+        java.util.TreeSet<Identifier> ids = new java.util.TreeSet<>();
+        if (data == null) return new ArrayList<>(ids);
+        try {
+            data.registries().compositeAccess().lookupOrThrow(Registries.LEVEL_STEM).listElementIds()
+                    .forEach(k -> ids.add(k.identifier()));
+        } catch (RuntimeException e) {
+            Natives.log("Java mods: the level stems can't be listed: " + e);
+        }
+        ids.removeIf(HorizonServer::vanillaLevel);
+        return new ArrayList<>(ids);
+    }
+
+    /** The Overworld, the Nether or the End. */
+    static boolean vanillaLevel(Identifier id) {
+        return id.getNamespace().equals("minecraft")
+                && (id.getPath().equals("overworld") || id.getPath().equals("the_nether") || id.getPath().equals("the_end"));
+    }
+
+    /** Every level a server of these data packs has: vanilla's three, then the mods' (createLevels' order). */
+    static List<String> levelIds() {
+        List<String> ids = new ArrayList<>(List.of("minecraft:overworld", "minecraft:the_nether", "minecraft:the_end"));
+        for (Identifier id : extraStems()) ids.add(id.toString());
+        return ids;
+    }
+
+    /**
+     * The level stems beyond the Overworld, the Nether and the End (a mod's or a data pack's
+     * dimension: The Sift's, a mining dimension), as a JSON list of what Horizon needs to hold
+     * them as levels of its own: id, dimension type, build range, skylight, ceiling, coordinate
+     * scale. Their mirrored levels are made with vanilla's ({@link #levelIds}), as
+     * MinecraftServer.createLevels makes one per stem: mods' code asking {@code
+     * server.getLevel(key)} (a horn, a teleporter block) finds it.
+     */
+    public static String extraLevels() {
+        StringBuilder json = new StringBuilder("[");
+        for (Identifier id : extraStems()) {
+            // The world's preset's stem when it has one of that id.
+            var stem = HorizonData.stem(id);
+            if (stem == null) continue;
+            try {
+                var type = stem.type().value();
+                String typeId = stem.type().unwrapKey().map(k -> k.identifier().toString()).orElse(id.toString());
+                if (json.length() > 1) json.append(',');
+                json.append("{\"id\":\"").append(id).append("\",\"type\":\"").append(typeId)
+                        .append("\",\"min_y\":").append(type.minY())
+                        .append(",\"height\":").append(type.height())
+                        .append(",\"logical_height\":").append(type.logicalHeight())
+                        .append(",\"has_skylight\":").append(type.hasSkyLight())
+                        .append(",\"has_ceiling\":").append(type.hasCeiling())
+                        .append(",\"coordinate_scale\":").append(type.coordinateScale())
+                        .append('}');
+            } catch (RuntimeException e) {
+                Natives.log("Java mods: the dimension " + id + " can't be a level: " + e);
+            }
+        }
+        return json.append(']').toString();
     }
 
     /** The world spawn's first chunk in a dimension the mods generate (HorizonWorldgen.origin): [x, z] or null. */
@@ -1357,10 +1438,21 @@ public final class HorizonServer {
         try {
             tickBody(tick, dedicated, world, ids, names, dimensions, motion, modes, health, food, permissions, kinds, who,
                     texts, positions, inventories);
+        } catch (RuntimeException | Error e) {
+            // Rust logs only the message ("a tick failed: …"): where it failed, once a kind.
+            if (TICK_FAILURES.add(e.getClass().getName())) {
+                java.io.StringWriter trace = new java.io.StringWriter();
+                e.printStackTrace(new java.io.PrintWriter(trace));
+                Natives.log("Java mods: a tick failed: " + trace);
+            }
+            throw e;
         } finally {
             tickTime(tick, System.nanoTime() - started);
         }
     }
+
+    /** The kinds of exceptions a tick failed with, each traced once (tick). */
+    private static final java.util.Set<String> TICK_FAILURES = ConcurrentHashMap.newKeySet();
 
     /**
      * MinecraftServer.tickServer's record of its ticks' times (tickTimesNanos, the average and
@@ -1416,10 +1508,13 @@ public final class HorizonServer {
         phase = HorizonProfile.add("client tick", phase);
         if (!started) {
             started = true;
+            // The constructor's hooks (biome modifications) come before the server starts, as
+            // in vanilla, even when no dimension's generation has asked for them yet.
+            HorizonWorldgen.readyBeforeTicks(seed);
             fireEach("ServerLifecycleEvents.SERVER_STARTING", ServerLifecycleEvents.SERVER_STARTING, l -> l.onServerStarting(server));
             // MinecraftServer.loadLevel (runServer's initServer): the levels exist at its end.
             hook(server, MinecraftServer.class, "loadLevel", "()V", "HEAD", NO_ARGUMENTS);
-            for (String dimension : new String[] {"minecraft:overworld", "minecraft:the_nether", "minecraft:the_end"}) {
+            for (String dimension : levelIds()) {
                 level(dimension);
             }
             // MinecraftServer.createLevels: Fabric's LOAD for each (a level made before
@@ -2194,6 +2289,11 @@ public final class HorizonServer {
             if (SECTIONS.get().noView && level instanceof ServerLevel server) {
                 BlockState held = HorizonChunks.heldBlock(server, pos);
                 if (held != null) return held;
+            }
+            // A chunk Horizon hasn't loaded that a mod made load (HorizonWorldgen.standIn).
+            if (level instanceof ServerLevel server) {
+                BlockState standIn = HorizonWorldgen.standInBlock(server, pos);
+                if (standIn != null) return standIn;
             }
             return net.minecraft.world.level.block.Blocks.AIR.defaultBlockState();
         }

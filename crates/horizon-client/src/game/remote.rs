@@ -2235,6 +2235,7 @@ impl Game<'_> {
             dimension.has_ceiling,
         )
         .unwrap_or_else(|_| super::Dim::from_id(&dimension.name).shape());
+        let level_dim = client_level(&spawn.dimension, &dimension, shape);
         // handleRespawn keeps the ClientLevel only for the same level key:
         // two levels sharing a dimension type are still two levels.
         let same = keep_world && r.heard_level.as_deref() == Some(spawn.dimension.as_str());
@@ -2261,7 +2262,7 @@ impl Game<'_> {
         r.position_sender = Default::default();
         r.predictions.clear();
         self.set_mode_id(spawn.game_type);
-        self.dim = Dim::from_id(&spawn.dimension);
+        self.dim = level_dim;
         self.audio.set_world(&spawn.dimension);
         // ClientPacketListener.handleLogin / handleRespawn: the server's
         // Player.getLastDeathLocation, for the recovery compass.
@@ -3288,7 +3289,7 @@ impl Game<'_> {
                         r.local_entity_silent = false;
                     }
                 }
-                let dimension_changed = self.dim != Dim::from_id(&p.spawn.dimension);
+                let dimension_changed = self.dim.id() != p.spawn.dimension;
                 let died = self.screen == Screen::Dead
                     || self
                         .player
@@ -11929,4 +11930,30 @@ mod tests {
         assert_eq!(crafting.event, 12);
         assert!(crafting.param == 1.0);
     }
+}
+
+/// The level a server names (`ClientboundLoginPacket`, `ClientboundRespawnPacket`): one
+/// beyond vanilla's three (a mod's dimension) becomes an extra level of this client, drawn as
+/// its dimension type says, so its own levels stay apart from the Overworld.
+fn client_level(
+    name: &str,
+    dimension: &horizon_protocol::registry::DimensionType,
+    shape: horizon_client::chunk::LevelShape,
+) -> Dim {
+    if let Some(dim) = Dim::known(name) {
+        return dim;
+    }
+    let looks_like = if dimension.has_ceiling || !dimension.has_skylight {
+        "minecraft:the_nether"
+    } else {
+        "minecraft:overworld"
+    };
+    let level = horizon_client::chunk::ExtraLevel {
+        id: Box::leak(name.to_owned().into_boxed_str()),
+        dimension_type: Box::leak(dimension.name.clone().into_boxed_str()),
+        shape,
+        coordinate_scale: 1.0,
+        looks_like,
+    };
+    horizon_client::chunk::register_extra_level(level).map_or(Dim::Overworld, Dim::Extra)
 }
