@@ -56,6 +56,7 @@ public final class HorizonBlockEntities {
         LIVE.clear();
         SAVED.clear();
         COPIES.clear();
+        HorizonClientBlockEntities.clear();
         dir = now;
     }
 
@@ -94,6 +95,12 @@ public final class HorizonBlockEntities {
         dirty = true;
         loaded(level, made);
         return made;
+    }
+
+    /** The live mod block entity at {@code pos}, without making one (null when none is up). */
+    public static synchronized BlockEntity peek(Level level, BlockPos pos) {
+        Map<Long, BlockEntity> live = LIVE.get((ServerLevel) level);
+        return live == null ? null : live.get(pos.asLong());
     }
 
     /** The live mod block entities of a level (a copy: its renderers' snapshot reads them). */
@@ -150,6 +157,7 @@ public final class HorizonBlockEntities {
     /** Level.blockEntityChanged (BlockEntity.setChanged). */
     public static synchronized void changed(Level level, BlockPos pos) {
         dirty = true;
+        HorizonClientBlockEntities.changed((ServerLevel) level, pos);
         Map<Long, Copy> copies = COPIES.get((ServerLevel) level);
         Copy copy = copies == null ? null : copies.get(pos.asLong());
         if (copy != null) copy.changed = true;

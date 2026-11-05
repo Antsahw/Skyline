@@ -139,7 +139,7 @@ public final class HorizonPackets {
         return bytes;
     }
 
-    private static void send(ServerPlayer player, Packet<?> packet) {
+    static void send(ServerPlayer player, Packet<?> packet) {
         try {
             Natives.packet(player.getStringUUID(), encode(packet));
         } catch (Throwable t) {

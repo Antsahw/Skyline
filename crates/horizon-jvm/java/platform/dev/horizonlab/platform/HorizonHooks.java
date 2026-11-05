@@ -682,13 +682,23 @@ public final class HorizonHooks {
      * handle*Event(SDL_Event)).
      */
     public static List<Method> injected(Class<?> owner, String method, Class<?>... params) {
+        return injected(owner, method, false, params);
+    }
+
+    /**
+     * As {@link #injected(Class, String, Class[])}; with {@code locals}, handlers that also take
+     * locals after their CallbackInfo (MixinExtras' @Local: Create's scroll handler takes the
+     * scaled offset) are found too.
+     */
+    public static List<Method> injected(Class<?> owner, String method, boolean locals, Class<?>... params) {
         List<Method> found = new ArrayList<>();
         Map<String, ClassNode> mixins = new HashMap<>();
         for (Method m : owner.getDeclaredMethods()) {
             MixinMerged merged = m.getAnnotation(MixinMerged.class);
-            if (merged == null || merged.mixin().startsWith("net.fabricmc.") || merged.mixin().startsWith("dev.horizonlab.")) continue;
+            if (merged == null || merged.mixin().startsWith("net.fabricmc.") || merged.mixin().startsWith("dev.horizonlab.platform.")) continue;
             Class<?>[] p = m.getParameterTypes();
-            if (p.length != params.length + 1 || !CallbackInfo.class.isAssignableFrom(p[params.length])) continue;
+            if (locals ? p.length < params.length + 1 : p.length != params.length + 1) continue;
+            if (!CallbackInfo.class.isAssignableFrom(p[params.length])) continue;
             if (!java.util.Arrays.equals(java.util.Arrays.copyOf(p, params.length), params)) continue;
             ClassNode node = mixins.computeIfAbsent(merged.mixin(), name -> {
                 try (var in = HorizonHooks.class.getClassLoader().getResourceAsStream(name.replace('.', '/') + ".class")) {

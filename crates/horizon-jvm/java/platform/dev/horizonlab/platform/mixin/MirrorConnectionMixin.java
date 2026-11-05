@@ -28,9 +28,32 @@ public abstract class MirrorConnectionMixin {
         if (HorizonServer.isClientConnection(this)) cir.setReturnValue(true);
     }
 
-    @Inject(method = {"send(Lnet/minecraft/network/protocol/Packet;Lio/netty/channel/ChannelFutureListener;Z)V", "flushChannel",
-            "runOnceConnected", "tick"}, at = @At("HEAD"), cancellable = true)
+    @org.spongepowered.asm.mixin.Shadow
+    @org.spongepowered.asm.mixin.Final
+    private java.util.Queue<?> pendingActions;
+
+    @Inject(method = {"flushChannel", "runOnceConnected", "tick"}, at = @At("HEAD"), cancellable = true)
     private void horizon$noChannel(CallbackInfo ci) {
-        if (HorizonServer.isClientConnection(this)) ci.cancel();
+        if (HorizonServer.isClientConnection(this) || pendingActions == null) ci.cancel();
+    }
+
+    /**
+     * A packet sent raw on the client's connection, or on any connection the bridge made
+     * without its constructor (no channel, no queue: FancyMenu's handshake failed on its null
+     * pendingActions): a mod's custom payload from the client goes to the mods' server code
+     * (HorizonLoop), as the packet listener's sends do; the rest goes nowhere.
+     */
+    @Inject(method = "send(Lnet/minecraft/network/protocol/Packet;Lio/netty/channel/ChannelFutureListener;Z)V",
+            at = @At("HEAD"), cancellable = true)
+    private void horizon$send(net.minecraft.network.protocol.Packet<?> packet, io.netty.channel.ChannelFutureListener listener,
+                              boolean flush, CallbackInfo ci) {
+        boolean client = HorizonServer.isClientConnection(this);
+        if (!client && pendingActions != null) return;
+        if (!client && HorizonServer.isMirror(this)) return;
+        ci.cancel();
+        if (dev.horizonlab.platform.HorizonClient.headless()
+                && packet instanceof net.minecraft.network.protocol.common.ServerboundCustomPayloadPacket(var payload)) {
+            dev.horizonlab.platform.HorizonLoop.toServer(payload);
+        }
     }
 }

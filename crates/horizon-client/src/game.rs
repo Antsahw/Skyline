@@ -18347,6 +18347,8 @@ impl Game<'_> {
                                 );
                             }
                         } else {
+                            // Java mods' injections there hear it (and may take it back).
+                            self.java_bind_scroll(raw_x, raw_y, self.selected);
                             self.selected =
                                 horizon_client::mouse::ScrollWheelHandler::next_selection(
                                     f64::from(wheel),

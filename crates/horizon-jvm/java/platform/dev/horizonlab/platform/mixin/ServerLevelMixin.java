@@ -51,7 +51,12 @@ public abstract class ServerLevelMixin {
     private void horizon$sendBlockUpdated(net.minecraft.core.BlockPos pos, net.minecraft.world.level.block.state.BlockState old,
                                           net.minecraft.world.level.block.state.BlockState now, int flags,
                                           org.spongepowered.asm.mixin.injection.callback.CallbackInfo ci) {
-        if (HorizonServer.isMirror(this)) ci.cancel();
+        if (!HorizonServer.isMirror(this)) return;
+        ci.cancel();
+        // What the server would send the client's block entity (its update packet).
+        if (HorizonServer.clientHalf != Thread.currentThread()) {
+            dev.horizonlab.platform.HorizonClientBlockEntities.updated((ServerLevel) (Object) this, pos);
+        }
     }
 
     /** The level's entities, for a mod's checks: its mirrored players. */

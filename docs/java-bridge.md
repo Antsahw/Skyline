@@ -1013,6 +1013,61 @@ Generic fixes found with Create Fly (no Create-specific code); regress `createma
   millstone, a press over items on the ground); players don't collide with contraptions; a
   contraption's own moving actors (drills, harvesters) untested.
 
+## The client from its start, its own block entities, mods' packets, sounds and wheel (bridge-client-14)
+
+Generic fixes for a tester's ~60 client mods and Create's client items (regress `earlyclient`,
+`creategoggles`, `createvalue`, `createtoolbox`, `createsounds`, `modscroll`).
+- **The GPU device stays when a mod fails at its start.** Async Particles' injection at the end
+  of `RenderSystem.initRenderer` casts the device to a `VulkanDevice` (its backend's name said
+  "vulkan"): the throw lost the device, so the client had no models, and every mod reading them
+  failed (ModelManager null, EMF's models, Xaero's World Map's frame). The device's backend name
+  is now `Horizon wgpu` (the wgpu backend is in its driver line), and a throw after the device is
+  set is the mod's (told in chat), not the device's.
+- **The client is made in vanilla's order**: GPU device, `ClientBootstrap` (atlas source types:
+  JEI's mezz_config "Unknown element id: minecraft:directory"), window, a frame rate limiter, then
+  options (no more "Failed to load options" on every start), key names in text
+  (`KeybindResolver`: "Release Right Button"), and the HUD's field defaults (Immersive Hotbar's
+  held-item name read `lastToolHighlight` null).
+- **A particle engine** (`HorizonParticles`): `createParticle` goes to the player as a particle
+  packet, as `ClientLevel.doAddParticle` does; particle objects mods add are dropped; Async
+  Particles finds a real engine.
+- **Models from the start** (`standInModels`): a model manager (the one the models' reload fills
+  later, so suppliers over it see the models) and an item model resolver with no manager, which
+  keeps items for Horizon (`ItemModelResolverMixin`; swap animation defaults).
+- **Receivers registered while in game** (ShulkerBoxTooltip at `ClientPlayConnectionEvents.INIT`):
+  client connections get Fabric's play addon (`fabricAddon`); HorizonLoop asks it first.
+- **Connections made without their constructor never NPE on send** (FancyMenu's handshake:
+  `pendingActions` null): `MirrorConnectionMixin` drops the send, a mod's custom payload on the
+  client's connection goes to the mods' server code.
+- **Mods' reload listeners ordered after vanilla's atlases or models** (Fabric's resource loader
+  v1 `addListenerOrdering`: Continuity) run with the models' reload, and one that fails on its
+  own (it reads the atlases' shared stitch) runs again there.
+- **The client has its own block entities** (`HorizonClientBlockEntities`): `ClientLevel.getBlockEntity`
+  of a mod block gives the client's copy, made by the type and loaded from the update tag, then
+  from the update packet at each `sendBlockUpdated` (and at most every 10 ticks after a
+  `setChanged`), ticked by the block's client ticker as the player's client, within 32 blocks of a
+  player (`-Dhorizon.clientBlockEntities`). Create adds its client behaviours there: goggles'
+  overlay, value boxes' hover tips, frogport sounds. Writes from client code are dropped.
+- **The client's part of using a block runs first** (`MultiPlayerGameMode.useItemOn` injections
+  before its prediction, `HorizonClient.useBlockFirst`): one that ends the use takes the click and
+  the server's use never runs (Create's value boxes, arm points, glue, chain conveyors). The use
+  key is down while the right click lasts (the window's button when mods take every button, else
+  6 ticks after each use), screens tick with the player's keys.
+- **Mods' own packet types** (`Packet` classes outside `net.minecraft`: Create's `OpenScreenPacket`,
+  `ValueSettingsPacket`) go to the other half: the player's client connection handles a server's
+  (`HorizonLoop.toClientPacket`), the server connection a client's (`toServerPacket`); the client
+  and the mirror's server have packet processors on their thread. Create's toolbox screen opens.
+- **Mods' client sounds** (`HorizonSounds`): `SoundManager.play` sends the player a sound packet
+  (relative ones at the player), ticking sounds tick and stop (a stop packet); `isActive` answers
+  for them. Horizon plays a looping sound once.
+- **The wheel while playing** (`MouseHandler.onScroll` injections, `-200` in the bound keys): the
+  game moves its hotbar at once and sends the turn with the slot it left; a mod that cancels gets
+  the hotbar put back (`ClientboundSetHeldSlotPacket`). Create's own value boxes are a held
+  right-click in this port, not the wheel (its wheel is schematics, trains, elevators).
+- Not done: Create's value box outlines and other world-drawn overlays (the Outliner draws in the
+  level renderer: gpu); looping sounds repeat; the toolbox's 3D drawer in its screen.
+- `HORIZON_JAVA_DEBUG=cbe` (client copies), `=sounds` (each sound sent), `=loop` (mods' packets).
+
 ## 26.3 facts that cost time
 
 - **A client player made without its constructor never ages**: `LocalPlayer.tick` is what moves
@@ -1023,6 +1078,20 @@ Generic fixes found with Create Fly (no Create-specific code); regress `createma
   opened after it shows the search box but no list until something is typed (the empty
   filter's search isn't run again: `AsyncSearchManager` not dirty, the new widget empty).
   Open: `reiscreen`, and `rei-lan`'s host list.
+
+- **A mod's injection at the end of `RenderSystem.initRenderer` can throw** (Async Particles
+  casts the device to vanilla's Vulkan backend when its backend name says "vulkan"): the device
+  is set by then; keep it. Don't name the bridge's device after a native API.
+- **Create's client behaviours live on client block entities** (`CLIENT_REGISTRY`, added at the
+  block entity's first client tick): with one object for both halves `getBehaviour` is null on
+  the client side. A mod block entity's client copy must exist and have ticked before client
+  code asks (`HorizonClientBlockEntities.near`).
+- **Mods register their own `Packet` classes in the play protocol** (Create): neither a custom
+  payload nor vanilla's; the mirror dropped them ("A mod sent a player a OpenScreenPacket").
+  Their handlers check `PacketUtils.ensureRunningOnSameThread`: a client/server made without its
+  constructor needs a `PacketProcessor`.
+- `HorizonHooks.injected` left out every `dev.horizonlab.` mixin, the fixtures' too: only
+  `dev.horizonlab.platform.` is Horizon's own.
 
 - **Anything that swaps the client connection's channel must answer a `LocalAddress`**
   (`HorizonClient.memoryConnection`, `HorizonPacketTap.open`): Simple Voice Chat connects its
@@ -1735,6 +1804,13 @@ Layers draws its layers (see "Create, Flywheel, OBJ models, mods' fluids, 3D Ski
 bridge-gpu-13: press, millstone, deployer and belts work; a bearing's contraption assembles,
 draws and turns; the wrench and the creative tab's blank items draw (Java's item models). See
 "Create's machines, contraptions and items"; regress `createmachines`, `contraption`, `createitems`.
+
+Create's client side (2026-11-05, bridge-client-14): goggles' overlay, value boxes (hold
+right-click: the settings board; the speed changes), the toolbox's screen, frogport and machine
+sounds; a tester's client mods (Async Particles, Immersive Hotbar, EMF/ETF, ShulkerBoxTooltip,
+FancyMenu, Continuity, JEI's mezz_config, Xaero's World Map) start with no failures. See "The
+client from its start..."; regress `earlyclient`, `creategoggles`, `createvalue`,
+`createtoolbox`, `createsounds`, `modscroll`.
 
 Nether and End (tested 2026-10-31 with BOP, BetterNether, BetterEnd, BCLib, WorldWeaver):
 both generate through the mods, the Nether with BetterNether's and BOP's biomes and blocks

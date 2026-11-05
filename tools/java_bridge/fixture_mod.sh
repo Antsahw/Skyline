@@ -18,6 +18,12 @@ CP="$R/.local/minecraft/26.3/jars/client.jar"
 for j in "$R"/.local/minecraft/26.3/libraries/**/*.jar "$R"/.local/bridge/lib/*.jar "$MODULES"/*.jar; do
   CP="$CP:$j"
 done
+# MixinExtras (@Local, @WrapOperation), which Fabric Loader carries inside its jar.
+X=$(mktemp -d)
+for l in "$R"/.local/bridge/lib/fabric-loader-*.jar; do
+  (cd "$X" && unzip -q -o "$l" 'META-INF/jars/mixinextras-*.jar' 2>/dev/null) || true
+done
+for j in "$X"/META-INF/jars/*.jar; do CP="$CP:$j"; done
 # FIXTURE_CP: mod jars a fixture builds against (GeckoLib for geckomod), ':'-separated.
 [ -n "$FIXTURE_CP" ] && CP="$CP:$FIXTURE_CP"
 W=$(mktemp -d)

@@ -251,6 +251,23 @@ impl Game<'_> {
         }
     }
 
+    /// The mouse wheel while playing, for Java mods that take it (`MouseHandler.onScroll`'s
+    /// injections: Create's schematic tools, a train's throttle), sent when they bound `-200`.
+    /// The hotbar moves at once as vanilla's would; `slot` is where it was, which Java puts
+    /// back when a mod takes the turn.
+    pub(super) fn java_bind_scroll(&mut self, x: f64, y: f64, slot: usize) {
+        if !self.java_binds.keys.contains(&-200) || self.remote.is_none() {
+            return;
+        }
+        let data = json!({"kind": "bind", "scroll": y, "x": x, "slot": slot})
+            .to_string()
+            .into_bytes();
+        self.send(S::CustomPayload(CustomPayload {
+            channel: INPUT.into(),
+            data,
+        }));
+    }
+
     /// A mouse button of the window while playing, for Java mods' key bindings set to it (TACZ's
     /// shoot and aim) and mods' own button handlers (MouseHandler.onButton): sent as
     /// `-100 - button` is bound ([`KEYS`]), released after it was sent down.

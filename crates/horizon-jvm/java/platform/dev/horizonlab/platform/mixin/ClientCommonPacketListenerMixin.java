@@ -22,6 +22,11 @@ public abstract class ClientCommonPacketListenerMixin {
     private void horizon$send(Packet<?> packet, CallbackInfo ci) {
         if (!HorizonClient.headless()) return;
         ci.cancel();
-        if (packet instanceof ServerboundCustomPayloadPacket(var payload)) HorizonLoop.toServer(payload);
+        if (packet instanceof ServerboundCustomPayloadPacket(var payload)) {
+            HorizonLoop.toServer(payload);
+        } else if (!packet.getClass().getName().startsWith("net.minecraft.") && !packet.getClass().getName().startsWith("net.fabricmc.")) {
+            // A mod's own packet type (Create's value boxes' settings): to the mods' server code.
+            HorizonLoop.toServerPacket(packet);
+        }
     }
 }

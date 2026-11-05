@@ -744,6 +744,26 @@ impl Game<'_> {
                     other => return Err(format!("unknown mouse button {other}").into()),
                 };
                 self.require_world()?;
+                // A Java mod's client-only screen (opened while the button was held: Create's
+                // value settings) hears the button as the window's would send it.
+                if self.screen == Screen::JavaMod
+                    && matches!(button, MouseButton::Left | MouseButton::Right)
+                {
+                    let right = button == MouseButton::Right;
+                    match arg(2)? {
+                        "down" => {
+                            self.java_screen_mouse("press", right);
+                        }
+                        "up" => {
+                            self.java_screen_mouse("release", right);
+                        }
+                        _ => {
+                            self.java_screen_mouse("press", right);
+                            self.java_screen_mouse("release", right);
+                        }
+                    }
+                    return ok();
+                }
                 if self.screen != Screen::Playing {
                     return Err(format!(
                         "mouse needs the playing screen, not {}",
