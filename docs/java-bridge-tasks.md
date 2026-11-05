@@ -1907,6 +1907,43 @@ Simple Voice Chat broke in the merge (`voice_test.sh`: 0 tones; voice-1's own ti
 replay-1's `HorizonPacketTap` gave the host's client connection a plain EmbeddedChannel, and
 SVC's host client couldn't read its address. The tap's channel answers a `LocalAddress` now, as
 `memoryConnection`'s does: 34/39 and 36/39; `replaymod flashback pot` pass again.
+### Merge batch 12 (2026-11-05, boss; Claude for iaxivers)
+
+Merged, in order: upstream-sync-6, generic-2, upstream-prep-2, release-1, perf-1, worldgen-9,
+client-14, mixins-11, gpu-14, trello-2, 112-boot, and two follow-ups left out of batch 11:
+entities-10's last commit (TACZ third person) and generic-ui's notes. Not merged:
+`bridge-worldgen-5-farnoise-wip` (marked not for merge).
+Conflicts and how they were settled:
+- **upstream-prep-2 vs upstream sync 6:** upstream built native mods' chunk tickets
+  (`mod_forced`): ours sit on it now (`set_ticketed` in streaming/java.rs fills `mod_forced`;
+  prep's `java::Tickets` dropped). Upstream's `open_unplaced_container` and menu `extra` data
+  kept (prep's copy in containers/java.rs dropped). Registry entries are NBT upstream now:
+  `push_mod_biomes` and worldgen-9's extra dimension types write NBT. The moved fall code got
+  `MotionWorld.health`; `noise_only.rs` needs `R: 'static` (upstream's surface rule cache).
+- **Branches made before prep-2** edited code it moved: worldgen-9's `java_mods.rs` went into
+  `java_mods/bridge.rs`; gpu-14's own boxes/occlusion into `mod_content/java.rs`,
+  `content/states.rs` (+ its test into `content/tests/state_table.rs`), `oracle/own_states.rs`;
+  client-14's `java_binds` is `java.binds`; generic-2's own-client guards are in
+  `remote_java_payload`. Every hook prep left still has its callers (checked by name).
+- **The same thing built twice:** client-14 and mixins-11 both ran a block click's client half
+  first and both carried mods' own packet types: mixins-11's `useBlockFirst` (with client-14's
+  held use key) and `packetToServer`/`packetToClient` kept (their logs name the class, as
+  client-14's cases read). client-14 and gpu-14 both made client copies of mods' block
+  entities: client-14's kept (any client code gets the copy through the client level), gpu-14's
+  `of(server)` for the renderers on top of it.
+- Small: `/time` in a mod's level uses the clock of the level it's drawn as; two lints of the
+  newer toolchain in java_device.rs; `parked_items` only with java-mods. Clippy clean with and
+  without `java-mods`.
+Regress (2 cores, llvmpipe), 24 cases: pass `nomodcode earlyclient creategoggles createvalue
+createtoolbox createsounds modscroll createitemsin createfluids createparts jeifluids
+tacz-model rift server pot placed create maps-lan replaymod`; `dimensions` failed in the long
+run and passed alone. `bettercombat` failed: the hit lands after the case's 1.5 s here (passes
+with 5 s: the wait is 4 s now). `tacz`: fires (ammo 30 → 28) but only 2 shots in 1.35 s on this
+box, the zombie lives: retest on the PC. `createclick`: arm and chain pass, the train station
+steps (and once the sandpaper) fail; mixins-11's own Java on this build fails the same, so not
+the click merge; trello-2 saw track placing miss too. `rei-lan` fails as generic-2 reported.
+`voice_test.sh`: both directions heard (17/39, 23/39). Game build 18 min; launcher built.
+
 ### Generic 2: Better Combat, a client per player's game (2026-11-05, branch `bridge-generic-2`; Claude for iaxivers)
 
 The three cases that failed since the mod-specific code went, with generic fixes only (`nomodcode` passes).

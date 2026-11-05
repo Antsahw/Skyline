@@ -267,3 +267,23 @@ upstream prep chat (launcher switch, then the shared-file hooks), and the reply 
   killed run eats 2.6 GB: the next build's rustc gets OOM-killed (`pgrep -x horizon-client`).
   Never `pkill -f` a pattern that is in your own command line.
 
+## State after merge-batch12 (2026-11-05)
+
+- `java-bridge` = batch 12: upstream sync 6 (upstream main 41d5649ed), upstream-prep-2 (bridge
+  code out of Horizon's files: hooks listed in java-bridge-upstream.md), release-1 (the fork's
+  signed `java-mods` release workflow; nothing published yet: the signing key secret isn't set),
+  perf-1, generic-2, worldgen-9 (mods' dimensions), client-14, mixins-11, gpu-14, trello-2,
+  112-boot, entities-10's TACZ follow-up. Report: java-bridge-tasks.md "Merge batch 12".
+- **After upstream-prep-2, bridge code lives in `<file>/java.rs` child modules and
+  `java_mods/{bridge,off}.rs`.** A worker branch made before it that edits the old place
+  conflicts: re-apply its hunks where prep moved the code (`patch -F0` per hunk; fuzz
+  misplaces them), and keep the plain build compiling (clippy without `java-mods` too). Game
+  fields moved into `JavaGame` (`self.java.binds`, `self.java.overlay`...).
+- **Two chats built the same thing** twice this round (client-14 with mixins-11, and with
+  gpu-14): one owner per mechanism (click halves, mods' packets, client block entities) in
+  the queue.
+- Tests here are load-sensitive: `bettercombat`, `tacz`, `dimensions` failed in the 24-case
+  run on timing; run a failure alone (or on the PC) before blaming a merge. Java-only bisect:
+  put a commit's `crates/horizon-jvm/java` in place (remove the folder first: later files
+  linger), `java.sh`, `regress.py --java-only`.
+- Checked: game build, launcher build, clippy (both builds), 24 cases + voice.

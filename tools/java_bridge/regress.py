@@ -1110,7 +1110,8 @@ CASES = {
         about="Better Combat: the click's client half (Minecraft.startAttack's head) is its own attack; the cow takes the sword's hit",
         mods=["bettercombat", "cloth", "playeranim"], scene="fight", env={"HORIZON_JAVA_DEBUG": "combat"},
         # Within the iron sword's own reach (Better Combat's 2.5 blocks; the scene's cow is 2.57 away).
-        steps=['$C command "tp @s ^ ^ ^0.4" >/dev/null; sleep 1; $C mouse left click >/dev/null; sleep 1.5; '
+        # The hit lands after the upswing: past 1.5 s on a loaded 2-core box (merge batch 12).
+        steps=['$C command "tp @s ^ ^ ^0.4" >/dev/null; sleep 1; $C mouse left click >/dev/null; sleep 4; '
                '$C entities 6 minecraft:cow > $S/cow.json'],
         checks=[check_file("cow.json", r'"health":[0-4]\.', "the cow lost 6 health"),
                 check_log(r"taken by a mod's client attack", "Better Combat's client took the click")],
