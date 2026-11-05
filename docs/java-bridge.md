@@ -2724,6 +2724,15 @@ their Fabric names and versions, Add (file picker or dropped jars; a jar without
 failed in the last game (its `logs/latest.log`: the "[Java mods] <mod> failed in …" lines, a start
 that failed) on their rows. CLI: `horizon-launcher java-mods list|add <jar>|remove <name>|failed
 [--instance <name>]`.
+**Copy bug report** (the tab's buttons, `launcher/src/java_bug_report.rs`; CLI `horizon-launcher
+java-mods report [--instance <name>]`) copies one Markdown block for an issue at
+iaxivers/horizon-java-bridge: launcher version, the version's Java mods build (its `.installed`
+marker's commit), OS, GPU (the log's `Horizon renderer:` line), the switch, Java home + version,
+the jars and sizes, the log's errors (`Java mods`, `[java]` ERROR/WARN, `Exception`, `Caused by`;
+deduplicated) and last 300 lines (1500 at most), and the last run's crash report and
+`hs_err_pid*.log` (150 lines each). Clipboard only. Redacted: every string in `accounts.json`,
+emails, UUIDs, token-shaped words (`eyJ…`, 100+ chars), the home folder and user name as `~`.
+"Open logs folder" beside it opens the instance's `logs/`.
 
 `tools/java_bridge/install_test.sh` checks it: a scratch install laid out like a launcher
 version (binary, research-lock.json, the preparation's folders linked from the checkout), the

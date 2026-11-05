@@ -22,6 +22,7 @@ pub mod installer;
 pub mod instances;
 pub mod instances_mrpack;
 pub mod java;
+pub mod java_bug_report;
 pub mod java_launch;
 pub mod java_mods;
 pub mod java_release;

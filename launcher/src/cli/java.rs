@@ -27,6 +27,12 @@ pub(super) enum JavaModsCmd {
         #[arg(long)]
         instance: Option<String>,
     },
+    /// A bug report to paste in an issue: versions, system, Java, jars, the log's tail and
+    /// errors, the last crash (secrets taken out; nothing is uploaded)
+    Report {
+        #[arg(long)]
+        instance: Option<String>,
+    },
     /// Whether the instance plays Fabric 26.3 mods (beta), and its version's Java mods build
     Status {
         #[arg(long)]
@@ -124,6 +130,14 @@ pub(super) fn java_mods(action: Option<JavaModsCmd>, as_json: bool) -> Result<()
             }
         }
         JavaModsCmd::Status { instance } => status(&pick(&instance)?),
+        JavaModsCmd::Report { instance } => {
+            let text = horizon_launcher::java_bug_report::for_instance(&pick(&instance)?);
+            if as_json {
+                json(serde_json::json!({ "report": text }));
+            } else {
+                print!("{text}");
+            }
+        }
         JavaModsCmd::On { instance } => {
             let i = pick(&instance)?;
             if i.java.is_some() {
