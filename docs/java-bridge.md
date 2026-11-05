@@ -1647,6 +1647,13 @@ Chunky (2026-11-04, bridge-mixins-10): `/chunky start` pregenerates through Hori
 Testers' Trello retest (2026-11-04, bridge-trello-1): JEI, Farmer's Delight, Litematica's menu
 and Cloth Config's screens (`/modconfig`) work; Chunky, Simple Voice Chat, TACZ fail; Chat Heads,
 Flashback, ReplayMod load and do nothing. Log lines and areas: java-bridge-tasks.md, "Retest".
+Retest 2 (2026-11-05, bridge-trello-2, java-bridge 6a252e94f): Chunky, Cloth's lag, ReplayMod,
+SVC's screens, Create's water wheel, pump, depot clicks, track's first click and the scaffolding
+fixed; TACZ half (drawn, fires once); Better Combat, Chat Heads' heads still not. Create's
+leftovers fall in three buckets: its client click handlers (chain conveyor, arm, glue, value
+boxes, goggles), item entities in the mirror (depot throws, crushers, fans), mod blocks' shape
+updates and the routed lava/water interaction (with Create no obsidian forms). Table:
+java-bridge-tasks.md, "Retest 2".
 Mod blocks with no collision rule never stop the game (2026-11-04, bridge-crash-1): placing
 Create's scaffolding and walking near it ended the game ("unsupported block collision state
 36126", on the window's thread, so the world saved beside it crashed again on the first step).
