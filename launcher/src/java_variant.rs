@@ -102,9 +102,10 @@ pub fn dir(tag: &str) -> PathBuf {
     backend::version_dir(tag).join(DIR)
 }
 
-/// Whether installed version `tag` has its Java mods build.
+/// Whether installed version `tag` has its Java mods build. An imported build (a game of your
+/// own, `build_import`) is its own: built with Java mods, it plays them with [`OPT_IN_ARG`].
 pub fn is_installed(tag: &str) -> bool {
-    complete(&dir(tag))
+    complete(&dir(tag)) || crate::build_import::is_imported(tag)
 }
 
 fn complete(dir: &Path) -> bool {
@@ -352,14 +353,19 @@ pub fn switch_command(cmd: &mut Command) -> Result<(), String> {
         .ok_or_else(|| format!("{}: no version folder", plain.display()))?;
     asset().ok_or_else(no_build_here)?;
     let java = version.join(DIR);
-    if !complete(&java) {
-        let tag = version.file_name().unwrap_or_default().to_string_lossy();
+    let tag = version.file_name().unwrap_or_default().to_string_lossy();
+    let program = if complete(&java) {
+        java.join(CLIENT)
+    } else if crate::build_import::is_imported(&tag) {
+        // An imported build plays the mods itself (`use-build` can still give it another).
+        plain.clone()
+    } else {
         return Err(format!(
             "{tag}'s Fabric mods build isn't installed: turn Fabric 26.3 mods off and on again, \
              or horizon-launcher java-mods on"
         ));
-    }
-    let mut next = Command::new(java.join(CLIENT));
+    };
+    let mut next = Command::new(program);
     next.args(cmd.get_args());
     for (key, value) in cmd.get_envs() {
         match value {

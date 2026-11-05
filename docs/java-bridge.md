@@ -2763,6 +2763,10 @@ player turns them on**, per instance:
   accent while on; dimmed with the reason (`java_mods_lock`: no `-java` asset for this platform,
   no signed-in owner) while it can't be turned on; turning off always works. Its second line
   (`java_mods_state`) shows On/Off, the build's download or its error.
+- **An imported build** (`import-build`, `imported-…` versions) is its own Fabric mods build:
+  with the switch on, the launcher plays its program with `--java-mods` (nothing to download;
+  `use-build` still overrides it). **Trap:** a build imported before 2026-11-04 has no opt-in and
+  runs `mods-java/` whatever the switch says: import a fresh one.
 - **CLI:** `horizon-launcher java-mods on|off|status [--instance X]`, and
   `java-mods use-build <horizon-client> [--version TAG]` for a Java mods build of your own
   (upstream's releases have no `-java` assets; the fork's `java-mods` release does: below). `instance list --json` has `java_mods`.
