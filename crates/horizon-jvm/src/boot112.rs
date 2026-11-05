@@ -172,7 +172,7 @@ pub fn start(config: &Cleanroom) -> Result<(&'static Bridge, String), String> {
             unsafe { std::env::set_var(var, value) };
         }
     }
-    let bridge_jar = write_jar(&config.work, "horizon-bridge.jar", crate::BRIDGE_JAR)?;
+    let bridge_jar = crate::bridge_jar(&config.work, &config.home)?;
     let mut class_path = vec![bridge_jar];
     class_path.extend(launch.class_path.iter().cloned());
     let log_config = write_jar(

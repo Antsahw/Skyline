@@ -11,6 +11,8 @@ export HORIZON_BRIDGE_PLATFORM=source CARGO_TARGET_DIR=target-java
 cargo build --release --locked ${target:+--target "$target"} -p horizon-client --features java-mods --bin horizon-client
 bin="target-java/${target:+$target/}release"
 "$bin/horizon-client$exe" --help | grep -q -- '--resources'
+# Nothing of Fabric's fetched here: the source build reads none (docs/java-bridge.md, "Ownership").
+[[ ! -e .local/bridge ]] || { echo "Fabric's files were fetched on the build machine" >&2; exit 1; }
 for tool in horizon-ctl horizon-prepare horizon-server; do cp "$BIN/$tool$exe" "$bin/"; done
 cargo run --locked -p xtask -- package "$bin/horizon-client$exe" "dist/$dir"
 cd dist
@@ -19,4 +21,5 @@ case "$asset" in
   *.tar.gz) tar czf "$asset" "$dir" ;;
   *) 7z a -tzip "$asset" "$dir" > /dev/null ;;
 esac
+"$(command -v python3 || command -v python)" ../tools/java_bridge/check_no_fabric.py "$asset"
 ls -l "$asset"

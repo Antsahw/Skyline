@@ -137,6 +137,32 @@ def screen_has(slot, item):
 
 
 CASES = {
+    "direct": dict(
+        about="Ownership: the game started by hand with --java-mods (no launcher, no signed-in owner) runs no "
+              "mods, downloads nothing (no Fabric, no Java, nothing of Mojang's), says the launcher is needed "
+              "and plays without them (install_test.sh DIRECT=1: a scratch install, as a player's)",
+        fixtures=["hellomod"], scene="none", install=True, env={"DIRECT": "1"},
+        steps=['{ [ -e "$I/version/.local/bridge" ] && echo "fabric: fetched" || echo "fabric: none"; '
+               'grep -q libjvm "/proc/$PID/maps" && echo "jvm: loaded" || echo "jvm: none"; '
+               'ls -A "$I/lh/minecraft/runtime" 2>/dev/null | grep -q . && echo "java: fetched" || echo "java: none"; '
+               '$G state > "$I/state.json"; } > "$I/direct.txt"'],
+        checks=[check_log(r"Java mods: off: Fabric 26\.3 mods run only when Horizon's launcher starts the game for a "
+                          r"signed-in account that owns", "the log says the launcher with a signed-in owner is needed"),
+                check_file("direct.txt", r"fabric: none", "nothing of Fabric's downloaded (no .local/bridge)"),
+                check_file("direct.txt", r"java: none", "no Java runtime downloaded"),
+                check_file("direct.txt", r"jvm: none", "no JVM in the game's process"),
+                check_json("state.json", ["screen"], "playing", "the world plays without the mods")],
+        forbid=[r"Java mods: JVM", r"Java mods: Fabric loaded", r"downloading https"],
+    ),
+    "owner": dict(
+        about="Ownership: the game as the launcher starts it past its owner gate (--java-mods and "
+              "HORIZON_JAVA_MODS_OWNER, a scratch install): Fabric is fetched on this machine and the mod loads",
+        fixtures=["hellomod"], scene="none", install=True, timeout=900,
+        steps=['sleep 2; ls "$I/version/.local/bridge/lib" > "$I/fabric.txt"'],
+        checks=[check_log(r"Java mods: Fabric loaded .*horizon_hello", "Fabric and the mod loaded"),
+                check_file("fabric.txt", r"fabric-loader-0\.20\.1\.jar",
+                           "Fabric Loader fetched on this machine, into the install's own .local/bridge")],
+    ),
     "pot": dict(
         about="Farmer's Delight: the cooking pot's screen opens; beef moved into it",
         mods=["fd"], scene="pot",
@@ -1999,10 +2025,6 @@ def fixture(name, cache, against=()):
     if not jar.exists():
         env = dict(os.environ, FIXTURE_CP=":".join(str(j) for j in against))
         r = subprocess.run([str(TOOLS / "fixture_mod.sh"), name, str(jar)], capture_output=True, text=True, env=env)
-    src = ROOT / "crates/horizon-jvm/java/fixtures" / name
-    newest = max((f.stat().st_mtime for f in src.rglob("*") if f.is_file()), default=0)
-    if not jar.exists() or jar.stat().st_mtime < newest:
-        r = subprocess.run([str(TOOLS / "fixture_mod.sh"), name, str(jar)], capture_output=True, text=True)
         if r.returncode != 0 or not jar.exists():
             raise RuntimeError(f"fixture {name} did not build: {r.stderr[-400:]}")
     return jar
@@ -2056,13 +2078,19 @@ def run_game(case, name, jars, out, extra_env, pack=None, join_within=None):
         # A LAN case (lan=True): a host and a guest that joins it (lan_test.sh; steps see $H, $G).
         # A dedicated server case (server=True): a server and a player joining it (server_test.sh;
         # steps see $G, sv and $S, the server's folder; the log checked is the server's).
-        script = "server_test.sh" if case.get("server") else "lan_test.sh" if case.get("lan") else "screen_test.sh"
+        # An install case (install=True): the game in a scratch install as the launcher lays it out
+        # (install_test.sh; steps see $G, $I and $PID; the case's env picks DIRECT=1 or not).
+        script = ("server_test.sh" if case.get("server") else "lan_test.sh" if case.get("lan")
+                  else "install_test.sh" if case.get("install") else "screen_test.sh")
         r = subprocess.run([str(TOOLS / script), *case["steps"]], env=env, capture_output=True,
                            text=True, timeout=case.get("timeout", 600) + 300)
         (out / "screen_test.txt").write_text(r.stdout + r.stderr)
         if case.get("server"):
             scratch = Path(Path("/tmp/hz-bridge-server").read_text().strip())
             log_path = scratch / "logs" / "latest.log"
+        elif case.get("install"):
+            scratch = Path(Path("/tmp/hz-bridge-install").read_text().strip())
+            log_path = scratch / "home" / "logs" / "latest.log"
         else:
             scratch = Path(Path("/tmp/hz-bridge-scratch").read_text().strip())
             log_path = scratch / "home" / "logs" / "latest.log"

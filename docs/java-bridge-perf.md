@@ -1,4 +1,43 @@
-# Java bridge performance: the 81-jar test pack (2026-11-05, bridge-perf-1)
+# Java bridge performance
+
+## The bridge switched off (maintainers' condition c, bridge-ownership-1)
+
+What the bridge costs a player who doesn't use it: startup and frame time with `--benchmark standard`
+(release builds, `docs/benchmark.md`), three ways: upstream's main; this branch built without the
+`java-mods` feature; this branch built with it as the release builds it
+(`HORIZON_BRIDGE_PLATFORM=source`), the switch off (no `--java-mods`) and a jar in `mods-java/`.
+
+```sh
+tools/java_bridge/perf_off.sh 5          # builds the three, runs each 5 times alternating, prints the table
+SKIP_BUILD=1 tools/java_bridge/perf_off.sh 5   # again, same binaries
+```
+
+What runs with the switch off, by reading the code: `opted_in()` once (arguments and two variables),
+one `mods-java/` listing for the log line, nothing else: no JVM, no thread, no library loaded, no
+file of the bridge written. The build adds the bridge's code and its carried sources to the binary.
+
+Machine: AMD Ryzen 5 9600X, AMD Radeon RX 9070 XT (RADV, Vulkan), Fedora 43 (kernel 6.19.12). Upstream
+a27b7f20f, fork 8cff8dbc4. `--benchmark standard`, mean ± stdev over 5 runs each (frames: over every scene's
+flight). Measured 2026-11-05 with `tools/java_bridge/perf_off.sh 5`.
+
+| | Upstream main | java-bridge, no feature | java-mods build, switch off |
+|---|---|---|---|
+| Runs | 5 | 5 | 5 |
+| Start to title (ms) | 772 ± 259 | 687 ± 8 | 676 ± 22 |
+| Start to in-world (ms) | 2678 ± 300 | 2492 ± 68 | 2462 ± 110 |
+| Average FPS | 3699 ± 338 | 3707 ± 383 | 3597 ± 379 |
+| Frame p50 (ms) | 0.25 ± 0.02 | 0.25 ± 0.02 | 0.25 ± 0.02 |
+| Frame p99 (ms) | 0.74 ± 0.13 | 0.74 ± 0.16 | 0.77 ± 0.16 |
+| 1% low FPS | 856 ± 161 | 847 ± 161 | 827 ± 169 |
+| Peak RSS (MB) | 1119 ± 11 | 1116 ± 15 | 1114 ± 12 |
+| Binary (MB) | 89.9 | 87.9 | 93.4 |
+
+**Reading it:** every difference is inside one standard deviation, so with the switch off the bridge costs
+nothing measurable in start time, frame time or memory. The only real cost is the binary: +3.5 MB for the
+`java-mods` build (the bridge's code and its Java sources). The plain build (no feature), which is what upstream
+releases ship, is the same as main.
+
+## The 81-jar test pack (2026-11-05, bridge-perf-1)
 
 What a big Fabric pack costs Horizon: start time, memory, server tick time, and where they go.
 Measured headless with `tools/java_bridge/perf_measure.sh`. Start with this page before tuning.
@@ -24,7 +63,7 @@ CPU and native samples, allocations), the game's log with `HORIZON_JAVA_PROFILE=
 jcmd attaches through `-XX:+StartAttachListener` (the bridge's JVM runs with `-Xrs`, so SIGQUIT,
 which attach uses otherwise, is ignored). `launch.sh` now takes `JAVA_MODS=0` (the Java side off).
 
-## The numbers
+### The numbers
 
 | | Vanilla Horizon | Fabric API alone | Pack, before | Pack, with the tap fix | Pack, fix + `-Xmx3g` |
 |---|---|---|---|---|---|
@@ -42,7 +81,7 @@ which attach uses otherwise, is ignored). `launch.sh` now takes `JAVA_MODS=0` (t
 averages. RSS minus the JVM's committed memory is Horizon's own side (Rust, llvmpipe, the mods'
 content, LWJGL's untracked mallocs): ~1.5 GB vanilla, ~1.7–1.8 GB with the pack.
 
-## Where the server tick goes (pack, standing, after the fix)
+### Where the server tick goes (pack, standing, after the fix)
 
 `HORIZON_JAVA_PROFILE=1`, per server tick (`Java profile (mirror tick)`):
 
@@ -67,7 +106,7 @@ JFR on the server thread (Java and native samples):
   (`EnvironmentAttributeSystem` baked per step, all biomes' layers). Vanilla does the same per
   step. Its biome layer holds the region's `BiomeManager`, so it can't be shared per level.
 
-## Where the memory goes (pack)
+### Where the memory goes (pack)
 
 - **The JVM: 2.1–2.6 GB committed.** Java heap 1.2–1.5 GB committed (the cap is 25% of RAM:
   1.5 GB here), metaspace 212 MB, the CDS archive 228 MB (mapped from its file), code 86 MB,
@@ -90,7 +129,7 @@ JFR on the server thread (Java and native samples):
   as JSON strings) fills the 1.5 GB cap within minutes, and G1 then runs a **full compaction:
   1.85–1.98 s, in every run of the pack**. That is the P99 above.
 
-## Where the start goes (pack, warm content cache, 196 s)
+### Where the start goes (pack, warm content cache, 196 s)
 
 | Phase | Time |
 |---|---|
@@ -104,7 +143,7 @@ JFR on the server thread (Java and native samples):
 Cold adds the content conversion (52 s), but here it overlapped. Cold and warm joined within
 the noise (182 vs 196 s). The CDS archive is written at the first run's end and used after.
 
-## Fixed in this branch
+### Fixed in this branch
 
 1. **The packet tap kept a broken packet's bytes for good** (`HorizonPacketTap.dropLeftover`).
    The tap runs when a mod mixes into `Connection`. In this pack that is FrozenLib's QSL
@@ -124,7 +163,7 @@ the noise (182 vs 196 s). The CDS archive is written at the first run's end and 
    The tap stays on by default (no change). After fix 1 the tap itself costs little here
    (tap off: 145/143/117 ms against 129/155/108, within the noise).
 
-## The 3 biggest cheap wins (next)
+### The 3 biggest cheap wins (next)
 
 1. **Raise the JVM's heap ceiling for big packs** (not done: it trades memory). With `-Xmx3g`
    the 1.9 s full compaction never happened: sprinting P99 2080 → 288 ms, GC pauses 11.0 → 6.7 s, max
@@ -148,7 +187,7 @@ Base64 in JSON, and downsize in Rust's readback. Also: generate the spawn area w
 bakes its models (85 + 22 s, one after the other now), and drop the template manager's cache
 once mods' templates are exported.
 
-## Traps found
+### Traps found
 
 - jcmd can't attach to the bridge's JVM without `-XX:+StartAttachListener` (`-Xrs`).
 - `GC.class_histogram -all` counts dead objects too (it skips the full GC): use it without `-all`.

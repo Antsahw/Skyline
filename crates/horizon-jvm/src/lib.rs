@@ -22,6 +22,7 @@ pub mod content;
 pub mod device;
 pub mod events;
 pub mod facade;
+pub mod gate;
 pub mod gpu;
 pub mod libs;
 pub mod neoforge;
@@ -49,8 +50,13 @@ pub const JAVA_HOME_VAR: &str = "HORIZON_JAVA_HOME";
 /// The game's exit code when the player's Java mods can't start (its log says why).
 pub const NOT_STARTED_EXIT: i32 = 78;
 
-/// The bridge's jar, built by build.rs.
+/// The bridge's jar, built by build.rs; empty in a release build, which carries [`BRIDGE_SRC`].
 const BRIDGE_JAR: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/horizon-bridge.jar"));
+/// The bridge's sources (`java/dev/` and its service file) in a release build
+/// (`HORIZON_BRIDGE_PLATFORM=source`), compiled on the player's machine against the Fabric Loader
+/// fetched there ([`platform::ensure_bridge`]): the build machine reads nothing of Fabric's.
+/// Empty when the jar is built in.
+const BRIDGE_SRC: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/horizon-bridge-src.zip"));
 /// The platform mod (`java/platform/`, Fabric mod `horizon`), built by build.rs against the
 /// prepared game jar and Fabric API; empty when the checkout had no prepared game to build it
 /// against.
@@ -306,6 +312,20 @@ fn write_jar(work: &Path, name: &str, bytes: &[u8]) -> Result<PathBuf, String> {
     Ok(path)
 }
 
+/// The bridge's jar in `work`: a developer's (`HORIZON_JAVA_JARS`), the one built in, or the one
+/// built here from its sources (a release build) against Fabric Loader, fetched into
+/// `work/lib` on this machine. `home`: the Java that compiles it.
+pub(crate) fn bridge_jar(work: &Path, home: &Path) -> Result<PathBuf, String> {
+    let dev = std::env::var_os(DEV_JARS).map(|d| Path::new(&d).join("horizon-bridge.jar"));
+    if !BRIDGE_JAR.is_empty() || dev.as_ref().is_some_and(|d| d.is_file()) {
+        return write_jar(work, "horizon-bridge.jar", BRIDGE_JAR);
+    }
+    let fabric_libs = libs::ensure(&work.join("lib"))?;
+    platform::ensure_bridge(BRIDGE_SRC, home, work, &fabric_libs, &|line| {
+        log::info!("{line}")
+    })
+}
+
 /// Whether this build carries the platform mod (game events for mods).
 pub fn has_platform() -> bool {
     !PLATFORM_JAR.is_empty() || !PLATFORM_SRC.is_empty()
@@ -347,7 +367,7 @@ pub fn start(config: &Config) -> Result<&'static Bridge, String> {
     if let Some(bridge) = BRIDGE.get() {
         return Ok(bridge);
     }
-    let bridge_jar = write_jar(&config.work, "horizon-bridge.jar", BRIDGE_JAR)?;
+    let bridge_jar = bridge_jar(&config.work, &config.home)?;
     let mut class_path = vec![bridge_jar.clone()];
     let mut fabric_libs = Vec::new();
     if config.fabric.is_some() {

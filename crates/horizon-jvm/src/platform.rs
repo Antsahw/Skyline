@@ -1,9 +1,11 @@
-//! The platform mod (`java/platform/`, Fabric mod `horizon`) built on the player's machine: a
-//! build of the game made with no prepared game (a release build: Mojang's jar can't be on a
-//! build machine) carries the platform's sources instead of its jar, and they are compiled once
-//! against the player's own game jar, its libraries, Fabric Loader and Fabric API, with the
-//! Java the mods run on (Mojang's runtime has `javac`), then kept in the bridge's work folder
-//! until the sources or the game jar change.
+//! The bridge's jars built on the player's machine. A release build (`HORIZON_BRIDGE_PLATFORM=
+//! source`: Mojang's jar can't be on a build machine, and nothing of Fabric's is fetched or read
+//! there) carries their sources instead of the jars, compiled once with the Java the mods run on
+//! (Mojang's runtime has `javac`), then kept in the bridge's work folder until their inputs change:
+//! - the bridge's own classes (`java/dev/`, [`ensure_bridge`]), against Fabric Loader and its
+//!   libraries, fetched on this machine;
+//! - the platform mod (`java/platform/`, Fabric mod `horizon`, [`ensure`]), against the player's
+//!   own game jar, its libraries, Fabric Loader and Fabric API.
 
 use sha2::{Digest, Sha256};
 use std::io::{Read, Write};
@@ -15,6 +17,7 @@ const FORMAT: u32 = 1;
 /// The platform jar compiled from `sources` (a zip of `java/platform/`) for `fabric`'s game,
 /// in `work/platform/<key>/`: made now when not there yet. `bridge` is the bridge's jar
 /// (platform classes extend its classes), `fabric_api` Fabric API's jar.
+#[allow(clippy::too_many_arguments)]
 pub fn ensure(
     sources: &[u8],
     home: &Path,
@@ -26,10 +29,79 @@ pub fn ensure(
     game_libraries: &[PathBuf],
     log: &dyn Fn(String),
 ) -> Result<PathBuf, String> {
+    let dir = work.join("platform");
+    let modules = |at: &Path| -> Result<Vec<PathBuf>, String> {
+        let mut class_path: Vec<PathBuf> = fabric_libs.to_vec();
+        class_path.push(game_jar.to_path_buf());
+        class_path.extend(game_libraries.iter().cloned());
+        class_path.extend(fabric_api_modules(
+            fabric_api,
+            &at.join("fabric-api-modules"),
+        )?);
+        class_path.push(bridge.to_path_buf());
+        Ok(class_path)
+    };
+    build(
+        Built {
+            what: "Horizon's platform mod",
+            jar: "horizon-platform.jar",
+        },
+        sources,
+        home,
+        &dir,
+        &[game_jar, bridge],
+        &modules,
+        log,
+    )
+}
+
+/// The bridge's jar compiled from `sources` (a zip of `java/dev/` and its service file) against
+/// Fabric Loader and its libraries (`fabric_libs`, fetched on this machine), in
+/// `work/bridge/<key>/`.
+pub fn ensure_bridge(
+    sources: &[u8],
+    home: &Path,
+    work: &Path,
+    fabric_libs: &[PathBuf],
+    log: &dyn Fn(String),
+) -> Result<PathBuf, String> {
+    let inputs: Vec<&Path> = fabric_libs.iter().map(PathBuf::as_path).collect();
+    build(
+        Built {
+            what: "the Java mod bridge",
+            jar: "horizon-bridge.jar",
+        },
+        sources,
+        home,
+        &work.join("bridge"),
+        &inputs,
+        &|_| Ok(fabric_libs.to_vec()),
+        log,
+    )
+}
+
+/// What [`build`] makes: its name in messages, its jar's file name.
+struct Built {
+    what: &'static str,
+    jar: &'static str,
+}
+
+/// `sources` (a zip: `.java` files, other entries copied into the jar as they are) compiled
+/// against `class_path(dir)` into `dir/<key>/<jar>`, the key over the sources and `inputs`
+/// (path, size, time).
+fn build(
+    built: Built,
+    sources: &[u8],
+    home: &Path,
+    dir: &Path,
+    inputs: &[&Path],
+    class_path: &dyn Fn(&Path) -> Result<Vec<PathBuf>, String>,
+    log: &dyn Fn(String),
+) -> Result<PathBuf, String> {
     let mut key = Sha256::new();
     key.update(format!("format {FORMAT}\n"));
     key.update(sources);
-    for input in std::iter::once(game_jar).chain(std::iter::once(bridge)) {
+    for input in inputs {
         let meta = std::fs::metadata(input).map_err(|e| format!("{}: {e}", input.display()))?;
         let modified = meta
             .modified()
@@ -42,20 +114,24 @@ pub fn ensure(
         .iter()
         .map(|b| format!("{b:02x}"))
         .collect();
-    let dir = work.join("platform").join(&key);
-    let jar = dir.join("horizon-platform.jar");
+    let dir = dir.join(&key);
+    let jar = dir.join(built.jar);
     if jar.is_file() {
         return Ok(jar);
     }
     let javac = javac(home).ok_or_else(|| {
         format!(
-            "the Java in {} has no compiler (javac), which builds the Horizon platform mod once: \
+            "the Java in {} has no compiler (javac), which builds {} once: \
              use a JDK 25 (Mojang's Java for Minecraft has it)",
-            home.display()
+            home.display(),
+            built.what
         )
     })?;
     let started = std::time::Instant::now();
-    log("Java mods: building Horizon's platform mod against this game (once)".into());
+    log(format!(
+        "Java mods: building {} on this machine (once)",
+        built.what
+    ));
     let _ = std::fs::remove_dir_all(&dir);
     let src = dir.join("src");
     let classes = dir.join("classes");
@@ -63,13 +139,14 @@ pub fn ensure(
     let mut files = Vec::new();
     let mut resources = Vec::new();
     let mut archive = zip::ZipArchive::new(std::io::Cursor::new(sources))
-        .map_err(|e| format!("the platform's sources: {e}"))?;
+        .map_err(|e| format!("{}'s sources: {e}", built.what))?;
     for i in 0..archive.len() {
         let mut entry = archive.by_index(i).map_err(|e| e.to_string())?;
         let Some(name) = entry.enclosed_name() else {
             return Err(format!(
-                "unsafe name {:?} in the platform's sources",
-                entry.name()
+                "unsafe name {:?} in {}'s sources",
+                entry.name(),
+                built.what
             ));
         };
         if entry.is_dir() {
@@ -89,12 +166,7 @@ pub fn ensure(
         }
     }
     files.sort();
-    let modules = fabric_api_modules(fabric_api, &dir.join("fabric-api-modules"))?;
-    let mut class_path: Vec<PathBuf> = fabric_libs.to_vec();
-    class_path.push(game_jar.to_path_buf());
-    class_path.extend(game_libraries.iter().cloned());
-    class_path.extend(modules);
-    class_path.push(bridge.to_path_buf());
+    let class_path = class_path(&dir)?;
     // An argument file: the class path and the sources are longer than a Windows command line.
     let quote = |p: &Path| format!("\"{}\"", p.display().to_string().replace('\\', "/"));
     let separator = if cfg!(windows) { ";" } else { ":" };
@@ -124,11 +196,12 @@ pub fn ensure(
         let text = String::from_utf8_lossy(&output.stderr);
         let first: Vec<&str> = text.lines().take(12).collect();
         return Err(format!(
-            "javac failed on Horizon's platform mod:\n{}",
+            "javac failed on {}:\n{}",
+            built.what,
             first.join("\n")
         ));
     }
-    let partial = dir.join("horizon-platform.jar.partial");
+    let partial = dir.join(format!("{}.partial", built.jar));
     {
         let file =
             std::fs::File::create(&partial).map_err(|e| format!("{}: {e}", partial.display()))?;
@@ -159,7 +232,8 @@ pub fn ensure(
     let _ = std::fs::remove_dir_all(&src);
     let _ = std::fs::remove_dir_all(&classes);
     log(format!(
-        "Java mods: Horizon's platform mod built in {} ms ({} sources)",
+        "Java mods: {} built in {} ms ({} sources)",
+        built.what,
         started.elapsed().as_millis(),
         files.len()
     ));

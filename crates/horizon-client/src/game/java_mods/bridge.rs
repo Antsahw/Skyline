@@ -9,20 +9,27 @@ const PROBE_CLASSES: &[&str] = &[
     "net/fabricmc/fabric/api/event/lifecycle/v1/ServerTickEvents",
 ];
 
-/// The game argument that turns Fabric mods on for a run (the launcher passes it for an instance
-/// whose "Fabric 26.3 mods (beta)" switch is on).
-const OPT_IN_ARG: &str = "--java-mods";
-/// The same for developers' scripts and servers: `HORIZON_JAVA_MODS=1`.
-const OPT_IN_VAR: &str = "HORIZON_JAVA_MODS";
-
-/// Whether the player turned Fabric mods on for this run ([`OPT_IN_ARG`], [`OPT_IN_VAR`]). Off,
-/// a game built with Java mods plays as the plain one: no Java started (nor downloaded), whatever
-/// `mods-java/` holds.
+/// Whether Fabric mods run in this game (`horizon_jvm::gate`): started by the launcher past its
+/// owner gate (`--java-mods` and `HORIZON_JAVA_MODS_OWNER`), or a developer's harness
+/// (`HORIZON_JAVA_MODS=1`). Otherwise a game built with Java mods plays as the plain one: no Java
+/// started, nothing downloaded (no Fabric, no Java), whatever `mods-java/` holds. `--java-mods`
+/// alone (the game started by hand) says the launcher is needed, once.
 pub(in crate::game) fn opted_in() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| {
-        std::env::args().any(|a| a == OPT_IN_ARG)
-            || std::env::var(OPT_IN_VAR).is_ok_and(|v| v == "1")
+        let opt_in = horizon_jvm::gate::this_process();
+        match opt_in {
+            horizon_jvm::gate::OptIn::NoOwner => {
+                log::warn!("Java mods: off: {}", horizon_jvm::gate::NEEDS_LAUNCHER);
+                eprintln!("{}", horizon_jvm::gate::NEEDS_LAUNCHER);
+            }
+            horizon_jvm::gate::OptIn::Developer => log::info!(
+                "Java mods: on for a developer's run ({}=1)",
+                horizon_jvm::gate::DEV_VAR
+            ),
+            _ => {}
+        }
+        opt_in.runs()
     })
 }
 
@@ -39,7 +46,7 @@ pub(in crate::game) fn mod_jars() -> (PathBuf, Vec<PathBuf>) {
         let held = horizon_jvm::jars(&dir).len();
         if held > 0 {
             log::info!(
-                "Java mods: off ({held} jars in {}): start with {OPT_IN_ARG} to run them",
+                "Java mods: off ({held} jars in {}): the launcher runs them, with Fabric 26.3 mods on",
                 horizon_jvm::DIR
             );
         }

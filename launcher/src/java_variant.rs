@@ -19,8 +19,13 @@ use std::process::Command;
 pub const DIR: &str = "java";
 /// What tells the game to run the Fabric mods (`game/java_mods.rs`, `opted_in`).
 pub const OPT_IN_ARG: &str = "--java-mods";
-/// The game's variable that turns Fabric mods on as [`OPT_IN_ARG`] does (developers' scripts).
+/// The game's variable that turns Fabric mods on for developers' harnesses
+/// (`horizon_jvm::gate::DEV_VAR`): never passed by the launcher.
 const OPT_IN_VAR: &str = "HORIZON_JAVA_MODS";
+/// What tells the game, beside [`OPT_IN_ARG`], that this command passed the owner gate
+/// (`horizon_jvm::gate::OWNER_VAR`): without it the game runs no Fabric mods and downloads
+/// nothing for them. Set only by [`switch_command`], which runs on Play's command after the gate.
+pub const OWNER_VAR: &str = "HORIZON_JAVA_MODS_OWNER";
 /// Written once the build is all there.
 const COMPLETE: &str = ".installed";
 /// The Java home the game runs the mods on (`horizon_jvm::JAVA_HOME_VAR`).
@@ -237,10 +242,11 @@ pub fn use_build(tag: &str, program: &Path) -> Result<(), String> {
 /// Java 25 unless there is one: only past the owner gate, when something is missing.
 pub fn ensure(tag: &str, progress: impl Fn(f32)) -> Result<(), String> {
     let fork = fork_commit(tag);
-    if is_installed(tag) && java_home().is_some() && fork.is_none() {
+    if is_installed(tag) && java_home().is_some() && fork.is_none() && has_game_files(tag) {
         return Ok(());
     }
     owner_signed_in()?;
+    ensure_game_files(tag)?;
     if let Some(installed) = fork {
         refresh_from_fork(tag, &installed, &progress);
     }
@@ -250,6 +256,57 @@ pub fn ensure(tag: &str, progress: impl Fn(f32)) -> Result<(), String> {
         })?;
     }
     ensure_java().map(|_| ())
+}
+
+/// The version's own checked copy of the game, `.local/minecraft/<version>/jars/client.jar`, which
+/// Fabric runs as its game jar (with the game's libraries beside it). The plain game reads only
+/// the prepared resources, so a version whose resources were copied from another installed
+/// version (`backend::reuse_prepared`) has none.
+fn game_jar(tag: &str) -> PathBuf {
+    backend::version_dir(tag)
+        .join(".local/minecraft")
+        .join(backend::game_version(tag))
+        .join("jars/client.jar")
+}
+
+fn has_game_files(tag: &str) -> bool {
+    game_jar(tag).is_file()
+}
+
+/// [`game_jar`] and the libraries, past the owner gate: copied, checked, from an installed
+/// version that has them, else imported as Prepare imports them (the player's Minecraft
+/// folder, or Mojang's download for the owner).
+fn ensure_game_files(tag: &str) -> Result<(), String> {
+    if has_game_files(tag) {
+        return Ok(());
+    }
+    let dir = backend::version_dir(tag);
+    let log = |line: &str| eprintln!("{line}");
+    if horizon_prepare::artifacts::reuse_imported(&dir, &log).unwrap_or(false)
+        && has_game_files(tag)
+    {
+        return Ok(());
+    }
+    let log = |line: String| eprintln!("{line}");
+    let minecraft = backend::minecraft_dir(None)?;
+    let (preparer, _) = backend::preparer(tag, &minecraft, backend::MinecraftFrom::Install, &log)?;
+    match preparer {
+        backend::Preparer::Process(mut cmd) => {
+            let status = cmd.status().map_err(|e| format!("Preparing {tag}: {e}"))?;
+            if !status.success() {
+                return Err(format!("Preparing {tag} for Fabric mods failed ({status})"));
+            }
+        }
+        backend::Preparer::InProcess(options) => backend::prepare_in_process(&options, &log)?,
+    }
+    if has_game_files(tag) {
+        Ok(())
+    } else {
+        Err(format!(
+            "Fabric 26.3 mods need Minecraft's own files in {}: prepare {tag} again",
+            game_jar(tag).display()
+        ))
+    }
 }
 
 fn fetch(tag: &str, progress: impl Fn(f32)) -> Result<(), String> {
@@ -339,7 +396,7 @@ pub fn apply(cmd: &mut Command, instance: &crate::instances::Instance) -> Result
     } else {
         // Off means off: a `HORIZON_JAVA_MODS=1` the launcher itself was started with (a
         // developer's shell) would turn them on in the game it starts.
-        cmd.env_remove(OPT_IN_VAR);
+        cmd.env_remove(OPT_IN_VAR).env_remove(OWNER_VAR);
     }
     Ok(())
 }
@@ -382,6 +439,10 @@ pub fn switch_command(cmd: &mut Command) -> Result<(), String> {
             next.env(JAVA_HOME_VAR, home);
         }
     }
+    // Play builds this command only past the owner gate (`client_as`, the window's session,
+    // MCP's `play`): the game runs the mods only with this beside the argument. A developer's
+    // `HORIZON_JAVA_MODS=1` in the launcher's own environment doesn't reach it.
+    next.env_remove(OPT_IN_VAR).env(OWNER_VAR, "1");
     next.arg(OPT_IN_ARG);
     *cmd = next;
     Ok(())
@@ -440,6 +501,9 @@ mod tests {
         let envs: Vec<_> = cmd.get_envs().collect();
         assert!(envs.contains(&("HORIZON_HOME".as_ref(), Some(scratch.as_os_str()))));
         assert!(envs.contains(&("GONE".as_ref(), None)));
+        // The owner gate's word for the game, and never the developers' opt-in.
+        assert!(envs.contains(&(OWNER_VAR.as_ref(), Some("1".as_ref()))));
+        assert!(envs.contains(&(OPT_IN_VAR.as_ref(), None)));
         let _ = fs::remove_dir_all(&scratch);
     }
 }

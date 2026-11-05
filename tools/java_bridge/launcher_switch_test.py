@@ -34,7 +34,8 @@ TAG = "v2099.1.1"
 
 
 def stand_in(path, name, log):
-    path.write_text(f"#!/bin/sh\nprintf '%s|%s|%s\\n' '{name}' \"$*\" \"$PWD\" >> '{log}'\n")
+    # name|arguments|folder|the owner gate's word for the game (HORIZON_JAVA_MODS_OWNER)
+    path.write_text(f"#!/bin/sh\nprintf '%s|%s|%s|%s\\n' '{name}' \"$*\" \"$PWD\" \"$HORIZON_JAVA_MODS_OWNER\" >> '{log}'\n")
     path.chmod(0o755)
 
 
@@ -97,8 +98,8 @@ def main():
     r = run("play")
     ran = played()
     if not gate(r):
-        check(r.returncode == 0 and len(ran) == 1 and ran[0][0] == "plain" and "--java-mods" not in ran[0][1],
-              "off: the plain program, no --java-mods, with jars in mods-java/")
+        check(r.returncode == 0 and len(ran) == 1 and ran[0][0] == "plain" and "--java-mods" not in ran[0][1]
+              and ran[0][3] == "", "off: the plain program, no --java-mods, with jars in mods-java/")
 
     runtime = work / "lh/minecraft/runtime"
 
@@ -120,8 +121,8 @@ def main():
     r = run("play", "--world", "W")
     ran = played()
     gate(r) or check(r.returncode == 0 and len(ran) == 1 and ran[0][0] == "java" and "--java-mods" in ran[0][1].split()
-          and "--world W" in ran[0][1] and ran[0][2] == str(home),
-          "on: the Java mods build with --java-mods, the game's arguments and folder")
+          and "--world W" in ran[0][1] and ran[0][2] == str(home) and ran[0][3] == "1",
+          "on: the Java mods build with --java-mods and the owner gate's word, the game's arguments and folder")
     listed = json.loads(run("instance", "list", "--json").stdout)
     check(any(i["id"] == "horizon" and i["java_mods"] for i in listed), "instance list says java_mods")
 
