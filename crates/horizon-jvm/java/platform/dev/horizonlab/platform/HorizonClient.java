@@ -89,7 +89,38 @@ public final class HorizonClient {
         HorizonDeviceMods.startScan();
         // options.txt is brought up to date by the game's data fixer, as the server's saves are.
         set(Minecraft.class, mc, "fixerUpper", net.minecraft.util.datafix.DataFixers.getDataFixer());
+        // The GPU device first, as Minecraft's constructor makes its window and device before
+        // its options: options.txt's load asks the device (its anisotropy, mods' options read
+        // RenderSystem.getDevice(): "Can't getDevice() before it was initialized").
+        HorizonGpu.install();
+        // Its frame rate limiter, which options.txt's load sets (maxFps): a value holder here.
+        set(Minecraft.class, mc, "framerateLimitTracker",
+                Natives.allocate(com.mojang.blaze3d.platform.FramerateLimitTracker.class));
+        // The client's codecs' types (ClientBootstrap: Minecraft's main runs it before the game
+        // starts): mods' resource reloads parse atlas sources and item models with them (a
+        // config library's GUI atlas: "Unknown element id: minecraft:directory").
+        try {
+            net.minecraft.client.ClientBootstrap.bootstrap();
+        } catch (Throwable t) {
+            Natives.log("Horizon's client: the client's bootstrap stopped at " + t);
+        }
+        // Its window (sized below), and while the options load, options that answer what their
+        // load asks the client (the GUI scale's range: isEnforceUnicode, the window's scale), as
+        // Minecraft's constructor has its window before its options. Before, every start logged
+        // "Failed to load options" (Options.forceUnicodeFont() on null).
+        set(Minecraft.class, mc, "window", Natives.allocate(com.mojang.blaze3d.platform.Window.class));
+        try {
+            var early = (net.minecraft.client.Options) Natives.allocate(net.minecraft.client.Options.class);
+            set(net.minecraft.client.Options.class, early, "forceUnicodeFont",
+                    net.minecraft.client.OptionInstance.createBoolean("options.forceUnicodeFont", false));
+            set(Minecraft.class, mc, "options", early);
+        } catch (Throwable t) {
+            Natives.log("Horizon's client: no options for the options' load: " + t);
+        }
         set(Minecraft.class, mc, "options", new net.minecraft.client.Options(mc, mc.gameDirectory));
+        // Key names in text (Component.keybind: Create's "Release Right Button to Confirm"), as
+        // Minecraft's constructor sets them: the key bindings' names, not their ids.
+        net.minecraft.network.chat.contents.KeybindResolver.setKeyResolver(KeyMapping::createNameSupplier);
         set(Minecraft.class, mc, "font", font());
         // A mouse, which screens focus their widgets for.
         set(Minecraft.class, mc, "lastInputType", net.minecraft.client.InputType.MOUSE);
@@ -118,6 +149,18 @@ public final class HorizonClient {
         // (the hearts' jitter).
         set(net.minecraft.client.gui.Hud.class, hud, "minecraft", mc);
         set(net.minecraft.client.gui.Hud.class, hud, "random", net.minecraft.util.RandomSource.create());
+        // What its field initializers and constructor set that mods' parts of it read: the held
+        // item's name's last item (Immersive Hotbar's tooltip read it: null), the vignette, the
+        // title times, the spectator menu.
+        set(net.minecraft.client.gui.Hud.class, hud, "lastToolHighlight", net.minecraft.world.item.ItemStack.EMPTY);
+        set(net.minecraft.client.gui.Hud.class, hud, "vignetteBrightness", 1.0F);
+        hud.resetTitleTimes();
+        try {
+            set(net.minecraft.client.gui.Hud.class, hud, "waypointStyles", new net.minecraft.client.resources.WaypointStyleManager());
+            set(net.minecraft.client.gui.Hud.class, hud, "spectatorGui", new net.minecraft.client.gui.components.spectator.SpectatorGui(mc));
+        } catch (Throwable t) {
+            Natives.log("Horizon's client: the HUD's spectator menu or waypoint styles couldn't be made: " + t);
+        }
         // Its contextual bar (experience, locator, a mount's jump) as its constructor makes it:
         // vanilla's hotbar run inside a mod's wrap of it (Create's) picks one each frame. (The
         // ContextualInfo enum is private: by name.)
@@ -230,7 +273,6 @@ public final class HorizonClient {
         set(Minecraft.class, mc, "gameRenderer", renderer);
         // Its level extractor, which mods ask to redraw (LevelExtractorMixin: nothing to redraw).
         set(Minecraft.class, mc, "levelExtractor", Natives.allocate(net.minecraft.client.renderer.extract.LevelExtractor.class));
-        set(Minecraft.class, mc, "window", Natives.allocate(com.mojang.blaze3d.platform.Window.class));
         windowSize();
         // Its mouse and keyboard handlers (mods' screens call them: JourneyMap's onButton).
         mouseAt(0, 0);
@@ -245,9 +287,13 @@ public final class HorizonClient {
             Natives.log("Horizon's client: no language manager: " + t);
         }
         language(mc.options.languageCode);
-        // A GPU device (RenderSystem.getDevice()) on Horizon's wgpu, for mods that draw with
-        // the GPU (Xaero's minimap): HorizonGpu.
-        HorizonGpu.install();
+        // A particle engine that hands mods' particles to Horizon's (HorizonParticles).
+        set(Minecraft.class, mc, "particleEngine", new HorizonParticles());
+        // Item and block models, until the client's own load (models(), with a GPU; never
+        // without one): a model manager with none baked and a resolver that keeps items for
+        // Horizon to draw (ItemModelResolverMixin), so the HUD's hotbar, the hands' tick and
+        // mods asking for them don't fail on null.
+        standInModels();
         Natives.log("Horizon's headless client is up");
     }
 
@@ -1559,6 +1605,52 @@ public final class HorizonClient {
      */
     /** Each player's client ticks left with the attack key down (a click's press). */
     private static final java.util.Map<java.util.UUID, Integer> ATTACK_HELD = new java.util.concurrent.ConcurrentHashMap<>();
+    /**
+     * Vanilla's use key, down while the player's right click lasts: their game sends a use
+     * every 4 ticks while it is held (rightClickDelay), so it is down for 6 ticks after each
+     * (Create's value boxes open their settings when the click is held).
+     */
+    private static final java.util.Map<java.util.UUID, Integer> USE_HELD = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final int USE_TICKS = 6;
+    /** Players whose use button is down, as their game told (bindMouse: when mods take every button). */
+    private static final java.util.Set<java.util.UUID> USE_DOWN = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    /**
+     * The client's part of using a block before the server hears of it
+     * (MultiPlayerGameMode.useItemOn, before its prediction sends the packet): the mods'
+     * injections there, as the player's client (Create's value boxes, the mechanical arm's
+     * and the chain conveyor's selections, super glue...). One that ends the use with a
+     * result takes the click: the server's use never runs, as no packet is sent. Null: none did.
+     */
+    public static net.minecraft.world.InteractionResult useBlockFirst(net.minecraft.server.level.ServerPlayer player,
+                                                                       net.minecraft.world.InteractionHand hand,
+                                                                       net.minecraft.world.phys.BlockHitResult hit) {
+        if (minecraft == null || minecraft.font == null || minecraft.gameMode == null) return null;
+        USE_HELD.put(player.getUUID(), USE_TICKS);
+        if (!HorizonHooks.hasMerged(net.minecraft.client.multiplayer.MultiPlayerGameMode.class, "useItemOn",
+                "INVOKE Lnet/minecraft/client/multiplayer/MultiPlayerGameMode;startPrediction")) return null;
+        net.minecraft.world.InteractionResult[] out = {null};
+        try {
+            inWorld(player, () -> withKeys(player.getUUID(), () -> {
+                HorizonServer.clientHalf = Thread.currentThread();
+                try {
+                    var r = HorizonHooks.fireMergedSkipping(minecraft.gameMode, net.minecraft.client.multiplayer.MultiPlayerGameMode.class,
+                            "useItemOn", "INVOKE Lnet/minecraft/client/multiplayer/MultiPlayerGameMode;startPrediction", true,
+                            minecraft.player, hand, hit);
+                    if (r.cancelled() && r.returnValue() instanceof net.minecraft.world.InteractionResult result) out[0] = result;
+                    tasks();
+                } finally {
+                    HorizonServer.clientHalf = null;
+                }
+            }));
+        } catch (Throwable t) {
+            Throwable root = t;
+            while (root.getCause() != null && root.getCause() != root) root = root.getCause();
+            Natives.log("Horizon's client: the client side of using a block failed: " + root);
+            HorizonFailures.report("using a block", root);
+        }
+        return out[0];
+    }
     private static final int CLICK_TICKS = Integer.getInteger("horizon.clickTicks", 2);
 
     public static boolean startAttack(net.minecraft.server.level.ServerPlayer player, int ticks) {
@@ -1614,14 +1706,7 @@ public final class HorizonClient {
             reloadClientResources();
             // The GPU's shaders: the GUI pipelines' fallback cache over the client's resources
             // (vanilla's and the mods' shaders), as Minecraft's start makes it.
-            if (HorizonGpu.installed() && minecraft.getResourceManager() != null) {
-                try {
-                    net.minecraft.client.renderer.GameRenderer.preloadUiShader(minecraft.getResourceManager());
-                } catch (Throwable t) {
-                    Natives.log("Horizon's client: the GPU's shaders couldn't be loaded: " + t);
-                }
-                models();
-            }
+            if (HorizonGpu.installed() && minecraft.getResourceManager() != null) models();
             HorizonServer.fireEach("ClientLifecycleEvents.CLIENT_STARTED",
                     net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents.CLIENT_STARTED, l -> l.onClientStarted(minecraft));
             reloadAddedListeners();
@@ -1650,6 +1735,7 @@ public final class HorizonClient {
         }
         // In a world: each player's client in turn, standing in their level and looking at what
         // they look at (the one client a vanilla game has), ticked, then its HUD drawn.
+        java.util.Set<Object> tickedLevels = new java.util.HashSet<>();
         for (var player : players) {
             try {
                 inWorld(player, () -> withKeys(player.getUUID(), () -> {
@@ -1661,7 +1747,16 @@ public final class HorizonClient {
                     if (modelsLoaded) HorizonItemModels.exportOnce();
                     long t = HorizonProfile.start();
                     tickOnce();
+                    // The client level's own block entities of mod blocks (ClientLevel's tick of
+                    // them), once a tick per level, as the first of its players.
+                    if (minecraft.level != null) {
+                        HorizonClientBlockEntities.near(minecraft.level, minecraft.player);
+                        if (tickedLevels.add(minecraft.level)) HorizonClientBlockEntities.tick(minecraft.level);
+                    }
                     ATTACK_HELD.computeIfPresent(player.getUUID(), (u, n) -> n > 1 ? n - 1 : null);
+                    USE_HELD.computeIfPresent(player.getUUID(), (u, n) -> n > 1 ? n - 1 : null);
+                    // Their client's ticking sounds (the sound engine's tick).
+                    HorizonSounds.tick(player.getUUID());
                     t = HorizonProfile.add("client: tick", t);
                     // The chunks mods asked for on their own threads (JourneyMap's mapping).
                     HorizonChunks.serveWanted(64);
@@ -1690,6 +1785,8 @@ public final class HorizonClient {
                 }
             }
         }
+        HorizonClientBlockEntities.endTick();
+        HorizonSounds.endTick();
         rest(players.get(0));
     }
 
@@ -1752,11 +1849,20 @@ public final class HorizonClient {
             set(Minecraft.class, minecraft, "blockColors", colors);
             var atlases = new net.minecraft.client.resources.model.sprite.AtlasManager(minecraft.getTextureManager(), 0);
             var skins = (net.minecraft.client.renderer.PlayerSkinRenderCache) Natives.allocate(net.minecraft.client.renderer.PlayerSkinRenderCache.class);
-            var models = new net.minecraft.client.resources.model.ModelManager(colors, atlases, skins);
             // Minecraft's constructor makes its model manager at once, its models filled by the
             // reload: mods' client start reads it (TACZ's item renderers keep
-            // getEntityModels(), a supplier over it). Loaded or not: modelsLoaded().
-            if (minecraft.getModelManager() == null) set(Minecraft.class, minecraft, "modelManager", models);
+            // getEntityModels(), a supplier over it). Loaded or not: modelsLoaded(). The one the
+            // client was made with (standInModels) is the one reloaded.
+            var models = minecraft.getModelManager();
+            if (models == null) {
+                models = new net.minecraft.client.resources.model.ModelManager(colors, atlases, skins);
+                set(Minecraft.class, minecraft, "modelManager", models);
+            } else {
+                Class<?> manager = net.minecraft.client.resources.model.ModelManager.class;
+                set(manager, models, "blockColors", colors);
+                set(manager, models, "atlasManager", atlases);
+                set(manager, models, "playerSkinRenderCache", skins);
+            }
             // The real atlases beside the headless GUI one, from the start: mods ask the
             // client's atlas manager for them as they stitch (Xaero's, for the blocks').
             Class<?> owner = net.minecraft.client.resources.model.sprite.AtlasManager.class;
@@ -1879,6 +1985,28 @@ public final class HorizonClient {
     /** The models' reload under way: reload, model manager, atlas manager, start time, skins. */
     private static Object[] pendingModels;
 
+    /**
+     * The client's model manager and item model resolver from its start, as Minecraft's
+     * constructor makes them before its first resource reload: the manager holds no models
+     * until the reload (models(): with a GPU), the resolver has no manager and keeps the items
+     * it is asked for (ItemModelResolverMixin), as the entity renderers' does. Without them
+     * the HUD's hotbar, the hands' tick and mods' client start failed on null (and with no GPU
+     * they stayed null).
+     */
+    private static void standInModels() {
+        try {
+            if (minecraft.getModelManager() == null) {
+                set(Minecraft.class, minecraft, "modelManager",
+                        new net.minecraft.client.resources.model.ModelManager(null, null, null));
+            }
+            if (minecraft.getItemModelResolver() == null) {
+                set(Minecraft.class, minecraft, "itemModelResolver", new net.minecraft.client.renderer.item.ItemModelResolver(null));
+            }
+        } catch (Throwable t) {
+            Natives.log("Horizon's client: no stand-in models: " + t);
+        }
+    }
+
     /** The models' reload, once it ended: the client's model manager, atlases and fonts from it. */
     private static void finishModels() {
         if (pendingModels == null) return;
@@ -1926,6 +2054,11 @@ public final class HorizonClient {
     private static boolean gpuParts;
     /** The models' reload ended with the models in place. */
     private static volatile boolean modelsLoaded;
+
+    /** Whether the client's models are loaded (the model manager holds them). */
+    static boolean modelsReady() {
+        return modelsLoaded;
+    }
     /** The client levels whose level renderer was told of them (levelRendererReady). */
     private static final java.util.Set<net.minecraft.client.multiplayer.ClientLevel> RENDERED_LEVELS =
             java.util.Collections.newSetFromMap(new java.util.WeakHashMap<>());
@@ -2113,6 +2246,64 @@ public final class HorizonClient {
     }
 
     /**
+     * Fabric's play networking addon of a client connection made without its constructor
+     * (whose injection makes it): made as that does, without its start (the session's global
+     * receivers are the global registry's, which HorizonLoop asks itself), and without the
+     * channel registration it would send (Horizon's connection has no channel).
+     */
+    static net.fabricmc.fabric.impl.networking.client.ClientPlayNetworkAddon fabricAddon(
+            net.minecraft.client.multiplayer.ClientPacketListener connection) {
+        if (connection == null) return null;
+        try {
+            var existing = net.fabricmc.fabric.impl.networking.client.ClientNetworkingImpl.getAddon(connection);
+            if (existing != null) return existing;
+            Field slot = null;
+            for (Field f : net.minecraft.client.multiplayer.ClientPacketListener.class.getDeclaredFields()) {
+                if (f.getType() == net.fabricmc.fabric.impl.networking.client.ClientPlayNetworkAddon.class) slot = f;
+            }
+            if (slot == null) return null;
+            var addon = (net.fabricmc.fabric.impl.networking.client.ClientPlayNetworkAddon)
+                    Natives.allocate(net.fabricmc.fabric.impl.networking.client.ClientPlayNetworkAddon.class);
+            for (Class<?> c = addon.getClass(); c != null && c != Object.class; c = c.getSuperclass()) {
+                for (Field f : c.getDeclaredFields()) {
+                    if (java.lang.reflect.Modifier.isStatic(f.getModifiers())) continue;
+                    f.setAccessible(true);
+                    Class<?> t = f.getType();
+                    Object value = null;
+                    if (t == java.util.Map.class) value = new java.util.HashMap<>();
+                    else if (t == java.util.Set.class) value = java.util.Collections.synchronizedSet(new java.util.HashSet<>());
+                    else if (t == java.util.concurrent.locks.ReadWriteLock.class) value = new java.util.concurrent.locks.ReentrantReadWriteLock();
+                    else if (t == java.util.concurrent.atomic.AtomicBoolean.class) value = new java.util.concurrent.atomic.AtomicBoolean();
+                    else if (t == org.slf4j.Logger.class) value = org.slf4j.LoggerFactory.getLogger("ClientPlayNetworkAddon (Horizon)");
+                    else if (t == net.minecraft.network.Connection.class) value = connection.getConnection();
+                    else if (t == Minecraft.class) value = minecraft;
+                    else if (t.isInstance(connection) && f.getName().equals("listener")) value = connection;
+                    else if (f.getName().equals("receiver")) value = net.fabricmc.fabric.impl.networking.client.ClientNetworkingImpl.PLAY;
+                    if (value != null && f.get(addon) == null) f.set(addon, value);
+                }
+            }
+            slot.setAccessible(true);
+            slot.set(connection, addon);
+            return addon;
+        } catch (Throwable t) {
+            Natives.log("Horizon's client: no Fabric networking addon for the client's connection: " + t);
+            return null;
+        }
+    }
+
+    /** A receiver a mod registered on this player's client connection (in game), or null. */
+    static Object connectionReceiver(net.minecraft.server.level.ServerPlayer player, net.minecraft.resources.Identifier channel) {
+        var connection = CONNECTIONS.get(player.getUUID());
+        if (connection == null) return null;
+        try {
+            var addon = net.fabricmc.fabric.impl.networking.client.ClientNetworkingImpl.getAddon(connection);
+            return addon == null ? null : addon.getHandler(channel);
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /**
      * A player's client joining (ClientPacketListener.handleLogin, then the level's spawn:
      * handleSetSpawn), once its client is in a world: the mods' injections into those
      * methods run on its connection, wherever in them they inject (Xaero's minimap starts its
@@ -2156,7 +2347,11 @@ public final class HorizonClient {
             Natives.log("Horizon's client: no spawn for the client's join: " + t);
         }
         // Fabric's own (its networking's injection, skipped in fireConnection): the connection's INIT and
-        // JOIN (Puzzles Lib's client join, and mods listening there).
+        // JOIN (Puzzles Lib's client join, and mods listening there). The connection gets
+        // Fabric's play addon first, as its constructor's injection makes it: receivers mods
+        // register in game, at INIT among others, go to it ("Cannot register receiver while
+        // not in game": ShulkerBoxTooltip).
+        fabricAddon(connection);
         var sender = HorizonLoop.clientSender();
         HorizonServer.fireEach("ClientPlayConnectionEvents.INIT",
                 net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents.INIT, l -> l.onPlayInit(connection, minecraft));
@@ -2340,6 +2535,16 @@ public final class HorizonClient {
             Natives.log("Horizon's client: no client resource manager: " + t);
         }
         clientResources = manager;
+        // The GPU's shaders: the GUI pipelines' fallback cache over the client's resources
+        // (vanilla's and the mods' shaders), as Minecraft's start makes it before its first
+        // reload: mods' reloads stitch atlases with it ("Fallback pipeline cache not yet set").
+        if (HorizonGpu.installed()) {
+            try {
+                net.minecraft.client.renderer.GameRenderer.preloadUiShader(minecraft.getResourceManager());
+            } catch (Throwable t) {
+                Natives.log("Horizon's client: the GPU's shaders couldn't be loaded: " + t);
+            }
+        }
         java.util.concurrent.Executor here = Runnable::run;
         int ran = 0;
         int skipped = 0;
@@ -2359,7 +2564,18 @@ public final class HorizonClient {
             } catch (Throwable t) {
                 Throwable root = t;
                 while (root.getCause() != null && root.getCause() != root) root = root.getCause();
-                Natives.log("Horizon's client: a mod's resource reload (" + listener.getClass().getName() + ") failed: " + root);
+                if (HorizonGpu.installed()) {
+                    // Failed on its own: it may want vanilla's listeners in the same reload (the
+                    // atlases' stitch shared with every listener: Continuity's connected
+                    // textures read it). Run again with the models' reload, as the game's
+                    // reload holds them all.
+                    Natives.log("Horizon's client: a mod's resource reload (" + listener.getClass().getName()
+                            + ") failed alone (" + root + "); it runs again with the models");
+                    AFTER_MODELS.add(listener);
+                    skipped++;
+                } else {
+                    Natives.log("Horizon's client: a mod's resource reload (" + listener.getClass().getName() + ") failed: " + root);
+                }
             }
         }
         Natives.log("Horizon's client: " + ran + " of the mods' resource reload listeners ran over " + packs.size()
@@ -2408,7 +2624,33 @@ public final class HorizonClient {
      * dependencies): it reads the baked models or atlases (Traveler's Backpack's star model,
      * from the ModelManager), which the headless client never bakes; Horizon draws them.
      */
+    /** Vanilla's client reload listeners whose results a mod's listener ordered after them reads. */
+    private static final java.util.Set<String> MODEL_LISTENERS = java.util.Set.of(
+            "minecraft:models", "minecraft:textures", "minecraft:atlas", "minecraft:block_entity_render_dispatcher",
+            "minecraft:entity_render_dispatcher");
+
     private static boolean afterModels(Object listener) {
+        // Fabric's resource loader v1: an ordering after vanilla's atlases or models
+        // (ResourceLoader.addListenerOrdering(ResourceReloaderKeys.Client.ATLAS, id): Continuity).
+        try {
+            var loader = net.fabricmc.fabric.impl.resource.ResourceLoaderImpl.get(net.minecraft.server.packs.PackType.CLIENT_RESOURCES);
+            Class<?> impl = net.fabricmc.fabric.impl.resource.ResourceLoaderImpl.class;
+            @SuppressWarnings("unchecked")
+            var added = (java.util.Map<Object, Object>) field(impl, loader, "addedReloaders");
+            Object id = null;
+            for (var e : added.entrySet()) if (e.getValue() == listener) id = e.getKey();
+            if (id != null) {
+                for (Object order : (java.util.Collection<?>) field(impl, loader, "reloadersOrdering")) {
+                    var first = order.getClass().getDeclaredMethod("first");
+                    var second = order.getClass().getDeclaredMethod("second");
+                    first.setAccessible(true);
+                    second.setAccessible(true);
+                    if (id.equals(second.invoke(order)) && MODEL_LISTENERS.contains(String.valueOf(first.invoke(order)))) return true;
+                }
+            }
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            // No v1 ordering to read: the v0 dependencies below.
+        }
         try {
             var deps = listener.getClass().getMethod("getFabricDependencies").invoke(listener);
             if (!(deps instanceof java.util.Collection<?> list)) return false;
@@ -2495,6 +2737,8 @@ public final class HorizonClient {
         var out = new com.google.gson.JsonArray();
         java.util.Set<Integer> seen = new java.util.TreeSet<>();
         if (!keyPressHandlers().isEmpty() || !sdlKeyHandlers.isEmpty()) out.add(-1);
+        // -200: mods take the mouse wheel while playing (MouseHandler.onScroll's injections).
+        if (!scrollHandlers().isEmpty()) out.add(-200);
         // Mouse buttons as -100 - button: the mods' KeyMappings set to one (TACZ's shoot and aim
         // on the left and right buttons), and every button when mods handle them themselves
         // (MouseHandler.onButton's injections).
@@ -2538,6 +2782,16 @@ public final class HorizonClient {
     private static void bind(java.util.UUID player, com.mojang.blaze3d.platform.InputConstants.Key pressed, boolean down) {
         Keys keys = KEYS.computeIfAbsent(player, p -> new Keys(
                 java.util.concurrent.ConcurrentHashMap.newKeySet(), new java.util.concurrent.ConcurrentHashMap<>()));
+        // Vanilla's use key, when its button's own presses come (mods take every button: the
+        // click's real length, not the uses it repeats).
+        if (minecraft != null && minecraft.options != null && pressed.equals(key(minecraft.options.keyUse))) {
+            if (down) {
+                USE_DOWN.add(player);
+            } else {
+                USE_DOWN.remove(player);
+                USE_HELD.remove(player);
+            }
+        }
         for (KeyMapping mapping : modKeys()) {
             if (!pressed.equals(key(mapping))) continue;
             if (DEBUG_INPUT) Natives.log("bind " + pressed.getName() + (down ? " down" : " up") + ": " + mapping.getName());
@@ -2582,6 +2836,82 @@ public final class HorizonClient {
                     new net.minecraft.client.input.MouseButtonInfo(button, mods), down ? 1 : 0)));
         } catch (Throwable t) {
             Natives.log("Horizon's client: a mouse button failed: " + t);
+        }
+    }
+
+    private static java.util.List<java.lang.reflect.Method> scrollHandlers;
+
+    /** The mods' handlers merged into MouseHandler.onScroll, at whatever point (Create's schematics, trains, elevators). */
+    static synchronized java.util.List<java.lang.reflect.Method> scrollHandlers() {
+        if (scrollHandlers != null) return scrollHandlers;
+        try {
+            scrollHandlers = HorizonHooks.injected(net.minecraft.client.MouseHandler.class, "onScroll", true,
+                    long.class, double.class, double.class);
+        } catch (Throwable t) {
+            Natives.log("Horizon's client: the mods' scroll handlers can't be read: " + t);
+            scrollHandlers = java.util.List.of();
+        }
+        if (!scrollHandlers.isEmpty() || DEBUG_INPUT) {
+            Natives.log("Horizon's client: " + scrollHandlers.size() + " mod scroll handler(s) get the mouse wheel while playing");
+        }
+        return scrollHandlers;
+    }
+
+    /**
+     * The mouse wheel of a player's game while playing (no screen), as MouseHandler.onScroll
+     * gets it: the mods' injections there, as that player's client, before vanilla moves the
+     * hotbar. The player's game moved its hotbar at once (no wait for the mods); when a mod
+     * takes the scroll (cancels: Create's schematic tools, a train's throttle), the hotbar is
+     * put back to {@code slot}, where it was.
+     */
+    static void scroll(java.util.UUID id, double x, double y, int slot) {
+        var handlers = scrollHandlers();
+        var player = HorizonServer.player(id);
+        if (handlers.isEmpty() || player == null || minecraft == null) return;
+        long window = HorizonScreenEvents.windowHandle(minecraft);
+        boolean[] taken = {false};
+        // The slot the wheel turned from is the one in hand as the mods hear it.
+        if (slot >= 0 && slot < 9) player.getInventory().setSelectedSlot(slot);
+        try {
+            inWorld(player, () -> withKeys(id, () -> {
+                // As vanilla scales it (discrete steps by default), which handlers take as a local.
+                boolean discrete = minecraft.options.discreteMouseScroll().get();
+                double sensitivity = minecraft.options.mouseWheelSensitivity().get();
+                double scaledY = (discrete ? Math.signum(y) : y) * sensitivity;
+                var info = new org.spongepowered.asm.mixin.injection.callback.CallbackInfo("onScroll", true);
+                for (var handler : handlers) {
+                    Class<?>[] params = handler.getParameterTypes();
+                    Object[] call = new Object[params.length];
+                    call[0] = window;
+                    call[1] = x;
+                    call[2] = y;
+                    call[3] = info;
+                    for (int i = 4; i < params.length; i++) {
+                        if (params[i] == double.class) call[i] = scaledY;
+                        else if (params[i] == int.class) call[i] = (int) Math.signum(scaledY);
+                        else if (params[i] == float.class) call[i] = (float) scaledY;
+                        else if (params[i] == boolean.class) call[i] = discrete;
+                        else if (params[i] == long.class) call[i] = window;
+                    }
+                    try {
+                        handler.invoke(java.lang.reflect.Modifier.isStatic(handler.getModifiers()) ? null : minecraft.mouseHandler, call);
+                    } catch (ReflectiveOperationException e) {
+                        HorizonFailures.report("the mouse wheel", e.getCause() != null ? e.getCause() : e, handler);
+                    }
+                    if (info.isCancelled()) {
+                        taken[0] = true;
+                        break;
+                    }
+                }
+                tasks();
+            }));
+        } catch (Throwable t) {
+            Natives.log("Horizon's client: the mouse wheel failed: " + t);
+        }
+        if (DEBUG_INPUT) Natives.log("scroll " + y + " to " + handlers.size() + " mod handler(s)" + (taken[0] ? ", taken" : ""));
+        if (taken[0] && slot >= 0 && slot < 9) {
+            HorizonPackets.send(player, new net.minecraft.network.protocol.game.ClientboundSetHeldSlotPacket(slot));
+            player.getInventory().setSelectedSlot(slot);
         }
     }
 
@@ -2692,14 +3022,19 @@ public final class HorizonClient {
             mapping.setDown(keys != null && keys.down().contains(mapping));
             clickCount.setInt(mapping, keys == null ? 0 : keys.clicks().getOrDefault(mapping, 0));
         }
-        // Vanilla's attack key: down while the player's click lasts (startAttack).
+        // Vanilla's attack key: down while the player's click lasts (startAttack); its use key
+        // while their right click does.
         KeyMapping attack = minecraft.options != null ? minecraft.options.keyAttack : null;
         Integer held = ATTACK_HELD.get(player);
         if (attack != null) attack.setDown(held != null && held > 0);
+        KeyMapping use = minecraft.options != null ? minecraft.options.keyUse : null;
+        Integer using = USE_HELD.get(player);
+        if (use != null) use.setDown(USE_DOWN.contains(player) || using != null && using > 0);
         try {
             run.run();
         } finally {
             if (attack != null) attack.setDown(false);
+            if (use != null) use.setDown(false);
             for (KeyMapping mapping : mappings) {
                 int left = clickCount.getInt(mapping);
                 if (keys != null) {
@@ -2957,7 +3292,8 @@ public final class HorizonClient {
             Natives.log("hud: " + graphics.ops().size() + " ops kept, " + graphics.dropped + " vanilla ones left out; parts "
                     + hooked + "; looking at " + (minecraft.hitResult instanceof net.minecraft.world.phys.BlockHitResult b
                     ? b.getBlockPos().toShortString() + " " + minecraft.level.getBlockState(b.getBlockPos())
-                    : String.valueOf(minecraft.hitResult)));
+                    : String.valueOf(minecraft.hitResult)) + "; wearing " + (minecraft.player == null ? "-"
+                    : minecraft.player.getItemBySlot(net.minecraft.world.entity.EquipmentSlot.HEAD)));
         }
         return graphics.ops();
     }
@@ -3398,7 +3734,8 @@ public final class HorizonClient {
         if (screen == null || player == null) return;
         try {
             syncClientMenu(id);
-            as(player, () -> HorizonScreenEvents.tick(screen));
+            // With the player's keys down, as a screen's tick reads them (KeyMapping.isDown).
+            as(player, () -> withKeys(player.getUUID(), () -> HorizonScreenEvents.tick(screen)));
         } catch (Throwable t) {
             Throwable root = t;
             while (root.getCause() != null && root.getCause() != root) root = root.getCause();
@@ -3423,6 +3760,12 @@ public final class HorizonClient {
             if (minecraft.getRunningThread() == null) {
                 set(Minecraft.class, minecraft, "gameThread", Thread.currentThread());
             }
+            // Its packet processor on that thread (mods' own packets' handlers check they run
+            // there: PacketUtils.ensureRunningOnSameThread), the packets queued from others run here.
+            if (minecraft.packetProcessor() == null) {
+                set(Minecraft.class, minecraft, "packetProcessor", new net.minecraft.network.PacketProcessor(minecraft.getRunningThread()));
+            }
+            minecraft.packetProcessor().processQueuedPackets();
             if (runAllTasks == null) {
                 runAllTasks = net.minecraft.util.thread.BlockableEventLoop.class.getDeclaredMethod("runAllTasks");
                 runAllTasks.setAccessible(true);
@@ -3461,6 +3804,11 @@ public final class HorizonClient {
         java.util.UUID id = java.util.UUID.fromString(uuid);
         var in = com.google.gson.JsonParser.parseString(json).getAsJsonObject();
         String kind = in.get("kind").getAsString();
+        if (kind.equals("bind") && in.has("scroll")) {
+            scroll(id, in.has("x") ? in.get("x").getAsDouble() : 0, in.get("scroll").getAsDouble(),
+                    in.has("slot") ? in.get("slot").getAsInt() : -1);
+            return;
+        }
         if (kind.equals("bind") && in.has("mouse")) {
             int button = in.get("mouse").getAsInt();
             boolean down = in.get("down").getAsBoolean();

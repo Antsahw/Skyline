@@ -45,7 +45,13 @@ public abstract class LevelMixin {
     /** Vanilla blocks' block entities are Horizon's (none here); mod blocks' are Java's. */
     @Inject(method = "getBlockEntity", at = @At("HEAD"), cancellable = true)
     private void horizon$blockEntity(BlockPos pos, CallbackInfoReturnable<BlockEntity> cir) {
-        if (HorizonServer.isMirror(this)) cir.setReturnValue(HorizonBlockEntities.get(HorizonServer.serverSide((Level) (Object) this), pos));
+        if (!HorizonServer.isMirror(this)) return;
+        // A client level has its own copies of mods' block entities, as a client does.
+        if (dev.horizonlab.platform.HorizonClient.headless() && (Object) this instanceof net.minecraft.client.multiplayer.ClientLevel client) {
+            cir.setReturnValue(dev.horizonlab.platform.HorizonClientBlockEntities.get(client, pos));
+            return;
+        }
+        cir.setReturnValue(HorizonBlockEntities.get(HorizonServer.serverSide((Level) (Object) this), pos));
     }
 
     @Inject(method = "setBlockEntity", at = @At("HEAD"), cancellable = true)

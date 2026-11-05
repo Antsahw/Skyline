@@ -121,7 +121,10 @@ public final class HorizonLoop {
             }
             return true;
         }
-        var handler = (ClientPlayNetworking.PlayPayloadHandler) ClientNetworkingImpl.PLAY.getHandler(payload.type().id());
+        // The player's connection's own receivers first (ClientPlayNetworking.registerReceiver
+        // while in game: ShulkerBoxTooltip's, at the connection's INIT), then the global ones.
+        var own = (ClientPlayNetworking.PlayPayloadHandler) HorizonClient.connectionReceiver(player, payload.type().id());
+        var handler = own != null ? own : (ClientPlayNetworking.PlayPayloadHandler) ClientNetworkingImpl.PLAY.getHandler(payload.type().id());
         if (handler == null) return false;
         CustomPacketPayload received = carried(payload, net.fabricmc.fabric.impl.networking.PayloadTypeRegistryImpl.CLIENTBOUND_PLAY);
         Runnable delivery = () -> {
@@ -139,6 +142,30 @@ public final class HorizonLoop {
             }
         };
         OUTBOX.add(delivery);
+        return true;
+    }
+
+    /**
+     * Server to client, a mod's own packet type (a Packet of its own class in the play
+     * protocol: Create's OpenScreenPacket for its toolbox and other menus): handled by the
+     * player's client connection, delivered at flush as payloads are. False with no client here.
+     */
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    public static boolean toClientPacket(ServerPlayer player, net.minecraft.network.protocol.Packet<?> packet) {
+        if (!on()) return false;
+        if (DEBUG) Natives.log("loop: server to client packet " + packet.getClass().getName() + " for " + player.getName().getString());
+        OUTBOX.add(() -> {
+            try {
+                HorizonClient.as(player, () -> {
+                    HorizonClient.joinBeforeMessages(player);
+                    var connection = net.minecraft.client.Minecraft.getInstance().getConnection();
+                    if (connection != null) ((net.minecraft.network.protocol.Packet) packet).handle(connection);
+                    HorizonClient.tasks();
+                });
+            } catch (Throwable t) {
+                log("the client of " + packet.getClass().getName() + " failed", t);
+            }
+        });
         return true;
     }
 
@@ -284,6 +311,40 @@ public final class HorizonLoop {
         } finally {
             reading--;
         }
+    }
+
+    /**
+     * Client to server, a mod's own packet type (Create's ValueSettingsPacket: a value box's
+     * new setting): handled by the sending player's server connection, at once on the loop's
+     * thread (queued from another), as payloads are.
+     */
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    public static void toServerPacket(net.minecraft.network.protocol.Packet<?> packet) {
+        ServerPlayer player = HorizonClient.serverPlayer(Minecraft.getInstance().player);
+        boolean elsewhere = loopThread != null && Thread.currentThread() != loopThread;
+        if (player == null && elsewhere) player = HorizonClient.lastPlayer();
+        if (DEBUG) Natives.log("loop: client to server packet " + packet.getClass().getName() + " from "
+                + (player == null ? null : player.getName().getString()));
+        if (player == null || player.connection == null) return;
+        ServerPlayer from = player;
+        Runnable run = () -> {
+            try {
+                // The mirror's server is made without its constructor: its packet processor
+                // (handlers check they run on its thread) is this thread's.
+                var server = from.level().getServer();
+                if (server != null && server.packetProcessor() == null) {
+                    HorizonClient.set(net.minecraft.server.MinecraftServer.class, server, "packetProcessor",
+                            new net.minecraft.network.PacketProcessor(Thread.currentThread()));
+                }
+                ((net.minecraft.network.protocol.Packet) packet).handle(from.connection);
+            } catch (net.minecraft.server.RunningOnDifferentThreadException e) {
+                // Queued on the server's processor: it runs at the server's tick.
+            } catch (Throwable t) {
+                log("the server of " + packet.getClass().getName() + " failed", t);
+            }
+        };
+        if (elsewhere) INBOX.add(run);
+        else run.run();
     }
 
     /** Client messages read now, inside the client code that sent them (on the loop's thread). */

@@ -56,6 +56,17 @@ public abstract class ItemModelResolverMixin {
         ci.cancel();
     }
 
+    /** The hands' tick asks how an item swaps in (no manager: vanilla's defaults). */
+    @Inject(method = "shouldPlaySwapAnimation", at = @At("HEAD"), cancellable = true)
+    private void horizon$swap(ItemStack stack, org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable<Boolean> cir) {
+        if (modelManager == null) cir.setReturnValue(true);
+    }
+
+    @Inject(method = "swapAnimationScale", at = @At("HEAD"), cancellable = true)
+    private void horizon$swapScale(ItemStack stack, org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable<Float> cir) {
+        if (modelManager == null) cir.setReturnValue(1.0F);
+    }
+
     private void horizon$keep(ItemStackRenderState state, ItemStack stack, ItemDisplayContext context, CallbackInfo ci) {
         if (modelManager != null) return;
         state.clear();

@@ -56,23 +56,18 @@ public abstract class ClientLevelMixin {
     }
 
     /**
-     * A particle a mod's client code adds (Create's belt connector between its shafts): the
-     * headless client has no particle engine (vanilla's createParticle on null failed the mod's
-     * whole client tick), so it goes to the client's player as the packet a server would send
-     * (count 0: one particle, its speed the given one), which Horizon's game draws.
+     * A particle a mod's client code adds (Create's belt connector between its shafts): Horizon's
+     * game draws particles, so it goes to the client's player as the packet a server would send
+     * (HorizonParticles), with no distance or particle-setting checks of vanilla's (the
+     * player's game makes those).
      */
     @Inject(method = "doAddParticle", at = @At("HEAD"), cancellable = true)
     private void horizon$particle(net.minecraft.core.particles.ParticleOptions options, boolean force, boolean always,
                                   double x, double y, double z, double xd, double yd, double zd,
                                   org.spongepowered.asm.mixin.injection.callback.CallbackInfo ci) {
-        var mc = net.minecraft.client.Minecraft.getInstance();
-        if (!HorizonServer.isMirror(this) || mc.particleEngine != null) return;
+        if (!HorizonServer.isMirror(this)) return;
         ci.cancel();
-        if (mc.player == null) return;
-        var player = HorizonServer.player(mc.player.getUUID());
-        if (player == null) return;
-        dev.horizonlab.platform.HorizonPackets.forward(player, new net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket(
-                options, force, always, x, y, z, (float) xd, (float) yd, (float) zd, 1.0F, 0));
+        dev.horizonlab.platform.HorizonParticles.send(options, force, always, x, y, z, xd, yd, zd);
     }
 
     private net.minecraft.world.level.Level horizon$server() {

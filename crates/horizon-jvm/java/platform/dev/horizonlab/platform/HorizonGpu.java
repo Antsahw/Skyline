@@ -91,17 +91,30 @@ public final class HorizonGpu implements GpuDeviceBackend {
         var limits = new DeviceLimits(16, d.get("uniformAlign").getAsInt(), d.get("maxTexture").getAsInt(),
                 d.get("maxBuffer").getAsLong(), 0, Math.min(8, d.get("maxColorAttachments").getAsInt()), 1);
         var features = new DeviceFeatures(false, false, false, false, false, false, true, false);
-        var info = new DeviceInfo(d.get("name").getAsString(), "Horizon", d.get("driver").getAsString(), true,
-                "Horizon (wgpu " + d.get("backend").getAsString() + ")", 1.0F, limits, features, Set.of(),
+        // The backend's name says it is neither OpenGL nor Vulkan: mods that branch on it reach
+        // for the native API under vanilla's backends (Async Particles cast the device to a
+        // VulkanDevice at its end of initRenderer, and the device was lost). The wgpu backend
+        // under it is in the driver's line.
+        var info = new DeviceInfo(d.get("name").getAsString(), "Horizon",
+                d.get("driver").getAsString() + " (wgpu " + d.get("backend").getAsString() + ")", true,
+                "Horizon wgpu", 1.0F, limits, features, Set.of(),
                 new HintsAndWorkarounds(false, false, false, false), DeviceType.OTHER);
         device = new HorizonGpu(info);
         try {
             com.mojang.blaze3d.systems.RenderSystem.initRenderer(
                     new com.mojang.renderpearl.frontend.FrontendGpuDevice(device));
         } catch (Throwable t) {
-            Natives.log("Horizon's client: the GPU device failed to start: " + t);
-            device = null;
-            return false;
+            // A mod's injection at initRenderer's end failed: the device is up (vanilla's body
+            // ran), and stays; the mod is told of. Before, every mod lost the GPU (and the
+            // client's models with it) for one mod's failure.
+            if (com.mojang.blaze3d.systems.RenderSystem.tryGetDevice() != null) {
+                Natives.log("Horizon's client: a mod failed as the GPU device started (the device stays): " + t);
+                HorizonFailures.report("the GPU's start", t);
+            } else {
+                Natives.log("Horizon's client: the GPU device failed to start: " + t);
+                device = null;
+                return false;
+            }
         }
         Natives.log("Horizon's client: GPU " + d.get("name").getAsString() + " (" + d.get("backend").getAsString() + ")");
         return true;

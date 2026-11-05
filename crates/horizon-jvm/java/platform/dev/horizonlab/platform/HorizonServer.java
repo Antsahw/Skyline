@@ -2403,6 +2403,16 @@ public final class HorizonServer {
         if (clickTaken(player, level)) return 1;
         var hit = new net.minecraft.world.phys.BlockHitResult(new net.minecraft.world.phys.Vec3(hitX, hitY, hitZ),
                 net.minecraft.core.Direction.from3DDataValue(face), new BlockPos(x, y, z), false);
+        // The client's part first (MultiPlayerGameMode.useItemOn's mods' injections, before the
+        // packet): one that ends the use takes the click, and the server never hears of it.
+        if (client) {
+            var first = HorizonClient.useBlockFirst(player, interaction, hit);
+            if (first != null) {
+                syncInventories();
+                CLICK_TAKEN.put(player.getUUID(), level.getGameTime());
+                return first instanceof net.minecraft.world.InteractionResult.Success success && success.shouldSwing() ? 2 : 1;
+            }
+        }
         net.minecraft.world.InteractionResult[] result = {net.minecraft.world.InteractionResult.PASS};
         fire("ServerPlayerGameMode.useItemOn", () -> result[0] =
                 player.gameMode.useItemOn(player, level, player.getItemInHand(interaction), interaction, hit));

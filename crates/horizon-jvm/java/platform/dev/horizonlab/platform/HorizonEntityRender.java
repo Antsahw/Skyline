@@ -83,7 +83,7 @@ public final class HorizonEntityRender {
         HorizonClient.set(net.minecraft.client.renderer.entity.EntityRenderDispatcher.class, dispatcher, "itemModelResolver", items);
         // Block models once the client's are loaded (modelsLoaded): renderers that draw blocks
         // (Create's contraptions: their blocks through the model set) need the resolver.
-        var blocks = mc.getModelManager() != null ? new net.minecraft.client.renderer.block.BlockModelResolver(mc.getModelManager()) : null;
+        var blocks = HorizonClient.modelsReady() ? new net.minecraft.client.renderer.block.BlockModelResolver(mc.getModelManager()) : null;
         context = new EntityRendererProvider.Context(dispatcher, blocks, items, null, null, models, null,
                 mc.getAtlasManager(), mc.font, null, null);
         // Its renderers by type (renderer(): vanilla's and the mods'), for renderers that draw
