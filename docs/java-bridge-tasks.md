@@ -1806,3 +1806,36 @@ Simple Voice Chat broke in the merge (`voice_test.sh`: 0 tones; voice-1's own ti
 replay-1's `HorizonPacketTap` gave the host's client connection a plain EmbeddedChannel, and
 SVC's host client couldn't read its address. The tap's channel answers a `LocalAddress` now, as
 `memoryConnection`'s does: 34/39 and 36/39; `replaymod flashback pot` pass again.
+
+### gpu 14: Create's parts, mods' own occlusion, neighbour updates, fluids in screens (2026-11-05, branch `bridge-gpu-14`; Claude for iaxivers)
+
+Jars: Create Fly `create-fly-26.3-6.0.9-unofficial.3.jar` (CurseForge 9321329), Fabric API
+0.165.2, JEI 31.17.0.108, Farmer's Delight 3.6.30. 2 cores, llvmpipe. gpu-13 was merged (batch
+11); its list's rest, all generic (java-bridge.md, "Create's parts, neighbour updates, own
+shapes, fluids in screens"):
+- **Pale blue-white square** (presses, mixers, blaze burners): not a sprite: the sky through
+  the floor's face under a basin/burner, hidden by its stand-in vanilla state's full-cube
+  occlusion. Own states now carry their own outline, collision and occlusion (Java exports
+  occlusion; content API 0.2 `outline`/`collision`/`occlusion`; FORMAT 16). Also the "outline
+  bigger than the model" (pipes).
+- **Wrong/missing parts**: the mixer's renderer NPE'd on the server's block entity (client-only
+  behaviours): renderers now draw the client's copy, loaded from the update packet and ticked as a
+  client's (FD's stove now smokes while cooking, as in vanilla). The saw had no renderer (no
+  sprites in its context): its blade draws. The blaze burner's head draws once in its cage
+  (`blaze=none` draws none, as Create). Not reproduced: a doubled head.
+- **Parts staying after breaking**: Horizon's neighbour updates now reach mods' blocks (mods'
+  `updateNeighborsAt` injections, shape updates, neighborChanged): the crank pops off.
+- **Fluids in screens**: `blitTiledSprite` injected: JEI's water is blue, not black.
+- **Water wheel**: turns in flowing and falling water (FlowScore -1). A mod block set in the
+  first ticks (before the mods' states are known) had no block entity: fixed.
+- **Ponder, contraptions**: researched, plans in java-bridge.md (Ponder: hovered stack + key
+  from Horizon's inventory, PonderUI as a mod screen, a real FeatureRenderDispatcher for its
+  picture-in-picture; contraptions: collision boxes from Java into Rust physics, actors untested).
+
+Regress pass: `createparts jeifluids` (new), `create createwhole createmachines contraption
+createitems fluids ber pot placed pot-jei scaffold kinetic nomodcode`. Unit tests: content
+own boxes (horizon-mods), carry boxes (port-pack), occlusion faces (mod_content, ignored set),
+neighbour hook (horizon-world).
+Test on the PC: `regress.py --jars <folder with create-fly*, fabric-api*, jei*> createparts
+jeifluids createmachines`; in game: a basin on the floor (no pale square), a mixer over it on a
+motor, a saw on a motor, a hand crank on a cogwheel then break the cogwheel, JEI search "water".
