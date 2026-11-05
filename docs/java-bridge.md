@@ -252,8 +252,12 @@ saying something works.
   set N recipes`), which reaches REI's client as any mod's payload does.
 - **A screen opened before the client joined is laid out again at the join** (`joined`: its
   `init`). Horizon's world plays while the headless client still loads its models, so a pot
-  could be open before the client joined; REI made no overlay for it then (no world) and its
-  list stayed empty. A vanilla client has no screen open before it joins. Regress `reiscreen`.
+  could be open before the client joined; REI made no overlay for it then (no world). A
+  vanilla client has no screen open before it joins. Still intermittent: REI's list beside that
+  pot is sometimes empty, also when opened again later (1 of 2 runs passed; REI's search ran
+  during its join reload and isn't redone: the old code forced a search, by name). Regress
+  `reiscreen`. A screen opened after REI's reload (the inventory, the pot later in a session)
+  has its list.
 - **A packet handler's injections run in the order its body reaches them**
   (`fireConnection`, `HorizonHooks.injectOrder`): HEAD first, RETURN/TAIL last. REI starts its
   reload at `handleUpdateRecipes`' head and Architectury's recipe event (REI's END stage) fires
@@ -1876,7 +1880,7 @@ in `crates/horizon-jvm crates/horizon-client` finds comments only.)
   through its own GuiGraphics; JEI's start, list, search, uses from its list, R/U over slots,
   over the cooking pot's screen (`pot-jei`); Jade's tooltip and AppleSkin on the HUD; Options →
   Mods' Java settings screens (Jade's, Cloth Config's). Regress `rei jei pot-jei hud
-  modsettings join reiscreen` pass.
+  modsettings join` pass; `reiscreen` intermittent (below).
 - Broken (listed, not patched; their cases stay): **per-player state of these mods on a LAN or
   dedicated server**: REI's and JEI's search text and REI's craftable filter, REI's, Jade's,
   AppleSkin's and AutoConfig mods' settings are one for every player again (`rei-lan`,

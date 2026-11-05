@@ -1556,7 +1556,7 @@ CASES = {
                 # Unanswered, the plugin waits 3 x 30 s and REI's reload with it.
                 check_log(r"REIClientPlugin finished post-reload for END in [0-9.]+ m?s, totaling [0-9.]+ m?s", "REI's join reload ends, not held by the plugin's timeouts")],
         forbid=[r"was sent with no player's client running", r"Incomplete data", r"Missing chunk with index"],
-        look="diamond ore's recipes: Advanced Loot Info's block loot page among them",
+        look="REI reloads at the join with Advanced Loot Info's data (R over diamond ore: its block loot page)",
     ),
     "cloth": dict(
         about="Cloth Config's own settings screen (its demo, from Options > Mods): its icons drawn (a hyphenated mod id's "
