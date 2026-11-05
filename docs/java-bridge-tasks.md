@@ -183,6 +183,9 @@ By area:
   **Blaze burners** work but draw wrong: the blaze head looks doubled/overlapping and a pale
   blue-white flat square under it (the same pale square as the press/mixer report: likely one
   sprite or render type wrong for animated/emissive block-entity parts; gpu-13).
+  **Done in `bridge-client-14`: value boxes (a held right-click opens the settings board in
+  this port; the wheel is generic now too), goggles, the toolbox screen, the frogport's sounds,
+  the `ParticleEngine` NPE.**
   **New kind (client chat): mods' client sounds.** Using Create's frogport: "failed in using a
   block: NullPointerException ... FrogportAudioBehaviour.open". Mods play client sounds through
   vanilla's `SoundManager` (`Minecraft.getSoundManager().play(SoundInstance)`, looping and moving
@@ -305,6 +308,13 @@ chat with no head, Chunky's 0 chunks). The driver: one `screen_test.sh` per mod 
 use a gun; pause; `break` a dirt block in survival).
 
 ### A tester's log (2026-11-05, ~60 mods, mostly client-side: GTX 1060, Linux)
+
+**Done in `bridge-client-14`** (see Reports): the particle engine, the ModelManager/
+ItemModelResolver stand-ins (the root: Async Particles' failure at the GPU's start lost the
+device and so the models), options loaded too early, ShulkerBoxTooltip's receivers, FancyMenu's
+send on a connection made without its constructor, Continuity's atlas and its CTM loader,
+mezz_config's atlas sources and pipeline cache. Not reproduced: `Entity.vicinityCache` (a mod's
+field: Lithium?, not fetched), the client level's view distance 0.
 
 No crash: the world played ~4 minutes and closed normally. Mods: Continuity, Entity Model/Texture
 Features, Async Particles, FancyMenu, Immersive Hotbar, ShulkerBoxTooltip, Legendary Tooltips,
@@ -1798,3 +1808,36 @@ Simple Voice Chat broke in the merge (`voice_test.sh`: 0 tones; voice-1's own ti
 replay-1's `HorizonPacketTap` gave the host's client connection a plain EmbeddedChannel, and
 SVC's host client couldn't read its address. The tap's channel answers a `LocalAddress` now, as
 `memoryConnection`'s does: 34/39 and 36/39; `replaymod flashback pot` pass again.
+
+### Client 14: the client from its start, client block entities, mods' packets, sounds, the wheel (2026-11-05, branch `bridge-client-14`; Claude for iaxivers)
+
+Jars (Modrinth, 26.3 Fabric): Async Particles 26.3.2.1, Immersive Hotbar 1.3.0 (+YACL), EMF 3.3.12,
+ETF 7.2.7, ShulkerBoxTooltip 5.4.3, FancyMenu 3.9.14 (+Konkrete, Melody), Continuity 3.0.1, JEI
+31.17.0.108 (+mezz_config), Xaero's World Map 1.47.2, Fabric API 0.165.2; Create Fly unofficial
+26.3 (CurseForge 9321329, CC0). 2 cores, llvmpipe. Round 11 had already done: client particles
+added through the level (gpu-13), the log4j file (client-12). Everything else below was open.
+All generic (`nomodcode` passes); java-bridge.md, "The client from its start...".
+- **Tester's log**: every failure reproduced with the old jars and gone with the new
+  (`earlyclient`). The root of most: Async Particles' injection at `initRenderer`'s end threw
+  (it casts a device named "vulkan" to vanilla's Vulkan backend), the bridge dropped the GPU
+  device, so no models. Also fixed: options before the device, particle engine, stand-in models,
+  HUD defaults, receivers at INIT, sends on constructor-less connections, Fabric v1 reloader
+  ordering + a failed listener retried with the models, ClientBootstrap and UI shaders first.
+- **Create**: goggles' overlay, value box hover tips and the settings board (hold right-click,
+  pick, release: the motor's speed changes), toolbox screen, frogport sounds. Three generic
+  pieces made them work: client copies of mod block entities (client behaviours), the client's
+  `useItemOn` injections before the server's use, and mods' own `Packet` types both ways.
+- **Wheel**: `MouseHandler.onScroll` injections while playing (fixture `kineticmod` now has
+  Create's pattern); a cancel puts the hotbar back.
+- Shared files touched (small): `game.rs` (one call in the wheel), `game/control.rs` (ctl's
+  `mouse` on a Java client screen), `game/java_screen.rs` (`java_bind_scroll`),
+  `HorizonServer.useBlock` (mixins' area: the client part first), `fixture_mod.sh` (MixinExtras
+  on the class path).
+- Not done: Create's world-drawn outlines (value box frames, Outliner: gpu), looping sounds play
+  once, the toolbox's 3D drawer, Lithium's `vicinityCache` (no jar here).
+Regress: `earlyclient creategoggles createvalue createtoolbox createsounds modscroll` (new) pass;
+see the run below for the old cases.
+Test on the PC: `regress.py --jars <folder with the jars above, create-fly*, fabric-api*>
+earlyclient creategoggles createvalue createtoolbox createsounds modscroll`; in-game with
+Create: goggles on, look at a motor; hold right-click on its side, drag, let go; open a toolbox.
+

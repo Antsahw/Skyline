@@ -716,7 +716,9 @@ impl Game<'_> {
                 self.require_world()?;
                 // A Java mod's client-only screen (opened while the button was held: Create's
                 // value settings) hears the button as the window's would send it.
-                if self.screen == Screen::JavaMod && matches!(button, MouseButton::Left | MouseButton::Right) {
+                if self.screen == Screen::JavaMod
+                    && matches!(button, MouseButton::Left | MouseButton::Right)
+                {
                     let right = button == MouseButton::Right;
                     match arg(2)? {
                         "down" => {

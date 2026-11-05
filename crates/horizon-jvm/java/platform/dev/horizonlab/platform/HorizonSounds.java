@@ -35,6 +35,8 @@ public final class HorizonSounds {
     private record Playing(SoundInstance sound, UUID player, long until) {}
 
     private static final Map<SoundInstance, Playing> PLAYING = new ConcurrentHashMap<>();
+    /** HORIZON_JAVA_DEBUG=sounds: each sound a mod's client code plays. */
+    private static final boolean DEBUG = String.valueOf(System.getenv("HORIZON_JAVA_DEBUG")).contains("sounds");
     private static long tick;
     private static Field volumeField;
     private static Field pitchField;
@@ -62,6 +64,8 @@ public final class HorizonSounds {
             HorizonPackets.forward(player, new ClientboundSoundPacket(event, sound.getSource(), x, y, z, vp[0], vp[1],
                     player.getRandom().nextLong()));
             boolean ticks = sound instanceof TickableSoundInstance;
+            if (DEBUG) Natives.log("sounds: " + id + " for " + player.getName().getString() + " at "
+                    + (int) x + " " + (int) y + " " + (int) z + (ticks ? " (ticking)" : ""));
             PLAYING.put(sound, new Playing(sound, player.getUUID(), ticks ? Long.MAX_VALUE : tick + 20));
             return true;
         } catch (Throwable t) {

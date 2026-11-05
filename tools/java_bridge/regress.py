@@ -283,12 +283,102 @@ CASES = {
               "contraption entity (the mirror's levels have no neighbour updater: the shape updates are "
               "Horizon's) and turns it; its renderer gets the client's block models",
         mods=["create"], optional=["fabric-api"], scene="contraption", timeout=900,
-        steps=['read X Y Z < $S/pos; $C command "clear @s" >/dev/null; $C look-at-block $((X+3)) $((Y+1)) $Z >/dev/null; '
+        # The bearing's side away from its middle: the middle is its value box (Create's client
+        # part takes that click: the rotation mode's settings, as in a vanilla client).
+        steps=['read X Y Z < $S/pos; $C command "clear @s" >/dev/null; $C look-at $(awk "BEGIN{print $X+3.01}") $(awk "BEGIN{print $Y+1.12}") $(awk "BEGIN{print $Z+0.5}") >/dev/null; '
                'sleep 0.5; $C mouse right click >/dev/null; sleep 3; $C block $((X+3)) $((Y+2)) $Z > $S/lifted.json',
                'sleep 2'],
         checks=[check_file("lifted.json", r"minecraft:air", "the planks left the world: they are the contraption's")],
         forbid=[r"no renderer for create:", r"Cannot invoke \"net\.minecraft\.world\.level\.redstone\.CollectingNeighborUpdater", r"failed to tick"],
         look="contraption-1 and contraption-2: the planks on the bearing, turned by different angles",
+    ),
+    "earlyclient": dict(
+        about="A tester's client mods (Async Particles, Immersive Hotbar, EMF/ETF, ShulkerBoxTooltip, FancyMenu, "
+              "Continuity, JEI's mezz_config, Xaero's World Map): the GPU device stays when a mod fails at its "
+              "start (Async Particles cast it to a Vulkan device), options.txt loads, the client has a particle "
+              "engine and models from its start, receivers registered at a connection's INIT, Continuity's "
+              "reloaders run with the atlases",
+        mods=["asyncparticles", "immersivehotbar", "yacl", "emf", "etf", "shulkerboxtooltip", "fancymenu", "konkrete",
+              "melody", "continuity", "jei", "mezzconfig", "xaeroworldmap", "fabric-api"], scene="none", timeout=900,
+        steps=['sleep 20; $C command "give @s minecraft:diamond_sword" >/dev/null; sleep 3'],
+        checks=[check_log(r"Horizon's client: GPU ", "the GPU device is up"),
+                check_log(r"block and item models loaded", "the client's models loaded")],
+        forbid=[r"Failed to load options", r"GPU device failed to start", r"\"mc\.particleEngine\" is null",
+                r"Cannot register receiver while not in game", r"Invalid atlas id", r"Unknown element id",
+                r"ModelManager\.\w+\(\)\" because .* is null", r"Fallback pipeline cache not yet set",
+                r"\"stack\" is null", r"pendingActions"],
+        look="earlyclient-1: Xaero's minimap, the hotbar with the sword, no red failure lines in chat",
+    ),
+    "creategoggles": dict(
+        about="Create's client behaviours on the client's own block entities: goggles worn, looking at a creative "
+              "motor shows its stress capacity (a HUD overlay); its value box's hover tip shows",
+        mods=["create"], optional=["fabric-api"], scene="none", env={"HORIZON_JAVA_DEBUG": "hud,cbe"}, timeout=900,
+        steps=['sleep 8; "$R/tools/java_bridge/around.sh" '
+               '\'q "setblock $((X+2)) $Y $Z create:creative_motor[facing=up]"\' '
+               '\'q "setblock $((X+2)) $((Y+1)) $Z create:shaft[axis=y]"\' '
+               '\'q "item replace entity @s armor.head with create:goggles"\' '
+               '\'$C look-at $(p $X+2.5) $(p $Y+0.4) $(p $Z+0.5) >/dev/null; sleep 4\''],
+        checks=[check_log(r"cbe: client copy of com\.zurrtum\.create\.content\.kinetics\.motor\.CreativeMotorBlockEntity",
+                          "the client has its own copy of the motor's block entity"),
+                check_log(r"hud: [1-9]\d* ops kept.*creative_motor.*wearing 1 create:goggles", "the goggles' overlay draws")],
+        forbid=[r"failed in its client tick"],
+        look="creategoggles-1: the motor, a dark tooltip box \"Generator Stats: Kinetic Stress Capacity\" beside the crosshair",
+    ),
+    "createvalue": dict(
+        about="Create's value box (a creative motor's speed): right-click held on it opens its settings screen "
+              "(the client's useItemOn injections run before the server's use; the use key is down while the "
+              "click lasts), a right-click on the board sets the value (its packet type to the server's handler)",
+        mods=["create"], optional=["fabric-api"], scene="none", env={"HORIZON_JAVA_DEBUG": "ber,loop,frames"}, timeout=900,
+        steps=['sleep 8; "$R/tools/java_bridge/around.sh" '
+               '\'q "setblock $((X+2)) $Y $Z create:creative_motor[facing=up]"\' '
+               '\'q "setblock $((X+2)) $((Y+1)) $Z create:shaft[axis=y]"\' '
+               '\'$C look-at-block $((X+2)) $Y $Z west >/dev/null\'; sleep 2',
+               '$C mouse right down >/dev/null; sleep 1.5; $C state > $S/open.json',
+               '$C click-at 360 125 right >/dev/null; sleep 3; $C mouse right up >/dev/null 2>&1; $C state > $S/closed.json'],
+        checks=[check_json("open.json", ["java_screen"], -1, "the settings screen is open while the click is held"),
+                check_log(r"ValueSettingsScreen", "it is Create's value settings screen"),
+                check_json("closed.json", ["screen"], "playing", "the release on the board closed it"),
+                check_log(r"loop: client to server packet com\.zurrtum\.create\.infrastructure\.packet\.c2s\.ValueSettingsPacket",
+                          "its packet reached the server"),
+                check_log(r"ber create:motor at .*ScrollValue:2[0-9][0-9]", "the motor's speed changed (from 16)")],
+        look="createvalue-1: the board \"Generated Speed in RPM\", \"Release Right Button to Confirm\"",
+    ),
+    "createtoolbox": dict(
+        about="Create's toolbox opens its screen: Create's own packet type (OpenScreenPacket) reaches the player's "
+              "client connection, whose packet processor runs it; its menu reads the client's toolbox",
+        mods=["create"], optional=["fabric-api"], scene="none", env={"HORIZON_JAVA_DEBUG": "loop,frames"}, timeout=900,
+        steps=['sleep 8; "$R/tools/java_bridge/around.sh" '
+               '\'q "setblock $((X+2)) $Y $Z create:white_toolbox"\' '
+               '\'$C look-at-block $((X+2)) $Y $Z >/dev/null; sleep 0.5; $C mouse right click >/dev/null; sleep 3; $C state > $S/state.json\''],
+        checks=[check_log(r"loop: server to client packet com\.zurrtum\.create\.infrastructure\.packet\.s2c\.OpenScreenPacket",
+                          "Create's opening reached the client"),
+                check_json("state.json", ["java_screen"], -1, "the toolbox's screen is open")],
+        forbid=[r"PacketProcessor\.isSameThread", r"A mod sent a player a OpenScreenPacket"],
+        look="createtoolbox-1: the toolbox's eight compartments over the inventory",
+    ),
+    "createsounds": dict(
+        about="Mods' client sounds (SoundManager.play from client code: Create's frogport opening, in the client "
+              "half of its use, from its client behaviour) go to the player's game",
+        mods=["create"], optional=["fabric-api"], scene="none", env={"HORIZON_JAVA_DEBUG": "sounds"}, timeout=900,
+        steps=['sleep 8; "$R/tools/java_bridge/around.sh" '
+               '\'q "setblock $((X+2)) $Y $Z create:package_frogport"\' '
+               '\'$C look-at-block $((X+2)) $Y $Z >/dev/null; sleep 1; $C mouse right click >/dev/null; sleep 3\''],
+        checks=[check_log(r"sounds: create:frogport_open for ", "the frogport's opening sound is played")],
+        forbid=[r"FrogportAudioBehaviour", r"failed in using a block"],
+        look="createsounds-1: the frogport's screen",
+    ),
+    "modscroll": dict(
+        about="Mods' injections into MouseHandler.onScroll while playing (kineticmod, as Create's: before the hotbar, "
+              "the scaled offset as a local): a held stick takes the wheel (the hotbar is put back), else it moves",
+        fixtures=["kineticmod"], scene="none", env={"HORIZON_JAVA_DEBUG": "screens"},
+        steps=['sleep 3; $C command "clear @s" >/dev/null; $C command "give @s minecraft:stick" >/dev/null; '
+               '$C command "give @s minecraft:dirt" >/dev/null; sleep 1; $C select 1 >/dev/null; sleep 0.5; '
+               '$C scroll-at 213 120 -1 >/dev/null; sleep 1.5; $C state > $S/taken.json; '
+               '$C select 2 >/dev/null; sleep 0.5; $C scroll-at 213 120 -1 >/dev/null; sleep 1.5; $C state > $S/passed.json'],
+        checks=[check_log(r"horizon_kinetic: scroll -1\.0 taken", "the mod took the wheel over the stick"),
+                check_json("taken.json", ["selected"], 1, "the hotbar stayed on the stick"),
+                check_log(r"horizon_kinetic: scroll -1\.0 passed", "the mod let it pass over dirt"),
+                check_json("passed.json", ["selected"], 3, "the hotbar moved")],
     ),
     "createitems": dict(
         about="Create's items drawn by its own item model types (the wrench, the extendo grip, the backtanks' "
