@@ -778,26 +778,11 @@ pub(crate) fn unpack(archive: &Path, url: &str, to: &Path) -> Result<(), String>
 /// Downloads one release, checks it against its signed checksums and unpacks it; `progress` gets
 /// the fraction done.
 pub fn install(release: &Release, progress: impl Fn(f32)) -> Result<(), String> {
-    let sha256 = release_digest(release, ASSET.unwrap_or_default())?;
-    install_as(release, &release.tag, &sha256, progress)?;
-    crate::java_variant::follow(release, &release.tag);
-    Ok(())
-}
-
-/// The signed SHA-256 of `release`'s file `asset`, or why it must not be installed.
-pub(crate) fn release_digest(release: &Release, asset: &str) -> Result<String, String> {
     let tag = release.tag.as_str();
-    match &release.nightly {
-        // Signed for the Nightly channel, served under its own GitHub tag.
-        Some(published) => crate::signed::nightly_digest(
-            published,
-            asset,
-            &horizon_release_sign::trusted_keys(),
-            fetch_small,
-        ),
-        None if is_game_tag(tag) => signed_digest(tag, asset),
-        None => Err(format!("{tag} is not a Horizon release.")),
-    }
+    let sha256 = release_digest(release, ASSET.unwrap_or_default())?;
+    install_as(release, tag, &sha256, progress)?;
+    crate::java_variant::follow(release, tag);
+    Ok(())
 }
 
 /// Downloads `release`'s archive for this platform, checks it against `sha256` (its signed
@@ -3499,6 +3484,9 @@ impl Settings {
         Ok(())
     }
 }
+
+mod release_digest;
+pub(crate) use release_digest::release_digest;
 
 #[cfg(test)]
 #[path = "backend/release_loading_tests.rs"]

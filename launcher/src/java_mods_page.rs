@@ -19,6 +19,8 @@ pub(super) struct JavaModsTab {
     confirm_remove: Option<String>,
     /// What the last action did, or why it failed.
     note: Option<Result<String, String>>,
+    /// The Fabric 26.3 mods switch's download, while it runs and once it ended.
+    build: Option<JavaBuild>,
 }
 
 /// The switch's download of a version's Java mods build: the version, and how it went once done.
@@ -38,8 +40,10 @@ impl JavaModsTab {
 impl Launcher {
     fn load_java_mods(&mut self, home: PathBuf) {
         if self.java_mods.home.as_ref() != Some(&home) {
+            // Another instance: its own list, the switch's download kept.
             self.java_mods = JavaModsTab {
                 home: Some(home.clone()),
+                build: self.java_mods.build.take(),
                 ..JavaModsTab::default()
             };
         }
@@ -63,14 +67,14 @@ impl Launcher {
         };
         let on = !i.java_mods;
         if let Err(e) = instances::edit(&i.id, |m| m.java_mods = on) {
-            self.java_build = Some(JavaBuild {
+            self.java_mods.build = Some(JavaBuild {
                 tag: String::new(),
                 done: Some(Err(e)),
             });
             return;
         }
         self.reload_instances();
-        self.java_build = None;
+        self.java_mods.build = None;
         if !on {
             return;
         }
@@ -82,7 +86,7 @@ impl Launcher {
         if java_variant::is_installed(&tag) {
             return;
         }
-        self.java_build = Some(JavaBuild {
+        self.java_mods.build = Some(JavaBuild {
             tag: tag.clone(),
             done: None,
         });
@@ -95,7 +99,7 @@ impl Launcher {
 
     /// A switch's download ended.
     pub(super) fn java_build_done(&mut self, tag: String, result: Result<(), String>) {
-        if let Some(build) = self.java_build.as_mut().filter(|b| b.tag == tag) {
+        if let Some(build) = self.java_mods.build.as_mut().filter(|b| b.tag == tag) {
             build.done = Some(result);
         }
     }
@@ -128,7 +132,7 @@ impl Launcher {
              Java. On, once you're signed in with an account that owns Minecraft, the launcher \
              downloads Horizon's build with Java mods, and Java 25 if you have none.",
         ));
-        let state = self.java_build.as_ref().map(|b| match &b.done {
+        let state = self.java_mods.build.as_ref().map(|b| match &b.done {
             None => text(theme::CAPTION)
                 .text_color(t.muted)
                 .child(tr("Downloading the Fabric mods build…").to_string()),
@@ -147,6 +151,32 @@ impl Launcher {
                 .child(about)
                 .children(state),
         )
+    }
+
+    /// Home's Java mods tab and its count, when the selected instance has the switch on.
+    pub(super) fn java_mods_tab_entry(&mut self) -> Option<(home_tabs::HomeTab, Option<usize>)> {
+        self.has_java_mods_tab()
+            .then(|| (home_tabs::HomeTab::JavaMods, Some(self.java_mods_count())))
+    }
+
+    /// The Fabric 26.3 mods tab in the glass look: its buttons above its list (the flat view's
+    /// strip end).
+    pub(super) fn glass_java_mods(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        self.java_mods_section(cx).map(|(actions, list)| {
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(8.))
+                .child(actions)
+                .child(list)
+                .into_any_element()
+        })
+    }
+
+    /// Whether Play (`start_client`) gets the version's Java mods build first: Fabric 26.3 mods
+    /// on for the selected instance, and no pack starting.
+    pub(super) fn java_build_at_play(&self) -> bool {
+        self.starting_pack.is_none() && self.has_java_mods_tab()
     }
 
     /// How many Java mods the selected instance has.
@@ -378,5 +408,15 @@ impl Launcher {
                 }))
                 .child(section.children(rows)),
         ))
+    }
+}
+
+/// Play's thread, before the session: with Fabric 26.3 mods on ([`Launcher::java_build_at_play`]),
+/// the version's Java mods build first, when it isn't there yet; why not goes to the game's log.
+pub(super) fn ensure_at_play(java_build: bool, tag: &str, tx: &Sender<Msg>) {
+    if java_build {
+        if let Err(e) = java_variant::ensure(tag, |_| {}) {
+            let _ = tx.send(Msg::Line(Job::Client, e));
+        }
     }
 }

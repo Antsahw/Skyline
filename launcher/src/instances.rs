@@ -671,10 +671,7 @@ pub fn play_time(played: Duration) -> String {
 /// launcher has them, and options.txt and the offline name when it has none yet.
 pub fn apply(cmd: &mut Command, instance: &Instance) -> Result<(), String> {
     instance.horizon()?;
-    // Fabric 26.3 mods on: the version's Java mods build, told to run them.
-    if instance.java_mods {
-        crate::java_variant::switch_command(cmd)?;
-    }
+    crate::java_variant::apply(cmd, instance)?;
     match instance.kind {
         Kind::Default => return Ok(()),
         Kind::Own => {

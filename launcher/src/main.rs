@@ -447,8 +447,6 @@ struct Launcher {
     screenshots: screenshots_page::Screenshots,
     java_mods: java_mods_page::JavaModsTab,
     shot_blur: glass_shot_blur::ShotBlur,
-    /// The Fabric 26.3 mods switch's download, while it runs and once it ended.
-    java_build: Option<java_mods_page::JavaBuild>,
     game_packs: packs_page::Packs,
     world_packs: datapacks_page::WorldPacks,
     export: Option<export_page::ExportPanel>,
@@ -698,7 +696,6 @@ impl Launcher {
             screenshots: screenshots_page::Screenshots::default(),
             java_mods: java_mods_page::JavaModsTab::default(),
             shot_blur: Default::default(),
-            java_build: None,
             game_packs: packs_page::Packs::default(),
             world_packs: datapacks_page::WorldPacks::default(),
             export: None,
@@ -1746,17 +1743,11 @@ impl Launcher {
         self.starting_client = Some(tag.clone());
         self.play_pressed = Some(Instant::now());
         let tx = self.tx.clone();
-        // Fabric 26.3 mods on: the version's Java mods build first, when it isn't there yet.
-        let java_build =
-            self.starting_pack.is_none() && self.selected_instance().is_some_and(|i| i.java_mods);
+        let java_build = self.java_build_at_play();
         // Fabric mods play only for a signed-in owner: never the developer option's offline pass.
         let offline_without_owner = self.settings.dev_offline && !java_build;
         std::thread::spawn(move || {
-            if java_build {
-                if let Err(e) = horizon_launcher::java_variant::ensure(&tag, |_| {}) {
-                    let _ = tx.send(Msg::Line(Job::Client, e));
-                }
-            }
+            java_mods_page::ensure_at_play(java_build, &tag, &tx);
             backend::complete_assets(&tag);
             let session = account::session_for_game(&backend::game_home(), offline_without_owner);
             let _ = tx.send(Msg::Session(session));
