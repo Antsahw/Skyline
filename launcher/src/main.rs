@@ -5421,9 +5421,6 @@ impl Render for Launcher {
         if let Some(dialog) = self.instance_dialog(cx) {
             root = root.child(dialog);
         }
-        if let Some(dialog) = self.java_mods_warning(cx) {
-            root = root.child(dialog);
-        }
         if let Some(panel) = self.native_log_panel(cx) {
             root = root.child(panel);
         }

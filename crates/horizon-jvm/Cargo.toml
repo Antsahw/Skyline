@@ -6,15 +6,6 @@ license.workspace = true
 rust-version = "1.90"
 description = "Runs Java mods inside Horizon: an embedded JVM, started only when mods-java/ holds jars"
 
-[features]
-# Developers' harnesses only: `HORIZON_JAVA_MODS=1` runs the mods without the launcher's owner
-# record, and `HORIZON_JAVA_MODS_SERVICES` names a stand-in for the Minecraft services (gate.rs).
-# Release builds (java-mods-release.yml, package_java_variant.sh) never enable it.
-dev = []
-# The NeoForge and Forge 1.12 prototypes (neoforge.rs, boot112.rs; docs/java-bridge-neoforge.md,
-# java-bridge-112.md). Off in release builds: they ship Fabric only.
-prototypes = []
-
 [dependencies]
 # The Java mods' blocks, items and assets as Horizon content mods (content.rs): the
 # carry-over step of the modpack porter, fed with facts from the bridge's running game.
@@ -60,10 +51,6 @@ rustls-pki-types = { version = "1", features = ["std"] }
 webpki-roots = "0.26"
 sha2 = "0.10"
 zip = { version = "2", default-features = false, features = ["deflate"] }
-
-[[test]]
-name = "boot112"
-required-features = ["prototypes"]
 
 [dev-dependencies]
 serde_json = "1"

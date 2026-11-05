@@ -7237,7 +7237,7 @@ def main():
     parser.add_argument('--out', default=str(ROOT / '.local/lan-e2e'), help='screenshots and game logs go here')
     # The host's world always runs on its server thread; the flag stays for existing callers.
     parser.add_argument('--server-thread', action='store_true', help=argparse.SUPPRESS)
-    parser.add_argument('--java-mods', help='a folder of Fabric mod jars both games run (a build with java-mods-dev; '
+    parser.add_argument('--java-mods', help='a folder of Fabric mod jars both games run (a build with java-mods; '
                         'the javamobs check needs the crittermod fixture: tools/java_bridge/fixture_mod.sh)')
     args = parser.parse_args()
     global JAVA_MODS

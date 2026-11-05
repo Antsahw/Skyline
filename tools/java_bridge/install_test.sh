@@ -14,21 +14,14 @@
 #   launcher's, after its sign-in) and says why the mods didn't start
 #   OFF=1 ...: without --java-mods, as the launcher starts an instance with its Fabric switch off:
 #   no Java may start (or be downloaded), jars in mods-java/ or not
-#   DIRECT=1 ...: --java-mods without the launcher's owner record (HORIZON_JAVA_MODS_OWNER):
+#   DIRECT=1 ...: --java-mods without the launcher's owner-gate word (HORIZON_JAVA_MODS_OWNER):
 #   the game started by hand. No mods, nothing downloaded, the log says the launcher is needed
 #   (regress `direct`). Steps also see I (the scratch install) and PID (the game's process).
-#   FORGED=word ...: the variable set by hand to the old launcher word (HORIZON_JAVA_MODS_OWNER=1);
-#   FORGED=record ...: a record written by hand (an account in accounts.json, a made-up token),
-#   checked with Mojang's real services, which refuse it (or can't be reached): no mods either way
-#   (regress `forged_word`, `forged_record`).
-# The launcher, past its owner gate, writes an owner record (the owner's UUID and Minecraft token,
-# account::write_owner_record) in its folder's java-mods-owner/ and passes its path in
-# HORIZON_JAVA_MODS_OWNER beside --java-mods (java_variant::switch_command). Unless DIRECT, FORGED
-# or OFF, this script does the same with a test account whose token a stand-in for the Minecraft
-# services on localhost accepts (HORIZON_JAVA_MODS_SERVICES: a java-mods-dev build only).
+# The launcher passes HORIZON_JAVA_MODS_OWNER=1 beside --java-mods past its owner gate
+# (java_variant::switch_command); this script does the same unless DIRECT or OFF.
 R=$(cd "$(dirname "$0")/../.." && pwd)
 OPT_IN=--java-mods; [ -n "$OFF" ] && OPT_IN=
-OWNER=1; [ -n "$DIRECT$OFF$FORGED" ] && OWNER=
+OWNER=1; [ -n "$DIRECT$OFF" ] && OWNER=
 : "${MODS:?MODS: a folder of mod jars}" "${OUT:=/tmp}"
 mkdir -p "$OUT"
 CTL="$R/target/fast/horizon-ctl"
@@ -65,30 +58,10 @@ if [ -z "$jh" ]; then
   done
 fi
 [ -n "$NO_JAVA" ] && jh=
-# The owner record, as the launcher writes it: its account in the launcher's accounts.json.
-uuid=0123456789abcdef0123456789abcdef
-record= services=
-if [ -n "$OWNER" ] || [ "$FORGED" = record ]; then
-  echo "{\"accounts\":[{\"uuid\":\"$uuid\",\"name\":\"Tester\"}],\"selected\":\"$uuid\"}" > "$I/lh/accounts.json"
-  mkdir -p -m 700 "$I/lh/java-mods-owner"
-  record=$I/lh/java-mods-owner/session-test.json
-  token=made-up-by-hand; [ -n "$OWNER" ] && token=regress-token
-  (umask 077; echo "{\"name\":\"Tester\",\"uuid\":\"$uuid\",\"access_token\":\"$token\",\"user_type\":\"msa\"}" > "$record")
-fi
-[ "$FORGED" = word ] && record=1
-if [ -n "$OWNER" ]; then
-  # The stand-in services: this account owns the game, for its token only.
-  python3 -I "$R/tools/java_bridge/fake_services.py" "$uuid" regress-token "$I/services.port" > "$I/services.log" 2>&1 &
-  SERVICES_PID=$!
-  trap 'kill $SERVICES_PID 2>/dev/null' EXIT
-  for _ in $(seq 50); do [ -s "$I/services.port" ] && break; sleep 0.1; done
-  services=http://127.0.0.1:$(cat "$I/services.port")
-fi
 # The game folder is HORIZON_HOME (the launcher starts the game there; horizon-ctl too).
 cd "$I/home"
 env -u HORIZON_ROOT -u HORIZON_JAVA_HOME -u JAVA_HOME -u HORIZON_JAVA_JARS -u JAVA_TOOL_OPTIONS \
-  -u HORIZON_JAVA_MODS -u HORIZON_JAVA_MODS_OWNER -u HORIZON_JAVA_MODS_SERVICES \
-  ${record:+HORIZON_JAVA_MODS_OWNER=$record} ${services:+HORIZON_JAVA_MODS_SERVICES=$services} \
+  -u HORIZON_JAVA_MODS -u HORIZON_JAVA_MODS_OWNER ${OWNER:+HORIZON_JAVA_MODS_OWNER=$OWNER} \
   ${jh:+HORIZON_JAVA_HOME=$jh} PATH=$path HORIZON_JAVA_NO_SYSTEM=$nosys HORIZON_HOME=$I/home HORIZON_LAUNCHER_HOME=$I/lh XDG_DATA_HOME=$I/data XDG_CONFIG_HOME=$I/conf \
   HORIZON_LAUNCHER_NO_SELF_UPDATE=1 HORIZON_NO_AUDIO=1 HORIZON_CTL_LAUNCH_TIMEOUT=900 \
   "$CTL" --socket "$I/ctl.sock" launch --world W --seed "${SEED:-1234}" --creative --wait --offscreen $OPT_IN \

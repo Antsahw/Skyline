@@ -1849,52 +1849,11 @@ pub fn launch(
         }
     }
     if owned {
-        if let Some((account, secrets)) = &pass.owner {
-            if let Ok(mut last) = LAST_OWNER.lock() {
-                *last = Some((account.clone(), secrets.clone(), Instant::now()));
-            }
-        }
         Ok(pass)
     } else {
         Err(NoOwner)
     }
 }
-
-/// The account the last [`launch`] heard own the game from the services, and when: what an owner
-/// record ([`write_owner_record`]) is written from.
-static LAST_OWNER: Mutex<Option<(Account, Secrets, Instant)>> = Mutex::new(None);
-/// How recent that answer must be for the game being started now.
-const OWNER_ANSWER_LIFE: Duration = Duration::from_secs(300);
-
-/// Fabric 26.3 mods' owner record (`horizon_jvm::gate`, docs/java-bridge.md "Ownership"): the
-/// session file of the account the owner gate heard own the game just now (its UUID and
-/// Minecraft token), in `<launcher>/java-mods-owner/`, for the game being started. The game reads
-/// it once, deletes it, checks the account is in `accounts.json` and asks the Minecraft services
-/// with the token itself. None when no owner answered in the last minutes (offline): Fabric mods
-/// then don't start.
-pub fn write_owner_record() -> Result<PathBuf, String> {
-    let last = LAST_OWNER.lock().ok().and_then(|last| last.clone());
-    owner_record(last, &owner_record_dir())
-}
-
-/// [`write_owner_record`] from the owner gate's `last` answer, in `dir`.
-fn owner_record(last: Option<(Account, Secrets, Instant)>, dir: &Path) -> Result<PathBuf, String> {
-    let fresh = last.filter(|(_, _, at)| at.elapsed() <= OWNER_ANSWER_LIFE);
-    let Some((account, secrets, _)) = fresh else {
-        return Err(crate::i18n::tr(OWNER_NOT_CONFIRMED).to_string());
-    };
-    write_launch_session_file(dir, &account, &secrets)
-}
-
-/// Where owner records go: beside `accounts.json`, which the game reads to find the account.
-pub fn owner_record_dir() -> PathBuf {
-    crate::backend::data_dir().join("java-mods-owner")
-}
-
-/// Why Play with Fabric 26.3 mods on can't start them.
-pub const OWNER_NOT_CONFIRMED: &str = "Fabric 26.3 mods need the Minecraft services to confirm \
-     that your account owns Minecraft: Java Edition, and they could not be reached. Connect to \
-     the internet and press Play again, or turn Fabric 26.3 mods off to play offline.";
 
 /// The owner gate before the game starts. With the window's hidden developer option
 /// (`backend::Settings::dev_offline`, `offline_without_owner`) no owner is no refusal: the game

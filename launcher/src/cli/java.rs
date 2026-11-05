@@ -43,15 +43,6 @@ pub(super) enum JavaModsCmd {
         #[arg(long)]
         instance: Option<String>,
     },
-    /// Download the version's Fabric mods build again, the newest that fits it (an installed
-    /// build is never replaced otherwise, but by a new version)
-    Update {
-        /// The installed version (default: the one the instance plays)
-        #[arg(long)]
-        version: Option<String>,
-        #[arg(long)]
-        instance: Option<String>,
-    },
     /// Use a Java mods build of your own (a horizon-client built with --features java-mods) as an
     /// installed version's, in place of a download
     UseBuild {
@@ -147,17 +138,7 @@ pub(super) fn java_mods(action: Option<JavaModsCmd>, as_json: bool) -> Result<()
                         .into(),
                 );
             }
-            if !i.java_mods_warned {
-                // The window's confirmation, said once: the command itself is the answer.
-                eprintln!("{}", horizon_launcher::i18n::tr(java_variant::WARNING_TITLE));
-                for line in java_variant::WARNING {
-                    eprintln!("  {}", horizon_launcher::i18n::tr(line));
-                }
-            }
-            let i = instances::edit(&i.id, |m| {
-                m.java_mods = true;
-                m.java_mods_warned = true;
-            })?;
+            let i = instances::edit(&i.id, |m| m.java_mods = true)?;
             // The version's build now, so Play doesn't wait for it. A version installed later
             // gets its own with it (`java_variant::follow`); Play fetches a missing one.
             if let Ok(tag) = i.resolve_version(None) {
@@ -171,12 +152,6 @@ pub(super) fn java_mods(action: Option<JavaModsCmd>, as_json: bool) -> Result<()
         }
         JavaModsCmd::Off { instance } => {
             let i = instances::edit(&pick(&instance)?.id, |m| m.java_mods = false)?;
-            status(&i);
-        }
-        JavaModsCmd::Update { version, instance } => {
-            let i = pick(&instance)?;
-            let tag = i.resolve_version(version.as_deref())?;
-            java_variant::update(&tag, progress(format!("Fabric mods build of {tag}")))?;
             status(&i);
         }
         JavaModsCmd::UseBuild {

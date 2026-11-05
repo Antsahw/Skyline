@@ -21,9 +21,6 @@ pub(super) struct JavaModsTab {
     note: Option<Result<String, String>>,
     /// The Fabric 26.3 mods switch's download, while it runs and once it ended.
     build: Option<JavaBuild>,
-    /// Turning the switch on waits for the player to confirm `java_variant::WARNING` (once per
-    /// instance: `java_mods_warned`).
-    confirm_on: bool,
 }
 
 /// The switch's download of a version's Java mods build: the version, and how it went once done.
@@ -62,39 +59,14 @@ impl Launcher {
         self.selected_instance().is_some_and(|i| i.java_mods)
     }
 
-    /// Turns the selected instance's Fabric 26.3 mods on or off, saved at once. On: first the
-    /// warning (`java_variant::WARNING`) unless the player confirmed it for this instance
-    /// before, then its `mods-java/` is made, and its version's Java mods build downloads unless
-    /// it's there.
+    /// Turns the selected instance's Fabric 26.3 mods on or off, saved at once. On: its
+    /// `mods-java/` is made, and its version's Java mods build downloads unless it's there.
     pub(super) fn flip_java_mods(&mut self) {
-        let Some(i) = self.selected_instance() else {
-            return;
-        };
-        if !i.java_mods && !i.java_mods_warned {
-            self.java_mods.confirm_on = true;
-            return;
-        }
-        self.set_java_mods(!i.java_mods);
-    }
-
-    /// The warning's answer: on, and remembered for this instance; or left off.
-    fn answer_java_mods_warning(&mut self, on: bool) {
-        self.java_mods.confirm_on = false;
-        if on {
-            self.set_java_mods(true);
-        }
-    }
-
-    fn set_java_mods(&mut self, on: bool) {
         let Some(i) = self.selected_instance().cloned() else {
             return;
         };
-        let edited = instances::edit(&i.id, |m| {
-            m.java_mods = on;
-            // Only the confirmation leads here with the warning unread.
-            m.java_mods_warned |= on;
-        });
-        if let Err(e) = edited {
+        let on = !i.java_mods;
+        if let Err(e) = instances::edit(&i.id, |m| m.java_mods = on) {
             self.java_mods.build = Some(JavaBuild {
                 tag: String::new(),
                 done: Some(Err(e)),
@@ -209,118 +181,6 @@ impl Launcher {
                 .child(row)
                 .child(about)
                 .children(state),
-        )
-    }
-
-    /// The warning before Fabric 26.3 mods turn on for the selected instance, over the page.
-    pub(super) fn java_mods_warning(&mut self, cx: &mut Context<Self>) -> Option<Stateful<Div>> {
-        use horizon_theme::glass::{ink, radius};
-        if !self.java_mods.confirm_on {
-            return None;
-        }
-        let t = self.theme;
-        let name = self.selected_instance()?.name.clone();
-        let title = div()
-            .font_weight(FontWeight::SEMIBOLD)
-            .text_size(px(22.))
-            .line_height(px(28.))
-            .text_color(if t.glass { glass_ui::white(ink::FULL) } else { t.ink })
-            .child(tr(java_variant::WARNING_TITLE).to_string());
-        let line = |en: &str, strong: bool| {
-            let color = match (t.glass, strong) {
-                (true, true) => glass_ui::white(ink::FULL),
-                (true, false) => glass_ui::white(ink::BODY),
-                (false, true) => t.ink,
-                (false, false) => t.ink_soft,
-            };
-            text(theme::LABEL).text_color(color).child(tr(en).to_string())
-        };
-        let answers = div()
-            .flex()
-            .items_center()
-            .gap(px(8.))
-            .mt(px(8.))
-            .child(
-                button(
-                    "java-mods-warning-on",
-                    "Turn on Fabric mods",
-                    Kind::Primary,
-                    &t,
-                )
-                .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
-                    this.answer_java_mods_warning(true);
-                    cx.notify();
-                })),
-            )
-            .child(
-                button("java-mods-warning-cancel", "Cancel", Kind::Ghost, &t).on_click(
-                    cx.listener(|this, _: &ClickEvent, _, cx| {
-                        this.answer_java_mods_warning(false);
-                        cx.notify();
-                    }),
-                ),
-            );
-        let body = div()
-            .flex()
-            .flex_col()
-            .gap(px(12.))
-            // A set width: text measured at it wraps where it is drawn.
-            .w(px(520.))
-            .max_w_full()
-            .p(px(32.))
-            .child(
-                text(theme::CAPTION)
-                    .text_color(if t.glass { glass_ui::white(ink::QUIET) } else { t.muted })
-                    .child(name),
-            )
-            .child(title)
-            .child(line(java_variant::WARNING[0], true))
-            .child(line(java_variant::WARNING[1], true))
-            .child(line(java_variant::WARNING[2], false))
-            .child(answers);
-        let card = if t.glass {
-            glass_ui::dialog_plate(radius::MODAL)
-        } else {
-            div().rounded(px(8.)).bg(t.panel).border_1().border_color(t.raised)
-        }
-        .id("java-mods-warning-card")
-        .occlude()
-        .child(body);
-        let scrim = if t.glass {
-            glass_ui::scrim()
-        } else {
-            t.page.opacity(0.8)
-        };
-        Some(
-            div()
-                .id("java-mods-warning")
-                .absolute()
-                .top_0()
-                .left_0()
-                .size_full()
-                .flex()
-                .items_center()
-                .justify_center()
-                .p(px(24.))
-                .occlude()
-                .on_scroll(|_, _, cx| cx.stop_propagation())
-                .children(t.glass.then(glass_ui::scrim_backdrop))
-                .child(
-                    div()
-                        .absolute()
-                        .top_0()
-                        .left_0()
-                        .size_full()
-                        .bg(scrim)
-                        .on_mouse_down(
-                            gpui::MouseButton::Left,
-                            cx.listener(|this, _: &MouseDownEvent, _, cx| {
-                                this.answer_java_mods_warning(false);
-                                cx.notify();
-                            }),
-                        ),
-                )
-                .child(card),
         )
     }
 

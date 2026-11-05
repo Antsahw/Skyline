@@ -564,34 +564,6 @@ fn an_owner_plays_with_a_session() {
     assert!(accounts.selected().unwrap().skin.is_some());
 }
 
-/// Fabric 26.3 mods' owner record: written only from an owner the services confirmed in the
-/// last minutes, as the session file the game reads (horizon-jvm's gate checks it again).
-#[test]
-fn the_owner_record_needs_a_fresh_answer_from_the_services() {
-    let dir = std::env::temp_dir().join(format!("horizon-launcher-owner-{}", std::process::id()));
-    // No answer at all, or one too old: Play with the mods on is refused.
-    assert!(owner_record(None, &dir).is_err());
-    if let Some(old) = Instant::now().checked_sub(OWNER_ANSWER_LIFE + Duration::from_secs(5)) {
-        assert!(owner_record(Some((notch(), secrets("mc-token", true), old)), &dir).is_err());
-    }
-    // The owner gate passing for an owner keeps that answer.
-    let (_, ep) = mock(|_| {});
-    let store = MemoryStore::default();
-    let mut accounts = signed_in(&store, &secrets("mc-token", true));
-    launch(&ep, Some("test-client"), &store, &mut accounts).unwrap();
-    let last = LAST_OWNER.lock().unwrap().clone();
-    assert!(last.as_ref().is_some_and(|(a, _, at)| a.uuid == UUID && at.elapsed() < OWNER_ANSWER_LIFE));
-    let path = owner_record(Some((notch(), secrets("mc-token", true), Instant::now())), &dir).unwrap();
-    let v: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-    assert_eq!((v["uuid"].as_str(), v["access_token"].as_str()), (Some(UUID), Some("mc-token")));
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
-    }
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
 /// A keychain that reads but refuses to keep anything new (#3249).
 struct Refusing(MemoryStore);
 impl SecretStore for Refusing {

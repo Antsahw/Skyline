@@ -51,7 +51,6 @@ fn maker(root: &Path) -> impl Fn(&str) -> Result<Instance, String> + '_ {
             launch: Default::default(),
             java: None,
             java_mods: false,
-            java_mods_warned: false,
         })
     }
 }
