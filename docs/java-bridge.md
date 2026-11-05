@@ -1213,6 +1213,15 @@ gpu-13 made a bearing's contraption assemble, draw and turn. Left:
 
 ## 26.3 facts that cost time
 
+- **One Vulkan device list a process.** On the user's Fedora 43 PC (RX 9070 XT, RADV, vulkan-loader
+  1.4.341, Mesa 25.3.6) a second `vkEnumeratePhysicalDevices` in the process segfaults in the
+  loader (`linux_read_sorted_physical_devices`), even on the same instance: every game with Java
+  mods died opening its window ("the game ran (12 s)" in regress, a core dump, nothing in the
+  log). The window and the Java mods' GPU device now share one instance and adapter, whichever
+  opens first (`gfx::SHARED_INSTANCE`, `horizon_jvm::gpu::SHARED_INSTANCE`, wired in
+  `java_mods/bridge.rs`). Don't add another `wgpu::Instance`/`request_adapter` in the game
+  process. llvmpipe never shows it: only a real GPU does. `coredumpctl info -1` finds it.
+
 - **A client player made without its constructor never ages**: `LocalPlayer.tick` is what moves
   `tickCount` and `attackStrengthTicker`; a mod timing its client by them (Better Combat's
   upswing: `ticksLeft` by `tickCount`) waits forever. The headless client moves both each tick.
