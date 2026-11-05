@@ -2025,10 +2025,6 @@ def fixture(name, cache, against=()):
     if not jar.exists():
         env = dict(os.environ, FIXTURE_CP=":".join(str(j) for j in against))
         r = subprocess.run([str(TOOLS / "fixture_mod.sh"), name, str(jar)], capture_output=True, text=True, env=env)
-    src = ROOT / "crates/horizon-jvm/java/fixtures" / name
-    newest = max((f.stat().st_mtime for f in src.rglob("*") if f.is_file()), default=0)
-    if not jar.exists() or jar.stat().st_mtime < newest:
-        r = subprocess.run([str(TOOLS / "fixture_mod.sh"), name, str(jar)], capture_output=True, text=True)
         if r.returncode != 0 or not jar.exists():
             raise RuntimeError(f"fixture {name} did not build: {r.stderr[-400:]}")
     return jar

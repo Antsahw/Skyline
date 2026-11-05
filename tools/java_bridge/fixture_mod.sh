@@ -18,6 +18,10 @@ CP="$R/.local/minecraft/26.3/jars/client.jar"
 for j in "$R"/.local/minecraft/26.3/libraries/**/*.jar "$R"/.local/bridge/lib/*.jar "$MODULES"/*.jar; do
   CP="$CP:$j"
 done
+# The bridge's own classes (dev.horizonlab.bridge.Natives, which hellomod and testmod log through):
+# compile-only, the game provides them at run time.
+BRIDGE="$(dirname "$MODULES")/horizon-bridge.jar"
+[ -s "$BRIDGE" ] && CP="$CP:$BRIDGE"
 # MixinExtras (@Local, @WrapOperation), which Fabric Loader carries inside its jar.
 X=$(mktemp -d)
 for l in "$R"/.local/bridge/lib/fabric-loader-*.jar; do
