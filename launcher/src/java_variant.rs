@@ -19,6 +19,8 @@ use std::process::Command;
 pub const DIR: &str = "java";
 /// What tells the game to run the Fabric mods (`game/java_mods.rs`, `opted_in`).
 pub const OPT_IN_ARG: &str = "--java-mods";
+/// The game's variable that turns Fabric mods on as [`OPT_IN_ARG`] does (developers' scripts).
+const OPT_IN_VAR: &str = "HORIZON_JAVA_MODS";
 /// Written once the build is all there.
 const COMPLETE: &str = ".installed";
 /// The Java home the game runs the mods on (`horizon_jvm::JAVA_HOME_VAR`).
@@ -333,6 +335,10 @@ pub fn apply(cmd: &mut Command, instance: &crate::instances::Instance) -> Result
     // Fabric 26.3 mods on: the version's Java mods build, told to run them.
     if instance.java_mods {
         switch_command(cmd)?;
+    } else {
+        // Off means off: a `HORIZON_JAVA_MODS=1` the launcher itself was started with (a
+        // developer's shell) would turn them on in the game it starts.
+        cmd.env_remove(OPT_IN_VAR);
     }
     Ok(())
 }
