@@ -6,7 +6,7 @@ and talks with the user. Read this, then [java-bridge.md](java-bridge.md) and
 
 ## The people
 
-- **The user: iaxivers.** Owns the fork `iaxivers/horizon`. Fedora, RX 9070 XT, Ryzen 9600X,
+- **The user: iaxivers.** Owns the fork `iaxivers/horizon-java-bridge`. Fedora, RX 9070 XT, Ryzen 9600X,
   32 GB DDR5, Europe/Oslo. Often on mobile: short replies, plain words, casual is fine. Has
   Claude Max; mind usage but don't be stingy when it matters. Wants honest answers ("is this a
   tragedy?" gets a straight yes/no and why). Tests on his PC in the evenings.

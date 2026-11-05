@@ -1,7 +1,7 @@
 name: java mods release
 run-name: java mods release ${{ github.ref_name }}${{ inputs.dry_run && ' (dry run)' || '' }}
 # The java-bridge fork's own Fabric 26.3 mods build (docs/java-bridge.md, "Fabric mods releases"), opt-in: it runs
-# only in iaxivers/horizon, and only when asked: by pushing the commit to build to the branch `java-mods-build`, or a
+# only in iaxivers/horizon-java-bridge, and only when asked: by pushing the commit to build to the branch `java-mods-build`, or a
 # tag `java-mods-build-<anything>` on it, or by hand. It builds, on GitHub's own runners (no Minecraft jar there, nothing of Mojang's in the archives):
 # - the game with Fabric Java mods (feature java-mods, HORIZON_BRIDGE_PLATFORM=source: the platform mod's sources,
 #   built on the player's machine against their own game), Linux and Windows, as game-build.yml's `<asset>-java`;
@@ -13,7 +13,7 @@ run-name: java mods release ${{ github.ref_name }}${{ inputs.dry_run && ' (dry r
 # version's own release has no `-java` build (launcher/src/java_release.rs). Without the secret it is a dry run.
 #   git push -f origin java-bridge:java-mods-build
 #   git tag java-mods-build-$(date +%F) && git push origin java-mods-build-$(date +%F)
-#   gh workflow run "java mods release" -R iaxivers/horizon --ref java-bridge -f dry_run=false
+#   gh workflow run "java mods release" -R iaxivers/horizon-java-bridge --ref java-bridge -f dry_run=false
 on:
   push:
     branches: [java-mods-build]
@@ -31,7 +31,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   meta:
-    if: github.repository == 'iaxivers/horizon'
+    if: github.repository == 'iaxivers/horizon-java-bridge'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:

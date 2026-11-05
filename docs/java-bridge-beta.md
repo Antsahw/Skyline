@@ -28,7 +28,7 @@ way to play the mods.
 
 ## Get it
 
-Download the fork's launcher from the **[`java-mods` release](https://github.com/iaxivers/horizon/releases/tag/java-mods)**
+Download the fork's launcher from the **[`java-mods` release](https://github.com/iaxivers/horizon-java-bridge/releases/tag/java-mods)**
 and unpack it anywhere:
 
 - **Windows:** `horizon-launcher-windows-x64.zip` → `horizon-launcher.exe`.
@@ -55,7 +55,7 @@ Install the tools:
 Then (about 20 minutes):
 
 ```sh
-git clone -b java-bridge https://github.com/iaxivers/horizon
+git clone -b java-bridge https://github.com/iaxivers/horizon-java-bridge
 cd horizon
 cargo build --profile fast -p horizon-client --features horizon-client/java-mods
 cd launcher && cargo build --release && cd ..
@@ -137,7 +137,7 @@ No need to report these, though tell us if you learn more about them:
 
 ## Reporting a bug
 
-Open an issue at [iaxivers/horizon](https://github.com/iaxivers/horizon) if issues are on, or tell
+Open an issue at [iaxivers/horizon-java-bridge](https://github.com/iaxivers/horizon-java-bridge) if issues are on, or tell
 whoever gave you this guide. One bug per report, with:
 
 1. **What happened, and what you expected**, and the steps to make it happen again if you know them.

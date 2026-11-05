@@ -1,7 +1,7 @@
 # Java mods in Horizon: the bridge, in one page
 
 For Horizon's maintainers. By iaxivers (Windows support by martipops). Branch `java-bridge` of
-[iaxivers/horizon](https://github.com/iaxivers/horizon/tree/java-bridge). Details:
+[iaxivers/horizon-java-bridge](https://github.com/iaxivers/horizon-java-bridge/tree/java-bridge). Details:
 [java-bridge.md](java-bridge.md).
 
 ## What it is

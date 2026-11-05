@@ -1,40 +1,53 @@
-<p align="center">
-  <img src="docs/media/banner.webp" alt="The Horizon website: the game you know, rebuilt in Rust" width="100%">
-</p>
+<h1 align="center">Horizon Java Bridge</h1>
+
+<p align="center"><b>Real Fabric mods, running inside <a href="https://github.com/horizon-rust/horizon">Horizon</a>, the Rust rewrite of Minecraft: Java Edition 26.3.</b></p>
 
 <p align="center">
-  <a href="https://github.com/horizon-rust/horizon/actions/workflows/ci.yml"><img src="https://github.com/horizon-rust/horizon/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
-  <img src="https://img.shields.io/badge/Minecraft-Java%2026.3-5D9C3F" alt="Minecraft Java 26.3">
-  <img src="https://img.shields.io/badge/Rust-stable-B7410E?logo=rust&logoColor=white" alt="Rust">
-  <img src="https://img.shields.io/badge/vanilla%20parity-100%25-F0795A" alt="Vanilla parity 100%">
-  <a href="#project-status"><img src="https://img.shields.io/badge/player--visible%20gaps-0%20open-F0795A" alt="Player-visible gaps open"></a>
-  <img src="https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-2A2470" alt="Linux, macOS and Windows">
+  <img src="https://img.shields.io/badge/Fabric-26.3-DBD0B4" alt="Fabric 26.3">
+  <img src="https://img.shields.io/badge/status-beta-F0795A" alt="Beta">
+  <img src="https://img.shields.io/badge/platform-Linux%20%7C%20Windows-2A2470" alt="Linux and Windows">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-3B2F7E" alt="MIT license"></a>
 </p>
 
 <p align="center">
-  <a href="https://playhorizon.dev"><b>Website</b></a> ·
-  <a href="#download"><b>Download</b></a> ·
-  <a href="https://playhorizon.dev/docs/"><b>Documentation</b></a> ·
-  <a href="https://github.com/horizon-rust/horizon/releases"><b>Release notes</b></a> ·
-  <a href="ROADMAP.md"><b>Roadmap</b></a> ·
-  <a href="#project-status"><b>Project status</b></a> ·
-  <a href="#contributing"><b>Contributing</b></a>
+  <a href="#get-it"><b>Get it</b></a> ·
+  <a href="#what-works"><b>What works</b></a> ·
+  <a href="#how-it-works"><b>How it works</b></a> ·
+  <a href="docs/java-bridge-beta.md"><b>Testers' guide</b></a> ·
+  <a href="https://trello.com/b/2uhi4jkj"><b>Mod tracker</b></a>
 </p>
 
-# Horizon
+> **Unofficial, opt-in, beta.** Made by [iaxivers](https://github.com/iaxivers), with Windows support by [martipops](https://github.com/martipops). Built on [Horizon](https://github.com/horizon-rust/horizon) by Ludovic, who has agreed to take it into the main repository; that work is underway. Not an official Minecraft product, nor approved by or associated with Mojang or Microsoft. No Minecraft code, assets or data are included: you need your own copy of Java Edition 26.3.
 
-Minecraft: Java Edition 26.3, rewritten in Rust. Same worlds, same rules, same terrain, checked against the Java game by more than 300 differential harnesses. Free, open source and unofficial.
+Horizon plays Minecraft in Rust. The bridge lets it play the **mods people already use**: the same Fabric 26.3 jars you'd put in a normal mods folder, unchanged. Horizon keeps running the game (world, mobs, redstone, physics, saving, multiplayer, all rendering); a Java VM inside Horizon runs only the mods' own code, where a mod changes something. Turned off, it's plain Horizon with no Java at all.
 
-> Not an official Minecraft product, nor approved by or associated with Mojang or Microsoft. Horizon contains no Minecraft code, assets or data: you need your own copy of Java Edition 26.3.
+## Get it
 
-## This fork: Fabric mods in Horizon
+You need a Microsoft account that owns Minecraft: Java Edition, and Minecraft 26.3 played once in the official launcher. Playing with mods works only through the launcher, after sign-in: there's no offline way, and nothing for the mods is downloaded before you sign in.
 
-> **Branch `java-bridge`** of [iaxivers/horizon](https://github.com/iaxivers/horizon). Work in progress, not part of upstream Horizon yet.
+1. **Download the launcher** from the [`java-mods` release](https://github.com/iaxivers/horizon-java-bridge/releases/tag/java-mods): `horizon-launcher-linux-x86_64.tar.gz` or `horizon-launcher-windows-x64.zip`. It never updates itself into the main Horizon launcher.
+2. **Start it, sign in,** install a Horizon version and let it prepare from your Minecraft 26.3.
+3. **Turn on "Fabric 26.3 mods (beta)"** under **Launch…** on Home. The launcher downloads the Fabric mods build of the game (signed, checked like the game itself) and Java 25 if you have none.
+4. **Add Fabric 26.3 jars** in the **Java mods** tab and press **Play**. The first start with new mods takes a few minutes.
 
-The Java bridge runs **real Fabric mods for 26.3** inside Horizon. **Horizon's world stays the real one:** Horizon (Rust) keeps running all of vanilla's logic (terrain, blocks, redstone, mobs, physics, the server, saving, rendering). A Java VM in the game's own process loads Fabric Loader and the real 26.3 jar and runs **only the mods' own code** (their mobs, machines, worldgen features, screens) against a mirror of Horizon's world, made lazily as mods read it; what the mods change is written back into Horizon's world. Without mod jars, Java never starts. The goal is big packs, SkyFactory-style, at Horizon's speed.
+Found a bug? Post it with a screenshot or video, your mod list and `logs/latest.log` (in your game folder). The [testers' guide](docs/java-bridge-beta.md) has every step.
 
-**Status (2026-11-05):** an 81-jar pack (165 mods with the ones they bundle) plays on a real PC at about Horizon's own speed, and beta testers are playing their own packs on Linux and Windows. **Off by default:** Java mods only run when you turn on **"Fabric 26.3 mods (beta)"** for an instance in the launcher. The fork's own signed release is set up but not published yet (it waits for its signing key): until then, build it yourself ("From source", below). Horizon's maintainer has asked for it upstream; his two conditions are met (2026-11-04): launcher only, and no code tied to any one mod's internals (a regress check keeps it so).
+<details>
+<summary>Build from source instead</summary>
+
+```sh
+git clone -b java-bridge https://github.com/iaxivers/horizon-java-bridge && cd horizon-java-bridge
+cargo build --profile fast -p horizon-client --features horizon-client/java-mods
+cd launcher && cargo build --release    # Fedora needs libxkbcommon-x11-devel
+horizon-launcher java-mods use-build ../target/fast/horizon-client
+```
+
+Then steps 2–4 above. Start a self-built launcher with `HORIZON_LAUNCHER_NO_SELF_UPDATE=1`.
+</details>
+
+## What works
+
+Of the 60 most-downloaded Fabric 26.3 mods, **39 work**, 4 renderer replacements are left out on purpose (Horizon has its own renderer), 16 play with one feature missing and 1 stops the game ([the survey](docs/java-bridge-survey.md)). An 81-jar pack (166 mods) plays on a real PC.
 
 | Area | Status |
 |---|---|
@@ -55,20 +68,23 @@ The Java bridge runs **real Fabric mods for 26.3** inside Horizon. **Horizon's w
 | Known not working yet | 🐛 Flashback's recording, Chat Heads' heads, Litematica's overlay in the world; on LAN, the host's own REI list (each player running their mods' client, `HORIZON_JAVA_OWN_CLIENT=1`, is still opt-in). TACZ's guns fire and draw, still rough. Testers track mods on [their Trello](https://trello.com/b/2uhi4jkj) |
 | Windows | ✅ builds and plays on Windows 11 (Windows support by [martipops](https://github.com/martipops)); macOS untested |
 
-How it works, the tick flow, 26.3 traps and the test tools: **[docs/java-bridge.md](docs/java-bridge.md)**. What each chat is fixing: [docs/java-bridge-tasks.md](docs/java-bridge-tasks.md).
 
-### Try it
+## How it works
 
-**Through the Horizon launcher only, signed in with a Microsoft account that owns Minecraft: Java Edition.** Nothing for the mods (the Fabric mods build, Java 25) is downloaded before that sign-in, and there is no offline way to play them.
+- **Horizon owns the game.** Rust runs the world, ticks, mobs, physics, saving, networking and every frame.
+- **Java runs only the mods.** A JVM in Horizon's process loads Fabric Loader, the mods and their mixins against the real 26.3 classes from your own install, and handles only what a mod changes; the result goes back into Horizon's world. Mods' screens and drawings are captured and drawn by Horizon's renderer.
+- **Generic, no mod-specific code.** Nothing in the bridge targets one mod's internals; a test fails if a mod's package name appears in its code. Every bug fixed is fixed for every mod.
+- **Off by default.** A cargo feature plus a per-instance launcher switch. Off means no Java, no downloads, no cost.
 
-1. Download the fork's launcher from **[the `java-mods` release](https://github.com/iaxivers/horizon/releases/tag/java-mods)**: `horizon-launcher-linux-x86_64.tar.gz` or `horizon-launcher-windows-x64.zip`. It has the Fabric switch, and never updates itself into the main launcher.
-2. Start it, sign in, install a Horizon version and let it prepare from your Minecraft 26.3.
-3. Turn on **Fabric 26.3 mods (beta)** under **Launch…**: the launcher downloads the Fabric mods game build from the same release (signed, checked like the game) and Java 25 if you have none.
-4. Add jars in the **Java mods** tab and press **Play**.
+Details for developers: **[docs/java-bridge.md](docs/java-bridge.md)** (where everything is, the tick flow, 26.3 traps, the test tools). One-page overview: [docs/java-bridge-pitch.md](docs/java-bridge-pitch.md). Performance numbers: [docs/java-bridge-perf.md](docs/java-bridge-perf.md). Coming next: NeoForge 26.3 ([plan](docs/java-bridge-neoforge.md)) and Forge 1.12 / SkyFactory 4 on Cleanroom ([plan](docs/java-bridge-112.md)).
 
-Every step: the **[testers' guide](docs/java-bridge-beta.md)**. From source instead: `git clone -b java-bridge https://github.com/iaxivers/horizon`, `cargo build --profile fast -p horizon-client --features horizon-client/java-mods`, build `launcher/`, then `horizon-launcher java-mods use-build target/fast/horizon-client`.
+**Tests:** `python3 tools/java_bridge/regress.py --jars <jars>` plays every scene that once worked, headless, with screenshots.
 
-**Tests:** `python3 tools/java_bridge/regress.py --jars <jars>` plays every scene that once worked, headless, with screenshots; `--pack <mods folder> bigpack` plays a whole pack. Add `HORIZON_JAVA_PROFILE=1` to see what the mods cost each tick.
+---
+
+# About Horizon (the game this builds on)
+
+Everything below is [Horizon](https://github.com/horizon-rust/horizon)'s own README: Minecraft: Java Edition 26.3, rewritten in Rust, checked against the Java game by more than 300 differential harnesses. For plain Horizon without mods, use [its own launcher](https://playhorizon.dev).
 
 ## Download
 

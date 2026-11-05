@@ -1,4 +1,4 @@
-# The Java mod bridge (fork `iaxivers/horizon`, branch `java-bridge`)
+# The Java mod bridge (fork `iaxivers/horizon-java-bridge`, branch `java-bridge`)
 
 Fabric Java mods run inside Horizon: a JVM in the game's process runs Fabric Loader with the real
 26.3 jar, mods and all. Horizon stays the game: its world, its server, its rendering. The Java
@@ -2768,9 +2768,9 @@ publishes its own (below).
 
 ### Fabric mods releases (2026-11-05, bridge-release-1)
 
-Testers no longer build: the fork publishes **the `java-mods` pre-release** on iaxivers/horizon
+Testers no longer build: the fork publishes **the `java-mods` pre-release** on iaxivers/horizon-java-bridge
 (`.github/workflows/java-mods-release.yml`), and the fork's launcher installs from it.
-- **Opt-in:** runs only in iaxivers/horizon, only when asked: push the commit to the branch
+- **Opt-in:** runs only in iaxivers/horizon-java-bridge, only when asked: push the commit to the branch
   `java-mods-build` (`git push -f origin java-bridge:java-mods-build`), or a tag
   `java-mods-build-<x>` on it, or `gh workflow run "java mods release" --ref java-bridge -f dry_run=false` (dispatch needs the
   file on the default branch; the tag doesn't). Without the signing key it is a dry run.
@@ -2787,13 +2787,13 @@ Testers no longer build: the fork publishes **the `java-mods` pre-release** on i
   `launcher/java-mods-keys.txt` (never upstream's release-keys.txt). The sign job checks out only
   `tools/ci/sign_release.sh`; publish verifies as launchers do, then replaces the release.
   Set up once: `cargo run -q -p horizon-release-sign -- keygen --public-out java-mods.pub | gh secret
-  set JAVA_MODS_SIGNING_KEY -R iaxivers/horizon`, commit java-mods.pub's line in the keys file.
+  set JAVA_MODS_SIGNING_KEY -R iaxivers/horizon-java-bridge`, commit java-mods.pub's line in the keys file.
   Sign-in needs the repository variable `HORIZON_MSA_CLIENT_ID` (as launcher.yml).
 - **The launcher** (`launcher/src/java_release.rs`, `java_variant::install_from_fork`): when the
   version's own release has no `-java` build, past the owner gate, it takes the fork's: the
   manifest's checksum, the archive's, both from SHA256SUMS signed by a key in java-mods-keys.txt,
   and only if the installed version prepares the manifest's format (`fits`; else "install a
-  newer/older version"). The install marker (`java/.installed`) names `iaxivers/horizon@<commit>`;
+  newer/older version"). The install marker (`java/.installed`) names `iaxivers/horizon-java-bridge@<commit>`;
   before each Play (`ensure`) such a build is replaced by a newer one that fits (best effort). A
   `use-build` build has an empty marker and is never replaced.
 - **Tested:** launcher unit tests `java_release::` (signed by a listed key for the channel; other

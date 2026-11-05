@@ -11,7 +11,7 @@ use std::path::Path;
 /// The repository publishing the builds (a build-time `HORIZON_JAVA_MODS_REPO` overrides it).
 pub const REPO: &str = match option_env!("HORIZON_JAVA_MODS_REPO") {
     Some(repo) => repo,
-    None => "iaxivers/horizon",
+    None => "iaxivers/horizon-java-bridge",
 };
 /// The release's tag, and the channel its checksums are signed for (`horizon release java-mods`).
 pub const TAG: &str = "java-mods";
