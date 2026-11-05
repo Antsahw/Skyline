@@ -12,6 +12,10 @@ use std::{
     io::Read,
     path::Path,
 };
+mod declare;
+mod invisible;
+mod legacy_lang;
+mod texture_namespaces;
 
 #[derive(Debug, Default, Serialize)]
 pub struct Report {
@@ -706,31 +710,7 @@ fn extra_namespaces(
         owned.insert(ns.clone());
         claimed.push(ns);
     }
-    // A namespace holding only the mod's own client textures (no data, no models or block
-    // states: GUI sheets its code draws by name, Cloth Config's `cloth-config2`) is its too:
-    // nothing names those ids in JSON, but its screens need them.
-    for ns in candidates {
-        let (data, assets) = (format!("data/{ns}/"), format!("assets/{ns}/"));
-        let mut textures = false;
-        let only_looks = zip.file_names().filter_map(Result::ok).all(|name| {
-            if name.starts_with(&data) {
-                return false;
-            }
-            match name.strip_prefix(&assets) {
-                Some(rest) if rest.starts_with("textures/") => {
-                    textures = true;
-                    true
-                }
-                Some(rest) => {
-                    rest.starts_with("lang/") || rest.starts_with("sounds") || rest.is_empty()
-                }
-                None => true,
-            }
-        });
-        if only_looks && textures {
-            claimed.push(ns);
-        }
-    }
+    claimed.extend(texture_namespaces::only_textures(zip, candidates));
     claimed.sort();
     claimed
 }
@@ -749,29 +729,6 @@ pub fn namespaces_claimed(
 
 fn contains(haystack: &[u8], needle: &[u8]) -> bool {
     haystack.windows(needle.len()).any(|w| w == needle)
-}
-
-/// `assets/<ns>/lang/<code>.json` for a legacy `assets/<ns>/lang/<code>.lang` (its code
-/// lowercased: `en_US.lang`).
-fn legacy_lang(name: &str) -> Option<String> {
-    let stem = name.strip_suffix(".lang")?;
-    let (dir, code) = stem.rsplit_once('/')?;
-    let parts: Vec<&str> = dir.split('/').collect();
-    (parts.len() == 3 && parts[0] == "assets" && parts[2] == "lang" && !code.is_empty())
-        .then(|| format!("{dir}/{}.json", code.to_ascii_lowercase()))
-}
-
-/// A `.lang` file's `key=value` lines (`#` comments, blank lines skipped) as a JSON object.
-fn lang_json(bytes: &[u8]) -> Vec<u8> {
-    let text = String::from_utf8_lossy(bytes);
-    let map: serde_json::Map<String, Value> = text
-        .lines()
-        .map(|l| l.trim_start_matches('\u{feff}'))
-        .filter(|l| !l.trim().is_empty() && !l.trim_start().starts_with('#'))
-        .filter_map(|l| l.split_once('='))
-        .map(|(k, v)| (k.to_owned(), Value::String(v.to_owned())))
-        .collect();
-    serde_json::to_vec_pretty(&Value::Object(map)).expect("strings serialize")
 }
 
 /// Why the game would refuse a file of the mod's own content, if it would.
@@ -861,28 +818,6 @@ fn without_comments(bytes: &[u8]) -> Vec<u8> {
     out
 }
 
-/// A blockstate's models replaced with empty children of them (`<ns>:block/horizon_invisible/...`,
-/// recorded in `made` with their parent): the block's model draws nothing.
-fn empty_models(v: &mut Value, ns: &str, made: &mut BTreeMap<String, String>) {
-    match v {
-        Value::Object(o) => {
-            if let Some(Value::String(model)) = o.get("model").cloned() {
-                let name = format!(
-                    "{ns}:block/horizon_invisible/{}",
-                    model.replace([':', '/'], "_")
-                );
-                made.insert(name.clone(), model);
-                o.insert("model".into(), Value::String(name));
-            }
-            for (_, child) in o.iter_mut() {
-                empty_models(child, ns, made);
-            }
-        }
-        Value::Array(a) => a.iter_mut().for_each(|c| empty_models(c, ns, made)),
-        _ => {}
-    }
-}
-
 /// Item models another item's overrides reach: looks, not items; models that only reach each other stay items.
 fn variant_models(overrides: &BTreeMap<String, BTreeSet<String>>) -> BTreeSet<String> {
     let targets: BTreeSet<&String> = overrides.values().flatten().collect();
@@ -955,7 +890,7 @@ pub fn carry(
         // A legacy `.lang` file (`key=value` lines, the pre-1.13 format: ReplayMod keeps its
         // translations so and makes JSON of them at runtime, in a resource pack of its own) is
         // carried as the JSON vanilla reads, unless the jar has that JSON too.
-        let lang = legacy_lang(&name).filter(|json| !names.contains(json));
+        let lang = legacy_lang::legacy_lang(&name).filter(|json| !names.contains(json));
         let name = lang.clone().unwrap_or(name);
         let Some(keep) = place(&name, &owned) else {
             continue;
@@ -970,7 +905,7 @@ pub fn carry(
             .read_to_end(&mut bytes)
             .map_err(|e| format!("{name}: {e}"))?;
         if lang.is_some() {
-            bytes = lang_json(&bytes);
+            bytes = legacy_lang::lang_json(&bytes);
         }
         let unreadable = if keep {
             unreadable(&name, &mut bytes)
@@ -1124,26 +1059,9 @@ pub fn carry(
                 .and_then(|b| b.strip_suffix(".json"))
                 .filter(|_| own)
             {
-                if let Ok(v) = serde_json::from_slice::<Value>(&bytes) {
-                    // A block only its block entity's renderer draws (RenderShape.INVISIBLE:
-                    // Chunk Loaders' floating core): its models carried empty (their particle
-                    // kept), or Horizon drew them still under the moving one.
-                    let invisible = facts
-                        .and_then(|f| f.blocks.get(&format!("{ns}:{b}")))
-                        .is_some_and(|block| {
-                            !block.states.is_empty() && block.states.values().all(|s| s.invisible)
-                        });
-                    if invisible {
-                        let mut hidden = v.clone();
-                        let mut made = BTreeMap::new();
-                        empty_models(&mut hidden, ns, &mut made);
-                        for (model, parent) in &made {
-                            let path = model.split_once(':').map_or(model.as_str(), |(_, p)| p);
-                            let out = inside.join(format!("assets/{ns}/models/{path}.json"));
-                            let json = json!({"parent": parent, "elements": []});
-                            write(&out, &serde_json::to_vec_pretty(&json).unwrap_or_default())?;
-                        }
-                        bytes = serde_json::to_vec_pretty(&hidden).unwrap_or(bytes);
+                if let Ok(v) = serde_json::from_slice(&bytes) {
+                    if let Some(hidden) = invisible::blockstate(facts, ns, b, &v, &inside)? {
+                        bytes = hidden;
                     }
                     blockstates.insert(b.to_owned(), v);
                 }
@@ -1231,144 +1149,27 @@ pub fn carry(
         let text = serde_json::to_vec_pretty(v).unwrap_or_default();
         write(&decl.join(format!("{kind}/{name}.json")), &text)
     };
+    // Owned names, not borrowed from `report` (declared into below).
+    let owned: Vec<String> = owned.iter().map(|n| n.to_string()).collect();
+    let owned: Vec<&str> = owned.iter().map(String::as_str).collect();
     if let Some(facts) = facts {
         report.oracle = true;
-        let mut declared = BTreeSet::new();
+        let prefix = format!("{id}:");
         // The mod's blocks and items under each namespace it owns (BuildCraft's are under
         // `buildcraftenergy`, `buildcraftfactory`..., not its id), declared there.
-        let namespaces: Vec<String> = std::iter::once(id.to_owned())
-            .chain(report.namespaces.iter().cloned())
-            .collect();
-        for ns in &namespaces {
-            let prefix = format!("{ns}:");
-            let decl = inside.join(format!("data/{ns}/horizon"));
-            let write_decl = |kind: &str, name: &str, v: &Value| {
-                let text = serde_json::to_vec_pretty(v).unwrap_or_default();
-                write(&decl.join(format!("{kind}/{name}.json")), &text)
-            };
-            // The report's names: the path under the id, `ns:path` under another namespace.
-            let key = |b: &str| {
-                if ns == id {
-                    b.to_owned()
-                } else {
-                    format!("{ns}:{b}")
-                }
-            };
-            for (full, block) in facts.blocks.range(prefix.clone()..) {
-                let Some(b) = full.strip_prefix(&prefix) else {
-                    break;
-                };
-                let (choice, own) = match facts.template(full, allowed) {
-                    Some(choice) => (choice, None),
-                    None => match facts.own_states(full, allowed) {
-                        Some((choice, states)) => (choice, Some(states)),
-                        None => {
-                            let props: Vec<&str> =
-                                block.properties.keys().map(String::as_str).collect();
-                            let why = format!(
-                                "no vanilla {} with properties [{}]",
-                                block.vanilla_class().rsplit('.').next().unwrap_or(""),
-                                props.join(", ")
-                            );
-                            report.blocks_unknown.insert(key(b), why);
-                            continue;
-                        }
-                    },
-                };
-                let mut v = json!({"template": choice.template, "properties": choice.properties});
-                if let Some(states) = own {
-                    let key = if states.is_array() {
-                        "states"
-                    } else {
-                        "state_table"
-                    };
-                    v[key] = states;
-                }
-                let template_item = facts.blocks.get(&choice.template).map(|t| t.item.as_str());
-                if block.item == "minecraft:air" || template_item == Some("minecraft:air") {
-                    v["item"] = json!(false);
-                } else if block.item != *full {
-                    v["item"] = json!(false);
-                    report
-                        .differences
-                        .entry(key(b))
-                        .or_default()
-                        .push(format!("its item is {}", block.item));
-                } else {
-                    declared.insert(full.clone());
-                    let drop = (!block_loot.contains(b))
-                        .then(|| block.drops_itself(full))
-                        .flatten();
-                    if let Some(drop) = drop {
-                        let mut entry = json!({"type": "minecraft:item", "name": full});
-                        if let crate::oracle::SelfDrop::When(property, value) = drop {
-                            entry["condition"] = json!({
-                                "type": "minecraft:match_block",
-                                "blocks": full,
-                                "state": {property: value}
-                            });
-                        }
-                        let table = json!({
-                            "type": "minecraft:block",
-                            "pools": [{
-                                "condition": {"type": "minecraft:survives_explosion"},
-                                "entries": [entry],
-                                "rolls": 1
-                            }],
-                            "random_sequence": format!("{ns}:blocks/{b}")
-                        });
-                        let file = inside.join(format!("data/{ns}/loot_table/blocks/{b}.json"));
-                        write(
-                            &file,
-                            &serde_json::to_vec_pretty(&table).unwrap_or_default(),
-                        )?;
-                        report.loot_tables_added += 1;
-                    }
-                }
-                write_decl("block", b, &v)?;
-                report.blocks.insert(key(b), choice.template);
-                if !choice.differences.is_empty() {
-                    report
-                        .differences
-                        .entry(key(b))
-                        .or_default()
-                        .extend(choice.differences);
-                }
-            }
-            for (full, item) in facts.items.range(prefix.clone()..) {
-                let Some(name) = full.strip_prefix(&prefix) else {
-                    break;
-                };
-                if declared.contains(full) {
-                    continue;
-                }
-                if item
-                    .block
-                    .as_ref()
-                    .is_some_and(|b| facts.blocks.contains_key(b))
-                    && report.blocks_unknown.contains_key(&key(name))
-                {
-                    report
-                        .items_unknown
-                        .insert(key(name), "its block is left out".into());
-                    continue;
-                }
-                match facts.item(full, &owned) {
-                    Ok((v, differences)) => {
-                        write_decl("item", name, &v)?;
-                        report.items += 1;
-                        if !differences.is_empty() {
-                            report.differences.insert(key(name), differences);
-                        }
-                    }
-                    Err(e) => {
-                        report.items_unknown.insert(key(name), e);
-                    }
-                }
-            }
+        for ns in owned.clone() {
+            declare::namespace(
+                ns,
+                id,
+                facts,
+                allowed,
+                &owned,
+                &block_loot,
+                &inside,
+                &mut report,
+            )?;
         }
         // 26.3 draws worn armour from an equipment asset per material, in the mod's own namespaces.
-        let prefix = format!("{id}:");
         let mut materials = BTreeSet::new();
         for (full, item) in facts.items.range(prefix.clone()..) {
             if !full.starts_with(&prefix) {
@@ -2072,60 +1873,7 @@ mod tests {
         fs::remove_dir_all(&dir).unwrap();
     }
 
-    /// A Fabric id with `-` (Cloth Config's `cloth-config`) is carried: the content mod's id
-    /// has `_`, the original stays its namespace; a namespace of textures its code draws by
-    /// name (`cloth-config2`, named by no JSON) is its too, and Horizon's reader accepts it.
-    #[test]
-    fn carries_a_hyphenated_id_and_its_texture_namespace() {
-        let dir =
-            std::env::temp_dir().join(format!("horizon-port-pack-dash-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).unwrap();
-        let jar = dir.join("cloth-config-1.0.jar");
-        let mut zip = zip::ZipWriter::new(fs::File::create(&jar).unwrap());
-        let files: &[(&str, &str)] = &[
-            (
-                "fabric.mod.json",
-                r#"{"schemaVersion": 1, "id": "cloth-config", "version": "1.0", "license": "LGPL-3.0"}"#,
-            ),
-            ("assets/cloth-config2/textures/gui/cloth_config.png", "png"),
-            (
-                "assets/cloth-config2/lang/en_us.json",
-                r#"{"text.cloth-config.reset": "Reset"}"#,
-            ),
-            // A namespace with data stays outside unless its files are named.
-            ("data/other_lib/loot_table/x.json", r#"{"pools": []}"#),
-        ];
-        for (name, text) in files {
-            zip.start_file(*name, zip::write::SimpleFileOptions::default())
-                .unwrap();
-            zip.write_all(text.as_bytes()).unwrap();
-        }
-        zip.finish().unwrap();
-        let info = crate::jar::read(&jar).unwrap();
-        let out = dir.join("work/mods/cloth-config");
-        let pack = Pack {
-            loaded: &|_| true,
-            mods: &|_| false,
-        };
-        let report = carry(&jar, &info, &out, None, &|_| true, &pack, &BTreeMap::new()).unwrap();
-        assert_eq!(report.namespaces, ["cloth-config2"]);
-        assert_eq!(report.outside, ["data/other_lib/loot_table/x.json"]);
-        let carried = out.join("carry");
-        assert!(
-            carried
-                .join("assets/cloth-config2/textures/gui/cloth_config.png")
-                .is_file()
-        );
-        let package = horizon_mods::Package::read(&carried).unwrap();
-        assert_eq!(package.manifest.id, "cloth_config");
-        assert_eq!(
-            package.manifest.namespaces,
-            ["cloth-config", "cloth-config2"]
-        );
-        fs::remove_dir_all(&dir).unwrap();
-    }
-
+    mod fabric_ids;
     /// A mod shipping its files under other names than its id: the
     /// namespaces its own files name are its, compat files for other mods
     /// and a pack mod's namespace stay outside.
