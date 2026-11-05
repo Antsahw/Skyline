@@ -1764,3 +1764,30 @@ Simple Voice Chat broke in the merge (`voice_test.sh`: 0 tones; voice-1's own ti
 replay-1's `HorizonPacketTap` gave the host's client connection a plain EmbeddedChannel, and
 SVC's host client couldn't read its address. The tap's channel answers a `LocalAddress` now, as
 `memoryConnection`'s does: 34/39 and 36/39; `replaymod flashback pot` pass again.
+### Generic 2: Better Combat, a client per player's game (2026-11-05, branch `bridge-generic-2`; Claude for iaxivers)
+
+The three cases that failed since the mod-specific code went, with generic fixes only (`nomodcode` passes).
+Jars (Modrinth, 26.3 Fabric): Better Combat 3.2.2 (ARR), Player Animation Lib 1.2.9, JourneyMap
+6.0.10 (ARR), VoxelMap Updated 1.16.13 (ARR), REI 26.3.824 (MIT), Architectury, Cloth Config,
+Farmer's Delight, Fabric API 0.165.2. 2 cores, llvmpipe.
+- **`bettercombat`: pass** (and `sweep`, `attack`). The headless client's players never aged:
+  `LocalPlayer.tick` moves `tickCount` and `attackStrengthTicker`, which Better Combat's upswing
+  is timed by. `HorizonClient.clientPlayerTick` moves both each client tick.
+- **`maps-lan`: pass** with `HORIZON_JAVA_OWN_CLIENT=1` (java-bridge.md, "Each game runs its own
+  mods' client"): the guest's own JVM runs every mod's client half on a mirror of what its game
+  sees; the server's headless client runs none of it for that player, and mods' messages for
+  them wait until their game has its client. Rewritten for it, JourneyMap only (with VoxelMap,
+  VoxelMap's client fails in vanilla too): both minimaps mapped, each its own, the guest's data
+  and waypoints in its own folder by server, its client leaves with it.
+- **`rei-lan`: guest and host filters now their own** (guest on, host off), but **still fails
+  on "the host's list: everything"**: an REI overlay opened after REI's server display sync shows
+  no list until something is typed, on the host and in single player, with or without the switch
+  (also why `reiscreen` fails here). Narrowed down (java-bridge.md, 26.3 facts), not fixed.
+  The case's few/full regexes could never match its own output (`guest on few`): fixed.
+- Not done: the client halves the server starts (item use, `startAttack`, menu screens) still
+  run on the server's headless client, without the mods' code for a guest with the switch; so
+  the switch stays off by default.
+- Regress, switch off (`--jars` all above): `nomodcode bettercombat sweep attack rei jei hud join
+  join-lan voxelmap pot modsettings` pass. Switch on (the cases set it): `maps-lan` pass, `rei-lan`
+  fails as above. Not run: clippy, `cargo test` (2 cores).
+Test on the PC: `regress.py --jars ~/hz-test/mods-java bettercombat sweep maps-lan rei-lan`.

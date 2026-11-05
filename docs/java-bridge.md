@@ -574,6 +574,50 @@ counts is what a mod's client code does.
   ignores `voice_host` (it asks Fabric's side, which is the client's here). SVC's licence:
   All Rights Reserved (its jar runs as it is; nothing of it is in the repo).
 
+## Each game runs its own mods' client (`HORIZON_JAVA_OWN_CLIENT`, bridge-generic-2)
+
+The generic fix for per-player client state (Ludovic's condition 2 took the per-mod lists
+away): as in vanilla, a player's mods' client half runs in **their own game**, not in a server's
+one headless client shared by every player. Off by default for now: `HORIZON_JAVA_OWN_CLIENT=1`
+on both the host (or server) and the players' games (regress `maps-lan` and `rei-lan` set it).
+It generalises the device mods' path (voice chat, above) from some mods to all of them.
+- **In a game connected to another's server** (LAN guest, a dedicated server's player;
+  `game/java_device.rs` `tick_own_client`, `HorizonDeviceClient` `own*`,
+  `HorizonServer.ownClientTick`): its JVM keeps a **mirror of what it sees**: a server's mirror
+  (`setUp(true)`: mods name per-server data by the server, not by a world folder) with its one
+  player where its game has it (position, look, mode, health, food, sneak, inventory when it
+  changes) and levels over the game's own world (the chunks the server sent: `with_java_world`
+  lends them, as a server lends its levels). No server event, tick, block entity or menu runs
+  there: only `HorizonClient.clientTick` and `sendFrames` for that player, the host's own code,
+  so joins, HUD, the inventory overlay, client-only screens, key bindings and `/modconfig`
+  screens work as for a host's own player. Their frames (actions `HudFrame`, `OverlayFrame`,
+  `ScreenFrame`/`ClientScreen` of window -1) are shown here; the input of windows -1, -2, -3
+  and `bind`/`modconfig` goes to this JVM (`own_client_takes`), a server menu's window still to
+  the server (its screen is made where the menu is). The server's HUD, overlay, keys and
+  settings list for this game are ignored (`own_java_client`). Its client connection answers
+  the server's address and server entry (`ownConnection`: `getCurrentServer`, the remote
+  address). Mods' messages: the client's go to the server over this game's connection; the
+  server's arrive as custom payloads and are delivered to the mods' client receivers.
+- **On the server**: a player whose game said so (`RUNS_OWN_CHANNEL`, as device mods do) gets
+  none of the headless client's mod code (`HorizonDeviceMods.runs`: their ticks, HUD, events,
+  hooks); every mod channel but `minecraft:`/`horizon:` goes to their game. What the mods send a
+  player before their game started its client (it starts with the game's JVM, after the join)
+  **waits** and goes in order once it says so (`HorizonLoop.WAITING`): REI's display sync at the
+  join had reached the host's own REI as the guest, replacing the host's displays.
+- Works (headless, LAN, 2 cores): JourneyMap per player (`maps-lan`: each minimap maps its own
+  player's world from its own game's chunks, the guest's map data and waypoints in its own
+  folder under the server, `journeymap/data/mp/localhost_<world>/`); REI per player
+  (`rei-lan`: the guest's craftable filter is its own, the host's stays off; the guest's list is
+  its own REI's).
+- Not yet: the client halves the server starts (a mod item's client use, `startAttack`, menu
+  screens and their overlays) still run on the server's headless client, now without the mods'
+  client code for such a player (Better Combat's swings and recipe viewers over a mod's menu
+  for a guest with the switch on); a player whose game has no Java mods gets no mod client at
+  all with the switch on. JourneyMap + VoxelMap together: VoxelMap's client entrypoint fails
+  (both register `worldinfo:world_id`, as in the real game). Default on once those are done.
+- Test: `regress.py --jars <journeymap, REI + Architectury + Cloth + FD, fabric-api> maps-lan
+  rei-lan`.
+
 ## Mods that change vanilla's behaviour (the mixin table, routed actions)
 
 Most of vanilla's code never runs on the Java side: Horizon does it in Rust. A mod's Mixin into
@@ -970,6 +1014,15 @@ Generic fixes found with Create Fly (no Create-specific code); regress `createma
   contraption's own moving actors (drills, harvesters) untested.
 
 ## 26.3 facts that cost time
+
+- **A client player made without its constructor never ages**: `LocalPlayer.tick` is what moves
+  `tickCount` and `attackStrengthTicker`; a mod timing its client by them (Better Combat's
+  upswing: `ticksLeft` by `tickCount`) waits forever. The headless client moves both each tick.
+- **REI's server display sync comes after the client's reload** when both halves are in one
+  JVM (its server waits until no REI reload runs, so single player too): an inventory overlay
+  opened after it shows the search box but no list until something is typed (the empty
+  filter's search isn't run again: `AsyncSearchManager` not dirty, the new widget empty).
+  Open: `reiscreen`, and `rei-lan`'s host list.
 
 - **Anything that swaps the client connection's channel must answer a `LocalAddress`**
   (`HorizonClient.memoryConnection`, `HorizonPacketTap.open`): Simple Voice Chat connects its
@@ -1612,10 +1665,12 @@ generator config are gone; what replaced them is generic (sections above):
   what is sent on it (`ConnectionMixin.send`). Fabric's own channel handshake tasks
   (`c:version`, `c:register`) are skipped: both halves are in one JVM.
 - **The client's attack** (`HorizonClient.startAttack`): see the third round above.
-- Not working now: **Better Combat**'s attacks (its client takes the click after the
-  configuration sync, but its swing never sends its request; its client tick, `continueAttack`
-  and the held attack key are fired, so what it still waits on is unknown without reading its
-  closed code); **Grid World**'s far terrain (whole land far away).
+- **Better Combat** works again (bridge-generic-2): its swing waited on the client player's
+  own counters, which the headless client never moved. `LocalPlayer.tick` moves `tickCount`
+  (Entity.baseTick) and `attackStrengthTicker` (Player.tick) each client tick; now
+  `HorizonClient.clientPlayerTick` does, so a mod timing its client's upswing by them sends its
+  attack (regress `bettercombat`, `sweep`, `attack` pass). Not working: **Grid World**'s far
+  terrain (whole land far away).
 - Licences (fabric.mod.json): Better Combat All Rights Reserved; 3D Skin Layers tr7zw Protective
   License; WorldWeaver MIT (parts ARR); TerraBlender LGPLv3; Grid World Zlib; GeckoLib MIT
   (only our fixture uses its public API); Farmer's Delight MIT (test data, comments); Create
@@ -1798,8 +1853,8 @@ Vanilla-patching mods (tested headless 2026-11-01, server thread, survival; each
 `snow`, `sweep`; the `mixinmod` fixture's `mixins1`, `attack`, `ride`, `dismount`, `fall`,
 `effects`, `slot`, `mixins2`; every routed action has one, and the fixture ones need no
 downloaded jars):
-- Better Combat (since 2026-11-04 through the generic client attack, see Status): its client
-  takes the click, but its swing doesn't land yet (`bettercombat`, `sweep` fail).
+- Better Combat (through the generic client attack, see Status): its client takes the click
+  and its swing lands (`bettercombat`, `sweep` pass since bridge-generic-2).
 - Serene Seasons' snow: mid winter, rain: the plains' floor gets snow layers.
 - The fixture: ten times the damage inside `Player.attack` (a cow dies to one sword hit, a pig
   spared by its head), no minecarts (the boat still takes the player), no ninth hotbar slot,
@@ -2065,7 +2120,9 @@ Map mods (2026-11-01, `bridge-gpu2`, headless, llvmpipe):
   voxelmap-server server` pass). On a LAN with a guest (`maps-lan`, JourneyMap + VoxelMap),
   the host's and the guest's minimap are both black/empty: one headless client holds every
   player's map in the mods' statics. Xaero's with a second player: its `currentSession` is
-  ended at the next join (not tested on LAN). The generic fix is a client per player.
+  ended at the next join (not tested on LAN). The generic fix is a client per player:
+  `HORIZON_JAVA_OWN_CLIENT` (bridge-generic-2, "Each game runs its own mods' client"): `maps-lan`
+  (JourneyMap) passes with it.
 - Dedicated servers (`bridge-gpu-8`, `server_test.sh`): their players get the map mods as a
   LAN host's do: JourneyMap (minimap; J's About screen, then its full-screen map), VoxelMap,
   Xaero's minimap and World Map, XaeroPlus, Diorama, MiniHUD. The mirror's `ChunkMap` now has
