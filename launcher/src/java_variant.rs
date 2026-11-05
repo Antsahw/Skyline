@@ -242,10 +242,11 @@ pub fn use_build(tag: &str, program: &Path) -> Result<(), String> {
 /// Java 25 unless there is one: only past the owner gate, when something is missing.
 pub fn ensure(tag: &str, progress: impl Fn(f32)) -> Result<(), String> {
     let fork = fork_commit(tag);
-    if is_installed(tag) && java_home().is_some() && fork.is_none() {
+    if is_installed(tag) && java_home().is_some() && fork.is_none() && has_game_files(tag) {
         return Ok(());
     }
     owner_signed_in()?;
+    ensure_game_files(tag)?;
     if let Some(installed) = fork {
         refresh_from_fork(tag, &installed, &progress);
     }
@@ -255,6 +256,57 @@ pub fn ensure(tag: &str, progress: impl Fn(f32)) -> Result<(), String> {
         })?;
     }
     ensure_java().map(|_| ())
+}
+
+/// The version's own checked copy of the game, `.local/minecraft/<version>/jars/client.jar`, which
+/// Fabric runs as its game jar (with the game's libraries beside it). The plain game reads only
+/// the prepared resources, so a version whose resources were copied from another installed
+/// version (`backend::reuse_prepared`) has none.
+fn game_jar(tag: &str) -> PathBuf {
+    backend::version_dir(tag)
+        .join(".local/minecraft")
+        .join(backend::game_version(tag))
+        .join("jars/client.jar")
+}
+
+fn has_game_files(tag: &str) -> bool {
+    game_jar(tag).is_file()
+}
+
+/// [`game_jar`] and the libraries, past the owner gate: copied, checked, from an installed
+/// version that has them, else imported as Prepare imports them (the player's Minecraft
+/// folder, or Mojang's download for the owner).
+fn ensure_game_files(tag: &str) -> Result<(), String> {
+    if has_game_files(tag) {
+        return Ok(());
+    }
+    let dir = backend::version_dir(tag);
+    let log = |line: &str| eprintln!("{line}");
+    if horizon_prepare::artifacts::reuse_imported(&dir, &log).unwrap_or(false)
+        && has_game_files(tag)
+    {
+        return Ok(());
+    }
+    let log = |line: String| eprintln!("{line}");
+    let minecraft = backend::minecraft_dir(None)?;
+    let (preparer, _) = backend::preparer(tag, &minecraft, backend::MinecraftFrom::Install, &log)?;
+    match preparer {
+        backend::Preparer::Process(mut cmd) => {
+            let status = cmd.status().map_err(|e| format!("Preparing {tag}: {e}"))?;
+            if !status.success() {
+                return Err(format!("Preparing {tag} for Fabric mods failed ({status})"));
+            }
+        }
+        backend::Preparer::InProcess(options) => backend::prepare_in_process(&options, &log)?,
+    }
+    if has_game_files(tag) {
+        Ok(())
+    } else {
+        Err(format!(
+            "Fabric 26.3 mods need Minecraft's own files in {}: prepare {tag} again",
+            game_jar(tag).display()
+        ))
+    }
 }
 
 fn fetch(tag: &str, progress: impl Fn(f32)) -> Result<(), String> {
