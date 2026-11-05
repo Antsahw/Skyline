@@ -4,3 +4,4 @@
 #   cargo run -q -p horizon-release-sign -- keygen --public-out java-mods.pub \
 #     | gh secret set JAVA_MODS_SIGNING_KEY -R iaxivers/horizon-java-bridge
 # then add java-mods.pub's line below.
+6TYVAH9iJ/p4cjXntXklGr7oGMyn6+zR4NEiB1DBunk=
