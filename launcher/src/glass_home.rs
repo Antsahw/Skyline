@@ -914,6 +914,7 @@ mod tests {
             last_played: last,
             launch: Default::default(),
             java: java.then(JavaGame::default),
+            java_mods: false,
         };
         let list = [
             one("horizon", Kind::Default, false, at(50)),
