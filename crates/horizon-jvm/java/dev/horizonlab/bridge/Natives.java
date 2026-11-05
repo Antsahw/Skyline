@@ -192,7 +192,12 @@ public final class Natives {
      * mob `id` of `dimension` takes `amount` of `damageType` from (x, y, z) (NaN: nowhere), by
      * the mods' entity `by` (-1: none).
      */
-    public static native void hurtMob(String dimension, int id, String damageType, float amount, double x, double y, double z, int by);
+    /**
+     * A hurt of one of Horizon's mobs (its shadow); {@code resetInvulnerable}: the mod cleared
+     * the shadow's invulnerable ticks before it (TACZ's bullets), so Horizon's don't block it.
+     */
+    public static native void hurtMob(String dimension, int id, String damageType, float amount, double x, double y, double z, int by,
+                                      boolean resetInvulnerable);
 
     /**
      * The chunks mods' tickets keep loaded and ticking in a dimension, as forced chunks

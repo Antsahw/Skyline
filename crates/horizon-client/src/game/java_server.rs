@@ -2460,9 +2460,18 @@ mod run {
                 amount,
                 from,
                 by,
+                reset_invulnerable,
             } = action
             {
-                self.java_hurt_mob(&dimension, id, &damage_type, amount, from, by);
+                self.java_hurt_mob(
+                    &dimension,
+                    id,
+                    &damage_type,
+                    amount,
+                    from,
+                    by,
+                    reset_invulnerable,
+                );
                 return;
             }
             let horizon_jvm::events::Action::HurtPlayer {
@@ -2520,6 +2529,7 @@ mod run {
             amount: f32,
             from: Option<[f64; 3]>,
             by: Option<i32>,
+            reset_invulnerable: bool,
         ) {
             use horizon_client::mobs::{Damage, DamageKind, Who};
             let Ok(id) = u32::try_from(id) else {
@@ -2539,6 +2549,9 @@ mod run {
             let hurt = |m: &mut horizon_client::mobs::Mob| {
                 if !m.alive() || m.removed {
                     return;
+                }
+                if reset_invulnerable {
+                    m.invulnerable = 0;
                 }
                 if m.damage(amount, damage) {
                     // LivingEntity.hurtServer's knockback: 0.4 away from the attacker.
@@ -2762,14 +2775,15 @@ mod run {
                     }
                     let _ = write!(
                         out,
-                        "[{},\"minecraft:{}\",{},{},{},{},{}]",
+                        "[{},\"minecraft:{}\",{},{},{},{},{},{}]",
                         m.id,
                         m.kind.id.trim_start_matches("minecraft:"),
                         at[0],
                         at[1],
                         at[2],
                         m.yaw,
-                        m.health
+                        m.health,
+                        m.invulnerable
                     );
                     n += 1;
                     if n >= 128 {

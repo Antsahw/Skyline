@@ -34,6 +34,8 @@ public final class HorizonNeighbours {
     /** Every shadow, for the quick "is this one?" of the hurt mixin. */
     private static final Map<Entity, ServerLevel> ALL = new IdentityHashMap<>();
     private static final Map<String, Boolean> REFUSED = new HashMap<>();
+    /** The invulnerable ticks the bridge last put on each shadow (Horizon's, or a hurt's 20). */
+    private static final Map<Entity, Integer> PUT = new IdentityHashMap<>();
 
     /**
      * Horizon's mobs this tick, `{"<dimension>": [[id, "type", x, y, z, yaw, health], ...]}`:
@@ -61,6 +63,12 @@ public final class HorizonNeighbours {
                 shadow.setYHeadRot(yaw);
                 shadow.setYBodyRot(yaw);
                 shadow.setHealth(Math.min(a.get(6).getAsFloat(), shadow.getMaxHealth()));
+                // Its invulnerable ticks after a hurt, as Horizon counts them: mods that clear
+                // them before hurting (TACZ's bullets) are seen doing it (hurt).
+                if (a.size() > 7) {
+                    shadow.setInvulnerableTime(a.get(7).getAsInt());
+                    PUT.put(shadow, shadow.getInvulnerableTime());
+                }
                 now.put(id, shadow);
             }
             seen.put(level, now);
@@ -72,6 +80,7 @@ public final class HorizonNeighbours {
                 if (!now.containsKey(shadow.getKey())) {
                     shadow.getValue().setRemoved(Entity.RemovalReason.DISCARDED);
                     ALL.remove(shadow.getValue());
+                    PUT.remove(shadow.getValue());
                 }
             }
         }
@@ -127,9 +136,17 @@ public final class HorizonNeighbours {
         String type = source.typeHolder().unwrapKey().map(k -> k.identifier().toString()).orElse("minecraft:generic");
         var from = source.getSourcePosition();
         Entity by = source.getEntity() != null ? source.getEntity() : source.getDirectEntity();
+        // A mod that cleared the ticks the bridge put there (TACZ: each bullet hurts) clears
+        // Horizon's; after the hurt they are 20, as LivingEntity.hurtServer sets them.
+        boolean reset;
+        synchronized (HorizonNeighbours.class) {
+            reset = shadow.getInvulnerableTime() == 0 && PUT.getOrDefault(shadow, 0) > 0;
+            shadow.setInvulnerableTime(20);
+            PUT.put(shadow, 20);
+        }
         Natives.hurtMob(level.dimension().identifier().toString(), shadow.getId(), type, amount,
                 from == null ? Double.NaN : from.x, from == null ? Double.NaN : from.y, from == null ? Double.NaN : from.z,
-                by == null ? -1 : by.getId());
+                by == null ? -1 : by.getId(), reset);
     }
 
     /**

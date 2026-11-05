@@ -78,6 +78,7 @@ MODS = {
     "mcjtylib": ["mcjtylib*"],
     "rftoolsbase": ["rftoolsbase*"],
     "fcap": ["forgeconfigapiport*"],
+    "tacz": ["tacz-refabricated*", "tacz*refabricated*"],
     "cc": ["cc-tweaked*"],
     "skills": ["puffish_skills*"],
     "legendarytooltips": ["legendarytooltips*"],
@@ -820,6 +821,32 @@ CASES = {
                 check_file("gone.txt", r"(?m)^gone", "Horizon's golem killed it"),
                 check_file("gone.txt", r"(?m)^kept", "the golem is still there")],
         look="the golem at the biter",
+    ),
+    "tacz": dict(
+        about="TACZ's guns fire: an AK-47 held down (its shoot key on the left button) kills a zombie at night; the ammo count drops (generic: mouse-bound key mappings, mixins' initializers, players' tick injections)",
+        mods=["tacz", "fabric-api", "playeranim", "fcap"], scene="range",
+        steps=['$C command "item replace entity @s hotbar.0 with tacz:modern_kinetic_gun[minecraft:custom_data={GunId:\\"tacz:ak47\\",GunFireMode:\\"AUTO\\",GunCurrentAmmoCount:30,HasBulletInBarrel:1b}]" >/dev/null; $C select 1 >/dev/null; sleep 4; $C command "time set midnight" >/dev/null; '
+               '$C command "summon minecraft:zombie $(cat $S/critter.pos) {NoAI:1b,PersistenceRequired:1b}" >/dev/null; sleep 1.5; $C entities 16 > $S/before.json; '
+               'at=$(python3 -c "import json,sys; b=[e[\'pos\'] for e in json.load(open(sys.argv[1])).get(\'entities\', []) if e.get(\'type\') == \'minecraft:zombie\']; print(\' \'.join(str(v + d) for v, d in zip(b[0], (0, 1.2, 0))) if b else \'\')" $S/before.json); '
+               '$C look-at $at >/dev/null; sleep 0.3; $C mouse left down >/dev/null; sleep 1.35; $C mouse left up >/dev/null; sleep 1; '
+               '$C entities 16 > $S/after.json; python3 "$R/tools/java_bridge/gone_check.py" minecraft:zombie $S/before.json $S/after.json > $S/gone.txt; '
+               '$C command "data get entity @s SelectedItem" > $S/item.json; $C screenshot $S/shot.png >/dev/null'],
+        checks=[check_file("gone.txt", r"(?m)^there", "the zombie stood in the pen"),
+                check_file("gone.txt", r"(?m)^gone", "the AK's bullets killed it"),
+                check_file("item.json", r"GunCurrentAmmoCount: ?(1?[0-9]|2[0-8])\b", "the gun's magazine emptied (its count back in Horizon's slot)"),
+                check_log(r"Mixin fields: com/tacz/guns/mixin/client/LocalPlayerMixin's initializer ran", "TACZ's client player state was made")],
+        forbid=[r"A mod failed in ClientTickEvents", r"Error executing task on null", r"getTickTimesNanos"],
+        look="the AK in first person; the zombie gone",
+    ),
+    "tacz-model": dict(
+        about="TACZ's gun models: the AK-47 in first person (deferred custom geometry, its gun pack's texture sent as an image) and in third person (a mod-drawn item model resolved by the client's own resolver)",
+        mods=["tacz", "fabric-api", "playeranim", "fcap"], scene="range",
+        steps=['$C command "item replace entity @s hotbar.0 with tacz:modern_kinetic_gun[minecraft:custom_data={GunId:\\"tacz:ak47\\",GunFireMode:\\"AUTO\\",GunCurrentAmmoCount:30,HasBulletInBarrel:1b}]" >/dev/null; $C select 1 >/dev/null; sleep 4; $C screenshot $S/first.png >/dev/null',
+               '$C key f5 tap >/dev/null; sleep 1; $C key f5 tap >/dev/null; sleep 2; $C screenshot $S/third.png >/dev/null; $C key f5 tap >/dev/null'],
+        checks=[check_log(r"tacz:textures/gun/uv/ak47\.png \(256x256\) is sent to the players' games", "the AK's texture went to the game"),
+                check_log(r"tacz:modern_kinetic_gun's item model is drawn by its mod", "the gun's item model is the mod's")],
+        forbid=[r"custom geometry couldn't be read", r"A mod failed"],
+        look="first.png: the AK-47 held in first person, arms on it; third.png: the player facing the camera, the AK in the right hand",
     ),
     "arrows": dict(
         about="Horizon's projectiles hit mods' mobs: the player's bow shots kill crittermod's biter on the mirror (HorizonNeighbours.hurtByProjectile)",

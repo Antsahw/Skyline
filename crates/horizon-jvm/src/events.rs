@@ -246,6 +246,9 @@ pub enum Action {
         amount: f32,
         from: Option<[f64; 3]>,
         by: Option<i32>,
+        /// The mod cleared the shadow's invulnerable ticks before the hurt (TACZ's bullets,
+        /// for fire faster than vanilla's 10 ticks): Horizon's mob's go too.
+        reset_invulnerable: bool,
     },
 }
 

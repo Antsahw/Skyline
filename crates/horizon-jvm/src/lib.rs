@@ -755,7 +755,7 @@ fn boot(env: &mut JNIEnv, jars: &[PathBuf]) -> jni::errors::Result<String> {
             },
             NativeMethod {
                 name: "hurtMob".into(),
-                sig: "(Ljava/lang/String;ILjava/lang/String;FDDDI)V".into(),
+                sig: "(Ljava/lang/String;ILjava/lang/String;FDDDIZ)V".into(),
                 fn_ptr: native_hurt_mob as *mut c_void,
             },
             NativeMethod {
@@ -1616,6 +1616,7 @@ extern "system" fn native_hurt_mob<'local>(
     y: sys::jdouble,
     z: sys::jdouble,
     by: sys::jint,
+    reset_invulnerable: sys::jboolean,
 ) {
     let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let (Ok(dimension), Ok(damage_type)) = (
@@ -1631,6 +1632,7 @@ extern "system" fn native_hurt_mob<'local>(
             amount,
             from: (!x.is_nan()).then_some([x, y, z]),
             by: (by >= 0).then_some(by),
+            reset_invulnerable: reset_invulnerable != 0,
         });
     }));
 }

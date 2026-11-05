@@ -1961,6 +1961,48 @@ Left: Create's scaffolding with `bottom=true` collides as vanilla's (Create's ow
 `SCAFFOLD_HALF`); 2 `create:fluid_pipe` states are full cubes (their nearest vanilla shape is
 a contextual one).
 
+TACZ Refabricated (the 26.3 unofficial port 0.8.6-beta1, with Player Animation Lib and Forge
+Config API Port; 2026-11-04, bridge-entities-10): guns fire, bullets hit, and the guns draw in
+first and third person with their animations, muzzle flash and ejected casings. All generic
+fixes, no TACZ code (its licence: GPL3 / CC BY-NC-ND 4.0; nothing of it is copied):
+- **Mouse-bound key bindings.** Mods' KeyMappings set to a mouse button (TACZ's shoot on the
+  left, aim on the right) are pressed while playing, and their handlers in
+  `MouseHandler.onButton` run (`HorizonClient.bindMouse`, `mousePress`; the window sends
+  `{"kind":"bind","mouse":n}` for `-100 - n` in the bound keys). While a player plays, the
+  client's mouse is grabbed and its window focused (mods check both: TACZ's `isInGame`).
+- **Mixins' field initializers, whole** (`HorizonMixinInit`): a mixin's constructor code after
+  its super call is copied into a hidden class nested with the target and run on objects made
+  without their constructor (the client player first: TACZ's twelve gun-state objects, which
+  take each other and the player). Final fields are written through reflection.
+- **Ticks**: the client player's `LocalPlayer.tick` injections fire (client mixins, via
+  `fireMerged`); a mirrored player's `LivingEntity.tick` and `Entity.tick` injections fire
+  inside `Player.tick`, as vanilla nests them (TACZ ticks draw, cool-downs and reloads there).
+- **The mirror's server and chunk maps**: `tickTimesNanos` and the average/smoothed tick times
+  are recorded (TACZ's shots threw on null); `ChunkMap.getPlayers`/`isChunkTracked` answer from
+  the mirrored players (its gun sounds threw on the null player map).
+- **Client start**: the model manager exists from the start (TACZ's renderers keep
+  `getEntityModels()`), and packs mods add to the client's pack repository at its first reload
+  (`HorizonHooks.START_PACKS`: TACZ's gun packs, with every gun's display, model and
+  animation) are loaded; the game mode has its `minecraft`.
+- **Models**: the recording collector runs custom geometry renderers when the submission ends,
+  as the feature dispatcher does (TACZ writes its vertices after submitting). First person is
+  recorded when mods hook the arm's drawing; its meshes are drawn. Items whose baked model is a
+  mod's own (`HorizonEntityRender.modDrawn`) are resolved by the client's real resolver, so
+  their renderer submits geometry (third person, held by mod mobs; Create's wrench should
+  benefit too). Textures Horizon's atlas doesn't pack go to each game once as `img:` trees
+  (Java image slots; 16 big ones now).
+- **Horizon's mobs take rapid fire**: a shadow carries Horizon's invulnerable ticks; a mod that
+  clears them before hurting (TACZ, each bullet) clears Horizon's (`hurtMob`'s
+  `resetInvulnerable`).
+Regress `tacz` (an AK-47 kills a zombie at night, the magazine empties), `tacz-model` (the
+AK's texture sent, the gun's item model the mod's; look at first.png and third.png).
+Not yet: gun icons in Horizon's inventory and hotbar (items drawn only by a custom renderer, in
+Horizon's GUI); bullet tracers (the renderer draws the server's bullet, which lacks what the
+client's copy gets from its spawn data); Horizon's own attack still runs on the left click
+(vanilla TACZ cancels it: a punch with the gun, block breaking in survival); the arms' aiming
+pose in third person (Horizon draws the player's body); aiming's zoom and camera recoil (the
+client camera is Horizon's).
+
 Create (Create Fly's 26.3 port, 2026-11-04, bridge-gpu-12): kinetic networks run and their
 shafts, cogs and motors draw turning; OBJ items draw; mods' fluids use their own sprites; 3D Skin
 Layers draws its layers (see "Create, Flywheel, OBJ models, mods' fluids, 3D Skin Layers").
@@ -3277,6 +3319,15 @@ surface draws as streaks from inside (client).
   it answers Horizon's server thread now. `ChunkMap.mainThreadExecutor` is the server. Fields
   mods' mixins add and initialise in a constructor are null too: `emptyCollections` makes
   collections and atomics; anything else stays null.
+
+- **26.3's mouse buttons are SDL's** (left 1, middle 2, right 3, back 4, forward 5), in
+  `InputConstants.Type.MOUSE` and `MouseButtonInfo`: GLFW's 0/1/2 pressed the wrong bindings.
+- **A mixin's final fields can't be written from another class** (`IllegalAccessError`, even a
+  nestmate): `HorizonMixinInit` writes them through reflection.
+- **Client mixins' injections aren't in `HorizonHooks.HOOKS`** (only their constructors are):
+  fire them with `fireMerged`, which reads the merged handlers in the class itself.
+- **Custom geometry is drawn after the submit** (`submitCustomGeometry`'s renderer runs at the
+  feature dispatch): record it at the submission's end, not at the call.
 
 - **GeckoLib and partial tick 1.0 (26.3 trap).** GeckoLib treats a partial tick of exactly 1.0
   as a paused game and freezes every animation. The bridge renders at 0.999
