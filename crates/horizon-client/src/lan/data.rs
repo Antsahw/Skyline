@@ -387,12 +387,19 @@ impl SyncData {
         if let Some(ids) = self.builtin.get(registry) {
             return ids.id(name);
         }
-        self.dynamic
-            .registries
-            .get(registry)?
-            .iter()
-            .position(|(n, _)| n == name)
-            .map(|i| i as i32)
+        let names = self.dynamic.registries.get(registry)?;
+        if let Some(i) = names.iter().position(|(n, _)| n == name) {
+            return Some(i as i32);
+        }
+        // The extra levels' dimension types, sent after the data's own.
+        if registry == DIMENSION_TYPE_REGISTRY {
+            let known: Vec<&str> = names.iter().map(|(n, _)| n.as_str()).collect();
+            return extra_dimension_types(&known)
+                .iter()
+                .position(|l| l.dimension_type == name)
+                .map(|i| (names.len() + i) as i32);
+        }
+        None
     }
 
     /// ClientboundRegistryDataPacket per registry. With `known_pack` the
@@ -405,15 +412,14 @@ impl SyncData {
     pub fn registry_packets(&self, known_pack: bool, levels: &LevelShapes) -> Vec<RegistryData> {
         self.registries
             .iter()
-            .map(|(key, e)| RegistryData {
-                registry: key.clone(),
-                entries: e
+            .map(|(key, e)| {
+                let mut entries: Vec<RegistryEntry> = e
                     .names
                     .iter()
                     .zip(&e.json)
                     .zip(&e.from_pack)
                     .map(|((name, json), &from_pack)| {
-                        let changed = (key == "minecraft:dimension_type")
+                        let changed = (key == DIMENSION_TYPE_REGISTRY)
                             .then(|| changed_dimension_type(name, json, levels))
                             .flatten();
                         RegistryEntry {
@@ -425,7 +431,27 @@ impl SyncData {
                             },
                         }
                     })
-                    .collect(),
+                    .collect();
+                if key == DIMENSION_TYPE_REGISTRY {
+                    // The extra levels' types, with their data: no client knows them.
+                    let known: Vec<&str> = e.names.iter().map(String::as_str).collect();
+                    for level in extra_dimension_types(&known) {
+                        let base = e
+                            .names
+                            .iter()
+                            .position(|n| n == level.looks_like)
+                            .map(|i| e.json[i].clone())
+                            .unwrap_or_else(|| Value::Object(Default::default()));
+                        entries.push(RegistryEntry {
+                            id: level.dimension_type.to_owned(),
+                            data: Some(json_to_nbt(&extra_dimension_type(base, &level))),
+                        });
+                    }
+                }
+                RegistryData {
+                    registry: key.clone(),
+                    entries,
+                }
             })
             .collect()
     }
@@ -606,6 +632,46 @@ impl SyncData {
             }
         }
     }
+}
+
+const DIMENSION_TYPE_REGISTRY: &str = "minecraft:dimension_type";
+
+/// The dimension type a level's clients are told it has (`ClientboundLoginPacket`'s): vanilla's
+/// levels share their id with their type; an extra level names its own.
+pub fn dimension_type_of(level: &str) -> &str {
+    match crate::chunk::extra_level_named(level) {
+        Some(extra) => extra.dimension_type,
+        None => level,
+    }
+}
+
+/// The extra levels whose dimension types aren't among `known`, one per type, in the order
+/// they were registered: what the dimension type registry holds after the data's own.
+fn extra_dimension_types(known: &[&str]) -> Vec<crate::chunk::ExtraLevel> {
+    let mut out: Vec<crate::chunk::ExtraLevel> = Vec::new();
+    for level in crate::chunk::extra_levels() {
+        if !known.contains(&level.dimension_type)
+            && !out.iter().any(|l| l.dimension_type == level.dimension_type)
+        {
+            out.push(level);
+        }
+    }
+    out
+}
+
+/// An extra level's dimension type for its clients: the vanilla type it looks like (`base`)
+/// with its own build range, skylight, ceiling and coordinate scale.
+fn extra_dimension_type(mut base: Value, level: &crate::chunk::ExtraLevel) -> Value {
+    if !base.is_object() {
+        base = Value::Object(Default::default());
+    }
+    base["min_y"] = level.shape.min_y.into();
+    base["height"] = level.shape.height.into();
+    base["logical_height"] = level.shape.logical_height.into();
+    base["has_skylight"] = level.shape.sky_light.into();
+    base["has_ceiling"] = level.shape.has_ceiling.into();
+    base["coordinate_scale"] = level.coordinate_scale.into();
+    base
 }
 
 /// The vanilla dimension type `name` (its JSON `json`) with the shape the

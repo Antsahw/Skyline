@@ -145,6 +145,38 @@ public final class HorizonChunkLoads {
     }
 
     /**
+     * Horizon's save of chunk x z (its region file, vanilla's format) as a chunk of the level,
+     * for a stand-in (HorizonWorldgen.standIn): its blocks, biomes and heights; null when it
+     * isn't saved complete. Its block entities stay Horizon's.
+     */
+    public static net.minecraft.world.level.chunk.LevelChunk saved(ServerLevel level, int x, int z) {
+        CompoundTag[] tag = {null};
+        ChunkPos pos = new ChunkPos(x, z);
+        try {
+            region(level, pos, in -> tag[0] = NbtIo.read(in));
+        } catch (IOException | RuntimeException e) {
+            return null;
+        }
+        if (tag[0] == null) return null;
+        var data = net.minecraft.world.level.chunk.storage.SerializableChunkData.parse(level, level.palettedContainerFactory(), tag[0]);
+        if (data == null || !data.chunkStatus().isOrAfter(ChunkStatus.FULL)) return null;
+        var sections = new net.minecraft.world.level.chunk.LevelChunkSection[level.getSectionsCount()];
+        for (var section : data.sectionData()) {
+            int i = level.getSectionIndexFromSectionY(section.y());
+            if (i >= 0 && i < sections.length && section.chunkSection() != null) sections[i] = section.chunkSection();
+        }
+        for (int i = 0; i < sections.length; i++) {
+            if (sections[i] == null) sections[i] = new net.minecraft.world.level.chunk.LevelChunkSection(level.palettedContainerFactory());
+        }
+        var chunk = new net.minecraft.world.level.chunk.LevelChunk(level, pos, net.minecraft.world.level.chunk.UpgradeData.EMPTY,
+                new net.minecraft.world.ticks.LevelChunkTicks<>(), new net.minecraft.world.ticks.LevelChunkTicks<>(), 0L,
+                sections, null, null);
+        net.minecraft.world.level.levelgen.Heightmap.primeHeightmaps(chunk,
+                java.util.EnumSet.allOf(net.minecraft.world.level.levelgen.Heightmap.Types.class));
+        return chunk;
+    }
+
+    /**
      * ServerChunkCache.chunkScanner().scanChunk on a mirrored level: the visitor reads the
      * chunk's save (a pregenerator asks for its Status), or a loaded chunk's status.
      */
@@ -181,7 +213,14 @@ public final class HorizonChunkLoads {
     private static void region(ServerLevel level, ChunkPos pos, Reader reader) throws IOException {
         Path java = HorizonSavedData.javaDir();
         if (java == null || java.getParent() == null) return;
-        Path file = net.minecraft.world.level.dimension.DimensionType.getStorageFolder(level.dimension(), java.getParent())
+        // The world's folder: the Java side's is the Overworld's (dimensions/minecraft/overworld).
+        Path root = java.getParent();
+        if (root.getParent() != null && root.getParent().getParent() != null
+                && root.getParent().getParent().getFileName() != null
+                && root.getParent().getParent().getFileName().toString().equals("dimensions")) {
+            root = root.getParent().getParent().getParent();
+        }
+        Path file = net.minecraft.world.level.dimension.DimensionType.getStorageFolder(level.dimension(), root)
                 .resolve("region").resolve("r." + pos.getRegionX() + "." + pos.getRegionZ() + ".mca");
         if (!Files.isRegularFile(file)) return;
         byte[] data;

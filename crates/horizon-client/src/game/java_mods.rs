@@ -259,8 +259,78 @@ fn start(root: &Path, dir: &Path, jars: Vec<PathBuf>, side: horizon_jvm::Side) -
             "Java mods: the client reads its connection's packets (a recording mod): the window's player's are passed"
         );
     }
+    if started {
+        register_extra_levels();
+    }
     SETTLED.store(true, std::sync::atomic::Ordering::SeqCst);
     started
+}
+
+/// The mods' dimensions (level stems beyond vanilla's three) become levels of Horizon's
+/// server (`chunk::ExtraLevel`, `Dim::Extra`), as `MinecraftServer.createLevels` makes one
+/// per stem: `/execute in`, `/tp`, mods' teleports and saved players reach them.
+fn register_extra_levels() {
+    let levels = match horizon_jvm::events::extra_levels() {
+        Ok(levels) => levels,
+        Err(e) => {
+            log::warn!("Java mods: their dimensions were not read: {e}");
+            return;
+        }
+    };
+    for l in levels {
+        let shape = match horizon_client::chunk::LevelShape::new(
+            l.min_y,
+            l.height,
+            l.logical_height,
+            l.has_skylight,
+            l.has_ceiling,
+        ) {
+            Ok(shape) => shape,
+            Err(e) => {
+                log::warn!("Java mods: the dimension {} can't be a level: {e}", l.id);
+                continue;
+            }
+        };
+        // Drawn as the vanilla level its type is most like: a ceiling or no skylight as the
+        // Nether, else the Overworld.
+        let looks_like = if l.has_ceiling || !l.has_skylight {
+            "minecraft:the_nether"
+        } else {
+            "minecraft:overworld"
+        };
+        let level = horizon_client::chunk::ExtraLevel {
+            id: Box::leak(l.id.clone().into_boxed_str()),
+            dimension_type: Box::leak(l.dimension_type.clone().into_boxed_str()),
+            shape,
+            coordinate_scale: l.coordinate_scale,
+            looks_like,
+        };
+        if horizon_client::chunk::extra_level_named(&l.id) == Some(level) {
+            continue;
+        }
+        match horizon_client::chunk::register_extra_level(level) {
+            Some(_) => log::info!(
+                "Java mods: the dimension {} is a level (type {}, y {}..{})",
+                l.id,
+                l.dimension_type,
+                l.min_y,
+                l.min_y + l.height
+            ),
+            None => log::warn!("Java mods: too many dimensions: {} has no level", l.id),
+        }
+    }
+}
+
+/// The level `id` names, waiting for the Java mods' start when it isn't one of the server's
+/// yet (a world saved in a mod's dimension opens before Java has said what they are).
+pub(super) fn level_named(id: &str) -> super::Dim {
+    if let Some(dim) = super::Dim::known(id) {
+        return dim;
+    }
+    if has_java_mods() {
+        wait_for_java(std::time::Duration::from_secs(300));
+    }
+    super::Dim::from_id(id)
 }
 
 /// Set once Java's start has ended, whether it started or not.

@@ -130,7 +130,7 @@ impl Game<'_> {
             forward: forward.map(|c| c as f32),
             rain,
             thunder,
-            skybox: self.dim == Dim::Overworld,
+            skybox: self.dim.vanilla() == Dim::Overworld,
             blindness: self
                 .potions
                 .effects
@@ -242,7 +242,7 @@ impl Game<'_> {
         } else {
             63.0
         };
-        self.dim == Dim::Overworld
+        self.dim.vanilla() == Dim::Overworld
             && camera.y < horizon
             && fog_type(
                 &self.world,
@@ -374,7 +374,14 @@ impl Game<'_> {
         let packed = self.world.light(b[0], b[1], b[2]);
         let sky = i32::from(packed >> 4) - self.sky_darken();
         let raw = sky.max(i32::from(packed & 15)).clamp(0, 15) as u8;
-        lightmap_brightness(if self.dim == Dim::Nether { 0.1 } else { 0.0 }, raw)
+        lightmap_brightness(
+            if self.dim.vanilla() == Dim::Nether {
+                0.1
+            } else {
+                0.0
+            },
+            raw,
+        )
     }
     pub(super) fn tick_particles(&mut self) {
         self.fog.tick_flicker();
@@ -442,10 +449,10 @@ impl Game<'_> {
         let height_no_leaves =
             |p: [i32; 3]| motion_blocking_leaves(world, facts, p[0], p[2], i32::MAX, false);
         // The day timeline: firefly bush sounds from 12600 to 23400.
-        let firefly_bush_sounds = self.dim == Dim::Overworld
+        let firefly_bush_sounds = self.dim.vanilla() == Dim::Overworld
             && (12600..23401).contains(&self.world.day_time.rem_euclid(24000));
         // EnvironmentAttributes.CREAKING_ACTIVE: the same overworld night.
-        let creaking_active = self.dim == Dim::Overworld
+        let creaking_active = self.dim.vanilla() == Dim::Overworld
             && (12600..23401).contains(&self.world.day_time.rem_euclid(24000));
         let tables = &self.pack.context.tables;
         let model_offset = |state, x, z| tables.offset(state, x, z);
@@ -472,7 +479,7 @@ impl Game<'_> {
             model_offset: &model_offset,
             gateway_particles: &gateway_particles,
             thundering,
-            ultrawarm: self.dim == Dim::Nether,
+            ultrawarm: self.dim.vanilla() == Dim::Nether,
         };
         if let Some(e) = eye {
             let block = [

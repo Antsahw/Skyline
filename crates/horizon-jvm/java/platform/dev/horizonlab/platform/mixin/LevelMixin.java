@@ -27,9 +27,15 @@ public abstract class LevelMixin {
     public boolean hasChunk(int x, int z) {
         if (HorizonServer.isMirror(this)) {
             Level level = (Level) (Object) this;
-            return HorizonServer.loaded(level, x << 4, 64, z << 4);
+            return HorizonServer.loaded(level, x << 4, 64, z << 4) || horizon$standIn(level, x, z);
         }
         return ((net.minecraft.world.level.LevelAccessor) (Object) this).getChunkSource().hasChunk(x, z);
+    }
+
+    /** A chunk a mod made load that Horizon hasn't yet (HorizonWorldgen.standIn): loaded, as in vanilla. */
+    private static boolean horizon$standIn(Level level, int x, int z) {
+        return level instanceof net.minecraft.server.level.ServerLevel server
+                && dev.horizonlab.platform.HorizonWorldgen.standInNow(server, x, z) != null;
     }
 
     @Inject(method = "getBlockState", at = @At("HEAD"), cancellable = true)
@@ -119,7 +125,8 @@ public abstract class LevelMixin {
     private void horizon$loaded(BlockPos pos, CallbackInfoReturnable<Boolean> cir) {
         if (HorizonServer.isMirror(this)) {
             Level level = (Level) (Object) this;
-            cir.setReturnValue(HorizonServer.loaded(level, pos.getX(), pos.getY(), pos.getZ()));
+            cir.setReturnValue(HorizonServer.loaded(level, pos.getX(), pos.getY(), pos.getZ())
+                    || horizon$standIn(level, pos.getX() >> 4, pos.getZ() >> 4));
         }
     }
 

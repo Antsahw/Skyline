@@ -66,7 +66,13 @@ public abstract class ServerChunkCacheMixin {
         if (!HorizonServer.isMirror(this)) return;
         var level = (net.minecraft.server.level.ServerLevel) horizon$level();
         var locating = dev.horizonlab.platform.HorizonWorldgen.locatingChunk(level, x, z, status);
-        cir.setReturnValue(locating != null ? locating : dev.horizonlab.platform.HorizonChunks.chunk(level, x, z));
+        net.minecraft.world.level.chunk.ChunkAccess chunk = locating != null ? locating
+                : dev.horizonlab.platform.HorizonChunks.chunk(level, x, z);
+        // Not loaded by Horizon: one asked to load (vanilla generates it there and then) is a
+        // stand-in of the mods' generation, in a level they generate; else one made already.
+        if (chunk == null) chunk = load ? dev.horizonlab.platform.HorizonWorldgen.standIn(level, x, z)
+                : dev.horizonlab.platform.HorizonWorldgen.standInNow(level, x, z);
+        cir.setReturnValue(chunk);
     }
 
     /** Horizon ticks what it has (ServerChunkCache.isPositionTicking: entities' own checks). */

@@ -24,9 +24,19 @@ public abstract class PlayerListMixin {
     @Inject(method = "broadcastSystemMessage(Lnet/minecraft/network/chat/Component;Z)V", at = @At("HEAD"), cancellable = true)
     private void horizon$broadcast(Component message, boolean overlay, CallbackInfo ci) {
         if (HorizonServer.isMirror((PlayerList) (Object) this)) {
-            Natives.broadcast(dev.horizonlab.platform.HorizonServer.chatJson(message));
+            if (!horizon$advancementAnnouncement(message)) Natives.broadcast(dev.horizonlab.platform.HorizonServer.chatJson(message));
             ci.cancel();
         }
+    }
+
+    /**
+     * A grant's "has made the advancement" line (PlayerAdvancements.award): Horizon keeps the
+     * players' advancements and announces them, so the mirror's (a mod awarding one itself)
+     * would be a second.
+     */
+    private static boolean horizon$advancementAnnouncement(Component message) {
+        return message.getContents() instanceof net.minecraft.network.chat.contents.TranslatableContents t
+                && t.getKey().startsWith("chat.type.advancement.");
     }
 
     @Inject(method = "broadcastSystemMessage(Lnet/minecraft/network/chat/Component;Ljava/util/function/Function;Z)V", at = @At("HEAD"), cancellable = true)

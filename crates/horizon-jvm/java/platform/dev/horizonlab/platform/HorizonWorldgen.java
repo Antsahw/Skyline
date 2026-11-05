@@ -130,6 +130,11 @@ public final class HorizonWorldgen {
             if (!serverReady) {
                 serverReady = true;
                 readyServer(seed, structures);
+            } else if (structures != readyStructures) {
+                // Readied before the first tick with structures assumed on (readyBeforeTicks).
+                set(MinecraftServer.class, HorizonServer.server(), "worldGenSettings",
+                        WorldGenSettings.of(new WorldOptions(seed, structures, false), HorizonServer.server().registryAccess()));
+                readyStructures = structures;
             }
             ServerLevel level = HorizonServer.level(dimension);
             ChunkGenerator generator = HorizonServer.generator(level);
@@ -176,7 +181,31 @@ public final class HorizonWorldgen {
      * (TerraBlender puts its regions into the level stems' biome sources and its surface rules
      * into their noise settings; Fabric API applies biome modifications).
      */
+    /**
+     * The server's start hooks before its first tick when no dimension's generation readied them
+     * yet: a world reopened in a level whose chunks around the player are saved (a mod's
+     * dimension, the Nether) starts generating ticks later, and by then the tick's start had
+     * marked the registries modified, so Fabric's biome modifications failed ("This dynamic
+     * registries instance has already been modified") and weren't applied anywhere.
+     */
+    static synchronized void readyBeforeTicks(long seed) {
+        if (serverReady || HorizonData.loaded == null) return;
+        serverReady = true;
+        Thread.currentThread().setContextClassLoader(HorizonWorldgen.class.getClassLoader());
+        try {
+            HorizonServer.worldSeed(seed);
+            readyServer(seed, true);
+        } catch (Throwable t) {
+            Natives.log("Java mods: the server's start hooks failed: " + t);
+            log(t);
+        }
+    }
+
+    /** The structure setting the server was readied with. */
+    private static boolean readyStructures;
+
     private static void readyServer(long seed, boolean structures) throws ReflectiveOperationException {
+        readyStructures = structures;
         MinecraftServer server = HorizonServer.server();
         var registries = server.registryAccess();
         set(MinecraftServer.class, server, "worldGenSettings",
@@ -280,6 +309,13 @@ public final class HorizonWorldgen {
     /** The mods that change a dimension's generation: their biomes in its source, their features in its biomes. */
     private static List<String> modded(ServerLevel level, ChunkGenerator generator) {
         Set<String> mods = new java.util.TreeSet<>();
+        // A level beyond vanilla's three (a mod's dimension: The Sift's, a mining dimension on
+        // vanilla's flat generator) is the mods' however it's made: Horizon has no stem of it.
+        var dimensionId = level.dimension().identifier();
+        if (!dimensionId.getNamespace().equals("minecraft") || !java.util.List.of("overworld", "the_nether", "the_end")
+                .contains(dimensionId.getPath())) {
+            mods.add(dimensionId.getNamespace());
+        }
         var features = level.registryAccess().lookupOrThrow(Registries.PLACED_FEATURE);
         for (Holder<Biome> biome : generator.getBiomeSource().possibleBiomes()) {
             biome.unwrapKey().ifPresent(k -> {
@@ -915,6 +951,96 @@ public final class HorizonWorldgen {
         ChunkStatus at = status == null || status.isAfter(ChunkStatus.STRUCTURE_REFERENCES)
                 ? ChunkStatus.STRUCTURE_REFERENCES : status;
         return neighbour(d, x, z, at);
+    }
+
+    // ---- Stand-ins --------------------------------------------------------------------------
+
+    /** Stand-in chunks of levels the mods generate, by chunk, until Horizon loads them. */
+    private static final Map<ServerLevel, Map<Long, net.minecraft.world.level.chunk.LevelChunk>> STAND_INS =
+            new java.util.IdentityHashMap<>();
+    /** Stand-ins kept a level (each a generated chunk); past it they start over. */
+    private static final int STAND_INS_KEPT = 256;
+
+    /**
+     * Chunk x z of a level, which Horizon hasn't loaded, for a mod's {@code getChunk(x, z)}
+     * that loads (vanilla's ServerChunkCache blocks, reads or generates it there and then): The
+     * Sift's rift finds its way out in The Sift's level, nobody being there yet, and its way
+     * back in the Overworld's, where the player left. Horizon's save of it when it has one
+     * (HorizonChunkLoads.saved); else, in a level the mods generate, generated here as Horizon
+     * would have them generate it (to FEATURES, kept in the cache Horizon's own generation of
+     * that chunk takes it from: both are the same chunk). Horizon is asked to load it
+     * (HorizonChunkLoads.future); block reads of the level fall back on the stand-in
+     * (standInBlock) until it has, and writes wait for Horizon's, as any write into an unloaded
+     * chunk. Null where neither can be had (a vanilla level's chunk never generated).
+     */
+    public static net.minecraft.world.level.chunk.LevelChunk standIn(ServerLevel level, int x, int z) {
+        long key = ChunkPos.pack(x, z);
+        synchronized (STAND_INS) {
+            var kept = STAND_INS.get(level);
+            if (kept != null && kept.containsKey(key)) return kept.get(key);
+        }
+        ClassLoader loader = Thread.currentThread().getContextClassLoader();
+        Thread.currentThread().setContextClassLoader(HorizonWorldgen.class.getClassLoader());
+        try {
+            var chunk = HorizonChunkLoads.saved(level, x, z);
+            if (chunk == null) chunk = generatedStandIn(level, x, z);
+            if (chunk == null) return null;
+            synchronized (STAND_INS) {
+                var kept = STAND_INS.computeIfAbsent(level, l -> new java.util.HashMap<>());
+                if (kept.size() >= STAND_INS_KEPT) kept.clear();
+                kept.put(key, chunk);
+            }
+            HorizonChunkLoads.future(level, x, z, ChunkStatus.FULL, true);
+            return chunk;
+        } catch (Throwable t) {
+            failed("stand-in chunk", t);
+            return null;
+        } finally {
+            Thread.currentThread().setContextClassLoader(loader);
+        }
+    }
+
+    /** Chunk x z of a level the mods generate, generated for a stand-in; null in another level. */
+    private static net.minecraft.world.level.chunk.LevelChunk generatedStandIn(ServerLevel level, int x, int z) {
+        String dimension = level.dimension().identifier().toString();
+        Dimension d = DIMENSIONS.get(dimension);
+        // A mod's level nobody has been in: its generation starts here, as Horizon's opening
+        // of the level would start it (vanilla's levels start with the server).
+        if (d == null && serverReady && !HorizonServer.vanillaLevel(level.dimension().identifier())
+                && start(dimension, HorizonServer.seed(), readyStructures, null)) {
+            d = DIMENSIONS.get(dimension);
+        }
+        if (d == null || d.level != level) return null;
+        Dimension outer = LOCATING.get();
+        LOCATING.set(d);
+        try {
+            Live live = d.live.get(ChunkPos.pack(x, z));
+            // A chunk Horizon is generating right now stays at its step (its worker holds it).
+            ProtoChunk proto = live != null ? live.chunk() : neighbour(d, x, z, ChunkStatus.FEATURES);
+            return new net.minecraft.world.level.chunk.LevelChunk(level, proto, null);
+        } finally {
+            if (outer == null) LOCATING.remove(); else LOCATING.set(outer);
+        }
+    }
+
+    /** The block at {@code pos} of a stand-in chunk (standIn), or null when there is none. */
+    public static BlockState standInBlock(ServerLevel level, BlockPos pos) {
+        if (STAND_INS.isEmpty()) return null;
+        net.minecraft.world.level.chunk.LevelChunk chunk;
+        synchronized (STAND_INS) {
+            var kept = STAND_INS.get(level);
+            chunk = kept == null ? null : kept.get(ChunkPos.pack(pos.getX() >> 4, pos.getZ() >> 4));
+        }
+        return chunk == null ? null : chunk.getBlockState(pos);
+    }
+
+    /** The stand-in of chunk x z, if one was made (heights, getChunk without loading). */
+    public static net.minecraft.world.level.chunk.LevelChunk standInNow(ServerLevel level, int x, int z) {
+        if (STAND_INS.isEmpty()) return null;
+        synchronized (STAND_INS) {
+            var kept = STAND_INS.get(level);
+            return kept == null ? null : kept.get(ChunkPos.pack(x, z));
+        }
     }
 
     // ---- Steps ------------------------------------------------------------------------------
