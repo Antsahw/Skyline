@@ -28,8 +28,19 @@ way to play the mods.
 
 ## Get it
 
-No release carries the Fabric mods build yet, so you build the fork's launcher and game once
-(about 20 minutes). Install the tools:
+Download the fork's launcher from the **[`java-mods` release](https://github.com/iaxivers/horizon/releases/tag/java-mods)**
+and unpack it anywhere:
+
+- **Windows:** `horizon-launcher-windows-x64.zip` → `horizon-launcher.exe`.
+- **Linux:** `horizon-launcher-linux-x86_64.tar.gz` → `horizon-launcher` (`chmod +x` if needed).
+
+It is Horizon's launcher with the Fabric switch, and it never updates itself into the main
+launcher (which has no switch). Download it again from the same page for a newer one. The game
+build with Fabric mods comes from that release too, by itself, when you turn the switch on.
+
+### From source instead
+
+Install the tools:
 
 - **Windows**, in PowerShell. When the Rust installer asks about Visual Studio, accept its option:
   ```powershell
@@ -41,7 +52,7 @@ No release carries the Fabric mods build yet, so you build the fork's launcher a
 - **Ubuntu / Debian:** `sudo apt install git build-essential openjdk-25-jdk libasound2-dev libudev-dev libxkbcommon-x11-dev`,
   then Rust from [rustup.rs](https://rustup.rs).
 
-Then, on every system:
+Then (about 20 minutes):
 
 ```sh
 git clone -b java-bridge https://github.com/iaxivers/horizon
@@ -50,25 +61,25 @@ cargo build --profile fast -p horizon-client --features horizon-client/java-mods
 cd launcher && cargo build --release && cd ..
 ```
 
-The launcher is `launcher/target/release/horizon-launcher` (`horizon-launcher.exe` on Windows); the
-game build with Fabric mods is `target/fast/horizon-client`. Start the launcher with
-`HORIZON_LAUNCHER_NO_SELF_UPDATE=1` set, so it doesn't replace itself with upstream's.
+Start `launcher/target/release/horizon-launcher` with `HORIZON_LAUNCHER_NO_SELF_UPDATE=1` set, and
+after step 2 below give the version your build:
+`launcher/target/release/horizon-launcher java-mods use-build target/fast/horizon-client`.
+After a `git pull`, build again and run `use-build` again.
 
 ## Set it up (once)
 
 1. **Sign in:** in the launcher, add your Microsoft account (or `horizon-launcher account sign-in`).
 2. **Install a Horizon version** on Home and let the launcher prepare it from your Minecraft 26.3.
-3. **Give that version the Fabric mods build you made:**
-   ```sh
-   launcher/target/release/horizon-launcher java-mods use-build target/fast/horizon-client
-   ```
-4. **Turn on Fabric mods:** Home > **Launch…** > **Fabric 26.3 mods (beta)**
-   (or `horizon-launcher java-mods on`). A **Java mods** tab appears on Home.
-5. **Add mods:** the Java mods tab > **Add**, or drop jars on it (or `horizon-launcher java-mods add <jar>`).
-6. Press **Play**.
+3. **Turn on Fabric mods:** Home > **Launch…** > **Fabric 26.3 mods (beta)**
+   (or `horizon-launcher java-mods on`). A **Java mods** tab appears on Home. "reads prepared files
+   of format N": the build and your Horizon version are too far apart; update the version (or
+   wait for the next build).
+4. **Add mods:** the Java mods tab > **Add**, or drop jars on it (or `horizon-launcher java-mods add <jar>`).
+5. Press **Play**.
 
-**The first start takes a few minutes.** If you have no Java 25 JDK, the launcher downloads
-Mojang's Java 25 first; then the game builds the mods' content once.
+**The first start takes a few minutes.** The launcher downloads the Fabric mods build for your
+version (and Mojang's Java 25 if you have no Java 25 JDK); before each Play it checks for a newer
+build and takes it; then the game builds the mods' content once.
 
 **Check it worked:** make a Creative world, type `/give @s ` and press Tab: your mods' items
 should be in the list.
@@ -76,7 +87,6 @@ should be in the list.
 **To play without mods:** turn **Fabric 26.3 mods (beta)** off. Your jars stay in the Java mods
 tab for next time.
 
-After a `git pull`, run the two build lines again, then step 3 again.
 
 ## Add mods and play
 
