@@ -326,6 +326,18 @@ Tweaks, The Sift... Failures, by what Horizon's headless client lacks (client ch
 - `Entity.vicinityCache` missing; "a client level has no chunk source: value 0 not in 1..32"
   (a view distance of 0 given to the client level).
 
+Same tester, follow-up: JEI works now; The Sift's blocks appear in ancient cities now. But
+**mods' own dimensions don't exist**: The Sift's dimension isn't in `/execute in`, and its horn
+(summons "the singer" in an ancient city, which leads there) does nothing, with nothing in the
+log. Horizon makes one level per vanilla dimension (`levels.rs`); a mod's `dimension`/
+`dimension_type` (data pack JSON or registered in code) gets no level, so there's nothing to
+travel to, nothing in `/execute in`, and mod code asking `server.getLevel(key)` gets null (the
+horn then silently gives up). **Worldgen chat, high priority** (Twilight Forest, the Aether,
+mining dimensions all need it): a level per extra dimension in the mirror's registry, generated
+by the mods' generator (as `HorizonWorldgen.modded`), saved under `dimensions/<ns>/<path>`, in
+`/execute in`, `/tp`, portals and `changeDimension` from mod code. Also Xaero's World Map:
+`ModelManager.getBlockStateModelSet()` null (client chat, the ModelManager stand-in above).
+
 ### Later: upstream's launcher redesign (noted 2026-11-04)
 
 Upstream redesigned the launcher (the "glass" views). Batch 10 only added the Java mods tab to
