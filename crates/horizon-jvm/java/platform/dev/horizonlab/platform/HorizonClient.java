@@ -1509,6 +1509,65 @@ public final class HorizonClient {
     }
 
     /**
+     * The client half of a block click that comes before the server's, in vanilla's order: a
+     * vanilla client runs MultiPlayerGameMode.useItemOn first, and the mods' injections at its
+     * head and before its prediction (startPrediction) may end the click there, on the client,
+     * with no packet to the server: a mod item's selection made by right-clicking blocks (a
+     * machine arm's points, a chain's first end), a value box set, glue's corner. They send
+     * their own packets for the server's half. Then those inside performUseItemOn (the
+     * prediction, before the packet). Vanilla's own bodies aren't run here: the server's are,
+     * and the inventory is shared. Fabric API's own are left out (its UseBlockCallback's client
+     * half runs in useBlock). The result when a mod ended the click on the client; else null.
+     */
+    public static net.minecraft.world.InteractionResult useBlockFirst(net.minecraft.server.level.ServerPlayer player,
+                                                                      net.minecraft.world.InteractionHand hand,
+                                                                      net.minecraft.world.phys.BlockHitResult hit) {
+        if (minecraft == null || minecraft.font == null || minecraft.gameMode == null) return null;
+        var gameModeClass = net.minecraft.client.multiplayer.MultiPlayerGameMode.class;
+        if (!HorizonHooks.hasMerged(gameModeClass, "useItemOn", "HEAD")
+                && !HorizonHooks.hasMerged(gameModeClass, "useItemOn", PREDICTION)
+                && !HorizonHooks.hasMergedInside(gameModeClass, "performUseItemOn")) return null;
+        net.minecraft.world.InteractionResult[] result = {null};
+        try {
+            inWorld(player, () -> withKeys(player.getUUID(), () -> {
+                var local = minecraft.player;
+                if (local == null) return;
+                HorizonServer.clientHalf = Thread.currentThread();
+                try {
+                    var gameMode = minecraft.gameMode;
+                    for (String at : new String[] {"HEAD", PREDICTION}) {
+                        var fired = HorizonHooks.fireMergedSkipping(gameMode, gameModeClass, "useItemOn", at, true, local, hand, hit);
+                        if (fired.cancelled()) {
+                            result[0] = fired.returnValue() instanceof net.minecraft.world.InteractionResult r
+                                    ? r : net.minecraft.world.InteractionResult.PASS;
+                            if (DEBUG_USE) Natives.log("use: the client took the click at " + at + " of useItemOn: " + result[0]);
+                            return;
+                        }
+                    }
+                    // The prediction (performUseItemOn): its result is the client's; the packet
+                    // goes to the server whatever it is, so the server's half follows.
+                    var fired = HorizonHooks.fireMergedInside(gameMode, gameModeClass, "performUseItemOn", true,
+                            local, hand, hit, hit.getBlockPos(), local.getItemInHand(hand));
+                    if (DEBUG_USE && fired.cancelled()) Natives.log("use: the client's prediction: " + fired.returnValue());
+                } finally {
+                    HorizonServer.clientHalf = null;
+                }
+            }));
+        } catch (Throwable t) {
+            Throwable root = t;
+            while (root.getCause() != null && root.getCause() != root) root = root.getCause();
+            Natives.log("Horizon's client: the client side of a block click failed: " + root);
+            HorizonFailures.report("using a block", root);
+        }
+        return result[0];
+    }
+
+    /** MultiPlayerGameMode.useItemOn's call that predicts the click and sends its packet. */
+    private static final String PREDICTION = "INVOKE Lnet/minecraft/client/multiplayer/MultiPlayerGameMode;startPrediction";
+
+    private static final boolean DEBUG_USE = String.valueOf(System.getenv("HORIZON_JAVA_DEBUG")).contains("use");
+
+    /**
      * The client half of using an item on nothing (MultiPlayerGameMode.useItem, after the
      * server's): Fabric's UseItemCallback, then the item's own use, on the player's client
      * player, with mirrored levels answering isClientSide() true (LevelMixin). What it opens

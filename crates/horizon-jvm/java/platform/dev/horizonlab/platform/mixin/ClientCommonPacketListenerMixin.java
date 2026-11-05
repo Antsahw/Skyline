@@ -13,7 +13,8 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 /**
  * The headless client's connection has no channel: a packet a mod sends on it
  * (minecraft.getConnection().send, a mod's custom payload as a raw packet) goes to the mods'
- * server code in this JVM (HorizonLoop) when it is a custom payload; vanilla's own are the
+ * server code in this JVM (HorizonLoop) when it is a custom payload or a packet type of a
+ * mod's own; vanilla's own are the
  * player's game's to send, and are dropped.
  */
 @Mixin(ClientCommonPacketListenerImpl.class)
@@ -23,5 +24,7 @@ public abstract class ClientCommonPacketListenerMixin {
         if (!HorizonClient.headless()) return;
         ci.cancel();
         if (packet instanceof ServerboundCustomPayloadPacket(var payload)) HorizonLoop.toServer(payload);
+        // A mod's own packet type (Create's selections' ends): to its server handler.
+        else if (HorizonLoop.modPacket(packet)) HorizonLoop.packetToServer(packet);
     }
 }

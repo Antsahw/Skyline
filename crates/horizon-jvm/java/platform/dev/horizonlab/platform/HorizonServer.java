@@ -653,6 +653,12 @@ public final class HorizonServer {
         HorizonNeighbours.update(json);
     }
 
+    /** Horizon's item entities near its players, for the mods' blocks (HorizonItems). */
+    public static void horizonItems(String json) {
+        Thread.currentThread().setContextClassLoader(HorizonServer.class.getClassLoader());
+        HorizonItems.update(json);
+    }
+
     /** Whether the mods' client reads its connection's packets (HorizonPacketTap.wanted). */
     public static boolean wantsPackets() {
         return HorizonPacketTap.wanted();
@@ -1311,6 +1317,8 @@ public final class HorizonServer {
         // Their item cooldowns (Player.tick's): a mod item's use that starts one (Create's belt
         // connector: 5 ticks after its first shaft) was otherwise never usable again.
         for (ServerPlayer p : BY_UUID.values()) fire("ItemCooldowns.tick", () -> p.getCooldowns().tick());
+        // Their held uses of mods' items (LivingEntity.tick's updatingUsingItem: sandpaper).
+        for (ServerPlayer p : BY_UUID.values()) tickUse(p);
         fireEach("ServerTickEvents.START_SERVER_TICK", ServerTickEvents.START_SERVER_TICK, l -> l.onStartTick(server));
         for (ServerLevel level : new ArrayList<>(LEVELS.values())) {
             fireEach("ServerTickEvents.START_LEVEL_TICK", ServerTickEvents.START_LEVEL_TICK, l -> l.onStartTick(level));
@@ -1528,6 +1536,8 @@ public final class HorizonServer {
             if (level.getFluidTicks() instanceof HorizonTicks<?> ticks) ticks.run(level);
         }
         phase = HorizonProfile.add("scheduled ticks", phase);
+        // Horizon's items on and in the mods' blocks (HorizonItems: a depot catching one).
+        HorizonItems.touchBlocks();
         HorizonBlockEntities.tick();
         phase = HorizonProfile.add("block entities", phase);
         HorizonChunkLoads.tick();
@@ -1540,6 +1550,8 @@ public final class HorizonServer {
         phase = HorizonProfile.add("entities", phase);
         HorizonSpawner.tick();
         phase = HorizonProfile.add("spawner", phase);
+        // What the mods did to Horizon's items this tick, to Horizon.
+        HorizonItems.report();
         // ServerPlayer.tick and doTick: a menu no longer valid closes, and the open menu sends
         // its changes (a mod's menu keeps its block working while it is watched, and syncs its
         // own data there: Tom's Storage's terminal its item list).
@@ -2347,6 +2359,9 @@ public final class HorizonServer {
         if (clientHalf == Thread.currentThread()) return false;
         if (HorizonEntities.modded(entity.getType())) return HorizonEntities.add((ServerLevel) level, entity);
         if (entity instanceof net.minecraft.world.entity.item.ItemEntity item && !item.getItem().isEmpty()) {
+            // Kept to stand for Horizon's item once it is listed (HorizonItems: what the mod set
+            // on it stays).
+            HorizonItems.spawned((ServerLevel) level, item);
             var motion = item.getDeltaMovement();
             Natives.dropItem(dimensionOf(level), item.getX(), item.getY(), item.getZ(),
                     motion.x, motion.y, motion.z,
@@ -2403,6 +2418,17 @@ public final class HorizonServer {
         if (clickTaken(player, level)) return 1;
         var hit = new net.minecraft.world.phys.BlockHitResult(new net.minecraft.world.phys.Vec3(hitX, hitY, hitZ),
                 net.minecraft.core.Direction.from3DDataValue(face), new BlockPos(x, y, z), false);
+        // The client's half first, as a vanilla client clicks (MultiPlayerGameMode.useItemOn
+        // before its packet): a mod's client code may end the click there (a machine arm's
+        // points chosen by right-clicking blocks), and the server never hears of it.
+        if (client) {
+            var first = HorizonClient.useBlockFirst(player, interaction, hit);
+            syncInventories();
+            if (first != null) {
+                if (first.consumesAction()) CLICK_TAKEN.put(player.getUUID(), level.getGameTime());
+                return first instanceof net.minecraft.world.InteractionResult.Success success && success.shouldSwing() ? 2 : 1;
+            }
+        }
         net.minecraft.world.InteractionResult[] result = {net.minecraft.world.InteractionResult.PASS};
         fire("ServerPlayerGameMode.useItemOn", () -> result[0] =
                 player.gameMode.useItemOn(player, level, player.getItemInHand(interaction), interaction, hit));
@@ -2457,6 +2483,8 @@ public final class HorizonServer {
         player.setXRot(pitch);
         if (clickTaken(player, level)) return 1;
         var interaction = hand == 1 ? net.minecraft.world.InteractionHand.OFF_HAND : net.minecraft.world.InteractionHand.MAIN_HAND;
+        // A mod's item in use here already: the click is the button still held (see tickUse).
+        if (stillHeld(player, interaction, level)) return 1;
         net.minecraft.world.InteractionResult[] result = {net.minecraft.world.InteractionResult.PASS};
         fire("ServerPlayerGameMode.useItem", () -> result[0] =
                 player.gameMode.useItem(player, level, player.getItemInHand(interaction), interaction));
@@ -2470,6 +2498,13 @@ public final class HorizonServer {
         if (handOverConsumable(player, interaction)) {
             syncInventories();
             return 0;
+        }
+        // Any other mod item's use over time (sandpaper polishing what the other hand holds, a
+        // mod's bow drawn) stays here: tickUse runs it while the button is held.
+        if (player.isUsingItem() && player.getUsedItemHand() == interaction && modItem(player.getUseItem())) {
+            USE_HELD.put(player.getUUID(), level.getGameTime());
+            if (DEBUG_USE) Natives.log("use: " + BuiltInRegistries.ITEM.getKey(player.getUseItem().getItem()) + " used over "
+                    + player.getUseItemRemainingTicks() + " ticks here");
         }
         syncInventories();
         // The client half (MultiPlayerGameMode.useItem): a mod's item opens its screen there
@@ -2502,6 +2537,66 @@ public final class HorizonServer {
 
     private static final boolean DEBUG_USE = String.valueOf(System.getenv("HORIZON_JAVA_DEBUG")).contains("use");
 
+    /**
+     * Per player using a mod's item over time on the mirror (not a consumable: Horizon eats
+     * those), the game time its game last asked to use it. Horizon's game doesn't know such an
+     * item is used over time, so while the button is held it asks again every 4 ticks
+     * (Minecraft.rightClickDelay) and never sends the release. A vanilla client would hold the
+     * use and send RELEASE_USE_ITEM on letting go.
+     */
+    private static final Map<UUID, Long> USE_HELD = new ConcurrentHashMap<>();
+    /** Ticks with no new ask after which the button was let go (asks come every 4). */
+    private static final int USE_LET_GO = 6;
+
+    /** Whether this use is the held button of the mod item's use already running: noted. */
+    private static boolean stillHeld(ServerPlayer player, net.minecraft.world.InteractionHand hand, ServerLevel level) {
+        if (!USE_HELD.containsKey(player.getUUID()) || !player.isUsingItem() || player.getUsedItemHand() != hand) return false;
+        if (!ItemStack.isSameItem(player.getItemInHand(hand), player.getUseItem())) return false;
+        USE_HELD.put(player.getUUID(), level.getGameTime());
+        return true;
+    }
+
+    private static java.lang.reflect.Method updatingUsingItem;
+
+    /**
+     * A mirrored player's use of a mod's item, one tick: LivingEntity.updatingUsingItem (the
+     * item's onUseTick, and at its end finishUsingItem: what it makes goes to Horizon with the
+     * slots), as LivingEntity.tick runs it; once the button is let go (no ask for USE_LET_GO
+     * ticks), ServerPlayer.releaseUsingItem (the item's releaseUsing), as RELEASE_USE_ITEM does.
+     */
+    private static void tickUse(ServerPlayer player) {
+        Long held = USE_HELD.get(player.getUUID());
+        if (held == null) return;
+        if (!player.isUsingItem()) {
+            USE_HELD.remove(player.getUUID());
+            return;
+        }
+        long now = player.level().getGameTime();
+        if (now - held > USE_LET_GO) {
+            if (DEBUG_USE) Natives.log("use: let go after " + player.getTicksUsingItem() + " ticks");
+            fire("ServerPlayer.releaseUsingItem", player::releaseUsingItem);
+            USE_HELD.remove(player.getUUID());
+            return;
+        }
+        fire("LivingEntity.updatingUsingItem", () -> {
+            try {
+                if (updatingUsingItem == null) {
+                    updatingUsingItem = net.minecraft.world.entity.LivingEntity.class.getDeclaredMethod("updatingUsingItem");
+                    updatingUsingItem.setAccessible(true);
+                }
+                updatingUsingItem.invoke(player);
+            } catch (java.lang.reflect.InvocationTargetException e) {
+                throw new RuntimeException(e.getCause());
+            } catch (ReflectiveOperationException e) {
+                throw new RuntimeException(e);
+            }
+        });
+        if (!player.isUsingItem()) {
+            if (DEBUG_USE) Natives.log("use: finished");
+            USE_HELD.remove(player.getUUID());
+        }
+    }
+
     /** Whether a stack is a mod's item (vanilla's are Horizon's, both halves). */
     private static boolean modItem(net.minecraft.world.item.ItemStack stack) {
         if (stack.isEmpty()) return false;
@@ -2525,6 +2620,8 @@ public final class HorizonServer {
                 all.addAll(HorizonCombat.visiting(level));
                 // Horizon's own mobs near its players (HorizonNeighbours).
                 all.addAll(HorizonNeighbours.of(level));
+                // Horizon's items near its players (HorizonItems).
+                all.addAll(HorizonItems.of(level));
                 return all;
             }
 
@@ -2564,6 +2661,7 @@ public final class HorizonServer {
                 // (Better Combat's sweep finds its targets with a box query).
                 for (var e : HorizonCombat.visiting(level)) if (e.getBoundingBox().intersects(box)) out.accept(e);
                 for (var e : HorizonNeighbours.of(level)) if (e.getBoundingBox().intersects(box)) out.accept(e);
+                for (var e : HorizonItems.of(level)) if (e.getBoundingBox().intersects(box)) out.accept(e);
             }
 
             @Override
@@ -2600,13 +2698,32 @@ public final class HorizonServer {
      * it made now (it ticks from its placement, as vanilla's do); a removed one's goes at its
      * next tick (HorizonBlockEntities.tick).
      */
-    public static void blockEntities(String dimension, int[] positions) {
+    public static void blockEntities(String dimension, int[] positions, String previous) {
         Thread.currentThread().setContextClassLoader(HorizonServer.class.getClassLoader());
         if (server == null) return;
         ServerLevel level = level(dimension);
+        String[] before = previous == null ? new String[0] : previous.split("\n", -1);
+        java.util.Set<Long> placed = new java.util.HashSet<>();
         for (int i = 0; i + 2 < positions.length; i += 3) {
             BlockPos pos = new BlockPos(positions[i], positions[i + 1], positions[i + 2]);
             fire("BlockEntity (made)", () -> HorizonBlockEntities.ensure(level, pos));
+            // What vanilla's LevelChunk.setBlockState does for the block it replaces and the one
+            // it sets (the mirror's setBlock and Horizon's world do neither for mods' blocks):
+            // the old block's affectNeighborsAfterRemoval, the new one's onPlace (Create's track
+            // joins its railway graph there). Once a position a call (its first set's old block).
+            int k = i / 3;
+            if (k < before.length && !before[k].isEmpty() && placed.add(pos.asLong())) {
+                BlockState old = parseState(before[k]);
+                BlockState now = level.getBlockState(pos);
+                if (old != null && old != now) {
+                    if (!old.is(now.getBlock()) && HorizonBlockEntities.modded(old) && ownsVanilla(old.getBlock(), "affectNeighborsAfterRemoval")) {
+                        fire("BlockState.affectNeighborsAfterRemoval", () -> old.affectNeighborsAfterRemoval(level, pos, false));
+                    }
+                    if (HorizonBlockEntities.modded(now) && ownsVanilla(now.getBlock(), "onPlace")) {
+                        fire("BlockState.onPlace", () -> now.onPlace(level, pos, old, false));
+                    }
+                }
+            }
             // A mod's fluid placed, or a neighbour of it changed (Horizon tells: the mod's
             // liquid block carries a vanilla template, LevelAccess::foreign_fluid): its tick,
             // as LiquidBlock.onPlace / neighborChanged / updateShape schedule it. The mirror
@@ -2616,6 +2733,19 @@ public final class HorizonServer {
                 level.scheduleTick(pos, fluid.getType(), fluid.getType().getTickDelay(level));
             }
         }
+    }
+
+    /** Per block class and method: whether a mod's class in its chain overrides vanilla's. */
+    private static final Map<String, Boolean> OWNS = new ConcurrentHashMap<>();
+
+    /** Whether {@code block}'s class (a mod's, up its chain to vanilla's) declares {@code method} itself. */
+    static boolean ownsVanilla(net.minecraft.world.level.block.Block block, String method) {
+        return OWNS.computeIfAbsent(block.getClass().getName() + "." + method, k -> {
+            for (Class<?> c = block.getClass(); c != null && !c.getName().startsWith("net.minecraft."); c = c.getSuperclass()) {
+                for (var m : c.getDeclaredMethods()) if (m.getName().equals(method)) return true;
+            }
+            return false;
+        });
     }
 
     /** Whether a fluid is a mod's (its flow is the mirror's; vanilla's water and lava are Horizon's). */
@@ -2638,6 +2768,46 @@ public final class HorizonServer {
             }
         }
         return out.toArray(String[]::new);
+    }
+
+    private static java.lang.reflect.Method shouldSpreadLiquid;
+
+    /**
+     * Lava whose fluid interactions are the mods' (they patch LiquidBlock.shouldSpreadLiquid:
+     * Create's own registry of them, honey and chocolate with lava), placed or next to a change
+     * in Horizon's block tick: vanilla's shouldSpreadLiquid runs here, the mods' injections
+     * first, as LiquidBlock.onPlace and neighborChanged call it. What it sets (obsidian,
+     * cobblestone, a mod's stone) is the mirror's write; Horizon scheduled the lava's tick.
+     */
+    public static void liquidInteractions(String dimension, int[] positions) {
+        Thread.currentThread().setContextClassLoader(HorizonServer.class.getClassLoader());
+        if (server == null) return;
+        ServerLevel level = level(dimension);
+        try {
+            if (shouldSpreadLiquid == null) {
+                shouldSpreadLiquid = net.minecraft.world.level.block.LiquidBlock.class.getDeclaredMethod("shouldSpreadLiquid",
+                        net.minecraft.world.level.Level.class, BlockPos.class, BlockState.class);
+                shouldSpreadLiquid.setAccessible(true);
+            }
+        } catch (ReflectiveOperationException e) {
+            Natives.log("Java mods: LiquidBlock.shouldSpreadLiquid not found: " + e);
+            return;
+        }
+        for (int i = 0; i + 2 < positions.length; i += 3) {
+            BlockPos pos = new BlockPos(positions[i], positions[i + 1], positions[i + 2]);
+            BlockState state = level.getBlockState(pos);
+            if (!(state.getBlock() instanceof net.minecraft.world.level.block.LiquidBlock liquid)) continue;
+            fire("LiquidBlock.shouldSpreadLiquid", () -> {
+                try {
+                    shouldSpreadLiquid.invoke(liquid, level, pos, state);
+                } catch (java.lang.reflect.InvocationTargetException e) {
+                    throw new RuntimeException(e.getCause());
+                } catch (IllegalAccessException e) {
+                    throw new RuntimeException(e);
+                }
+            });
+            if (TICK_DEBUG) Natives.log("fluid interaction " + pos + ": " + state + " -> " + level.getBlockState(pos));
+        }
     }
 
     public static void randomTicks(String dimension, int[] positions) {
@@ -2679,6 +2849,9 @@ public final class HorizonServer {
         if (HorizonVanillaActions.jumpsHooked()) out.add("jumps");
         if (HorizonVanillaActions.teleportsHooked()) out.add("teleports");
         if (HorizonVanillaActions.advancementsRouted()) out.add("advancements");
+        if (HorizonHooks.hooked("net/minecraft/world/level/block/LiquidBlock", "shouldSpreadLiquid")
+                || HorizonMixinTable.patchedInside(net.minecraft.world.level.block.LiquidBlock.class,
+                        java.util.Set.of("shouldSpreadLiquid"), java.util.Set.of())) out.add("liquid_interactions");
         if (!out.isEmpty()) {
             Natives.log("Routed to the mods: " + out + " (item pickup: " + HorizonMixinTable.mods(ITEM_ENTITY, "playerTouch")
                     + ", orbs: " + HorizonMixinTable.mods(ORB, "playerTouch") + ")");

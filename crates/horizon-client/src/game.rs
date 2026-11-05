@@ -1157,6 +1157,9 @@ impl LevelAccess for GameLevel<'_> {
     fn foreign_fluid_changed(&mut self, pos: BlockPos) {
         java_server::java_fluid_changed(pos);
     }
+    fn liquid_interaction(&mut self, pos: BlockPos) -> bool {
+        java_server::java_liquid_interaction(pos)
+    }
     fn redstone_experiments(&self) -> bool {
         self.redstone_experiments
     }
@@ -4289,6 +4292,11 @@ impl Game<'_> {
                 item.position.z.floor() as i32,
             ) || round.canceled(item.id)
             {
+                continue;
+            }
+            // Held by a Java mod's block (crushing wheels pulling it in): the mods' mirror
+            // ticks it, with their blocks' shapes for it.
+            if merging && java_server::java_holds_item(item.id) {
                 continue;
             }
             // ItemEntity.tick's noPhysics (servers only): out of a block

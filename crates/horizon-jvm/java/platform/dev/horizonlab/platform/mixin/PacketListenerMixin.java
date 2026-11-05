@@ -98,6 +98,13 @@ public abstract class PacketListenerMixin {
                 && dev.horizonlab.platform.HorizonPackets.forward(game.player, packet)) {
             return;
         }
+        // A packet type of a mod's own (registered into the game protocol, its own handle):
+        // to the mod's client code on the player's headless client, as a payload goes.
+        if (self instanceof ServerGamePacketListenerImpl game && game.player != null
+                && dev.horizonlab.platform.HorizonLoop.modPacket(packet)
+                && dev.horizonlab.platform.HorizonLoop.packetToClient(game.player, packet)) {
+            return;
+        }
         HorizonServer.dropped(packet);
     }
 

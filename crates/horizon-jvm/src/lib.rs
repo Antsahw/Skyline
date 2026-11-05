@@ -632,6 +632,11 @@ fn boot(env: &mut JNIEnv, jars: &[PathBuf]) -> jni::errors::Result<String> {
                 fn_ptr: native_tell as *mut c_void,
             },
             NativeMethod {
+                name: "itemsChanged".into(),
+                sig: "(Ljava/lang/String;)V".into(),
+                fn_ptr: native_items_changed as *mut c_void,
+            },
+            NativeMethod {
                 name: "overlay".into(),
                 sig: "(Ljava/lang/String;Ljava/lang/String;)V".into(),
                 fn_ptr: native_overlay as *mut c_void,
@@ -984,6 +989,16 @@ extern "system" fn native_log(mut env: JNIEnv, _class: JClass, text: JString) {
         if let Ok(text) = env.get_string(&text) {
             emit(&String::from(text));
         }
+    }));
+}
+
+/// `Natives.itemsChanged(String json)`.
+extern "system" fn native_items_changed(mut env: JNIEnv, _class: JClass, json: JString) {
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let Ok(json) = env.get_string(&json) else {
+            return;
+        };
+        events::push(events::Action::ItemsChanged { json: json.into() });
     }));
 }
 

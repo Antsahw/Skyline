@@ -12,6 +12,8 @@ public final class Natives {
 
     /** A line for one player's action bar (an overlay system message), as a JSON component. */
     public static native void overlay(String uuid, String text);
+    /** What the mods did to Horizon's item entities this tick (HorizonItems): a JSON list. */
+    public static native void itemsChanged(String json);
 
     /** Moves a player (by UUID) to a dimension ("minecraft:the_nether"), position and rotation. */
     public static native void teleport(String uuid, String dimension, double x, double y, double z, float yaw, float pitch);

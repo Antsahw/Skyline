@@ -396,6 +396,159 @@ public final class HorizonLoop {
         }
     }
 
+    // ---- Mods' own game packets ------------------------------------------------------------
+
+    /**
+     * Whether a packet is one of a mod's own packet types in the game protocol: not a custom
+     * payload, but a packet class with its own handle(listener), registered into the play
+     * protocol by the mod (a mixin on GameProtocols). The bridge has no connection to carry
+     * them, so they go between the two halves here, as payloads do.
+     */
+    public static boolean modPacket(Packet<?> packet) {
+        String name = packet.getClass().getName();
+        return !name.startsWith("net.minecraft.") && !name.startsWith("net.fabricmc.")
+                && !name.startsWith("dev.horizonlab.") && !name.startsWith("com.mojang.");
+    }
+
+    /**
+     * Client to server: a mod's own serverbound packet sent by the client running now
+     * (LocalPlayer.connection.send: a mod's client code after a click, as a selection's end),
+     * handled by its server listener, the player's mirrored connection, as the server reads it.
+     */
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    public static void packetToServer(Packet<?> packet) {
+        if (packet.type().flow() != net.minecraft.network.protocol.PacketFlow.SERVERBOUND) return;
+        ServerPlayer player = HorizonClient.serverPlayer(Minecraft.getInstance().player);
+        boolean elsewhere = loopThread != null && Thread.currentThread() != loopThread;
+        if (player == null && elsewhere) player = HorizonClient.lastPlayer();
+        if (DEBUG) Natives.log("loop: client to server packet " + packet.type().id() + " from "
+                + (player == null ? null : player.getName().getString()));
+        if (player == null || player.connection == null) {
+            Natives.log("Java mods: " + packet.type().id() + " was sent with no player's client running; dropped");
+            return;
+        }
+        ServerPlayer from = player;
+        Packet carried = carriedPacket(packet);
+        Runnable read = () -> {
+            if (HorizonServer.player(from.getUUID()) == null) return;
+            ensureProcessors();
+            try {
+                carried.handle(from.connection);
+                HorizonServer.afterLoop();
+            } catch (net.minecraft.server.RunningOnDifferentThreadException ignored) {
+                // Queued on the server (the mirror's thread check): it runs with its tasks.
+            } catch (Throwable t) {
+                log("the server side of " + packet.type().id() + " failed", t);
+            }
+        };
+        if (elsewhere) {
+            INBOX.add(read);
+            return;
+        }
+        reading++;
+        try {
+            read.run();
+        } finally {
+            reading--;
+        }
+    }
+
+    /**
+     * Server to client: a mod's own clientbound packet a mirrored player's connection was sent
+     * (the server asking the client for what it selected), handled by that player's headless
+     * client connection at flush, as a payload is. Whether it was taken.
+     */
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    public static boolean packetToClient(ServerPlayer player, Packet<?> packet) {
+        if (!on() || packet.type().flow() != net.minecraft.network.protocol.PacketFlow.CLIENTBOUND) return false;
+        if (DEBUG) Natives.log("loop: server to client packet " + packet.type().id() + " for " + player.getName().getString());
+        Packet carried = carriedPacket(packet);
+        OUTBOX.add(() -> {
+            try {
+                HorizonClient.as(player, () -> {
+                    HorizonClient.joinBeforeMessages(player);
+                    var connection = Minecraft.getInstance().getConnection();
+                    if (connection == null) return;
+                    ensureProcessors();
+                    try {
+                        carried.handle(connection);
+                    } catch (net.minecraft.server.RunningOnDifferentThreadException ignored) {
+                        // Scheduled on the client: run below, still as this player.
+                    }
+                    HorizonClient.tasks();
+                });
+            } catch (Throwable t) {
+                log("the client of " + packet.type().id() + " failed", t);
+            }
+        });
+        return true;
+    }
+
+    /**
+     * The client's and the server's packet processors (Minecraft's and MinecraftServer's
+     * packetProcessor, made in their constructors, which the mirror and the headless client
+     * skip): a mod's packet handler checks its thread with them
+     * (PacketUtils.ensureRunningOnSameThread). Both run on the loop's thread, Horizon's server
+     * thread, as single player's halves each run on their own.
+     */
+    private static void ensureProcessors() {
+        try {
+            var minecraft = Minecraft.getInstance();
+            if (minecraft != null && minecraft.packetProcessor() == null) {
+                HorizonClient.set(Minecraft.class, minecraft, "packetProcessor",
+                        new net.minecraft.network.PacketProcessor(Thread.currentThread()));
+            }
+            var server = HorizonServer.server();
+            if (server != null && server.packetProcessor() == null) {
+                HorizonClient.set(MinecraftServer.class, server, "packetProcessor",
+                        new net.minecraft.network.PacketProcessor(Thread.currentThread()));
+            }
+        } catch (ReflectiveOperationException e) {
+            Natives.log("Java mods: no packet processors: " + e);
+        }
+    }
+
+    /** Packet classes whose codec couldn't carry them: they go over as the object. */
+    private static final Set<Class<?>> UNCARRIED_PACKETS = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    /**
+     * A mod's packet written and read back with its codec (a static StreamCodec field of its
+     * class, as packet types declare theirs), so the two halves don't share its objects, as
+     * over a connection; the packet itself when there is none or it fails.
+     */
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private static Packet<?> carriedPacket(Packet<?> packet) {
+        Class<?> type = packet.getClass();
+        var server = HorizonServer.server();
+        if (server == null || UNCARRIED_PACKETS.contains(type)) return packet;
+        net.minecraft.network.codec.StreamCodec codec = null;
+        for (var field : type.getDeclaredFields()) {
+            if (!java.lang.reflect.Modifier.isStatic(field.getModifiers())
+                    || !net.minecraft.network.codec.StreamCodec.class.isAssignableFrom(field.getType())) continue;
+            try {
+                field.setAccessible(true);
+                codec = (net.minecraft.network.codec.StreamCodec) field.get(null);
+                break;
+            } catch (Throwable ignored) {
+            }
+        }
+        if (codec == null) {
+            UNCARRIED_PACKETS.add(type);
+            return packet;
+        }
+        var buf = new net.minecraft.network.RegistryFriendlyByteBuf(io.netty.buffer.Unpooled.buffer(), server.registryAccess());
+        try {
+            codec.encode(buf, packet);
+            if (codec.decode(buf) instanceof Packet<?> back && back.getClass() == type) return back;
+        } catch (Throwable t) {
+            if (DEBUG) Natives.log("loop: " + type.getName() + " goes over as it is (its codec: " + t + ")");
+        } finally {
+            buf.release();
+        }
+        UNCARRIED_PACKETS.add(type);
+        return packet;
+    }
+
     private static void log(String what, Throwable t) {
         Throwable root = t;
         while (root.getCause() != null && root.getCause() != root) root = root.getCause();

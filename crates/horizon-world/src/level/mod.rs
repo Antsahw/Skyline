@@ -339,6 +339,14 @@ pub trait LevelAccess {
     /// A foreign fluid at `pos` was placed or a neighbour of it changed: where vanilla's
     /// `LiquidBlock` schedules its fluid tick, the engine running it does.
     fn foreign_fluid_changed(&mut self, _pos: BlockPos) {}
+    /// `LiquidBlock.shouldSpreadLiquid` of the lava at `pos` belongs to another engine (a Java
+    /// mod's injection at its head: its own fluid interactions, which replace lava's): true
+    /// when that engine took it, and runs it (its conversions) at the end of the block tick.
+    /// Horizon then makes no conversion, and schedules the lava's tick as vanilla does when
+    /// there is none. The default: never.
+    fn liquid_interaction(&mut self, _pos: BlockPos) -> bool {
+        false
+    }
     fn allow_fluid_level_change(
         &self,
         _pos: BlockPos,
