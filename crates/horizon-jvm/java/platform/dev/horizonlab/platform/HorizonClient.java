@@ -2422,6 +2422,23 @@ public final class HorizonClient {
         return false;
     }
 
+    private static Field attackStrengthTicker;
+
+    /** The counters LocalPlayer.tick moves each client tick (the rest is the server's player). */
+    private static void clientPlayerTick(net.minecraft.client.player.LocalPlayer local) {
+        local.tickCount++;
+        try {
+            if (attackStrengthTicker == null) {
+                Field f = net.minecraft.world.entity.LivingEntity.class.getDeclaredField("attackStrengthTicker");
+                f.setAccessible(true);
+                attackStrengthTicker = f;
+            }
+            attackStrengthTicker.setInt(local, attackStrengthTicker.getInt(local) + 1);
+        } catch (ReflectiveOperationException e) {
+            // Left as it is.
+        }
+    }
+
     static void tickOnce() {
         HorizonHooks.fireClient(minecraft, "runTick");
         HorizonHooks.fireClient(minecraft, "tick");
@@ -2445,6 +2462,10 @@ public final class HorizonClient {
         // is the server's.
         var local = minecraft.player;
         if (local != null) {
+            // Its age and attack strength move as LocalPlayer.tick moves them (Entity.baseTick's
+            // tickCount++, Player.tick's attackStrengthTicker++): mods time their client's
+            // swings by them (a weapon's upswing that ends N ticks after the click).
+            clientPlayerTick(local);
             // Its hands' items and heights (LocalPlayer.tick ticks them; mods read them).
             var hands = local.firstPersonHandsAndItems();
             if (hands != null) {
