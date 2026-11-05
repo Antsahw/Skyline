@@ -1876,7 +1876,7 @@ impl Menu {
         if let Some((id, _)) = env.recipes.find(&grid, n) {
             self.crafted.push((format!("minecraft:{id}"), grid.clone()));
             self.crafted_takes
-                .push(CraftedTake::of(id, &taken, n, &grid));
+                .push(CraftedTake::of(id, taken, n, &grid));
             self.item_crafted
                 .push((format!("minecraft:{id}"), taken.clone()));
         }

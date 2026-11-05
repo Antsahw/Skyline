@@ -827,6 +827,7 @@ impl Game<'_> {
     }
 
     /// The Java image slot holding the image named `name`, with the image's size.
+    #[cfg_attr(not(feature = "java-mods"), allow(dead_code))]
     pub(super) fn java_image_slot(&self, name: &str) -> Option<(usize, u32, u32)> {
         self.java
             .images

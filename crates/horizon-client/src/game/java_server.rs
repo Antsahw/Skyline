@@ -564,6 +564,7 @@ impl Game<'_> {
         false
     }
     pub(super) fn java_crafted(&mut self, _takes: &[horizon_client::menu::CraftedTake]) {}
+    #[allow(dead_code)]
     pub(super) fn java_attack_mob(&mut self, _id: u32) -> bool {
         false
     }

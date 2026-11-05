@@ -19,7 +19,9 @@ impl Game<'_> {
             super::super::java_screen::HUD_CHANNEL => self.remote_java_hud(data),
             super::super::java_screen::CHANNEL => self.remote_java_screen(data),
             super::super::java_screen::KEYS => self.remote_java_keys(data),
+            #[cfg(feature = "java-mods")]
             super::super::java_entities::CHANNEL => self.remote_java_entities(data),
+            #[cfg(feature = "java-mods")]
             super::super::java_entities::PARTICLES => self.remote_java_particles(data),
             #[cfg(feature = "java-mods")]
             _ if super::super::java_device::takes(channel) => {
@@ -49,9 +51,12 @@ impl Game<'_> {
             location: self.java_entity_location(id, distance),
             secondary: sneaking,
         }));
-        let item = self.stack_in(self.selected).map_or("", |s| &*s.item);
-        if super::super::java_entities::used_past_entities(item) {
-            return Some(false);
+        #[cfg(feature = "java-mods")]
+        {
+            let item = self.stack_in(self.selected).map_or("", |s| &*s.item);
+            if super::super::java_entities::used_past_entities(item) {
+                return Some(false);
+            }
         }
         self.swing_arm();
         Some(true)

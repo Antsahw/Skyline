@@ -18,6 +18,7 @@ pub(super) struct ModsState {
     /// The WebAssembly mods found that no longer run, for the one-time notice.
     stopped: Vec<String>,
     /// The Java mods' server side (`java_server.rs`).
+    #[cfg_attr(not(feature = "java-mods"), allow(dead_code))]
     pub(super) java: super::java_server::JavaServerState,
 }
 
