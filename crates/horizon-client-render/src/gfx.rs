@@ -2122,14 +2122,16 @@ async fn open_with_retry(
 }
 /// Where another part of the process (the Java mods' GPU device) keeps a Vulkan instance it
 /// made, for the window to use too (`open_backend`). Unset: the window makes its own.
-pub static SHARED_INSTANCE: std::sync::OnceLock<fn() -> Option<wgpu::Instance>> =
+pub static SHARED_INSTANCE: std::sync::OnceLock<fn() -> Option<(wgpu::Instance, wgpu::Adapter)>> =
     std::sync::OnceLock::new();
 
 /// The window's own Vulkan instance, once made: [`own_instance`].
-static OWN_INSTANCE: std::sync::Mutex<Option<wgpu::Instance>> = std::sync::Mutex::new(None);
+static OWN_INSTANCE: std::sync::Mutex<Option<(wgpu::Instance, wgpu::Adapter)>> =
+    std::sync::Mutex::new(None);
 
-/// The window's Vulkan instance, if it made one, for another device in the process to share.
-pub fn own_instance() -> Option<wgpu::Instance> {
+/// The window's Vulkan instance and adapter, if it made them, for another device in the process
+/// to share.
+pub fn own_instance() -> Option<(wgpu::Instance, wgpu::Adapter)> {
     OWN_INSTANCE
         .lock()
         .unwrap_or_else(|e| e.into_inner())
@@ -2148,19 +2150,19 @@ async fn open_backend(
     allow_cpu: bool,
 ) -> std::result::Result<Opened, NoDevice> {
     let name = backends_name(backends);
-    // One Vulkan instance a process: the Java mods' GPU device may have made one already, and
-    // a second instance's device enumeration crashed in the Vulkan loader on a Fedora 43 PC
-    // with RADV (linux_read_sorted_physical_devices).
+    // One Vulkan instance and adapter a process: the Java mods' GPU device may have made them
+    // already, and a second enumeration of the devices (another instance's or the same one's)
+    // crashed in the Vulkan loader on a Fedora 43 PC with RADV (linux_read_sorted_physical_devices).
     let vulkan = backends.contains(wgpu::Backends::VULKAN) && !allow_nonconformant;
     let shared = if vulkan {
         SHARED_INSTANCE.get().and_then(|from| from())
     } else {
         None
     };
-    let instance = match shared {
-        Some(instance) => {
-            log::info!("Horizon: the window shares the Java mods' Vulkan instance");
-            instance
+    let (instance, shared_adapter) = match shared {
+        Some((instance, adapter)) => {
+            log::info!("Horizon: the window shares the Java mods' Vulkan instance and adapter");
+            (instance, Some(adapter))
         }
         None => {
             let instance = wgpu::Instance::new(instance_descriptor(
@@ -2168,10 +2170,7 @@ async fn open_backend(
                 Some(window),
                 allow_nonconformant,
             ));
-            if vulkan {
-                *OWN_INSTANCE.lock().unwrap_or_else(|e| e.into_inner()) = Some(instance.clone());
-            }
-            instance
+            (instance, None)
         }
     };
     let surface = if offscreen {
@@ -2182,18 +2181,29 @@ async fn open_backend(
             Err(e) => return Err(NoDevice::Failed(format!("{name} surface: {e}"))),
         }
     };
-    let adapter = match instance
-        .request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::HighPerformance,
-            compatible_surface: surface.as_ref(),
-            force_fallback_adapter: false,
-            ..Default::default()
-        })
-        .await
-    {
-        Ok(adapter) => adapter,
-        Err(e) => return Err(NoDevice::NoAdapter(format!("{name}: {e}"))),
+    let shared_adapter =
+        shared_adapter.filter(|a| surface.as_ref().is_none_or(|s| a.is_surface_supported(s)));
+    let adapter = match shared_adapter {
+        Some(adapter) => adapter,
+        None => match instance
+            .request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::HighPerformance,
+                compatible_surface: surface.as_ref(),
+                force_fallback_adapter: false,
+                ..Default::default()
+            })
+            .await
+        {
+            Ok(adapter) => adapter,
+            Err(e) => return Err(NoDevice::NoAdapter(format!("{name}: {e}"))),
+        },
     };
+    if vulkan {
+        let mut own = OWN_INSTANCE.lock().unwrap_or_else(|e| e.into_inner());
+        if own.is_none() {
+            *own = Some((instance.clone(), adapter.clone()));
+        }
+    }
     // NoAdapter, so `open_with_retry` asks again: with the non-conformant
     // adapters shown, wgpu ranks a real GPU (hasvk on Ivy Bridge or Haswell)
     // above a software one. The second try's error is final either way.
