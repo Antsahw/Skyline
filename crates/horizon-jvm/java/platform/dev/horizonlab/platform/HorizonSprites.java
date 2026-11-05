@@ -60,6 +60,16 @@ public final class HorizonSprites {
      * textures/<source>/<path>.png under its prefix); else the GUI atlas's gui/sprites/.
      */
     private static String texture(Identifier atlas, Identifier id) {
+        // Looked up once a sprite: a "directory" source asks the class loader, which searches
+        // every jar (a HUD blits sprites each tick: ~3% of the 81-jar pack's mirror tick).
+        return TEXTURES.computeIfAbsent(java.util.List.of(atlas == null ? "gui" : atlas.toString(), id.toString()),
+                k -> lookUp(atlas, id));
+    }
+
+    /** {@link #texture}'s answers by atlas and sprite (the jars don't change while the game runs). */
+    private static final Map<List<String>, String> TEXTURES = new ConcurrentHashMap<>();
+
+    private static String lookUp(Identifier atlas, Identifier id) {
         String name = atlas == null ? "gui" : atlas.getPath().replace("textures/atlas/", "").replace(".png", "");
         ClassLoader loader = HorizonSprites.class.getClassLoader();
         for (var source : sources(name)) {

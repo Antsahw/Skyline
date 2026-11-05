@@ -2,6 +2,7 @@
 # Starts the game headless with the Java mods of MODS (a folder of jars), in a fresh scratch
 # folder (CLAUDE.md: never real player data), driven by horizon-ctl. Prints the scratch folder;
 # its ctl.sock is the socket. The world has seed SEED (default 1234: the same land each run).
+# JAVA_MODS=0: the Java side off (the plain game, for comparisons).
 # Usage: MODS=~/mods [WORLD=name|none] [SEED=n] [SAVE=world-folder] tools/java_bridge/launch.sh [game args...]
 set -e
 R=$(cd "$(dirname "$0")/../.." && pwd)
@@ -48,7 +49,7 @@ if [ -z "$DISPLAY" ]; then
 fi
 cd "$S"
 export HORIZON_HOME=$S/home HORIZON_LAUNCHER_HOME=$S/lh XDG_DATA_HOME=$S/data XDG_CONFIG_HOME=$S/conf \
-  HORIZON_LAUNCHER_NO_SELF_UPDATE=1 HORIZON_NO_AUDIO=1 HORIZON_JAVA_MODS=1 HORIZON_ROOT=$R
+  HORIZON_LAUNCHER_NO_SELF_UPDATE=1 HORIZON_NO_AUDIO=1 HORIZON_JAVA_MODS=${JAVA_MODS:-1} HORIZON_ROOT=$R
 # WORLD=none starts at the title screen (to make a world through Create New World).
 world=(--world "${WORLD:-W}" --seed "${SEED:-1234}" --creative --wait)
 [ "${WORLD:-W}" = none ] && world=()
