@@ -4,6 +4,7 @@
 //! (feeding, shearing, milking, spawn eggs, throwing) and rendering.
 mod pufferfish_player;
 
+mod java;
 use super::{
     Dim, Game, Hand, InteractTarget, dispenser, entity_culling::EntityCullDecision,
     native_mob_draw::NativePlayerRender, native_projectiles::Impact, view_vector,
@@ -924,11 +925,9 @@ impl Game<'_> {
             }
             self.world.chunks.remove_fresh(&key);
             self.spawn_generation_creatures(key.0, key.1);
-            // The mods' creatures of its biome spawn too (HorizonSpawner.generated).
+            // The mods' creatures of its biome spawn too (creatures/java.rs).
             #[cfg(feature = "java-mods")]
-            if horizon_jvm::events::ready() {
-                horizon_jvm::world::fresh_chunk(self.dim.id(), key.0, key.1);
-            }
+            self.java_fresh_chunk(key);
         }
     }
     /// Advance every mob one tick, then apply their events.
@@ -4676,39 +4675,10 @@ impl Game<'_> {
         ) {
             return self.wind_charge_hit(p, hit);
         }
-        // Projectile.onHitEntity on one of the mods' entities: the mirror takes the hurt.
+        // Projectile.onHitEntity on one of the mods' entities (creatures/java.rs).
         #[cfg(feature = "java-mods")]
-        if let Hit::Entity {
-            who: Who::Mob(id), ..
-        } = hit
-            && self.is_java_neighbour(id)
-        {
-            let mut shot = p.clone();
-            let amount = match p.kind {
-                ProjectileKind::Arrow { .. } | ProjectileKind::Trident => {
-                    self.shot_damage(&mut shot, None)
-                }
-                ProjectileKind::SmallFireball => 5.0,
-                ProjectileKind::LargeFireball { .. } => 6.0,
-                ProjectileKind::WitherSkull { .. } => 8.0,
-                ProjectileKind::ShulkerBullet { .. } => 4.0,
-                ProjectileKind::LlamaSpit => 1.0,
-                ProjectileKind::Thrown(t) => t.damage,
-                _ => 0.0,
-            };
-            let hurt = self.java_projectile_hits_entity(p, id, amount);
-            if p.arrow.is_some() {
-                // AbstractArrow.onHitEntity: spent (or on through, piercing) when it hurt,
-                // else turned back.
-                let outcome = if hurt {
-                    EntityHit::Hurt
-                } else {
-                    EntityHit::Refused
-                };
-                self.finish_arrow_hit(shot, outcome);
-                return Ok(());
-            }
-            // The rest goes on as on any entity: a snowball breaks, a fireball explodes.
+        if self.java_projectile_hit(p, &hit) {
+            return Ok(());
         }
         // A wither skull's hit on a part or crystal goes through
         // `wither_skull_hit` below, as on any entity, and then explodes.

@@ -6,6 +6,7 @@ use crate::{
     text::Text,
     ui,
 };
+mod java;
 
 /// MenuTabBar.HEIGHT: the header above the tab area.
 const TAB_BAR: f32 = 24.0;
@@ -218,44 +219,14 @@ impl WorldOptions {
             }
             24 => self.commands = Some(!self.commands(*creative)),
             25 => {
-                // WorldCreationUiState's preset list: vanilla's, then the mods' presets in
-                // the `#minecraft:normal` tag.
-                use crate::save::WorldPreset;
-                let (first, last) = (
-                    WorldPreset::ALL[0],
-                    WorldPreset::ALL[WorldPreset::ALL.len() - 1],
-                );
-                let at = self
-                    .mod_preset
-                    .as_ref()
-                    .and_then(|p| self.presets.iter().position(|q| q == p));
-                if step >= 0 {
-                    match at {
-                        Some(i) => {
-                            self.mod_preset = self.presets.get(i + 1).cloned();
-                            if self.mod_preset.is_none() {
-                                self.world_type = first;
-                            }
-                        }
-                        None if self.world_type == last && !self.presets.is_empty() => {
-                            self.mod_preset = self.presets.first().cloned();
-                        }
-                        None => self.world_type = self.world_type.next(),
-                    }
+                self.world_type = if self.cycle_mod_preset(step) {
+                    self.world_type
+                } else if step >= 0 {
+                    self.world_type.next()
                 } else {
-                    match at {
-                        Some(0) => {
-                            self.mod_preset = None;
-                            self.world_type = last;
-                        }
-                        Some(i) => self.mod_preset = self.presets.get(i - 1).cloned(),
-                        None if self.world_type == first && !self.presets.is_empty() => {
-                            self.mod_preset = self.presets.last().cloned();
-                        }
-                        None => self.world_type = self.world_type.prev(),
-                    }
-                }
-                if self.mod_preset.is_none() && self.world_type == WorldPreset::Flat {
+                    self.world_type.prev()
+                };
+                if self.mod_preset.is_none() && self.world_type == crate::save::WorldPreset::Flat {
                     // setWorldType starts the generator from the flat preset.
                     self.flat_settings = Some(super::flat::FlatSettings::default());
                 }
@@ -269,39 +240,6 @@ impl WorldOptions {
             _ => {}
         }
     }
-}
-
-/// The mods' world presets a new world can take: those of `<root>/data/*/worldgen/world_preset/`
-/// in the `#minecraft:normal` tag (what CreateWorldScreen's World Type cycles through), mods'
-/// only (vanilla's are `WorldPreset`), sorted.
-pub fn mod_presets(root: &std::path::Path) -> Vec<String> {
-    let Ok(text) =
-        std::fs::read_to_string(root.join("data/minecraft/tags/worldgen/world_preset/normal.json"))
-    else {
-        return Vec::new();
-    };
-    let Ok(tag) = serde_json::from_str::<serde_json::Value>(&text) else {
-        return Vec::new();
-    };
-    let mut out: Vec<String> = tag
-        .get("values")
-        .and_then(|v| v.as_array())
-        .into_iter()
-        .flatten()
-        .filter_map(|v| v.as_str().or_else(|| v.get("id").and_then(|i| i.as_str())))
-        .filter(|id| !id.starts_with('#'))
-        .filter_map(|id| {
-            let (ns, path) = id.split_once(':').unwrap_or(("minecraft", id));
-            (ns != "minecraft"
-                && root
-                    .join(format!("data/{ns}/worldgen/world_preset/{path}.json"))
-                    .is_file())
-            .then(|| format!("{ns}:{path}"))
-        })
-        .collect();
-    out.sort();
-    out.dedup();
-    out
 }
 
 /// The biome a saved world's fixed biome source names
@@ -482,18 +420,7 @@ pub(super) fn buttons(w: f32, h: f32, creative: bool, o: &WorldOptions) -> Vec<B
                 gx,
                 gy,
                 150.0,
-                labelled(
-                    "selectWorld.mapType",
-                    match &o.mod_preset {
-                        // WorldPreset's description: generator.<namespace>.<path>.
-                        Some(p) => {
-                            let key = format!("generator.{}", p.replacen(':', ".", 1));
-                            let name = tr(&key);
-                            if name == key { p.clone() } else { name }
-                        }
-                        None => tr(o.world_type.label()),
-                    },
-                ),
+                labelled("selectWorld.mapType", o.world_type_label()),
                 true,
                 25,
             ),

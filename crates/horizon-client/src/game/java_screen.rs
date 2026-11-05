@@ -173,7 +173,7 @@ impl Game<'_> {
     /// The keys the server's Java mods bind ([`KEYS`]).
     pub(super) fn remote_java_keys(&mut self, data: &[u8]) {
         if let Ok(keys) = serde_json::from_slice::<Vec<i32>>(data) {
-            self.java_binds.keys = keys.into_iter().collect();
+            self.java.binds.keys = keys.into_iter().collect();
         }
     }
 
@@ -193,7 +193,7 @@ impl Game<'_> {
         // they're open, and the server would make the screen's frames only after.
         self.settings.save(&Self::options_path());
         self.screen = Screen::Playing;
-        self.java_overlay.mods_page = true;
+        self.java.overlay.mods_page = true;
         let input = json!({"kind": "modconfig", "mod": id});
         #[cfg(feature = "java-mods")]
         if Self::own_client_takes(&input) {
@@ -210,20 +210,20 @@ impl Game<'_> {
     /// A key of the window, for Java mods' key bindings: pressed while playing (no screen), or
     /// released after it was sent down (KeyboardHandler.keyPress: KeyMapping.set and click).
     pub(super) fn java_bind_key(&mut self, key: KeyCode, pressed: bool) {
-        if self.java_binds.keys.is_empty() || self.remote.is_none() {
+        if self.java.binds.keys.is_empty() || self.remote.is_none() {
             return;
         }
         let Some(code) = sdl_key(key) else {
             return;
         };
         // -1: a mod takes every key (MaLiLib's hotkeys, in KeyboardHandler.keyPress).
-        if !self.java_binds.keys.contains(&code) && !self.java_binds.keys.contains(&-1) {
+        if !self.java.binds.keys.contains(&code) && !self.java.binds.keys.contains(&-1) {
             return;
         }
         let send = if pressed {
-            self.screen == Screen::Playing && self.java_binds.down.insert(code)
+            self.screen == Screen::Playing && self.java.binds.down.insert(code)
         } else {
-            self.java_binds.down.remove(&code)
+            self.java.binds.down.remove(&code)
         };
         if send {
             let mut mods = 0;
@@ -256,7 +256,7 @@ impl Game<'_> {
     /// `-100 - button` is bound ([`KEYS`]), released after it was sent down.
     pub(super) fn java_bind_mouse(&mut self, button: winit::event::MouseButton, pressed: bool) {
         use winit::event::MouseButton as B;
-        if self.java_binds.keys.is_empty() || self.remote.is_none() {
+        if self.java.binds.keys.is_empty() || self.remote.is_none() {
             return;
         }
         // SDL's numbers, as 26.3's InputConstants.Type.MOUSE keys are (left 1, middle 2, right 3).
@@ -269,13 +269,13 @@ impl Game<'_> {
             B::Other(n) => i32::from(n),
         };
         let code = -100 - number;
-        if !self.java_binds.keys.contains(&code) {
+        if !self.java.binds.keys.contains(&code) {
             return;
         }
         let send = if pressed {
-            self.screen == Screen::Playing && self.java_binds.down.insert(code)
+            self.screen == Screen::Playing && self.java.binds.down.insert(code)
         } else {
-            self.java_binds.down.remove(&code)
+            self.java.binds.down.remove(&code)
         };
         if send {
             let data = json!({"kind": "bind", "mouse": number, "down": pressed})
@@ -297,11 +297,12 @@ impl Game<'_> {
         if frame.get("close").and_then(Value::as_bool) == Some(true) {
             // The mod closed its client-only screen (Gui.setScreen(null)).
             if self
-                .java_screen
+                .java
+                .screen
                 .as_ref()
                 .is_some_and(|s| s.window == window)
             {
-                self.java_screen = None;
+                self.java.screen = None;
             }
             if self.screen == Screen::JavaMod {
                 self.leave_java_screen();
@@ -315,13 +316,13 @@ impl Game<'_> {
         let typing = ops
             .iter()
             .any(|op| op.get("op").and_then(Value::as_str) == Some("typing"));
-        match &mut self.java_screen {
+        match &mut self.java.screen {
             Some(screen) if screen.window == window => {
                 screen.ops = ops;
                 screen.typing = typing;
             }
             _ => {
-                self.java_screen = Some(JavaScreen {
+                self.java.screen = Some(JavaScreen {
                     window,
                     ops,
                     typing,
@@ -331,7 +332,7 @@ impl Game<'_> {
         }
         // A client-only screen is a screen of its own, over the world (or what was open).
         if window == CLIENT_WINDOW && self.screen != Screen::JavaMod {
-            self.java_overlay.back = self.screen == Screen::Inventory;
+            self.java.overlay.back = self.screen == Screen::Inventory;
             self.screen = Screen::JavaMod;
             self.capture(false);
         }
@@ -343,7 +344,7 @@ impl Game<'_> {
             return;
         };
         let ops = self.take_java_images(&ops);
-        self.java_hud.get_or_insert_with(Default::default).ops = ops;
+        self.java.hud.get_or_insert_with(Default::default).ops = ops;
     }
 
     /// A frame of the mods' overlay on the inventory ([`OVERLAY_CHANNEL`]).
@@ -352,7 +353,7 @@ impl Game<'_> {
             return;
         };
         let ops = self.take_java_images(&ops);
-        let overlay = &mut self.java_overlay;
+        let overlay = &mut self.java.overlay;
         overlay.enabled = true;
         overlay.typing = ops
             .iter()
@@ -363,7 +364,7 @@ impl Game<'_> {
     /// Horizon's own inventory (or container) screen is open, with no mod screen in its place:
     /// the mods' overlay shows on it.
     fn java_overlay_on(&self) -> bool {
-        self.java_overlay.enabled
+        self.java.overlay.enabled
             && self.remote.is_some()
             && self.screen == Screen::Inventory
             && self.java_screen_window().is_none()
@@ -372,22 +373,22 @@ impl Game<'_> {
     /// Draws the mods' overlay over the inventory, each frame: the server hears the inventory
     /// open and close, the GUI's size and the mouse.
     pub(super) fn draw_java_overlay(&mut self, batch: &mut HudBatch) {
-        if !self.java_overlay.enabled {
+        if !self.java.overlay.enabled {
             return;
         }
         if !self.java_overlay_on() {
-            if self.java_overlay.open {
-                self.java_overlay.open = false;
-                self.java_overlay.ops.clear();
-                self.java_overlay.typing = false;
-                self.java_overlay.pressed = false;
+            if self.java.overlay.open {
+                self.java.overlay.open = false;
+                self.java.overlay.ops.clear();
+                self.java.overlay.typing = false;
+                self.java.overlay.pressed = false;
                 self.send_java_screen_input(OVERLAY_WINDOW, json!({"kind": "close"}));
             }
             return;
         }
         let size = (batch.width as i32, batch.height as i32);
         let mouse = (self.cursor.0 as i32, self.cursor.1 as i32);
-        let overlay = &mut self.java_overlay;
+        let overlay = &mut self.java.overlay;
         let open = !overlay.open;
         let send_size = !open && overlay.sent_size != Some(size);
         let now = std::time::Instant::now();
@@ -416,12 +417,12 @@ impl Game<'_> {
                 json!({"kind": "move", "x": mouse.0, "y": mouse.1}),
             );
         }
-        let ops = std::mem::take(&mut self.java_overlay.ops);
+        let ops = std::mem::take(&mut self.java.overlay.ops);
         if ops.is_empty() {
             return;
         }
         let (tooltip, lines_tooltip) = self.draw_java_ops(batch, &ops);
-        self.java_overlay.ops = ops;
+        self.java.overlay.ops = ops;
         if let Some(stack) = tooltip {
             let (x, y) = self.cursor;
             self.draw_stack_tooltip(batch, &stack, x, y);
@@ -444,11 +445,11 @@ impl Game<'_> {
         let take = match kind {
             "press" => {
                 let outside = self.carried.is_none() && self.inventory_target().1;
-                self.java_overlay.pressed = outside;
+                self.java.overlay.pressed = outside;
                 outside
             }
-            "release" => std::mem::take(&mut self.java_overlay.pressed),
-            "drag" => self.java_overlay.pressed,
+            "release" => std::mem::take(&mut self.java.overlay.pressed),
+            "drag" => self.java.overlay.pressed,
             _ => self.inventory_target().1,
         };
         take.then_some(OVERLAY_WINDOW)
@@ -478,7 +479,8 @@ impl Game<'_> {
     }
 
     /// Draws what Java mods draw on the HUD, over Horizon's own HUD; tells the server the HUD's
-    /// size when it changes.
+    /// size when it changes. Fabric's HUD elements come after vanilla's bars and before the
+    /// titles' layer ends: under chat and titles is close enough.
     pub(super) fn draw_java_hud(&mut self, batch: &mut HudBatch) {
         // The device client's HUD (this game's own JVM: java_device), over the server's.
         #[cfg(feature = "java-mods")]
@@ -489,7 +491,7 @@ impl Game<'_> {
                 self.draw_java_ops(batch, &ops);
             }
         }
-        let Some(hud) = self.java_hud.as_mut() else {
+        let Some(hud) = self.java.hud.as_mut() else {
             return;
         };
         let size = (batch.width as i32, batch.height as i32);
@@ -500,22 +502,22 @@ impl Game<'_> {
                 json!({"kind": "size", "width": size.0, "height": size.1}),
             );
         }
-        let ops = std::mem::take(&mut self.java_hud.as_mut().expect("checked").ops);
+        let ops = std::mem::take(&mut self.java.hud.as_mut().expect("checked").ops);
         if !ops.is_empty() {
             self.draw_java_ops(batch, &ops);
         }
-        if let Some(hud) = self.java_hud.as_mut() {
+        if let Some(hud) = self.java.hud.as_mut() {
             hud.ops = ops;
         }
     }
 
     /// Back to the world from a client-only screen.
     fn leave_java_screen(&mut self) {
-        if std::mem::take(&mut self.java_overlay.back) {
+        if std::mem::take(&mut self.java.overlay.back) {
             self.screen = Screen::Inventory;
             return;
         }
-        if std::mem::take(&mut self.java_overlay.mods_page) {
+        if std::mem::take(&mut self.java.overlay.mods_page) {
             self.open_options_at(false, horizon_client::options_ui::Page::Mods);
             return;
         }
@@ -528,7 +530,7 @@ impl Game<'_> {
     /// The window left a client-only screen on its own (Escape with no screen to take it): the
     /// mod hears it closed.
     pub(super) fn close_java_screen(&mut self) {
-        if let Some(screen) = self.java_screen.take()
+        if let Some(screen) = self.java.screen.take()
             && screen.window == CLIENT_WINDOW
         {
             self.send_java_screen_input(CLIENT_WINDOW, json!({"kind": "close"}));
@@ -539,7 +541,7 @@ impl Game<'_> {
     /// The open window's mod screen, when it has one: the window the server opened is still
     /// the one open, and the inventory screen shows it.
     pub(super) fn java_screen_window(&self) -> Option<i32> {
-        let screen = self.java_screen.as_ref()?;
+        let screen = self.java.screen.as_ref()?;
         if self.screen == Screen::JavaMod {
             return (screen.window == CLIENT_WINDOW).then_some(CLIENT_WINDOW);
         }
@@ -555,7 +557,7 @@ impl Game<'_> {
         // The screen lays out in this GUI size, and hovers where the mouse is.
         let size = (batch.width as i32, batch.height as i32);
         let mouse = (self.cursor.0 as i32, self.cursor.1 as i32);
-        let screen = self.java_screen.as_mut().expect("checked");
+        let screen = self.java.screen.as_mut().expect("checked");
         let now = std::time::Instant::now();
         let (send_size, send_mouse) = (
             screen.sent_size != Some(size),
@@ -579,7 +581,8 @@ impl Game<'_> {
             );
         }
         let ops = self
-            .java_screen
+            .java
+            .screen
             .as_ref()
             .map(|s| s.ops.clone())
             .unwrap_or_default();
@@ -647,7 +650,7 @@ impl Game<'_> {
                     // A mod's dynamic texture: its slot, the part of it the image fills.
                     let name = o.get("texture").and_then(Value::as_str).unwrap_or_default();
                     let Some(&(_, slot, w, h)) =
-                        self.java_images.slots.iter().find(|s| s.0 == name)
+                        self.java.images.slots.iter().find(|s| s.0 == name)
                     else {
                         continue;
                     };
@@ -846,8 +849,10 @@ impl Game<'_> {
     }
 
     /// The Java image slot holding the image named `name`, with the image's size.
+    #[cfg_attr(not(feature = "java-mods"), allow(dead_code))]
     pub(super) fn java_image_slot(&self, name: &str) -> Option<(usize, u32, u32)> {
-        self.java_images
+        self.java
+            .images
             .slots
             .iter()
             .find(|s| s.0 == name)
@@ -881,7 +886,7 @@ impl Game<'_> {
         } else {
             0..JAVA_IMAGE_SLOTS
         };
-        let images = &mut self.java_images.slots;
+        let images = &mut self.java.images.slots;
         let own = images
             .iter()
             .position(|s| s.0 == name && range.contains(&s.1));
@@ -977,6 +982,12 @@ impl Game<'_> {
         true
     }
 
+    /// A mouse button pressed or released on a client-only mod screen (`Screen::JavaMod`).
+    pub(super) fn java_screen_click(&mut self, pressed: bool, button: winit::event::MouseButton) {
+        let kind = if pressed { "press" } else { "release" };
+        self.java_screen_mouse(kind, button == winit::event::MouseButton::Right);
+    }
+
     pub(super) fn java_screen_scroll(&mut self, h: f64, v: f64) -> bool {
         let Some(window) = self.java_mouse_window("scroll") else {
             return false;
@@ -986,6 +997,17 @@ impl Game<'_> {
             window,
             json!({"kind": "scroll", "x": x, "y": y, "h": h, "v": v}),
         );
+        true
+    }
+
+    /// A scripted key press (horizon-ctl) on a mod screen that takes it: it types its letter
+    /// or digit, as the window's would. False when no mod screen takes it.
+    pub(super) fn java_screen_scripted_key(&mut self, key: KeyCode) -> bool {
+        if !self.java_screen_takes(key) {
+            return false;
+        }
+        let text = key_text(key);
+        self.java_screen_key(key, text.as_deref());
         true
     }
 
@@ -999,13 +1021,13 @@ impl Game<'_> {
         // in; when not, the keys the inventory screen doesn't use itself (a recipe viewer's,
         // over a slot or its entries).
         if self.java_screen_window().is_none() && self.java_overlay_on() {
-            return if self.java_overlay.typing {
+            return if self.java.overlay.typing {
                 key != KeyCode::Escape
             } else {
                 !self.inventory_screen_key(key) && !self.recipe_search_focused()
             };
         }
-        let Some(screen) = &self.java_screen else {
+        let Some(screen) = &self.java.screen else {
             return false;
         };
         // A client-only screen takes every key, Escape too: the screen closes itself (to its

@@ -13,6 +13,8 @@ use crate::{
 use horizon_core::geometry::{Axis, VoxelShape};
 use std::{collections::HashMap, io};
 
+mod mod_templates;
+
 /// `PipeBlock`'s shape for `size` pixels across (`makeShapes`): the core
 /// cube, with an arm from the centre out to each joined side (`sides` by
 /// `Direction`: down, up, north, south, west, east).
@@ -220,19 +222,7 @@ impl<'r> CachedCollisionRegistry<'r> {
         {
             return Err(invalid("invalid cached shape mapping"));
         }
-        let templates = match tag.get("templates") {
-            None => HashMap::new(),
-            Some(Tag::Compound(map)) => map
-                .iter()
-                .filter_map(|(block, template)| match template {
-                    Tag::String(template) => {
-                        Some((block.to_string_lossy(), template.to_string_lossy()))
-                    }
-                    _ => None,
-                })
-                .collect(),
-            Some(_) => return Err(invalid("invalid collision templates")),
-        };
+        let templates = mod_templates::read(tag.get("templates"))?;
         Ok(Self {
             registry,
             shapes,
@@ -241,10 +231,6 @@ impl<'r> CachedCollisionRegistry<'r> {
             canonical_identities,
             templates,
         })
-    }
-    /// The vanilla block a mod block copies (its content root's template), if any.
-    pub fn template(&self, block: &str) -> Option<&str> {
-        self.templates.get(block).map(String::as_str)
     }
     /// Older exports omit native canonical identities. Such imports retain their
     /// local alias graph but cannot support identity-dependent world iteration.

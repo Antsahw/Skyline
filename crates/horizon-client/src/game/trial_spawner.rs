@@ -24,6 +24,8 @@ use std::collections::HashMap;
 
 type Pos = (i32, i32, i32);
 
+mod java;
+
 impl TrialSpawnerLevel for GameLevel<'_, '_> {
     fn game_time(&self) -> i64 {
         self.game.world.game_time
@@ -295,27 +297,10 @@ impl Game<'_> {
     /// minutes per level, with Trial Omen's sound when it is new. `uuid` is
     /// the player found: the one in the game's frame, else a guest.
     fn bad_omen_to_trial_omen(&mut self, uuid: Uuid) {
-        // A guest of that UUID (not the one acting) first: a server thread's own acting_uuid
-        // falls back to the world owner's, who is a guest there.
-        let acting = self.lan_acting;
-        let guest = self.lan.as_ref().and_then(|h| {
-            h.hub.guests.iter().find(|g| {
-                horizon_client::lan::playerdata::uuid_ints(g.uuid) == uuid && Some(g.conn) != acting
-            })
-        });
-        let mine = guest.is_none() && self.acting_uuid() == uuid;
-        // The Trial Omen it would get: the Java mods' heads of addEffect may refuse it (the
-        // Bad Omen goes all the same, as vanilla removes it first).
-        let amplifier = if mine {
-            self.potions.effects.amplifier("bad_omen")
-        } else {
-            guest.and_then(|g| g.effects.amplifier("bad_omen"))
-        };
-        let Some(amplifier) = amplifier else {
+        // Whose Bad Omen, and whether a Java mod refuses the Trial Omen (trial_spawner/java.rs).
+        let Some((mine, refused)) = self.java_trial_omen(uuid) else {
             return;
         };
-        let player = horizon_client::lan::playerdata::ints_uuid(uuid);
-        let refused = self.java_add_effect_to(Some(player), &trial_omen(amplifier));
         let eye = if mine {
             transform_bad_omen(&mut self.potions.effects, !refused)
                 .then(|| self.eye_position().unwrap_or_default())
@@ -347,15 +332,6 @@ impl Game<'_> {
     }
 }
 
-/// The Trial Omen a Bad Omen of `amplifier` becomes: 15 minutes per level.
-fn trial_omen(amplifier: i32) -> horizon_client::effects::EffectInstance {
-    horizon_client::effects::EffectInstance::new(
-        "trial_omen",
-        TRIAL_OMEN_TICKS_PER_LEVEL * (amplifier + 1),
-        0,
-    )
-}
-
 /// Swap Bad Omen for Trial Omen on `effects` (only take the Bad Omen away unless `add`: a mod
 /// refused the Trial Omen); true when Trial Omen is new.
 fn transform_bad_omen(effects: &mut horizon_client::effects::PlayerEffects, add: bool) -> bool {
@@ -367,7 +343,11 @@ fn transform_bad_omen(effects: &mut horizon_client::effects::PlayerEffects, add:
         return false;
     }
     let new = effects.get("trial_omen").is_none();
-    effects.add(trial_omen(amplifier));
+    effects.add(horizon_client::effects::EffectInstance::new(
+        "trial_omen",
+        TRIAL_OMEN_TICKS_PER_LEVEL * (amplifier + 1),
+        0,
+    ));
     new
 }
 
@@ -394,15 +374,5 @@ mod omen_tests {
         );
         assert_eq!(omen_of(&e), Some(Omen::Trial));
         assert!(!transform_bad_omen(&mut e, true));
-    }
-
-    /// A mod refusing the Trial Omen (`addEffect`'s head) still loses the Bad Omen, as
-    /// vanilla's `removeEffect` comes first; nothing is new.
-    #[test]
-    fn a_refused_trial_omen_still_takes_the_bad_omen() {
-        let mut e = PlayerEffects::default();
-        e.add(EffectInstance::new("bad_omen", 100, 2));
-        assert!(!transform_bad_omen(&mut e, false));
-        assert!(e.list.is_empty());
     }
 }

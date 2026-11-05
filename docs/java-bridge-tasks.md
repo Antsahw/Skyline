@@ -356,10 +356,11 @@ One chat, branch `bridge-upstream-prep`, in this order:
    Off: the plain build, no tab, no Java started, even with jars in `mods-java/`. The game
    with the `java-mods` feature also starts Java only when opted in. Fetching Java 25 happens
    only after the switch. Test headless: the launcher CLI, both states.
-2. **Shrink the shared-file edits** (5,300 lines in 122 of Horizon's files vs upstream main):
+2. ~~**Shrink the shared-file edits**~~ Done 2026-11-05 (bridge-upstream-prep-2: +6,345 → +1,835
+   lines in Horizon's files; every hook in docs/java-bridge-upstream.md). (5,300 lines in 122 of Horizon's files vs upstream main):
    move logic into our files, leave one-line hooks; list each remaining hook and why
    (`docs/java-bridge-upstream.md`).
-3. **Plan the PR series** (< ~500 lines each where possible): hooks, crates, gameplay files,
+3. ~~**Plan the PR series**~~ Drafted 2026-11-05 (docs/java-bridge-upstream.md, "The PR series"): waits for the user and Ludovic. (< ~500 lines each where possible): hooks, crates, gameplay files,
    launcher, CI (Java 25, a few headless cases), docs. Don't open PRs until the user and Ludovic agree.
 
 ### The user's PC run (2026-11-03, 81-jar test pack from `tools/java_bridge/get_test_pack.py`)

@@ -10,6 +10,10 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     path::Path,
 };
+mod components;
+mod own_states;
+mod state_table;
+pub use state_table::{STATE_TABLE_FROM, compact_states};
 
 #[derive(Debug, Deserialize)]
 pub struct Facts {
@@ -22,31 +26,7 @@ pub struct Facts {
     pub vanilla_items: BTreeMap<String, Value>,
     /// Every vanilla state's shapes, for [`Facts::own_states`] (made once).
     #[serde(skip)]
-    shapes: std::sync::OnceLock<ShapeIndex>,
-}
-
-/// Vanilla states by their (outline, collision), and every one with its shapes.
-#[derive(Debug, Default)]
-struct ShapeIndex {
-    exact: BTreeMap<(String, String), String>,
-    /// Each state, its outline's bounds and its collision's.
-    all: Vec<(String, Option<[f64; 6]>, Option<[f64; 6]>)>,
-    /// `all` with one entry per (outline bounds, collision bounds): the first name of each
-    /// (the nearest search ties by name), a few hundred instead of every state.
-    distinct: Vec<(String, Option<[f64; 6]>, Option<[f64; 6]>)>,
-    /// The nearest vanilla state found for each (outline bounds, collision bounds) asked:
-    /// a mod's blocks share a few shapes over thousands of states.
-    nearest: std::sync::Mutex<std::collections::HashMap<BoundsKey, String>>,
-}
-
-/// A pair of shapes' bounds, bit for bit, as a map key.
-type BoundsKey = (Option<[u64; 6]>, Option<[u64; 6]>);
-
-fn bounds_key(outline: Option<[f64; 6]>, collision: Option<[f64; 6]>) -> BoundsKey {
-    (
-        outline.map(|b| b.map(f64::to_bits)),
-        collision.map(|b| b.map(f64::to_bits)),
-    )
+    shapes: std::sync::OnceLock<own_states::ShapeIndex>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -220,83 +200,7 @@ fn modifiers_26_3(v: &Value) -> Value {
     )
 }
 
-/// The components carried onto an item's template: what it does when used, worn or held.
-/// (Its name, model and tooltip come with the content mod's own id and assets.)
-const CARRIED_COMPONENTS: &[&str] = &[
-    "minecraft:food",
-    "minecraft:consumable",
-    "minecraft:use_remainder",
-    "minecraft:use_cooldown",
-    "minecraft:max_damage",
-    "minecraft:tool",
-    "minecraft:weapon",
-    "minecraft:attribute_modifiers",
-    "minecraft:equippable",
-    "minecraft:enchantable",
-    "minecraft:repairable",
-    "minecraft:damage_resistant",
-    "minecraft:death_protection",
-    "minecraft:blocks_attacks",
-    "minecraft:glider",
-    "minecraft:fireworks",
-    "minecraft:jukebox_playable",
-    "minecraft:instrument",
-];
-
-/// Whether a JSON value names only ids Horizon has: vanilla's (and tags of them), or the
-/// mod's own items (`own`), not its effects, sounds or other registries' entries.
-fn known_ids(v: &Value, own: &str) -> bool {
-    match v {
-        Value::String(s) => {
-            let id = s.strip_prefix('#').unwrap_or(s);
-            match id.split_once(':') {
-                Some((ns, path))
-                    if !ns.is_empty()
-                        && ns
-                            .chars()
-                            .all(|c| matches!(c, 'a'..='z' | '0'..='9' | '_' | '-' | '.'))
-                        && !path.is_empty()
-                        && !path.contains(' ') =>
-                {
-                    ns == "minecraft" || ns == own
-                }
-                _ => true,
-            }
-        }
-        Value::Array(a) => a.iter().all(|v| known_ids(v, own)),
-        Value::Object(o) => o.values().all(|v| known_ids(v, own)),
-        _ => true,
-    }
-}
-
 const VANILLA_PACKAGE: &str = "net.minecraft.";
-
-/// A shape's bounds (a box list: `[x0 y0 z0 x1 y1 z1]...`); `None` when empty.
-fn bounds(v: &Value) -> Option<[f64; 6]> {
-    let boxes = v.as_array()?;
-    let mut out = [f64::MAX, f64::MAX, f64::MAX, f64::MIN, f64::MIN, f64::MIN];
-    for b in boxes {
-        let c: Vec<f64> = b.as_array()?.iter().filter_map(Value::as_f64).collect();
-        if c.len() != 6 {
-            return None;
-        }
-        for i in 0..3 {
-            out[i] = out[i].min(c[i]);
-            out[i + 3] = out[i + 3].max(c[i + 3]);
-        }
-    }
-    (!boxes.is_empty()).then_some(out)
-}
-
-/// How far apart two shapes' bounds are (a box list each: `[x0 y0 z0 x1 y1 z1]...`);
-/// an empty shape is far from any other.
-fn bounds_distance(a: Option<[f64; 6]>, b: Option<[f64; 6]>) -> f64 {
-    match (a, b) {
-        (Some(x), Some(y)) => x.iter().zip(y).map(|(p, q)| (p - q).abs()).sum(),
-        (None, None) => 0.0,
-        _ => 6.0,
-    }
-}
 
 /// A state key with its properties sorted, so keys compare across blocks.
 /// Which states of a block drop the block itself.
@@ -314,74 +218,6 @@ fn pairs(key: &str) -> BTreeSet<(String, String)> {
         .filter_map(|p| p.split_once('='))
         .map(|(k, v)| (k.to_owned(), v.to_owned()))
         .collect()
-}
-
-/// From this many own states, a block's declaration lists them as a `state_table` (each
-/// property's values and the distinct shapes once, a row of indices per state) instead of a
-/// `states` array: ALA Industrial's pipes (76,832 states each) took 18.8 MB as an array, over
-/// the content fence (`horizon_mods::content::MAX_FILE`), and the whole mod was dropped.
-pub const STATE_TABLE_FROM: usize = 1024;
-
-/// `states` (the declaration's array) as it goes in the file: the array itself when short,
-/// else an object for `state_table`, rows in the same order.
-pub fn compact_states(states: Vec<Value>) -> Value {
-    if states.len() < STATE_TABLE_FROM {
-        return Value::Array(states);
-    }
-    let mut props: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for s in &states {
-        for (k, v) in s["properties"].as_object().into_iter().flatten() {
-            let vals = props.entry(k.clone()).or_default();
-            let v = v.as_str().unwrap_or_default();
-            if !vals.iter().any(|x| x == v) {
-                vals.push(v.to_owned());
-            }
-        }
-    }
-    let mut shapes: Vec<Value> = Vec::new();
-    let mut shape_at: BTreeMap<String, usize> = BTreeMap::new();
-    let (mut rows, mut light, mut ticks, mut default) = (Vec::new(), Map::new(), Vec::new(), None);
-    for (i, s) in states.iter().enumerate() {
-        let shape = match &s["shape"] {
-            Value::String(n) => n.clone(),
-            _ => String::new(),
-        };
-        let at = *shape_at.entry(shape.clone()).or_insert_with(|| {
-            shapes.push(if shape.is_empty() {
-                Value::Null
-            } else {
-                json!(shape)
-            });
-            shapes.len() - 1
-        });
-        let mut row = vec![at];
-        for (k, vals) in &props {
-            let v = s["properties"][k].as_str().unwrap_or_default();
-            row.push(vals.iter().position(|x| x == v).unwrap_or(0));
-        }
-        rows.push(row);
-        if let Some(l) = s.get("light") {
-            light.insert(i.to_string(), l.clone());
-        }
-        if s["random_ticks"] == json!(true) {
-            ticks.push(i);
-        }
-        if s["default"] == json!(true) {
-            default = Some(i);
-        }
-    }
-    let props: Vec<Value> = props.into_iter().map(|(k, v)| json!([k, v])).collect();
-    let mut t = json!({"properties": props, "shapes": shapes, "rows": rows});
-    if !light.is_empty() {
-        t["light"] = Value::Object(light);
-    }
-    if !ticks.is_empty() {
-        t["random_ticks"] = json!(ticks);
-    }
-    if let Some(d) = default {
-        t["default"] = json!(d);
-    }
-    t
 }
 
 pub fn state_key(key: &str) -> String {
@@ -543,123 +379,6 @@ impl Facts {
         Some(self.choice(block, template, t, allowed))
     }
 
-    /// For a block no vanilla block stands in for (its properties are its own): a template
-    /// without properties or behaviour (stone), and its own states, each with the vanilla
-    /// state whose collision and outline it has (else the nearest), for the declaration's
-    /// `states`.
-    pub fn own_states(&self, id: &str, allowed: &dyn Fn(&str) -> bool) -> Option<(Choice, Value)> {
-        let block = self.blocks.get(id)?;
-        let template = [
-            "minecraft:stone",
-            "minecraft:smooth_stone",
-            "minecraft:dirt",
-        ]
-        .into_iter()
-        .find(|t| allowed(t) && self.blocks.get(*t).is_some_and(|b| b.properties.is_empty()))?;
-        let mut choice = self.choice(block, template, &self.blocks[template], allowed);
-        self.shapes.get_or_init(|| {
-            let mut index = ShapeIndex::default();
-            for (name, v) in &self.blocks {
-                if !name.starts_with("minecraft:") || !allowed(name) {
-                    continue;
-                }
-                for (key, st) in &v.states {
-                    let full = format!("{name}[{}]", state_key(key));
-                    index
-                        .exact
-                        .entry((st.outline.to_string(), st.collision.to_string()))
-                        .or_insert_with(|| full.clone());
-                    index
-                        .all
-                        .push((full, bounds(&st.outline), bounds(&st.collision)));
-                }
-            }
-            let mut first: BTreeMap<BoundsKey, usize> = BTreeMap::new();
-            for (i, (name, o, c)) in index.all.iter().enumerate() {
-                let at = first.entry(bounds_key(*o, *c)).or_insert(i);
-                if name < &index.all[*at].0 {
-                    *at = i;
-                }
-            }
-            let mut picked: Vec<usize> = first.into_values().collect();
-            picked.sort_unstable();
-            index.distinct = picked.into_iter().map(|i| index.all[i].clone()).collect();
-            index
-        });
-        let ShapeIndex {
-            exact,
-            distinct,
-            nearest,
-            ..
-        } = self.shapes.get().expect("built above");
-        let default = state_key(&block.default);
-        let default_light = block.default_state().map_or(0, |s| s.emission);
-        let mut near = 0;
-        let mut states = Vec::new();
-        for (key, st) in &block.states {
-            let key = state_key(key);
-            let shape = match exact.get(&(st.outline.to_string(), st.collision.to_string())) {
-                Some(s) => s.clone(),
-                None => {
-                    near += 1;
-                    let (outline, collision) = (bounds(&st.outline), bounds(&st.collision));
-                    let key = bounds_key(outline, collision);
-                    let known = nearest
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .get(&key)
-                        .cloned();
-                    match known {
-                        Some(n) => n,
-                        None => {
-                            let d = |(_, o, c): &(String, Option<[f64; 6]>, Option<[f64; 6]>)| {
-                                bounds_distance(*c, collision) + bounds_distance(*o, outline) * 0.5
-                            };
-                            // Over one state per pair of bounds: the same distances, and the
-                            // tie on the name goes to the same state (each entry's name is
-                            // the least of its pair's).
-                            let n = distinct
-                                .iter()
-                                .min_by(|a, b| d(a).total_cmp(&d(b)).then(a.0.cmp(&b.0)))
-                                .map(|(n, _, _)| n.clone())?;
-                            nearest
-                                .lock()
-                                .unwrap_or_else(|e| e.into_inner())
-                                .insert(key, n.clone());
-                            n
-                        }
-                    }
-                }
-            };
-            let properties: Map<String, Value> = pairs(&key)
-                .into_iter()
-                .map(|(k, v)| (k, Value::String(v)))
-                .collect();
-            let mut v = json!({"properties": properties, "shape": shape});
-            if st.emission != default_light {
-                v["light"] = json!(st.emission);
-            }
-            if st.random_ticks {
-                v["random_ticks"] = json!(true);
-            }
-            if key == default {
-                v["default"] = json!(true);
-            }
-            states.push(v);
-        }
-        if near > 0 {
-            choice.differences.push(format!(
-                "shapes: {near} of {} states take the nearest vanilla state's",
-                states.len()
-            ));
-        }
-        choice.differences.push(format!(
-            "its own states: behaviour beyond a plain block ({})",
-            block.class.first().map_or("", String::as_str)
-        ));
-        Some((choice, compact_states(states)))
-    }
-
     fn choice(
         &self,
         block: &Block,
@@ -764,31 +483,8 @@ impl Facts {
             item_template(item)
         };
         let mut decl = json!({"template": template});
-        let own = id.split_once(':').map_or("", |(ns, _)| ns);
         // 26.3 components as the bridge's exporter writes them, carried as they are.
-        let mut components = Map::new();
-        for (name, value) in &item.components {
-            if !CARRIED_COMPONENTS.contains(&name.as_str()) {
-                continue;
-            }
-            let mut value = value.clone();
-            // Effects of the mod's own (Farmer's Delight's Comfort...) are left out, the rest kept.
-            if let Some(Value::Array(effects)) = value.get_mut("on_consume_effects") {
-                let before = effects.len();
-                effects.retain(|e| known_ids(e, ""));
-                if effects.len() < before {
-                    differences.push(format!(
-                        "{name}: {} effect(s) of the mod's own",
-                        before - effects.len()
-                    ));
-                }
-            }
-            if known_ids(&value, own) {
-                components.insert(name.clone(), value);
-            } else {
-                differences.push(format!("{name}: names what Horizon does not have"));
-            }
-        }
+        let mut components = components::carried(item, id, &mut differences);
         if food && !components.contains_key("minecraft:food") {
             return Err("food without its components (an older exporter)".into());
         }
@@ -1176,67 +872,6 @@ mod tests {
 
     fn armor_json() -> Value {
         json!({"slot": "legs", "material": "m:ruby", "equip_sound": "minecraft:item.armor.equip_diamond"})
-    }
-
-    #[test]
-    fn many_own_states_fit_the_content_fence_and_read_back() {
-        // A pipe: six sides of four kinds and a light level, 4^6 * 4 = 16,384 states, with
-        // a handful of shapes (ALA Industrial's have 76,832, 49 shapes).
-        let kinds = ["none", "pipe", "machine", "blocked"];
-        let sides = ["down", "east", "north", "south", "up", "west"];
-        let mut states = Vec::new();
-        for n in 0..4usize.pow(7) {
-            let mut properties = Map::new();
-            for (i, side) in sides.iter().enumerate() {
-                properties.insert((*side).into(), json!(kinds[n >> (2 * i) & 3]));
-            }
-            properties.insert("power".into(), json!((n >> 12).to_string()));
-            let mut v = json!({"properties": properties, "shape": format!("minecraft:cake[bites={}]", n % 7)});
-            if n >> 12 == 3 {
-                v["light"] = json!(9);
-            }
-            if n == 5 {
-                v["default"] = json!(true);
-            }
-            states.push(v);
-        }
-        let array = serde_json::to_vec(&Value::Array(states.clone())).unwrap();
-        let table = compact_states(states.clone());
-        assert!(table.is_object());
-        let file =
-            serde_json::to_vec(&json!({"template": "minecraft:stone", "state_table": table}))
-                .unwrap();
-        assert!(
-            file.len() * 4 < array.len(),
-            "{} vs {}",
-            file.len(),
-            array.len()
-        );
-        let manifest = "id = \"pipes\"\nname = \"Pipes\"\nversion = \"0.1.0\"\napi = \"0.2\"\nside = \"both\"\ncapabilities = [\"registries\"]\n";
-        let dir = std::env::temp_dir().join(format!("horizon-state-table-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("m.hmod");
-        let files: &[(&str, &[u8])] = &[("data/pipes/horizon/block/pipe.json", &file)];
-        std::fs::write(
-            &path,
-            horizon_mods::Package::write_files(manifest, None, files).unwrap(),
-        )
-        .unwrap();
-        let package = horizon_mods::Package::read(&path).unwrap();
-        let content = horizon_mods::Content::read(&path, &package.manifest).unwrap();
-        std::fs::remove_dir_all(&dir).unwrap();
-        let read = &content.blocks[0].states;
-        assert_eq!(read.len(), states.len());
-        for (r, s) in read.iter().zip(&states) {
-            let props: BTreeMap<String, String> =
-                serde_json::from_value(s["properties"].clone()).unwrap();
-            assert_eq!(r.properties, props);
-            assert_eq!(r.shape.as_deref(), s["shape"].as_str());
-            assert_eq!(r.light, s.get("light").map(|l| l.as_u64().unwrap() as u8));
-            assert_eq!(r.default, s.get("default").is_some());
-        }
-        // Few states stay an array.
-        assert!(compact_states(states[..10].to_vec()).is_array());
     }
 
     #[test]

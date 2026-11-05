@@ -48,9 +48,7 @@ impl Launcher {
         if self.has_mods_tab() {
             tabs.push((HomeTab::Mods, self.instance_mods_count(cx)));
         }
-        if self.has_java_mods_tab() {
-            tabs.push((HomeTab::JavaMods, Some(self.java_mods_count())));
-        }
+        tabs.extend(self.java_mods_tab_entry());
         tabs.push((HomeTab::Worlds, self.worlds_count(cx)));
         tabs.push((HomeTab::Multiplayer, Some(self.servers_count())));
         tabs.push((HomeTab::Packs, Some(self.packs_count())));

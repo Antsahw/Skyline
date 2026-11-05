@@ -2,6 +2,7 @@
 //! Controls, Key Binds, Mouse Settings, Chat Settings, Accessibility,
 //! Language and Resource Packs, laid out like vanilla's HeaderAndFooter /
 //! OptionsList screens and drawn with the shared widgets.
+mod java;
 use std::time::Instant;
 
 pub use crate::settings::Opt;
@@ -2854,85 +2855,61 @@ impl OptionsUi {
             }
             Page::Font => pairs(&[Opt::ForceUnicode, Opt::JapaneseGlyphs]),
             Page::Mods => {
-                // The world's Java mods with a settings screen (the server opens them).
-                let java = s.mods.java.iter().enumerate().map(|(i, (_, name))| {
-                    Row::Buttons(
-                        button(
-                            0.0,
-                            0.0,
-                            310.0,
-                            Text::literal(format!("{name}: Settings")),
-                            Act::JavaModSettings(i),
-                        ),
-                        None,
-                    )
-                });
-                let java: Vec<Row> = if s.mods.java.is_empty() {
-                    Vec::new()
-                } else {
-                    std::iter::once(Row::Header("Java mods"))
-                        .chain(java)
-                        .collect()
-                };
-                if s.mods.installed.is_empty() {
-                    if !java.is_empty() {
-                        return java;
-                    }
+                if s.mods.installed.is_empty() && s.mods.java.is_empty() {
                     return vec![Row::Header("horizon.mods.empty")];
                 }
-                let mut rows: Vec<Row> =
-                    s.mods
-                        .installed
-                        .iter()
-                        .enumerate()
-                        .map(|(i, installed)| {
-                            let mut label = Text::option_name_value(
-                                Text::literal(installed.title.clone()),
-                                on_off(s.mods.is_on(i)),
+                s.mods
+                    .installed
+                    .iter()
+                    .enumerate()
+                    .map(|(i, installed)| {
+                        let mut label = Text::option_name_value(
+                            Text::literal(installed.title.clone()),
+                            on_off(s.mods.is_on(i)),
+                        );
+                        if installed.problem.as_deref() == Some(crate::mod_list::NOT_BUILT) {
+                            label = label.append(tr("horizon.mods.not_built"));
+                        } else if installed.problem.is_some() {
+                            label = label.append(tr("horizon.mods.stopped"));
+                        } else if installed.dev {
+                            label = label.append(tr("horizon.mods.dev"));
+                        }
+                        // A content mod's set feeds the block-state tables the
+                        // open world's chunks were decoded with: changing it
+                        // mid-world remaps their ids (Forge/Fabric freeze the
+                        // registry before a world opens). A native mod toggles
+                        // live through `native_on`, so it stays available.
+                        let content = installed.native.is_none();
+                        if self.in_world && content {
+                            label = label.append(tr("horizon.mods.in_world"));
+                        }
+                        let dead =
+                            installed.dev || installed.id.is_empty() || self.in_world && content;
+                        // Only native mods with actual settings need a second button.
+                        if installed
+                            .native
+                            .as_ref()
+                            .is_some_and(|page| !page.keys.is_empty() || !page.buttons.is_empty())
+                        {
+                            let toggle = button(0.0, 0.0, 150.0, label, Act::ToggleMod(i));
+                            let settings = button(
+                                0.0,
+                                0.0,
+                                150.0,
+                                tr("horizon.mods.settings"),
+                                Act::ModSettings(i),
                             );
-                            if installed.problem.as_deref() == Some(crate::mod_list::NOT_BUILT) {
-                                label = label.append(tr("horizon.mods.not_built"));
-                            } else if installed.problem.is_some() {
-                                label = label.append(tr("horizon.mods.stopped"));
-                            } else if installed.dev {
-                                label = label.append(tr("horizon.mods.dev"));
-                            }
-                            // A content mod's set feeds the block-state tables the
-                            // open world's chunks were decoded with: changing it
-                            // mid-world remaps their ids (Forge/Fabric freeze the
-                            // registry before a world opens). A native mod toggles
-                            // live through `native_on`, so it stays available.
-                            let content = installed.native.is_none();
-                            if self.in_world && content {
-                                label = label.append(tr("horizon.mods.in_world"));
-                            }
-                            let dead = installed.dev
-                                || installed.id.is_empty()
-                                || self.in_world && content;
-                            // Only native mods with actual settings need a second button.
-                            if installed.native.as_ref().is_some_and(|page| {
-                                !page.keys.is_empty() || !page.buttons.is_empty()
-                            }) {
-                                let toggle = button(0.0, 0.0, 150.0, label, Act::ToggleMod(i));
-                                let settings = button(
-                                    0.0,
-                                    0.0,
-                                    150.0,
-                                    tr("horizon.mods.settings"),
-                                    Act::ModSettings(i),
-                                );
-                                Row::Buttons(
-                                    if dead { inactive(toggle) } else { toggle },
-                                    Some(settings),
-                                )
-                            } else {
-                                let widget = button(0.0, 0.0, 310.0, label, Act::ToggleMod(i));
-                                Row::Buttons(if dead { inactive(widget) } else { widget }, None)
-                            }
-                        })
-                        .collect();
-                rows.extend(java);
-                rows
+                            Row::Buttons(
+                                if dead { inactive(toggle) } else { toggle },
+                                Some(settings),
+                            )
+                        } else {
+                            let widget = button(0.0, 0.0, 310.0, label, Act::ToggleMod(i));
+                            Row::Buttons(if dead { inactive(widget) } else { widget }, None)
+                        }
+                    })
+                    .chain(java::mod_rows(s))
+                    .collect()
             }
             Page::NativeMod(i) => self.native_rows(s, i),
             Page::ShaderPacks => {

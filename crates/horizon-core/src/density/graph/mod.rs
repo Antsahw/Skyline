@@ -4,6 +4,7 @@
 use super::*;
 use std::collections::HashMap;
 mod compiler;
+mod noise_seed;
 mod seeded;
 #[cfg(test)]
 mod tests;
@@ -538,17 +539,6 @@ impl DensityGraph {
         name: String,
         definition: crate::noise::NormalNoise,
     ) -> Result<NoiseId, CompileError> {
-        self.register_noise_seeded(name, None, definition)
-    }
-    /// `register_noise` for a noise a mod seeds under another identifier than its own
-    /// (Tectonic seeds `tectonic:parameter/<x>` as `minecraft:<x>`): `seed` is hashed in
-    /// place of `name` when the noise is made.
-    pub fn register_noise_seeded(
-        &mut self,
-        name: String,
-        seed: Option<String>,
-        definition: crate::noise::NormalNoise,
-    ) -> Result<NoiseId, CompileError> {
         if self.noise_names.contains_key(&name) {
             return Err(CompileError::DuplicateNoise);
         }
@@ -556,7 +546,7 @@ impl DensityGraph {
         self.noise_names.insert(name.clone(), id);
         self.noises.push(seeded::NoiseEntry {
             name,
-            seed,
+            seed: None,
             definition,
         });
         Ok(id)

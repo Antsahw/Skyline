@@ -2758,6 +2758,7 @@ fn tuple_shapes_follow_final_state_order_and_separate_collision() {
     let Some(J::Arr(rows)) = gameplay.get("states") else {
         panic!("states")
     };
+    let rows: Vec<J> = rows.iter().map(|r| r.clone().parsed()).collect();
     for (index, row) in rows[2..].iter().enumerate() {
         assert_eq!(row.get("full_collision"), Some(&J::Bool(false)));
         let Some(J::Arr(outline)) = row.get("outline") else {
@@ -2810,6 +2811,7 @@ fn collision_only_preserves_outline_and_shape_typos_are_errors() {
     let Some(J::Arr(rows)) = gameplay.get("states") else {
         panic!("states")
     };
+    let rows: Vec<J> = rows.iter().map(|r| r.clone().parsed()).collect();
     assert_eq!(rows[0].get("outline"), rows[2].get("outline"));
     assert_eq!(rows[1].get("outline"), rows[3].get("outline"));
     assert_eq!(rows[2].get("full_collision"), Some(&J::Bool(false)));
@@ -2912,6 +2914,7 @@ fn content_block_state_properties_follow_vanilla_name_order() {
     let Some(J::Arr(rows)) = doc.get("states") else {
         panic!("no states")
     };
+    let rows: Vec<J> = rows.iter().map(|r| r.clone().parsed()).collect();
     assert_eq!(rows.len(), 2 + 4);
     let properties = |i: usize| -> (String, String) {
         let J::Arr(row) = &rows[i] else {

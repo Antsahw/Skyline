@@ -16,6 +16,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+mod wide;
+
 /// Called when a [`Pipe`] end has bytes to read or was closed ([`Pipe::on_ready`]).
 type Notify = Arc<dyn Fn() + Send + Sync>;
 
@@ -495,16 +497,6 @@ impl ConnReader {
     fn next_header(&self) -> Result<Option<usize>> {
         Ok(self.header()?.map(|(prefix, len)| prefix + len))
     }
-    /// The next frame's (prefix, length): an in-memory pipe's frames may pass the network's
-    /// 21-bit limit ([`frame::unbounded_contents`]).
-    fn header(&self) -> Result<Option<(usize, usize)>> {
-        let pending = &self.buffer[self.start..self.end];
-        if self.wide {
-            frame::wide_header(pending)
-        } else {
-            frame::header(pending)
-        }
-    }
     /// Take the next frame off the buffer, if it is whole.
     fn next(&mut self) -> Result<Next> {
         let Some(wanted) = self.next_header()? else {
@@ -624,12 +616,7 @@ impl ConnWriter {
             }
             return Ok(());
         }
-        // A packet over an in-memory pipe isn't held to the network's 21-bit frame
-        // (a big pack's join sends packets past 2 MiB to the window's own client).
-        if self.wide {
-            return self.send_contents(&frame::unbounded_contents(body, self.threshold)?);
-        }
-        self.send_contents(&frame::contents(body, self.threshold)?)
+        self.send_contents(&self.contents(body)?)
     }
     /// Send a frame whose contents [`frame::contents`] made with this
     /// writer's threshold.
@@ -835,26 +822,6 @@ mod tests {
         assert_eq!(c.reader.counters.received.load(Ordering::Relaxed), 1);
         server.join().unwrap();
         assert!(c.recv().is_err());
-    }
-
-    /// The window's own connection carries a packet past the network's 2 MiB frame
-    /// (a big pack's join: 2.3 MB), whole; a socket's still refuses one.
-    #[test]
-    fn a_local_pipe_carries_packets_past_the_frame_limit() {
-        let (a, b) = Pipe::pair();
-        let mut body = vec![7];
-        body.extend((0..3_000_000u32).map(|i| (i % 251) as u8));
-        let sent = body.clone();
-        let server = std::thread::spawn(move || {
-            let mut c = Connection::local(b);
-            c.send(&sent).unwrap();
-        });
-        let mut c = Connection::local(a);
-        let (id, payload) = c.recv().unwrap();
-        assert_eq!(id, 7);
-        assert_eq!(payload, body[1..]);
-        server.join().unwrap();
-        assert!(frame::contents(&body, None).is_err());
     }
 
     /// Packets from one byte to past the read size, compressed and

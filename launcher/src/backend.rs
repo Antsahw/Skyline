@@ -1226,22 +1226,6 @@ pub fn install(release: &Release, progress: impl Fn(f32)) -> Result<(), String> 
     Ok(())
 }
 
-/// The signed SHA-256 of `release`'s file `asset`, or why it must not be installed.
-pub(crate) fn release_digest(release: &Release, asset: &str) -> Result<String, String> {
-    let tag = release.tag.as_str();
-    match &release.nightly {
-        // Signed for the Nightly channel, served under its own GitHub tag.
-        Some(published) => crate::signed::nightly_digest(
-            published,
-            asset,
-            &horizon_release_sign::trusted_keys(),
-            fetch_small,
-        ),
-        None if is_game_tag(tag) => signed_digest(tag, asset),
-        None => Err(format!("{tag} is not a Horizon release.")),
-    }
-}
-
 /// The asset `release` installs from: the fallback when [`game_releases_with`] took it (its file
 /// name ends the download address), so the signed checksum checked is that file's.
 fn asset_installed<'a>(
@@ -4347,6 +4331,9 @@ impl Settings {
         Ok(())
     }
 }
+
+mod release_digest;
+pub(crate) use release_digest::release_digest;
 
 #[cfg(test)]
 #[path = "backend/release_loading_tests.rs"]

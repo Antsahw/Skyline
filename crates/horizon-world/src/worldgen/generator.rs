@@ -58,6 +58,8 @@ use std::{
     sync::{Arc, Mutex, OnceLock},
 };
 
+mod noise_only;
+
 #[derive(Debug)]
 pub enum GeneratorError {
     Io(io::Error),
@@ -405,16 +407,14 @@ impl GeneratorData {
                 let Ok(json) = fs::read_to_string(dir.join("blocks/structure-blocks.json")) else {
                     return Ok(None);
                 };
-                Ok(Some(Arc::new(
-                    super::structure::StructureResources::new(
-                        registry,
-                        super::structure::StateTransforms::from_json(&json, registry.len())?,
-                        &dir.join("structure"),
-                        read_optional_bundle(&dir, &ov, "processor_lists")?.unwrap_or_default(),
-                        &tags,
-                    )
-                    .with_packs(ov.templates().clone()),
-                )))
+                let resources = super::structure::StructureResources::new(
+                    registry,
+                    super::structure::StateTransforms::from_json(&json, registry.len())?,
+                    &dir.join("structure"),
+                    read_optional_bundle(&dir, &ov, "processor_lists")?.unwrap_or_default(),
+                    &tags,
+                );
+                Ok(Some(Arc::new(resources.with_packs(ov.templates().clone()))))
             }
         })?;
         let behaviours = loading({
@@ -1163,10 +1163,7 @@ where
         for (name, json) in &data.noises {
             let noise: Arc<dyn Noise> = Arc::new(
                 decode_noise(json)?
-                    .create(
-                        &mut root
-                            .from_hash_of(&super::noise_seed(json).unwrap_or_else(|| name.clone())),
-                    )
+                    .create(&mut root.from_hash_of(&super::noise_seed::id(json, name)))
                     .map_err(DecodeError::from)?,
             );
             noises.insert(name.clone(), noise);
@@ -1466,7 +1463,7 @@ where
         pos: ChunkPos,
     ) -> Result<ProtoChunk, GeneratorError> {
         let mut context = std::mem::take(&mut worker.terrain_context);
-        let result = self.generate_with_context(worker, pos, &mut context);
+        let result = self.generate_with_context(worker, pos, &mut context, false);
         // Release chunk-specific bindings and caches even after a sampling error.
         context.reset();
         worker.terrain_context = context;
@@ -1512,17 +1509,9 @@ where
         }
         false
     }
-    fn generate_with_context(
-        &self,
-        worker: &mut WorkerState,
-        pos: ChunkPos,
-        context: &mut SamplerContext,
-    ) -> Result<ProtoChunk, GeneratorError> {
-        self.generate_stages(worker, pos, context, false)
-    }
     /// The proto chunk at TERRAIN, or with `noise_only` at doFill's end (noise, aquifers,
     /// ore veins: what another generator's surface and carvers then run on).
-    fn generate_stages(
+    fn generate_with_context(
         &self,
         worker: &mut WorkerState,
         pos: ChunkPos,
@@ -1598,11 +1587,7 @@ where
         chunk.set_generation_stage(PreLightChunkStage::Biomes);
         // The noise alone leaves structures out: their terrain adaptation (the beardifier)
         // is the other generator's, from its own structures.
-        let structures = if noise_only {
-            None
-        } else {
-            self.structures.as_ref()
-        };
+        let structures = self.structures.as_ref().filter(|_| !noise_only);
         let (references, own_starts) = match structures {
             Some(structures) => {
                 let mut queries = StructureQueries {
@@ -1727,20 +1712,17 @@ where
             self.settings.default_block,
         )
         .map_err(stage("noise"))?;
+        let generation = self.generation();
         worker.timings.noise += lap(&mut clock);
         if noise_only {
-            return Ok(ProtoChunk {
-                terrain: chunk,
-                biomes: center,
-                data: data.clone(),
-                decorated: false,
-                block_entities: Vec::new(),
-                structure_starts: references,
+            return Ok(ProtoChunk::at_noise(
+                chunk,
+                center,
+                data.clone(),
+                references,
                 own_starts,
-                entities: Vec::new(),
-            });
+            ));
         }
-        let generation = self.generation();
         // The surface rule, compiled by this worker's first chunk.
         let mut shared = worker
             .surface_rule
@@ -2566,11 +2548,7 @@ where
         worker: &mut WorkerState,
         pos: ChunkPos,
     ) -> Result<ProtoChunk, GeneratorError> {
-        let mut context = std::mem::take(&mut worker.terrain_context);
-        let result = self.generate_stages(worker, pos, &mut context, true);
-        context.reset();
-        worker.terrain_context = context;
-        result
+        self.noise_only(worker, pos)
     }
     fn decorate(
         &self,
@@ -3738,11 +3716,6 @@ pub struct GeneratorWorker {
 impl GeneratorWorker {
     /// Biomes, noise fill and aquifers, material surface and carvers: the
     /// vanilla statuses up to TERRAIN. Independent of neighbor chunks' state.
-    /// The chunk at doFill's end (noise, aquifers, ore veins), for another generator's
-    /// surface, carvers and features (the Java mod bridge's).
-    pub fn generate_noise(&mut self, pos: ChunkPos) -> Result<ProtoChunk, GeneratorError> {
-        self.pipeline.generate_noise(&mut self.state, pos)
-    }
     pub fn generate_proto(&mut self, pos: ChunkPos) -> Result<ProtoChunk, GeneratorError> {
         let result = self.pipeline.generate(&mut self.state, pos);
         self.state.timings.chunks += 1;

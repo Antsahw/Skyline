@@ -13,6 +13,7 @@ use std::{
     collections::{BTreeMap, HashMap, HashSet},
     path::{Path, PathBuf},
 };
+mod java;
 
 /// RegistryDataLoader.SYNCHRONIZED_REGISTRIES, in vanilla's order.
 pub const SYNCHRONIZED: &[&str] = &[
@@ -399,21 +400,7 @@ impl SyncData {
                     .collect()
             });
             file_order(&mut entries);
-            // Mods' biomes after vanilla's, in crate::biome::Biomes' order.
-            if *key == "minecraft:worldgen/biome" {
-                for (namespace, path) in crate::biome::mod_biomes(resources) {
-                    let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
-                        continue;
-                    };
-                    let Ok(value) = std::fs::read_to_string(&path)
-                        .map_err(|e| e.to_string())
-                        .and_then(|t| serde_json::from_str::<Value>(&t).map_err(|e| e.to_string()))
-                    else {
-                        continue;
-                    };
-                    entries.push(((namespace, stem.to_owned()), json_to_nbt(&value), false));
-                }
-            }
+            java::push_mod_biomes(key, resources, &mut entries);
             let mut e = Entries {
                 names: Vec::new(),
                 data: Vec::new(),

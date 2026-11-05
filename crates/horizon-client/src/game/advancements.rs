@@ -1,6 +1,7 @@
 //! The player's advancements in the game: criteria triggered from game
 //! events (`CriteriaTriggers`), awarding with rewards, the toast and the
 //! chat announcement, and `players/advancements/<uuid>.json`.
+mod java;
 use super::{Dim, Game};
 use horizon_client::{
     advancements::{self as adv, EntityView, Frame, ItemView, Progress, Tree},
@@ -746,17 +747,6 @@ impl Game<'_> {
                 self.award(ai);
             }
         }
-    }
-    /// Whether the Java mods refuse `criterion` of `a` (their patches of
-    /// `PlayerAdvancements.award`, run on the mirror with the progress so far).
-    fn java_award_refused_in(&mut self, a: &adv::Advancement, criterion: &str) -> bool {
-        let done: Vec<&str> = a
-            .criteria
-            .iter()
-            .map(|c| c.name.as_str())
-            .filter(|c| self.adv.progress.has(&a.id, c))
-            .collect();
-        self.java_award_refused(&a.id, criterion, &done)
     }
     /// `PlayerAdvancements.award` / `revoke` after a criterion's progress changed.
     fn advancement_progress(&mut self, advancement: &str, criterion: &str, granted: bool) {

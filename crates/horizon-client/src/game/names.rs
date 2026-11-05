@@ -6,6 +6,7 @@
 //! objective displayed below names. Other players' names (on a LAN host
 //! or a server) show whenever `LivingEntityRenderer.shouldShowName` allows,
 //! and the player's own in third person with the `ownNameTag` extra.
+mod java;
 use super::{Game, view_vector};
 use horizon_client::{
     block_entity_render::vertex_light, hud::HudBatch, mesher::Vertex, mobs::Mob, mod_api,
@@ -296,28 +297,8 @@ impl Game<'_> {
             });
         }
         drop(player_ids);
-        // Java mods' entities: the name tag their renderer gives, shown always or when under
-        // the crosshair (its shouldShowName, asked both ways), within 64 blocks.
-        let java_target = self.java_entity_hit().map(|(id, _)| id);
-        for (id, at, height, name, visible) in self.java_entity_names(alpha) {
-            if at.distance_squared(camera) >= 64.0 * 64.0
-                || self.ui.hide_gui
-                || !(visible || Some(id) == java_target)
-            {
-                continue;
-            }
-            tags.push(NameTag {
-                at: at + glam::DVec3::new(0.0, height + 0.5, 0.0),
-                lines: vec![(name.resolve_legacy(), 0.0)],
-                light: self.world.light(
-                    at.x.floor() as i32,
-                    (at.y + height).floor() as i32,
-                    at.z.floor() as i32,
-                ),
-                discrete: false,
-                style: None,
-            });
-        }
+        // Java mods' entities (names/java.rs).
+        self.java_name_tags(camera, alpha, &mut tags);
         // Armor stands name themselves: an invisible one with a visible name
         // is a hologram (its model is skipped, its name tag is not).
         for a in &self.armor_stands {

@@ -4,6 +4,7 @@
 //! only; license and dependency fields are not interpreted.
 use serde::{Deserialize, Serialize};
 use std::{fs, io::Read, path::Path};
+mod lenient_json;
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct JarInfo {
@@ -197,7 +198,7 @@ pub fn mods_toml(text: &str) -> Result<JarInfo, String> {
 
 pub fn fabric(text: &str) -> Result<JarInfo, String> {
     let v: serde_json::Value = serde_json::from_str(text)
-        .or_else(|_| serde_json::from_str(&lenient_json(text)))
+        .or_else(|_| serde_json::from_str(&lenient_json::lenient_json(text)))
         .map_err(|e| format!("fabric.mod.json: {e}"))?;
     let s = |k: &str| v[k].as_str().unwrap_or("").to_owned();
     let license = match &v["license"] {
@@ -618,42 +619,5 @@ mandatory = true
             (1, 1, 1, 1)
         );
         assert_eq!((c.classes, c.mixin_configs), (1, 1));
-    }
-}
-
-/// `text` with the control characters inside its strings escaped: Fabric Loader's JSON reader
-/// takes raw newlines in strings (Better End's description has them), serde_json doesn't.
-fn lenient_json(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    let (mut in_string, mut escaped) = (false, false);
-    for c in text.chars() {
-        if in_string {
-            if escaped {
-                escaped = false;
-            } else if c == '\\' {
-                escaped = true;
-            } else if c == '"' {
-                in_string = false;
-            } else if (c as u32) < 0x20 {
-                out.push_str(&format!("\\u{:04x}", c as u32));
-                continue;
-            }
-        } else if c == '"' {
-            in_string = true;
-        }
-        out.push(c);
-    }
-    out
-}
-
-#[cfg(test)]
-mod lenient_tests {
-    #[test]
-    fn raw_newlines_in_strings_are_read() {
-        let info = super::fabric(
-            "{\"schemaVersion\": 1, \"id\": \"betterend\", \"description\": \"a\nb\"}",
-        )
-        .expect("lenient");
-        assert_eq!(info.mod_id, "betterend");
     }
 }

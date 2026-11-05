@@ -7,6 +7,8 @@ use horizon_world::registry::BlockStateId;
 use std::sync::{Arc, OnceLock};
 
 pub mod block_entity;
+mod block_revision;
+pub use block_revision::BlockRevision;
 
 /// The vanilla Overworld's column, which every dimension's chunks hold for
 /// now (`LevelShape::column`).
@@ -485,25 +487,6 @@ impl Section {
         }
     }
 }
-/// A number for a chunk's blocks as they are, so a reader can keep what it read: new for
-/// each chunk made, each copy of one (a clone may then be changed in any way) and each block
-/// set on it ([`Chunk::set`]). Java mods' block reads keep whole sections while it stays.
-pub struct BlockRevision(u64);
-impl BlockRevision {
-    fn next() -> Self {
-        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-        Self(NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
-    }
-    pub fn get(&self) -> u64 {
-        self.0
-    }
-}
-impl Clone for BlockRevision {
-    fn clone(&self) -> Self {
-        Self::next()
-    }
-}
-
 /// The heap bytes of a set of columns by what holds them (`Chunk::census`,
 /// `horizon-ctl memory`).
 #[derive(Clone, Copy, Debug, Default)]
@@ -660,9 +643,6 @@ impl Chunk {
             return v;
         };
         let previous = Arc::make_mut(&mut self.sections[s]).set(index(x, y, z), v);
-        if previous != v {
-            self.block_revision = BlockRevision::next();
-        }
         // `Heightmap.update`: a write two or more below a map's height can't
         // move it. Any other change rebuilds that map on the next read.
         if previous != v {
@@ -674,6 +654,7 @@ impl Chunk {
                     *map = OnceLock::new();
                 }
             }
+            self.block_revision = BlockRevision::next();
         }
         previous
     }

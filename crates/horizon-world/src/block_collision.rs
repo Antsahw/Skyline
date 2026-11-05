@@ -13,6 +13,8 @@ use crate::{
 use horizon_core::geometry::{Aabb, Axis, Direction, Vec3, VoxelShape};
 use std::{collections::HashMap, io, sync::Arc};
 
+mod mod_blocks;
+
 #[derive(Clone, Copy, Debug)]
 pub struct ShulkerCollisionState {
     pub previous_progress: f32,
@@ -99,88 +101,28 @@ impl<'r> BlockCollisionRegistry<'r> {
         let mut scan_flags = Vec::with_capacity(cached.registry().len());
         for index in 0..cached.registry().len() {
             let id = BlockStateId(index as u32);
-            let named = cached.registry().state(id).unwrap();
-            let cached_shape = cached.cached_shape(id)?;
-            let large = cached_shape.is_none_or(|shape| {
+            let state = cached.registry().state(id).unwrap();
+            let large = cached.cached_shape(id)?.is_none_or(|shape| {
                 Axis::ALL
                     .into_iter()
                     .any(|axis| shape.min(axis) < 0.0 || shape.max(axis) > 1.0)
             });
-            // A mod block copying a vanilla template (a content root's) follows
-            // the template's rule: Create's scaffoldings are vanilla scaffolding
-            // (`ScaffoldingBlock` subclasses). Its own properties may not fit the
-            // rule: then it has none, rather than the registry failing.
-            let template = cached
-                .template(&named.name)
-                .map(|template| crate::chunk::BlockState {
-                    name: template.to_owned(),
-                    properties: named.properties.clone(),
-                });
-            let (state, lenient) = match &template {
-                Some(state) => (state, true),
-                None => (named, false),
-            };
-            let rule = |result: io::Result<Option<ContextualRule>>| match result {
-                Err(_) if lenient => Ok(None),
-                other => other,
-            };
-            if let Some(rule) = rule(
-                ScaffoldingCollision::from_state(state).map(|r| r.map(ContextualRule::Scaffolding)),
-            )?
-            .or(rule(
-                LiquidCollision::from_state(state).map(|r| r.map(ContextualRule::Liquid)),
-            )?)
-            .or((state.name == "minecraft:powder_snow").then_some(ContextualRule::PowderSnow))
-            {
-                contextual.insert(id, rule);
-            }
-            if cached_shape.is_none() {
-                match DynamicSupport::from_state(state) {
-                    Ok(Some(rule)) => {
-                        dynamic.insert(id, rule);
-                    }
-                    Err(_) if lenient => {}
-                    Err(error) => return Err(error),
-                    Ok(None) => {}
-                }
-            }
-            // No cached shape and no rule: a mod block whose shape depends on
-            // context in a way Horizon doesn't know. A full cube, never a stop
-            // (players walk on it and can't walk through it).
-            if cached_shape.is_none() && !dynamic.contains_key(&id) {
-                fallback.insert(id, VoxelShape::block());
-            }
+            let rules = mod_blocks::StateRules::new(&cached, id, state)?;
+            let state = &*rules.state;
+            contextual.extend(rules.contextual.map(|rule| (id, rule)));
             // No contextual rule and an empty cached shape: empty everywhere.
-            let empty =
-                !contextual.contains_key(&id) && cached_shape.is_some_and(VoxelShape::is_empty);
+            let empty = !contextual.contains_key(&id)
+                && cached.cached_shape(id)?.is_some_and(VoxelShape::is_empty);
             scan_flags.push(
                 u8::from(large)
                     | (u8::from(state.name == "minecraft:moving_piston") << 1)
                     | (u8::from(empty) << 2)
                     | (u8::from(contextual.contains_key(&id)) << 3),
             );
+            dynamic.extend(rules.dynamic.map(|rule| (id, rule)));
+            fallback.extend(rules.fallback.then(|| (id, VoxelShape::block())));
         }
-        if !fallback.is_empty() {
-            let mut names: Vec<&str> = fallback
-                .keys()
-                .filter_map(|id| cached.registry().state(*id))
-                .map(|state| state.name.as_str())
-                .collect();
-            names.sort_unstable();
-            names.dedup();
-            // Once a process: the client, the server and worldgen each build a registry.
-            static LOGGED: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
-            let message = format!(
-                "{} block states have no collision rule; they collide as full blocks: {}",
-                fallback.len(),
-                names.join(", ")
-            );
-            let mut logged = LOGGED.lock().unwrap_or_else(|e| e.into_inner());
-            if !logged.contains(&message) {
-                log::warn!("Horizon: {message}");
-                logged.push(message);
-            }
-        }
+        mod_blocks::warn_fallback(&cached, &fallback);
         let pistons = PistonBlockBindings::new(cached.registry()).ok();
         Ok(Self {
             cached,
@@ -241,15 +183,14 @@ impl<'r> BlockCollisionRegistry<'r> {
         {
             return Ok(shape.clone());
         }
-        if let Some(rule) = self.dynamic.get(&state) {
-            return rule
-                .collision_shape(world, position)
-                .map_err(CollisionQueryError::Dynamic);
+        if let Some(shape) = self.fallback.get(&state) {
+            return Ok(shape.clone());
         }
-        self.fallback
+        self.dynamic
             .get(&state)
-            .cloned()
-            .ok_or(CollisionQueryError::Unsupported(state))
+            .ok_or(CollisionQueryError::Unsupported(state))?
+            .collision_shape(world, position)
+            .map_err(CollisionQueryError::Dynamic)
     }
 
     /// Ordinary entity/position/placement contexts. The remaining pinned block

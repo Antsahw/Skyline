@@ -54,6 +54,9 @@ pub const VERSION_NAME: &str = horizon_core::VANILLA_VERSION;
 mod gateway;
 #[cfg(test)]
 mod loot_tests;
+mod java;
+use java::PresetDimensions;
+pub use java::{PRESET_KEY, preset_dimensions};
 
 /// Snapshot live block entities and custom names for a save batch without
 /// mutating the world. Each map is visited once, retaining its iteration order
@@ -3480,21 +3483,6 @@ impl Default for WorldGen {
         }
     }
 }
-/// `world_gen_settings`' key naming a mod's world preset the world was made with.
-pub const PRESET_KEY: &str = "horizon:preset";
-/// A mod's world preset's dimensions (`<root>/data/<ns>/worldgen/world_preset/<path>.json`'s
-/// `dimensions`) as `world_gen_settings` keeps them; None if it has none.
-pub fn preset_dimensions(root: &Path, preset: &str) -> Option<Tag> {
-    let (ns, path) = preset.split_once(':').unwrap_or(("minecraft", preset));
-    let text =
-        fs::read_to_string(root.join(format!("data/{ns}/worldgen/world_preset/{path}.json")))
-            .ok()?;
-    let json: serde_json::Value = serde_json::from_str(&text).ok()?;
-    let dimensions = json.get("dimensions")?;
-    dimensions
-        .is_object()
-        .then(|| horizon_client_core::scoreboard::json_to_tag(dimensions))
-}
 /// Writes a new world's `world_gen_settings` (seed, options and dimensions).
 pub fn write_world_gen_settings(dir: &Path, seed: i64, options: WorldGen) -> Result<()> {
     write_world_gen_settings_with(dir, seed, options, None, None)
@@ -3631,29 +3619,26 @@ pub fn write_world_gen_settings_preset(
             ),
             (
                 "dimensions",
-                preset_dimensions
-                    .filter(|_| options.mod_preset.is_some())
-                    .unwrap_or_else(|| {
-                        Tag::compound([
-                            ("minecraft:overworld", overworld),
-                            (
-                                "minecraft:the_nether",
-                                dimension(
-                                    "minecraft:the_nether",
-                                    "minecraft:nether",
-                                    preset("minecraft:nether"),
-                                ),
-                            ),
-                            (
-                                "minecraft:the_end",
-                                dimension(
-                                    "minecraft:the_end",
-                                    "minecraft:end",
-                                    Tag::compound([("type", string("minecraft:the_end"))]),
-                                ),
-                            ),
-                        ])
-                    }),
+                Tag::compound([
+                    ("minecraft:overworld", overworld),
+                    (
+                        "minecraft:the_nether",
+                        dimension(
+                            "minecraft:the_nether",
+                            "minecraft:nether",
+                            preset("minecraft:nether"),
+                        ),
+                    ),
+                    (
+                        "minecraft:the_end",
+                        dimension(
+                            "minecraft:the_end",
+                            "minecraft:end",
+                            Tag::compound([("type", string("minecraft:the_end"))]),
+                        ),
+                    ),
+                ])
+                .or_mod_preset(preset_dimensions, &options),
             ),
         ]),
     )

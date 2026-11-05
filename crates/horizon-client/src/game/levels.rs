@@ -12,6 +12,7 @@
 //! game rules, the scoreboard, the maps and the entities waiting to arrive
 //! through a portal.
 
+mod java;
 use super::{
     Dim, ExperienceOrb, FallingBlock, Game, ItemEntity, Mob, boats, commands,
     creaking::CreakingState, dragon, fireworks, lan::LanHost, lightning, machines, minecarts,
@@ -126,14 +127,6 @@ pub(super) struct Levels {
     /// The levels whose open the mods heard (`native_level_load`), each to
     /// be told closed once.
     heard_open: Vec<Dim>,
-}
-
-impl Parked {
-    /// The chunks Java mods' chunk loaders keep in this level.
-    #[cfg_attr(not(feature = "java-mods"), allow(dead_code))]
-    pub(super) fn set_ticketed(&mut self, chunks: Vec<(i32, i32)>) {
-        self.streaming.set_ticketed(chunks);
-    }
 }
 
 impl Levels {

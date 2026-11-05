@@ -4,6 +4,7 @@
 //! guest's inventory, with vanilla's packets: OpenScreen, container clicks
 //! and their corrections, and the grid back into the inventory when the menu
 //! closes (`AbstractContainerMenu.clearContainer`).
+mod java;
 use super::{Game, lan::LanHost};
 use horizon_client::{
     containers::BlockEntity,
@@ -152,17 +153,7 @@ impl Game<'_> {
         menu.drops.clear();
         let takes = std::mem::take(&mut menu.crafted_takes);
         store_player(menu, &mut host.hub.guests[gi]);
-        if !takes.is_empty() {
-            // Java mods' crafted hooks (ResultSlot.onTake); what they give is sent now (the
-            // click's answer takes the inventory as the client already has it).
-            let conn = host.hub.guests[gi].conn;
-            let before: Vec<_> = (5..46).map(|s| host.hub.guests[gi].menu_slot(s)).collect();
-            self.as_guest(host, conn, |g| g.java_crafted(&takes));
-            let changed: Vec<usize> = (5..46)
-                .filter(|&s| host.hub.guests[gi].menu_slot(s) != before[s - 5])
-                .collect();
-            host.hub.send_inventory_slots(gi, &changed);
-        }
+        self.lan_java_crafted(host, gi, &takes);
         if !brewed.is_empty() {
             let conn = host.hub.guests[gi].conn;
             self.as_guest(host, conn, |g| {

@@ -12,6 +12,7 @@ pub mod mineshaft;
 pub mod monument;
 pub mod nether_fossil;
 pub mod ocean_ruin;
+mod packs;
 pub mod piece_limited;
 pub mod processor;
 pub mod ruined_portal;
@@ -359,13 +360,6 @@ impl StructureResources {
                 .collect(),
         }
     }
-    /// The data packs' templates over the game's own: a pack's file for an
-    /// id is read in place of the prepared one (a mod replacing vanilla's
-    /// ancient city centres), and the packs' new ids are found.
-    pub fn with_packs(mut self, packs: super::overrides::PackTemplates) -> Self {
-        self.packs = packs;
-        self
-    }
     /// StructureTemplateManager.getOrCreate; missing templates are empty.
     pub fn template(&self, id: &str) -> Option<Arc<StructureTemplate>> {
         let id = if id.contains(':') {
@@ -380,22 +374,22 @@ impl StructureResources {
         let file = self.dir.join(namespace).join(format!("{path}.nbt"));
         // The packs' resource stack before the built-in pack (vanilla's
         // ResourceManagerTemplateSource: the top pack's file wins).
-        let bytes = match self.packs.read(&id) {
-            Some(bytes) => Some(bytes),
-            None => horizon_core::prepared_files::read(&file).ok(),
-        };
-        let loaded = bytes.and_then(|bytes| {
-            let mut raw = Vec::new();
-            flate2::read::GzDecoder::new(bytes.as_slice())
-                .read_to_end(&mut raw)
-                .ok()?;
-            let tag = nbt::read_named(&raw, Limits::templates()).ok()?.0.tag;
-            Some(StructureTemplate::from_nbt(
-                &tag,
-                self.registry,
-                &self.transforms,
-            ))
-        });
+        let loaded = self
+            .packs
+            .read(&id)
+            .or_else(|| horizon_core::prepared_files::read(&file).ok())
+            .and_then(|bytes| {
+                let mut raw = Vec::new();
+                flate2::read::GzDecoder::new(bytes.as_slice())
+                    .read_to_end(&mut raw)
+                    .ok()?;
+                let tag = nbt::read_named(&raw, Limits::templates()).ok()?.0.tag;
+                Some(StructureTemplate::from_nbt(
+                    &tag,
+                    self.registry,
+                    &self.transforms,
+                ))
+            });
         // StructureTemplateManager.getOrCreate: missing templates are empty.
         let mut loaded = loaded.unwrap_or_else(StructureTemplate::empty);
         loaded.location = id.as_str().into();

@@ -239,6 +239,29 @@ pub fn follow(release: &Release, tag: &str) {
     }
 }
 
+/// [`ensure`] for an instance with Fabric 26.3 mods on (Play from the command line or MCP); nothing
+/// for one with them off.
+pub fn ensure_for(
+    instance: &crate::instances::Instance,
+    tag: &str,
+    progress: impl Fn(f32),
+) -> Result<(), String> {
+    if instance.java_mods {
+        ensure(tag, progress)?;
+    }
+    Ok(())
+}
+
+/// `instances::apply`'s hook: with Fabric 26.3 mods on, the version's Java mods build, told to
+/// run them ([`switch_command`]); the plain game's command otherwise.
+pub fn apply(cmd: &mut Command, instance: &crate::instances::Instance) -> Result<(), String> {
+    // Fabric 26.3 mods on: the version's Java mods build, told to run them.
+    if instance.java_mods {
+        switch_command(cmd)?;
+    }
+    Ok(())
+}
+
 /// Turns the plain game's command (`backend::client_command`) into the Java mods build's: the
 /// same arguments, folder and variables, with [`OPT_IN_ARG`].
 pub fn switch_command(cmd: &mut Command) -> Result<(), String> {

@@ -309,6 +309,7 @@ mod remote_stations;
 mod remote_vehicles;
 mod render_control;
 mod render_tick;
+mod replay;
 mod repro;
 mod respawn_anchor;
 mod saves_control;
@@ -1540,13 +1541,9 @@ impl LevelAccess for GameLevel<'_> {
         self.world.world_surface(x, z, |s| self.facts.is_air(s))
     }
     fn precipitation(&self, pos: BlockPos) -> Option<horizon_world::level::Precipitation> {
-        let info = self.behaviours.precipitation_info(self, pos)?;
-        // Java mods that patch the biomes' weather (Serene Seasons) answer it at the end of
-        // the level's tick (java_server.rs: java_random_ticks).
-        if java_server::java_precipitation(info.top) {
-            return None;
-        }
-        Some(info)
+        self.behaviours
+            .precipitation_info(self, pos)
+            .filter(|info| !java_server::java_precipitation(info.top))
     }
     fn is_raining_at(&self, pos: BlockPos) -> bool {
         self.behaviours.is_raining_at(self, pos)
@@ -2709,11 +2706,6 @@ struct Game<'a> {
     loading_progress_at: Option<std::time::Instant>,
     /// The world spawn search's origin chunk and fallback height, once known.
     spawn_origin: Option<((i32, i32), i32)>,
-    /// Whether the spawn search asked the Java mods' generator for its origin (they move it).
-    spawn_origin_asked: bool,
-    /// Players who joined while the Java mods' data-pack load functions hadn't run, with the
-    /// ticks they have waited, and the ticks since the functions ran (`hold_join`).
-    held_joins: Vec<(u32, u32, u32)>,
     spawn_spiral: horizon_client::world_spawn::ChunkSpiral,
     /// A new player's spawn search, while its candidates' chunks load.
     player_spawn: Option<horizon_client::world_spawn::PlayerSpawnFinder>,
@@ -2999,17 +2991,8 @@ struct Game<'a> {
     spill: spill::Spill,
     /// The recipe book of the open screen (game/recipe_book.rs).
     recipe_ui: recipe_book::RecipeUi,
-    /// The open window's Java mod screen, as its last frame drew it (game/java_screen.rs).
-    java_screen: Option<java_screen::JavaScreen>,
-    /// The keys the server's Java mods bind (game/java_screen.rs).
-    java_binds: java_screen::JavaBinds,
-    /// What Java mods last drew on the HUD (game/java_screen.rs).
-    java_hud: Option<java_screen::JavaHud>,
-    java_overlay: java_screen::JavaOverlay,
-    /// Java mods' dynamic textures in the atlas (game/java_screen.rs).
-    java_images: java_screen::JavaImages,
-    /// Java mods' entities the server last sent (game/java_entities.rs).
-    java_entities: java_entities::JavaEntities,
+    /// The Java mods' state in the game (game/java_mods.rs).
+    java: java_mods::JavaGame,
     /// The horse inventory (game/mount_menu.rs).
     mount_menu: mount_menu::MountMenu,
     /// The player's fishing hook.
@@ -6316,13 +6299,9 @@ impl Game<'_> {
         // on the client): a GameMasterBlock stays when the player cannot use
         // game master blocks (Player.canUseGameMasterBlocks).
         let state = self.world.block(pos[0], pos[1], pos[2]);
-        // Java mods: their injections at destroyBlock's head and Fabric's
-        // PlayerBlockBreakEvents.BEFORE may stop the break (the client puts the block back on
-        // the server's acknowledgement); a mod that patches the inside of breaking (a vein
-        // miner) has vanilla's whole break run on the Java side instead.
-        let after_java = match self.java_break(pos, state) {
-            java_server::JavaBreak::Cancelled | java_server::JavaBreak::Java => return Ok(()),
-            java_server::JavaBreak::Horizon { after } => after,
+        // Java mods may stop the break or run it themselves (java_server.rs, `JavaBreak`).
+        let Some(after_java) = self.java_break(pos, state).horizon() else {
+            return Ok(());
         };
         if !self.can_use_game_master_blocks()
             && is_game_master_block(&self.res.facts().get(state).name)
@@ -9069,8 +9048,6 @@ impl Game<'_> {
             hud_layout::paint(batch, &g.gui.atlas, &draws);
         });
         if show_hud {
-            // Java mods' HUD (Fabric's HUD elements come after vanilla's bars and before the
-            // titles' layer ends: under chat and titles is close enough).
             self.draw_java_hud(&mut batch);
             self.gui_layer("minecraft:overlay_message", &mut batch, |g, batch| {
                 g.draw_overlay_message(batch, bar_height);
@@ -11406,11 +11383,7 @@ impl Game<'_> {
                     .map(|o| (lerp(o.previous, o.position), orb.0, orb.1)),
             );
             // Java mods' entities: the radius their renderers give.
-            casters.extend(
-                self.java_entity_shadows(alpha)
-                    .into_iter()
-                    .map(|(pos, radius)| (pos, radius, 1.0)),
-            );
+            casters.extend(self.java_entity_shadows(alpha));
             // Text, block and item displays (DisplayRenderer's shadow radius).
             casters.extend(self.text_displays.values().filter_map(|d| d.shadow(a)));
             for (pos, radius, strength) in casters {
@@ -12394,94 +12367,6 @@ impl Game<'_> {
                 .play("minecraft:entity.player.attack.nodamage", from, 1.0, 1.0);
         }
     }
-    /// A mob a routed attack hit (Java mods' `Player.attack`, `game/java_server.rs`): hurt
-    /// by the player with what its copy's `hurtServer` got, pushed as its `knockback` was
-    /// (the strength and direction the mods left), and the hit's sounds and particles. The
-    /// weapon's wear and the exhaustion were the mirror's (they come back as slots and food).
-    pub(super) fn routed_hit(
-        &mut self,
-        index: usize,
-        amount: f32,
-        knockback: f64,
-        knock_x: f64,
-        knock_z: f64,
-        primary: bool,
-    ) {
-        let from = self
-            .player
-            .as_ref()
-            .map(|p| [p.position.x, p.position.y, p.position.z]);
-        self.combat.last_hurt_mob = Some((self.mobs[index].id, self.world.game_time));
-        let old_health = self.mobs[index].health;
-        let source = match from {
-            Some(f) => self.attack_source(f),
-            None => horizon_client::mobs::Damage::of(horizon_client::mobs::DamageKind::Generic),
-        };
-        let landed = amount > 0.0 && self.hurt_by_player(index, amount, source);
-        if !landed {
-            if primary {
-                self.audio
-                    .play("minecraft:entity.player.attack.nodamage", from, 1.0, 1.0);
-            }
-            return;
-        }
-        let victim = self.mob_entity(&self.mobs[index]);
-        self.player_hit(
-            &victim,
-            creatures::damage_type(source.kind, true),
-            None,
-            amount,
-        );
-        if knockback > 0.0 {
-            self.mobs[index].knockback(knockback, knock_x, knock_z, &source);
-        }
-        let mob = &self.mobs[index];
-        let actual = old_health - mob.health;
-        let (feet, height) = (
-            [mob.position.x, mob.position.y, mob.position.z],
-            mob.kind.height,
-        );
-        self.stats
-            .custom("damage_dealt", (actual * 10.0).round() as i32);
-        if actual > 2.0 {
-            let indicator = horizon_client::particles::ParticleOptions::simple(
-                horizon_client::particles::ParticleType::DamageIndicator,
-            );
-            let at = [feet[0], feet[1] + height * 0.5, feet[2]];
-            self.particles.send_particles(
-                &indicator,
-                at,
-                [0.1, 0.0, 0.1],
-                0.2,
-                (actual * 0.5) as u32,
-            );
-            self.lan_send_particles(lan_particles::QueuedParticle {
-                dimension: self.dim.id(),
-                options: indicator,
-                state: None,
-                at,
-                spread: [0.1, 0.0, 0.1],
-                speed: [0.2; 3],
-                count: (actual * 0.5) as u32 as i32,
-                randomization: 0,
-            });
-        }
-        self.last_hurt_by_player
-            .insert(self.mobs[index].id, self.lan_acting);
-        if primary {
-            self.audio
-                .play("minecraft:entity.player.attack.strong", from, 1.0, 1.0);
-        }
-        for event in std::mem::take(&mut self.mobs[index].outbox) {
-            match event {
-                horizon_client::mobs::MobEvent::Sound(s, at, volume, pitch) => {
-                    self.audio
-                        .play(&format!("minecraft:{s}"), Some(at), volume, pitch);
-                }
-                other => self.mobs[index].outbox.push(other),
-            }
-        }
-    }
     /// ServerExplosion: rays from a 16^3 grid lose (resistance + 0.3) * 0.3 per step.
     /// A mob explosion (`ServerLevel.explode` with `ExplosionInteraction.MOB`:
     /// blocks are kept without mobGriefing, else the mob_explosion_drop_decay
@@ -12906,7 +12791,7 @@ impl Game<'_> {
             .as_ref()
             .map(respawn_anchor::RespawnConfig::from_saved);
         self.spawn_origin = None;
-        self.spawn_origin_asked = false;
+        self.java.spawn_origin_asked = false;
         self.spawn_spiral = Default::default();
         self.player_spawn = None;
         self.creatures.reset_trader();
@@ -14577,14 +14462,8 @@ impl Game<'_> {
             .is_some_and(|p| p.auto_spin_attack_ticks > 0);
         let items = self.visible_hand_items();
         let off_hand_empty = items[1].is_none();
-        // What mods draw in first person (Carry On's carried block or mob), and the hands
-        // they draw instead of vanilla's arm and item (game/java_entities.rs).
-        self.java_hand_geometry(to_world, packed, &mut out);
-        let modded = self
-            .java_entities
-            .hands
-            .as_ref()
-            .map_or([false; 2], |h| h.hide);
+        // What mods draw in first person, and the hands they hide (game/java_entities.rs).
+        let modded = self.java_hand_geometry(to_world, packed, &mut out);
         for (i, (hand, item)) in Hand::BOTH.into_iter().zip(items).enumerate() {
             if !shown[i] || modded[i] {
                 continue;
@@ -18734,10 +18613,7 @@ impl Game<'_> {
                             self.stats_click(size);
                         }
                         Screen::Stats if button == MouseButton::Left => self.stats_release(),
-                        Screen::JavaMod => {
-                            let kind = if pressed { "press" } else { "release" };
-                            self.java_screen_mouse(kind, button == MouseButton::Right);
-                        }
+                        Screen::JavaMod => self.java_screen_click(pressed, button),
                         _ => {}
                     }
                 }
@@ -19659,8 +19535,6 @@ impl<'a> Game<'a> {
             creation_job: None,
             loading_progress_at: None,
             spawn_origin: None,
-            spawn_origin_asked: false,
-            held_joins: Vec::new(),
             spawn_spiral: Default::default(),
             player_spawn: None,
             spawn_wait: Vec::new(),
@@ -19824,12 +19698,7 @@ impl<'a> Game<'a> {
             pending: Default::default(),
             spill: Default::default(),
             recipe_ui: Default::default(),
-            java_screen: None,
-            java_binds: Default::default(),
-            java_hud: None,
-            java_overlay: Default::default(),
-            java_images: Default::default(),
-            java_entities: Default::default(),
+            java: Default::default(),
             mount_menu: Default::default(),
             hook: None,
             remote_hooks: Vec::new(),
@@ -21660,20 +21529,7 @@ fn start_game<'a>(
         return Ok(None);
     }
     match game.options.world.clone() {
-        _ if game.options.replay.is_some() => {
-            let path = game.options.replay.clone().unwrap_or_default();
-            let name = game.options.player_name();
-            match horizon_client::lan::replay::open(&path) {
-                Ok(pipe) => game.connect_local(pipe, &name)?,
-                Err(e) => {
-                    log::warn!(
-                        "Horizon: the replay {} couldn't be opened: {e}",
-                        path.display()
-                    );
-                    return Err(e.into());
-                }
-            }
-        }
+        _ if game.options.replay.is_some() => game.open_replay()?,
         _ if game.options.server.is_some() => {
             let (address, name) = (
                 game.options.server.clone().unwrap_or_default(),

@@ -60,16 +60,7 @@ impl Launcher {
         let body: Option<AnyElement> = match open {
             HomeTab::Overview => Some(self.glass_overview(rows, cx).into_any_element()),
             HomeTab::Mods => Some(self.glass_instance_mods(cx).into_any_element()),
-            // The Fabric 26.3 mods tab: its buttons above its list (the flat view's strip end).
-            HomeTab::JavaMods => self.java_mods_section(cx).map(|(actions, list)| {
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(8.))
-                    .child(actions)
-                    .child(list)
-                    .into_any_element()
-            }),
+            HomeTab::JavaMods => self.glass_java_mods(cx),
             HomeTab::Worlds => self.glass_worlds(cx).map(IntoElement::into_any_element),
             HomeTab::Multiplayer => self
                 .glass_multiplayer(cx)

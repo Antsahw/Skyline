@@ -2,6 +2,8 @@
 //! around the player, closest first. The game thread owns the world and only
 //! hands immutable `Arc` snapshots to workers; results carry a sequence number
 //! so stale work is dropped.
+mod busy;
+mod java;
 use crate::fast_hash::{FxHashMap, FxHashSet};
 use crate::section_mask::SectionMask;
 use crate::{
@@ -1558,19 +1560,6 @@ impl Streaming {
     pub fn pending(&self) -> usize {
         self.shared.queue.lock().unwrap().len()
     }
-    /// What [`Self::busy`] waits for: generating, decorating, viewing, finishing, lighting,
-    /// meshing, queued.
-    pub fn busy_parts(&self) -> [usize; 7] {
-        [
-            self.generating.len(),
-            self.decorating,
-            self.viewing.len(),
-            self.finishing.len(),
-            self.lighting.len(),
-            self.meshing.len(),
-            self.pending(),
-        ]
-    }
     /// Whether any chunk is queued or on its way from generation to a mesh.
     pub fn busy(&self) -> bool {
         self.chunks_in_flight() || !self.meshing.is_empty() || self.pending() != 0
@@ -1634,39 +1623,6 @@ impl Streaming {
     }
     /// Advance streaming: collect finished work, then schedule more.
     /// Returns meshes ready for upload and columns that were unloaded.
-    /// The chunks Java mods' tickets keep (`horizon_jvm` `Action::ChunkTickets`).
-    /// New ones are ranked for decoration and generation looks again, as `/forceload add`'s are.
-    pub fn set_ticketed(&mut self, chunks: impl IntoIterator<Item = (i32, i32)>) {
-        let chunks: HashSet<(i32, i32)> = chunks.into_iter().collect();
-        for c in self.ticketed.difference(&chunks) {
-            self.mod_forced.remove(c);
-        }
-        let mut new: Vec<(i32, i32)> = chunks
-            .iter()
-            .filter(|&&c| self.mod_forced.insert(c))
-            .copied()
-            .collect();
-        new.sort_unstable();
-        for (x, z) in new {
-            self.rank_forced(x, z, x, z);
-        }
-        self.ticketed = chunks;
-        self.generation_scan.exhausted = false;
-    }
-    /// What the Java mods' tickets keep (see [`Self::set_ticketed`]).
-    pub fn ticketed(&self) -> &HashSet<(i32, i32)> {
-        &self.ticketed
-    }
-    /// `/forceload`'s chunks and mods' tickets together, as the chunk tickets see them.
-    pub fn kept_chunks(&self) -> impl Iterator<Item = (i32, i32)> + '_ {
-        self.streamed_forced().copied()
-    }
-    /// `forced` and `mod_forced` together, once each.
-    fn streamed_forced(&self) -> impl Iterator<Item = &(i32, i32)> + '_ {
-        self.forced
-            .iter()
-            .chain(self.mod_forced.iter().filter(|c| !self.forced.contains(c)))
-    }
     pub fn update(
         &mut self,
         world: &mut World,

@@ -3,6 +3,9 @@
 //! (`LocalPlayer.aiStep`'s riding jump), positioning, dismounting, and the
 //! mount's health and jump bar on the HUD.
 use super::Game;
+
+mod java;
+mod jump;
 use horizon_client::{
     blocks::Fluid,
     hud::HudBatch,
@@ -49,37 +52,6 @@ pub(super) struct MountState {
     was_jumping: bool,
 }
 impl MountState {
-    /// `LocalPlayer.aiStep`'s riding jump: the jump key charges `jump_scale`, its release
-    /// jumps (`getPlayerJumpPendingScale` returned, 0 otherwise) and ten ticks cool down.
-    pub(super) fn charge_jump(&mut self, jump_key: bool) -> f32 {
-        let mut jump = 0.0;
-        let st = self;
-        if st.jump_ticks < 0 {
-            st.jump_ticks += 1;
-            if st.jump_ticks == 0 {
-                st.jump_scale = 0.0;
-            }
-        }
-        if st.was_jumping && !jump_key {
-            st.jump_ticks = -10;
-            let amount = (st.jump_scale * 100.0).floor() as i32;
-            // PlayerRideableJumping.getPlayerJumpPendingScale, the scale a
-            // guest's START_RIDING_JUMP carries as `data`.
-            jump = crate::mobs::equine::jump_pending_scale(amount);
-        } else if !st.was_jumping && jump_key {
-            st.jump_ticks = 0;
-            st.jump_scale = 0.0;
-        } else if st.was_jumping {
-            st.jump_ticks += 1;
-            st.jump_scale = if st.jump_ticks < 10 {
-                st.jump_ticks as f32 * 0.1
-            } else {
-                0.8 + 2.0 / (st.jump_ticks - 9) as f32 * 0.1
-            };
-        }
-        st.was_jumping = jump_key;
-        jump
-    }
     pub(super) fn reset_jump(&mut self) {
         self.jump_ticks = 0;
         self.jump_scale = 0.0;
@@ -810,15 +782,7 @@ impl Game<'_> {
     /// (`getVehicleMaxHearts`).
     pub(super) fn draw_mount_hud(&mut self, batch: &mut HudBatch, w: i32, h: i32) -> i32 {
         let Some(i) = self.mount_index() else {
-            // A Java mod's mob: its hearts, as a vanilla mount's (the server's snapshot gives
-            // them). Its jump bar is in `draw_jump_bar`.
-            let mut hearts = 0;
-            if let Some([health, max]) = self.java_mount_health() {
-                hearts = horizon_client::hud_layout::vehicle_max_hearts(max);
-                let draws = horizon_client::hud_layout::vehicle_health(w, h, hearts, health);
-                horizon_client::hud_layout::paint(batch, &self.gui.atlas, &draws);
-            }
-            return hearts;
+            return self.draw_java_mount_hud(batch, w, h);
         };
         let m = &self.mobs[i];
         let hearts = horizon_client::hud_layout::vehicle_max_hearts(m.attrs.max_health);
@@ -831,12 +795,7 @@ impl Game<'_> {
     /// The jump bar when it is the contextual bar.
     pub(super) fn draw_jump_bar(&self, batch: &mut HudBatch, w: i32, h: i32) {
         let Some(i) = self.mount_index() else {
-            // A Java mod's horse-style mob: its jump bar (its hearts are the mod's).
-            if self.java_mount_jumps() {
-                let draws = horizon_client::hud_overlays::jump_bar(w, h, 0, self.mount.jump_scale);
-                horizon_client::hud_layout::paint(batch, &self.gui.atlas, &draws);
-            }
-            return;
+            return self.draw_java_jump_bar(batch, w, h);
         };
         let m = &self.mobs[i];
         // JumpableVehicleBar: `getJumpCooldown`, which only the camel's and

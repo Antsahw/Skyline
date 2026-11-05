@@ -80,9 +80,7 @@ impl Session {
                     None => instances::selected(),
                 };
                 let tag = instance.resolve_version(arg_str(args, "version"))?;
-                if instance.java_mods {
-                    horizon_launcher::java_variant::ensure(&tag, |_| {})?;
-                }
+                horizon_launcher::java_variant::ensure_for(&instance, &tag, |_| {})?;
                 let mut cmd = backend::client(&tag)?;
                 instances::apply(&mut cmd, &instance)?;
                 cmd.args(game_tools::control_args());

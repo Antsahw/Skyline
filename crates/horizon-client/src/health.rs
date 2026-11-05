@@ -413,7 +413,6 @@ impl PlayerHealth {
         }
     }
 }
-
 impl PlayerMotion {
     pub fn hurt(
         &mut self,

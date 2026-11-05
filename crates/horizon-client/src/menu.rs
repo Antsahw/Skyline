@@ -17,6 +17,8 @@ use crate::{
 use std::sync::Arc;
 
 mod bundle;
+mod java;
+pub use java::CraftedTake;
 pub mod place;
 
 /// `ServerPlayer.getRecipeBook`: whether the player knows a recipe.
@@ -326,18 +328,6 @@ const RESULT: usize = 3;
 /// `Container.getMaxStackSize`.
 const CONTAINER_MAX: u32 = 99;
 const OFFHAND: usize = 40;
-
-/// A crafting result taken from a grid ([`Menu::crafted_takes`]).
-#[derive(Clone, Debug)]
-pub struct CraftedTake {
-    /// The recipe's id.
-    pub recipe: String,
-    pub taken: ItemStack,
-    /// The grid's width (2 or 3).
-    pub width: usize,
-    /// The grid's cells before the take.
-    pub grid: Vec<Option<ItemStack>>,
-}
 
 pub struct Menu {
     kind: Kind,
@@ -1895,12 +1885,8 @@ impl Menu {
         let grid = self.containers[GRID].clone();
         if let Some((id, _)) = env.recipes.find(&grid, n) {
             self.crafted.push((format!("minecraft:{id}"), grid.clone()));
-            self.crafted_takes.push(CraftedTake {
-                recipe: format!("minecraft:{id}"),
-                taken: taken.clone(),
-                width: n,
-                grid: grid.clone(),
-            });
+            self.crafted_takes
+                .push(CraftedTake::of(id, taken, n, &grid));
             self.item_crafted
                 .push((format!("minecraft:{id}"), taken.clone()));
         }
