@@ -333,6 +333,7 @@ public final class HorizonDeviceClient {
             try {
                 HorizonGraphics graphics = new HorizonGraphics(HorizonClient.width, HorizonClient.height);
                 graphics.imagesSent = HorizonClient.imagesSent(local.getUUID());
+                graphics.maxImage = HorizonGraphics.LOCAL_MAX_IMAGE;
                 HorizonClient.mouseAt(mouseX, mouseY);
                 HorizonScreenEvents.extract(screen, graphics, (int) mouseX, (int) mouseY, 0);
                 String ops = graphics.ops().toString();

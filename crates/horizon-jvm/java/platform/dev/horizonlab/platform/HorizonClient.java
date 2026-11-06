@@ -516,6 +516,17 @@ public final class HorizonClient {
         field.set(target, value);
     }
 
+    /** A field read by name (looked up once, as {@link #set}). */
+    static Object get(Class<?> owner, Object target, String name) throws ReflectiveOperationException {
+        Field field = FIELDS.computeIfAbsent(owner, o -> new java.util.concurrent.ConcurrentHashMap<>()).get(name);
+        if (field == null) {
+            field = owner.getDeclaredField(name);
+            field.setAccessible(true);
+            FIELDS.get(owner).put(name, field);
+        }
+        return field.get(target);
+    }
+
     /**
      * The atlases screens' graphics are made with (GuiGraphicsExtractor takes the GUI sprites'):
      * empty ones, without a GPU. Horizon draws sprites from its own atlas, by name.
@@ -676,21 +687,92 @@ public final class HorizonClient {
 
     /** The size Horizon's GUI has (scaled pixels), which screens lay out in. */
     static int width = 427, height = 240;
+    /**
+     * The window's GUI scale and framebuffer size (0: the GUI's size at the scale), as the
+     * player's game last said (a size input): pictures in picture are drawn at that scale, and
+     * mods' full-screen targets are the framebuffer's size (Xaero's World Map).
+     */
+    static int scale = 3, pixelWidth, pixelHeight;
 
-    /** The headless window's size: Horizon's GUI size, at scale 3 (1280x720's). */
+    /** Each player's window, as their game last told it: {GUI width, height, scale, framebuffer width, height}. */
+    private static final java.util.Map<java.util.UUID, int[]> WINDOWS = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** The window now: {GUI width, height, scale, framebuffer width, height}. */
+    private static int[] windowNow() {
+        return new int[] {width, height, scale, pixelWidth, pixelHeight};
+    }
+
+    /** Player {@code id}'s GUI size (the window now when their game hasn't said). */
+    static int[] guiSize(java.util.UUID id) {
+        int[] w = id == null ? null : WINDOWS.get(id);
+        return w == null ? new int[] {width, height} : new int[] {w[0], w[1]};
+    }
+
+    /**
+     * A size input ({@code {"kind":"size", width, height, scale, px_w, px_h}}; an older game sends
+     * the GUI's size only: scale 3): player {@code id}'s window, the headless one's now.
+     */
+    static void sizeInput(java.util.UUID id, com.google.gson.JsonObject in) {
+        int w = in.get("width").getAsInt(), h = in.get("height").getAsInt();
+        int s = in.has("scale") ? Math.max(1, in.get("scale").getAsInt()) : 3;
+        int pw = in.has("px_w") ? in.get("px_w").getAsInt() : w * s;
+        int ph = in.has("px_h") ? in.get("px_h").getAsInt() : h * s;
+        int[] window = {w, h, s, pw, ph};
+        if (id != null) WINDOWS.put(id, window);
+        applyWindow(window, true);
+    }
+
+    /** Sets the headless window to {@code window}; {@code resize}: the main target too. */
+    private static void applyWindow(int[] window, boolean resize) {
+        width = window[0];
+        height = window[1];
+        scale = window[2];
+        pixelWidth = window[3];
+        pixelHeight = window[4];
+        windowSize();
+        if (!resize) return;
+        // The main render target follows the window, as Minecraft.resizeDisplay resizes it
+        // (only on a size input: switching players' windows keeps it, unseen anyway).
+        try {
+            var renderer = minecraft == null ? null : minecraft.gameRenderer;
+            if (renderer instanceof net.minecraft.client.renderer.GameRenderer game) {
+                var target = (com.mojang.blaze3d.pipeline.RenderTarget) get(net.minecraft.client.renderer.GameRenderer.class, game, "mainRenderTarget");
+                int pw = pixelWidth > 0 ? pixelWidth : width * scale, ph = pixelHeight > 0 ? pixelHeight : height * scale;
+                if (target != null && (target.width != pw || target.height != ph)) target.resize(pw, ph);
+            }
+        } catch (Throwable t) {
+            Natives.log("Horizon's client: the main target couldn't follow the window: " + t);
+        }
+    }
+
+    /** The headless window's size: Horizon's GUI size at the window's scale and framebuffer. */
     static void windowSize() {
         try {
             var window = minecraft.getWindow();
             if (window == null) return;
             Class<?> owner = com.mojang.blaze3d.platform.Window.class;
-            int scale = 3;
-            for (String f : new String[] {"width", "framebufferWidth", "windowedWidth"}) set(owner, window, f, width * scale);
-            for (String f : new String[] {"height", "framebufferHeight", "windowedHeight"}) set(owner, window, f, height * scale);
+            int pw = pixelWidth > 0 ? pixelWidth : width * scale, ph = pixelHeight > 0 ? pixelHeight : height * scale;
+            for (String f : new String[] {"width", "framebufferWidth", "windowedWidth"}) set(owner, window, f, pw);
+            for (String f : new String[] {"height", "framebufferHeight", "windowedHeight"}) set(owner, window, f, ph);
             set(owner, window, "guiScaledWidth", width);
             set(owner, window, "guiScaledHeight", height);
             set(owner, window, "guiScale", scale);
             set(owner, window, "focused", true);
             set(owner, window, "monitorManager", Natives.allocate(HorizonMonitors.class));
+            // The render state's window (the GUI renderer's scale, pictures in picture), as the
+            // game renderer's extract sets it each frame.
+            if (minecraft.gameRenderer instanceof net.minecraft.client.renderer.GameRenderer game && game.gameRenderState() != null) {
+                var state = game.gameRenderState().windowRenderState;
+                state.width = pw;
+                state.height = ph;
+                state.guiScale = scale;
+                var gui = get(net.minecraft.client.renderer.GameRenderer.class, game, "guiRenderer");
+                if (gui != null) {
+                    set(net.minecraft.client.gui.render.GuiRenderer.class, gui, "cachedGuiScale", scale);
+                    var projection = get(net.minecraft.client.gui.render.GuiRenderer.class, gui, "guiProjection");
+                    if (projection instanceof net.minecraft.client.renderer.Projection p) p.setupOrtho(1000.0F, 11000.0F, width, height, true);
+                }
+            }
         } catch (ReflectiveOperationException e) {
             Natives.log("Horizon's client: the window's size could not be set: " + e);
         }
@@ -1249,9 +1331,15 @@ public final class HorizonClient {
         // as a screen closes): mods check both before acting on input (TACZ's guns fire only
         // "in game": no screen, mouse grabbed, window active).
         boolean grabbedBefore = grabMouse(minecraft.gui.screen() == null);
+        // Their window (GUI size and scale, framebuffer): mods' size maths and pictures in
+        // picture follow the player whose client runs.
+        int[] windowBefore = windowNow(), window = WINDOWS.get(player.getUUID());
+        boolean otherWindow = window != null && !java.util.Arrays.equals(window, windowBefore);
+        if (otherWindow) applyWindow(window, false);
         try {
             run.run();
         } finally {
+            if (otherWindow) applyWindow(windowBefore, false);
             // Back to the outer run's player's state (as() within another player's as()).
             if (before != null) HorizonClientState.load(before.getUUID());
             set(Minecraft.class, minecraft, "player", before);
@@ -1295,6 +1383,7 @@ public final class HorizonClient {
      */
     static void left(java.util.UUID id) {
         HorizonPacketTap.left(id);
+        WINDOWS.remove(id);
         JOINED.remove(id);
         HorizonDeviceMods.RUN_THEIR_OWN.remove(id);
         HorizonLoop.forget(id);
@@ -3462,9 +3551,11 @@ public final class HorizonClient {
 
     /** The HUD of the client player now (its images as {@code id}'s game has them). */
     static com.google.gson.JsonArray hud(java.util.UUID id, boolean hurtable) {
-        HorizonGraphics graphics = new HorizonGraphics(width, height);
+        int[] gui = guiSize(id);
+        HorizonGraphics graphics = new HorizonGraphics(gui[0], gui[1]);
         graphics.modsOnly = true;
         graphics.imagesSent = imagesSent(id);
+        graphics.maxImage = maxImage(id);
         var delta = net.minecraft.client.DeltaTracker.ONE;
         fabricHudElements(graphics, delta);
         // The end of the in-game GUI's frame: the mods' overlays there (MaLiLib's: MiniHUD).
@@ -3606,6 +3697,14 @@ public final class HorizonClient {
     private static final java.util.Map<java.util.UUID, java.util.Map<String, Integer>> IMAGES_SENT =
             new java.util.concurrent.ConcurrentHashMap<>();
 
+    /**
+     * The largest image player {@code id}'s game takes: this process's own game's (in memory)
+     * more than a network player's.
+     */
+    static int maxImage(java.util.UUID id) {
+        return id != null && id.equals(HorizonDeviceMods.own) ? HorizonGraphics.LOCAL_MAX_IMAGE : HorizonGraphics.REMOTE_MAX_IMAGE;
+    }
+
     static java.util.Map<String, Integer> imagesSent(java.util.UUID player) {
         return IMAGES_SENT.computeIfAbsent(player, p -> new java.util.concurrent.ConcurrentHashMap<>());
     }
@@ -3630,8 +3729,10 @@ public final class HorizonClient {
     public static String frame(java.util.UUID player, int mouseX, int mouseY) {
         var screen = SCREENS.get(player);
         if (screen == null) return null;
-        HorizonGraphics graphics = new HorizonGraphics(width, height);
+        int[] gui = guiSize(player);
+        HorizonGraphics graphics = new HorizonGraphics(gui[0], gui[1]);
         graphics.imagesSent = imagesSent(player);
+        graphics.maxImage = maxImage(player);
         try {
             as(OWNERS.get(player), () -> {
                 mouseAt(mouseX, mouseY);
@@ -3809,9 +3910,11 @@ public final class HorizonClient {
         var player = HorizonServer.player(id);
         if (screen == null || player == null) return null;
         double[] mouse = OVERLAY_MOUSE.getOrDefault(id, new double[] {-1, -1});
-        HorizonGraphics graphics = new HorizonGraphics(width, height);
+        int[] gui = guiSize(id);
+        HorizonGraphics graphics = new HorizonGraphics(gui[0], gui[1]);
         graphics.modsOnly = true;
         graphics.imagesSent = imagesSent(id);
+        graphics.maxImage = maxImage(id);
         try {
             as(player, () -> {
                 mouseAt(mouse[0], mouse[1]);
@@ -3855,11 +3958,7 @@ public final class HorizonClient {
         try {
             switch (kind) {
                 case "open" -> {
-                    if (in.has("width")) {
-                        width = in.get("width").getAsInt();
-                        height = in.get("height").getAsInt();
-                        windowSize();
-                    }
+                    if (in.has("width")) sizeInput(id, in);
                     if (OVERLAYS.containsKey(id)) return;
                     as(player, () -> {
                         var screen = new HorizonOverlayScreen(player.inventoryMenu, player.getInventory());
@@ -3894,9 +3993,7 @@ public final class HorizonClient {
                         as(player, () -> {
                             switch (kind) {
                                 case "size" -> {
-                                    width = in.get("width").getAsInt();
-                                    height = in.get("height").getAsInt();
-                                    windowSize();
+                                    sizeInput(id, in);
                                     screen.resize(width, height);
                                 }
                                 case "move" -> screen.mouseMoved(x, y);
@@ -4066,11 +4163,7 @@ public final class HorizonClient {
         }
         // The window's HUD size (window -2: no screen), which the HUD lays out in.
         if (in.has("window") && in.get("window").getAsInt() == -2) {
-            if ("size".equals(in.get("kind").getAsString())) {
-                width = in.get("width").getAsInt();
-                height = in.get("height").getAsInt();
-                windowSize();
-            }
+            if ("size".equals(in.get("kind").getAsString())) sizeInput(id, in);
             return;
         }
         if (in.has("window") && in.get("window").getAsInt() == OVERLAY_WINDOW) {
@@ -4100,9 +4193,7 @@ public final class HorizonClient {
             as(player, () -> {
                 switch (kind) {
                     case "size" -> {
-                        width = in.get("width").getAsInt();
-                        height = in.get("height").getAsInt();
-                        windowSize();
+                        sizeInput(id, in);
                         screen.resize(width, height);
                     }
                     case "move" -> screen.mouseMoved(x, y);
