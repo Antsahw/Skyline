@@ -1,7 +1,7 @@
 //! Fabric 26.3 mods (beta): the game build with the Java mod bridge (docs/java-bridge.md), per
 //! instance. Off by default: an instance plays the plain build, has no Java mods tab and never
 //! starts Java, even with jars in its `mods-java/`. On: the launcher installs the version's
-//! Java mods build (`<asset>-java`: its release's own, else the fork's, [`java_release`]) in
+//! Java mods build (`<asset>-java`: its release's own, else the fork's, [`java_release`](crate::java_release)) in
 //! the version's `java/` folder, beside the plain one, where it plays with the version's prepared files, and starts it with
 //! [`OPT_IN_ARG`] and the Java 25 to run the mods on ([`JAVA_HOME_VAR`]).
 //!
@@ -10,10 +10,13 @@
 //! Edition ([`owner_signed_in`]), and Play with the switch on never takes the developer option's
 //! way past the gate (`dev_offline`). The game itself downloads no Java.
 use crate::backend::{self, Release, CLIENT};
-use crate::{account, java, java_release};
+use crate::{account, java};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+mod fork;
+pub use fork::install_from_fork;
 
 /// The folder in a version's folder holding its Java mods build.
 pub const DIR: &str = "java";
@@ -145,29 +148,6 @@ pub fn install(release: &Release, tag: &str, progress: impl Fn(f32)) -> Result<(
     let sha256 = backend::release_digest(release, asset).map_err(|e| missing(tag, &e))?;
     let url = crate::signed::asset_url(published, asset);
     download_into(tag, &url, &sha256, "", &progress)
-}
-
-/// Installs the java-bridge fork's own Fabric mods build ([`java_release`]) as installed
-/// version `tag`'s: signed with the fork's key, and only when `tag` prepares the files it reads.
-pub fn install_from_fork(tag: &str, progress: impl Fn(f32)) -> Result<(), String> {
-    let asset = asset().ok_or_else(no_build_here)?;
-    let version = backend::version_dir(tag);
-    if !version.join(CLIENT).is_file() {
-        return Err(format!("{tag} is not installed."));
-    }
-    let keys = java_release::keys();
-    let fetch = |url: &str| backend::fetch_small(url);
-    let manifest = java_release::manifest(&keys, &fetch)?;
-    java_release::fits(&manifest, java_release::prepared_format(&version), tag)?;
-    let sha256 = java_release::digest(asset, &keys, &fetch)?;
-    let url = java_release::asset_url(asset);
-    download_into(
-        tag,
-        &url,
-        &sha256,
-        &java_release::marker(&manifest),
-        &progress,
-    )
 }
 
 /// Downloads `url` (`sha256`), unpacks it and makes it `tag`'s Java mods build.
@@ -428,7 +408,7 @@ fn fetch(tag: &str, progress: &dyn Fn(f32)) -> Result<(), String> {
             &[("tag", tag)],
         ));
     }
-    // The version's own release first; the fork's build when it has none (java_release).
+    // The version's own release first; the fork's build when it has none (`fork`).
     let own = backend::releases().and_then(|releases| {
         let release = releases
             .iter()
@@ -436,10 +416,7 @@ fn fetch(tag: &str, progress: &dyn Fn(f32)) -> Result<(), String> {
             .ok_or_else(|| format!("No Horizon release is tagged {tag}."))?;
         install(release, tag, progress)
     });
-    own.or_else(|own| {
-        install_from_fork(tag, progress)
-            .map_err(|fork| format!("{own} From {}: {fork}", java_release::REPO))
-    })
+    fork::or_fork(own, tag, progress)
 }
 
 /// Downloads `tag`'s Java mods build again, the newest that fits it and this launcher
@@ -472,10 +449,7 @@ pub fn follow(release: &Release, tag: &str) {
         eprintln!("Fabric mods build of {tag} not installed: {e}");
         return;
     }
-    if let Err(e) = install(release, tag, |_| {}).or_else(|own| {
-        install_from_fork(tag, |_| {})
-            .map_err(|fork| format!("{own} From {}: {fork}", java_release::REPO))
-    }) {
+    if let Err(e) = fork::or_fork(install(release, tag, |_| {}), tag, &|_| {}) {
         eprintln!("Fabric mods build of {tag} not installed: {e}");
     }
 }
