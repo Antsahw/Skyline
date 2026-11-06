@@ -3,15 +3,21 @@
 //! text, items) reach the player's game on [`CHANNEL`]; the game draws them in place of its own
 //! container screen and sends the mouse
 //! and keys back on [`INPUT`], which the screen runs.
-use super::{Game, Screen, lan::LanHost};
+//!
+//! Plain in every build: a plain Horizon client joined to a server running Java mods draws
+//! their screens, HUD and overlay from the frames the server sends, and sends their input and
+//! key bindings back (no JVM here: `remote/java.rs` hands it the payloads). The server's side
+//! is feature-only (`java_screen/host.rs`); this game's own mods' client's part answers
+//! "none" without the feature (`java_hooks/screens.rs`).
+use super::{Game, Screen};
 use horizon_client::hud::{HudBatch, rgba};
 use horizon_client::items::ItemStack;
-use horizon_protocol::packets::{
-    configuration::CustomPayload,
-    play::{Clientbound as C, Serverbound as S},
-};
+use horizon_protocol::packets::{configuration::CustomPayload, play::Serverbound as S};
 use serde_json::{Value, json};
 use winit::keyboard::KeyCode;
+
+#[cfg(feature = "java-mods")]
+mod host;
 
 /// A frame, server to client: `{"window": id, "ops": [...]}`.
 pub(super) const CHANNEL: &str = "horizon:java_screen";
@@ -284,14 +290,7 @@ fn stack(o: &Value) -> Option<ItemStack> {
 /// Whether this game's own JVM runs every mod's client half (java_device): the server's HUD,
 /// overlay, keys and settings list are then not this game's.
 pub(super) fn own_java_client() -> bool {
-    #[cfg(feature = "java-mods")]
-    {
-        super::java_device::own_all()
-    }
-    #[cfg(not(feature = "java-mods"))]
-    {
-        false
-    }
+    Game::java_own_all()
 }
 
 impl Game<'_> {
@@ -302,8 +301,7 @@ impl Game<'_> {
         if let Ok(keys) = serde_json::from_slice::<Vec<i32>>(data) {
             self.java.binds.keys = keys.into_iter().collect();
             // This game's own client's, for the mods the server doesn't run (java_device).
-            #[cfg(feature = "java-mods")]
-            self.java.binds.keys.extend(super::java_device::own_keys());
+            self.java.binds.keys.extend(Game::java_own_keys());
         }
     }
 
@@ -349,7 +347,6 @@ impl Game<'_> {
         self.screen = Screen::Playing;
         self.java.overlay.mods_page = true;
         let input = json!({"kind": "modconfig", "mod": id});
-        #[cfg(feature = "java-mods")]
         if Self::own_client_takes(&input) {
             self.own_client_input(&input);
             return;
@@ -395,20 +392,17 @@ impl Game<'_> {
             if self.has_control_down() {
                 mods |= CONTROL;
             }
-            #[cfg(feature = "java-mods")]
-            super::java_device::key(code, sdl_keycode(key, code), mods, pressed);
+            Game::java_own_key(code, sdl_keycode(key, code), mods, pressed);
             let mut input = json!({"kind": "bind", "key": code, "keycode": sdl_keycode(key, code),
                 "mods": mods, "down": pressed});
             if let Some(mappings) = mappings {
                 input["mappings"] = json!(mappings);
             }
             // This game's own client has the mods' key bindings (beside the server's: both).
-            #[cfg(feature = "java-mods")]
             if Self::own_client_takes(&input) {
                 self.own_client_input(&input);
                 return;
             }
-            #[cfg(feature = "java-mods")]
             if Self::own_client_also(&input) {
                 self.own_client_input(&input);
             }
@@ -673,19 +667,7 @@ impl Game<'_> {
     /// titles' layer ends: under chat and titles is close enough.
     pub(super) fn draw_java_hud(&mut self, batch: &mut HudBatch) {
         // The device client's HUD (this game's own JVM: java_device), over the server's.
-        #[cfg(feature = "java-mods")]
-        {
-            super::java_device::gui_size(batch.width as i32, batch.height as i32);
-            // An own client beside the server's mods hears the HUD's size even when the
-            // server's mods draw no HUD.
-            if super::java_device::own_client() && self.java.hud.is_none() {
-                self.java.hud = Some(Default::default());
-            }
-            let ops = super::java_device::hud_ops();
-            if !ops.is_empty() {
-                self.draw_java_ops(batch, &ops);
-            }
-        }
+        self.draw_own_client_hud(batch);
         let Some(hud) = self.java.hud.as_mut() else {
             return;
         };
@@ -1067,17 +1049,6 @@ impl Game<'_> {
         kept
     }
 
-    /// The Java image slot holding the image named `name`, with the image's size.
-    #[cfg_attr(not(feature = "java-mods"), allow(dead_code))]
-    pub(super) fn java_image_slot(&self, name: &str) -> Option<(usize, u32, u32)> {
-        self.java
-            .images
-            .slots
-            .iter()
-            .find(|s| s.0 == name)
-            .map(|s| (s.1, s.2, s.3))
-    }
-
     /// A mod's dynamic texture's pixels (`{"op":"image","name","width","height","rgba"}`):
     /// into an atlas slot (its own again, else a free one, else the least recently stored),
     /// shrunk to fit.
@@ -1186,18 +1157,15 @@ impl Game<'_> {
     fn send_java_screen_input(&mut self, window: i32, mut input: Value) {
         input["window"] = json!(window);
         // The device client's screen (this game's own JVM: java_device) takes its own input.
-        #[cfg(feature = "java-mods")]
-        if window == CLIENT_WINDOW && super::java_device::screen_open() {
+        if window == CLIENT_WINDOW && Game::java_device_screen_open() {
             self.device_screen_input(&input);
             return;
         }
         // This game's own client (mods' client half here): its windows' input.
-        #[cfg(feature = "java-mods")]
         if Self::own_client_takes(&input) {
             self.own_client_input(&input);
             return;
         }
-        #[cfg(feature = "java-mods")]
         if Self::own_client_also(&input) {
             self.own_client_input(&input);
         }
@@ -1338,58 +1306,6 @@ impl Game<'_> {
             self.send_java_screen_input(window, json!({"kind": "char", "char": ch as u32}));
         }
         true
-    }
-
-    // ---- The server -----------------------------------------------------------------------
-
-    /// What Java mods draw on a player's HUD, from Java: to their game.
-    #[cfg_attr(not(feature = "java-mods"), allow(dead_code))]
-    pub(super) fn send_java_hud_frame(host: &mut LanHost, conn: u32, frame: &str) {
-        host.hub.send_to(
-            conn,
-            &C::CustomPayload(CustomPayload {
-                channel: HUD_CHANNEL.into(),
-                data: frame.as_bytes().to_vec(),
-            }),
-        );
-    }
-
-    /// What Java mods draw over a player's inventory, from Java: to their game.
-    #[cfg_attr(not(feature = "java-mods"), allow(dead_code))]
-    pub(super) fn send_java_overlay_frame(host: &mut LanHost, conn: u32, frame: &str) {
-        host.hub.send_to(
-            conn,
-            &C::CustomPayload(CustomPayload {
-                channel: OVERLAY_CHANNEL.into(),
-                data: frame.as_bytes().to_vec(),
-            }),
-        );
-    }
-
-    /// A player's client-only screen closed, from Java: their game leaves it.
-    #[cfg_attr(not(feature = "java-mods"), allow(dead_code))]
-    pub(super) fn send_java_screen_close(host: &mut LanHost, conn: u32) {
-        let data = format!("{{\"window\":{CLIENT_WINDOW},\"close\":true}}").into_bytes();
-        host.hub.send_to(
-            conn,
-            &C::CustomPayload(CustomPayload {
-                channel: CHANNEL.into(),
-                data,
-            }),
-        );
-    }
-
-    /// A frame of a player's mod screen, from Java: to their game, for their window.
-    #[cfg_attr(not(feature = "java-mods"), allow(dead_code))]
-    pub(super) fn send_java_screen_frame(host: &mut LanHost, conn: u32, window: i32, frame: &str) {
-        let data = format!("{{\"window\":{window},\"ops\":{frame}}}").into_bytes();
-        host.hub.send_to(
-            conn,
-            &C::CustomPayload(CustomPayload {
-                channel: CHANNEL.into(),
-                data,
-            }),
-        );
     }
 }
 

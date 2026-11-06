@@ -4,6 +4,7 @@
 //! biome sources, surface rules and features, and read back as vanilla saves a chunk.
 //! Everything else of the generator (far terrain, structure searches, spawn) stays Horizon's
 //! own [`VanillaTerrain`], and a dimension the mods leave alone is all Horizon's.
+#![cfg(feature = "java-mods")]
 
 use horizon_client::biome::Biomes;
 use horizon_client::chunk::Chunk;
@@ -14,6 +15,14 @@ use std::sync::{Arc, OnceLock};
 
 /// How long the first chunk waits for Java and Fabric to start (they start beside the world).
 const JAVA_START: std::time::Duration = std::time::Duration::from_secs(300);
+
+impl super::Game<'_> {
+    /// The Java mods' data under the world's packs, as Fabric's mod packs sit below them: their
+    /// structures, structure sets and pieces (world_loading.rs).
+    pub(in crate::game) fn java_structure_packs() -> Vec<horizon_client::datapack::DataPack> {
+        mod_structure_packs()
+    }
+}
 
 /// The Java mods' jars as data packs whose structures Horizon's generator reads (new
 /// structures and their sets, biome tags, templates, template pools, processor lists, the

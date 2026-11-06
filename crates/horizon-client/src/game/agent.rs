@@ -748,7 +748,6 @@ impl Game<'_> {
             );
         }
         // Java mods' entities (game/java_entities.rs), as the server last sent them.
-        #[cfg(feature = "java-mods")]
         for (id, ty, pos) in self.java_entity_list() {
             push(pos, ty, json!({ "id": id, "kind": "java" }));
         }

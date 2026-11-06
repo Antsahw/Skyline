@@ -34,7 +34,9 @@ pub(super) struct JavaGame {
 #[cfg(feature = "java-mods")]
 mod bridge;
 #[cfg(feature = "java-mods")]
-pub(super) use bridge::*;
+pub(crate) use bridge::*;
 
 #[cfg(not(feature = "java-mods"))]
 mod off;
+#[cfg(not(feature = "java-mods"))]
+pub(crate) use off::*;

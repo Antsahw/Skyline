@@ -1,47 +1,31 @@
-//! Without the `java-mods` feature: what Horizon's files call on `Game` for the Java mods'
-//! entities (game/java_entities.rs) and clicks (game/java_server.rs) answers "none", so the
-//! plain build keeps its hooks without a `cfg` at each one.
-
-use super::super::Game;
-use horizon_client::mesher::Vertex;
+//! Without the `java-mods` feature: no JVM, no Java mods. What Horizon's files call to start
+//! them, read their content and name their levels answers "none".
+use super::super::{Dim, Game};
+use std::path::{Path, PathBuf};
 
 impl Game<'_> {
-    pub(in crate::game) fn java_entity_geometry(
-        &self,
-        _camera: glam::DVec3,
-        _alpha: f64,
-        _out: &mut Vec<Vertex>,
-    ) {
-    }
-    pub(in crate::game) fn java_hand_geometry(
-        &self,
-        _to_world: glam::Mat4,
-        _packed: u32,
-        _out: &mut Vec<Vertex>,
-    ) -> [bool; 2] {
-        [false; 2]
-    }
-    pub(in crate::game) fn java_entity_shadows(&self, _alpha: f64) -> Vec<(glam::DVec3, f32, f32)> {
-        Vec::new()
-    }
-    pub(in crate::game) fn java_entity_names(
-        &self,
-        _alpha: f64,
-    ) -> Vec<(i32, glam::DVec3, f64, horizon_client::text::Text, bool)> {
-        Vec::new()
-    }
-    pub(in crate::game) fn java_entity_hit(&self) -> Option<(i32, f64)> {
-        None
-    }
-    pub(in crate::game) fn java_entity_location(&self, _id: i32, _distance: f64) -> [f64; 3] {
-        [0.0; 3]
-    }
-    pub(in crate::game) fn java_use_item(
-        &mut self,
-        _off_hand: bool,
-        _yaw: f32,
-        _pitch: f32,
-    ) -> Option<bool> {
-        None
-    }
+    pub(in crate::game) fn start_java_mods(&mut self) {}
+}
+
+/// The process's start (entry.rs): no owner record to read.
+pub(crate) fn owner_record_early() {}
+/// The process's end (entry.rs): it ends as any other.
+pub(crate) fn exit_through_java() {}
+pub(in crate::game) fn start_early() {}
+/// The Java mods' content mods: none.
+pub(in crate::game) fn java_content(_base: &Path) -> Vec<PathBuf> {
+    Vec::new()
+}
+pub(in crate::game) fn java_creative(_out: &Path) {}
+/// The level a saved dimension id names: Horizon's own.
+pub(in crate::game) fn level_named(id: &str) -> Dim {
+    Dim::from_id(id)
+}
+/// Whether Java mods run: never.
+pub(in crate::game) fn has_java_mods() -> bool {
+    false
+}
+/// Whether the Java mods still load: they don't.
+pub(in crate::game) fn java_loading() -> bool {
+    false
 }

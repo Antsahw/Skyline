@@ -2,6 +2,7 @@
 //! where the game made it, summed, and logged every 200 server ticks as milliseconds a tick
 //! (the Java side logs its tick's phases the same way: `HorizonProfile`). Off, a call costs one
 //! check of a static.
+#![cfg(feature = "java-mods")]
 
 use std::collections::HashMap;
 use std::panic::Location;

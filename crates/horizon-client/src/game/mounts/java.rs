@@ -1,52 +1,31 @@
 //! Java mods' mobs ridden on a server (game/java_entities.rs): their hearts, jump bar and
-//! seat.
+//! seat. Without the `java-mods` feature: `java_hooks/entities.rs`.
+#![cfg(feature = "java-mods")]
 use super::*;
 
 impl Game<'_> {
     /// This game's player sits on a Java mod's mob (the server says so each tick).
     /// The Java mod's mob it rides jumps as a horse (the bar charges with the jump key).
     pub(in crate::game) fn java_mount_jumps(&self) -> bool {
-        #[cfg(feature = "java-mods")]
-        {
-            self.riding_java_mob() && self.java.entities.ride.is_some_and(|r| r.jump)
-        }
-        #[cfg(not(feature = "java-mods"))]
-        {
-            false
-        }
+        self.riding_java_mob() && self.java.entities.ride.is_some_and(|r| r.jump)
     }
 
     /// The Java mod's mob it rides: its health and max health when it shows hearts.
     pub(in crate::game) fn java_mount_health(&self) -> Option<[f32; 2]> {
-        #[cfg(feature = "java-mods")]
-        {
-            self.java
-                .entities
-                .ride
-                .filter(|_| self.riding.is_none())
-                .and_then(|r| r.hp)
-        }
-        #[cfg(not(feature = "java-mods"))]
-        {
-            None
-        }
+        self.java
+            .entities
+            .ride
+            .filter(|_| self.riding.is_none())
+            .and_then(|r| r.hp)
     }
 
     pub(in crate::game) fn riding_java_mob(&self) -> bool {
-        #[cfg(feature = "java-mods")]
-        {
-            self.riding.is_none() && self.java.entities.ride.is_some()
-        }
-        #[cfg(not(feature = "java-mods"))]
-        {
-            false
-        }
+        self.riding.is_none() && self.java.entities.ride.is_some()
     }
 
     /// A Java mod's mob (game/java_entities.rs): the server's mirror moves it by this
     /// player's keys (PlayerInput) and says where the seat is; the player sits there, and
     /// its position packets carry the seat. False when this player rides none.
-    #[cfg(feature = "java-mods")]
     pub(in crate::game) fn java_remote_ride(&mut self, jump_key: bool) -> bool {
         if self.riding.is_none()
             && let Some(ride) = self.java.entities.ride

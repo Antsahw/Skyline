@@ -177,18 +177,6 @@ impl Levels {
         )
     }
 
-    /// The item entities of a parked level.
-    #[cfg(feature = "java-mods")]
-    pub(super) fn parked_items(&self, dim: Dim) -> Option<&[ItemEntity]> {
-        self.parked.get(&dim).map(|level| level.dropped.as_slice())
-    }
-
-    /// The item entities of a parked level, to change.
-    #[cfg(feature = "java-mods")]
-    pub(super) fn parked_items_mut(&mut self, dim: Dim) -> Option<&mut Vec<ItemEntity>> {
-        self.parked.get_mut(&dim).map(|level| &mut *level.dropped)
-    }
-
     /// The mobs of a parked level.
     pub(super) fn parked_mobs(&self, dim: Dim) -> Option<&[Mob]> {
         self.parked.get(&dim).map(|level| level.mobs.as_slice())
@@ -227,7 +215,7 @@ impl Game<'_> {
         world.fast_lava = dim == Dim::Nether;
         let mut streaming = streaming;
         // What Java mods' chunk loaders asked of it before it opened.
-        streaming.set_ticketed(super::java_server::java_tickets(dim.id()));
+        streaming.set_ticketed(Game::java_tickets(dim.id()));
         Ok(Parked {
             world,
             streaming,
@@ -658,7 +646,7 @@ impl Game<'_> {
                 } else {
                     // A level not opened yet opens for the Java mods' chunk loaders.
                     self.levels.parked.get(d).map_or_else(
-                        || !super::java_server::java_tickets(d.id()).is_empty(),
+                        || !Game::java_tickets(d.id()).is_empty(),
                         |p| held(&p.streaming),
                     )
                 };

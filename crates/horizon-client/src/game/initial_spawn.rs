@@ -128,7 +128,6 @@ impl Game<'_> {
             }
         };
         // When Java mods generate the overworld, their generator's origin (initial_spawn/java.rs).
-        #[cfg(feature = "java-mods")]
         let Some((ox, oz)) = self.java_spawn_origin((ox, oz), height) else {
             return Ok(None);
         };

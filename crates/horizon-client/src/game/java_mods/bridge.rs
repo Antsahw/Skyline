@@ -94,6 +94,22 @@ impl Game<'_> {
     }
 }
 
+/// The process's start (entry.rs): Fabric mods' owner record (`horizon_jvm::gate`) is read
+/// now, while it is fresh, beside the start; the bridge waits for the answer when it needs it.
+pub(crate) fn owner_record_early() {
+    if std::env::args().any(|a| a == horizon_jvm::gate::ARG) {
+        let _ = std::thread::Builder::new()
+            .name("Java mods owner".into())
+            .spawn(horizon_jvm::gate::decision);
+    }
+}
+
+/// The process's end (entry.rs): with Java mods it ends through Java's exit (its class
+/// archive is written).
+pub(crate) fn exit_through_java() {
+    horizon_jvm::exit(0, std::time::Duration::from_secs(90), crate::logging::flush);
+}
+
 /// Starts Java and Fabric now, beside the rest of the resources' load, once the content root
 /// is there (built or reused: a build beside Java's start outgrew 6 GB for a 110-jar pack,
 /// the load after it doesn't): the JVM's start, over a minute for a big pack, no longer

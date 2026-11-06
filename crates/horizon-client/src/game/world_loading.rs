@@ -232,10 +232,7 @@ impl WorldRequest {
             level.position = None;
         }
         // A world saved in a mod's dimension waits for the mods to say what it is.
-        #[cfg(feature = "java-mods")]
         let dim = super::java_mods::level_named(&level.dimension);
-        #[cfg(not(feature = "java-mods"))]
-        let dim = Dim::from_id(&level.dimension);
         let shapes = level_shapes(&save_root, res.biomes());
         let shape = shapes.get(dim.id());
         let streaming_step = startup::step("world.make_streaming");
@@ -615,7 +612,7 @@ fn worldgen_overrides_of(
         .filter_map(|id| packs.iter().find(|p| &p.id == id))
         .collect();
     // The Java mods' data under the world's packs (world_loading/java.rs).
-    let mods = java::mod_structure_packs();
+    let mods = Game::java_structure_packs();
     let enabled: Vec<_> = mods.iter().chain(enabled).collect();
     horizon_client::datapack::worldgen_overrides(&enabled, |b| biomes.contains(b))
 }
@@ -872,8 +869,7 @@ pub(super) fn make_streaming(
         }
         locator = Some(inner.clone());
         // With Java mods, the mods' chunk steps generate the dimensions they change.
-        #[cfg(feature = "java-mods")]
-        if let Some(mut streaming) = java::streaming(
+        if let Some(mut streaming) = Game::java_streaming(
             &inner,
             res,
             pack,

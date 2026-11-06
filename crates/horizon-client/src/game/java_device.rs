@@ -4,6 +4,7 @@
 //! them, and their messages over this connection. On a server, a player's game saying so
 //! ([`horizon_jvm::device::RUNS_OWN_CHANNEL`]) gets those mods' messages, and what it sends on
 //! their channels goes to the mods' server code.
+#![cfg(feature = "java-mods")]
 
 use super::{Game, lan::LanHost};
 use horizon_protocol::packets::{configuration::CustomPayload, play::Serverbound as S};
@@ -639,6 +640,44 @@ impl Game<'_> {
         let uuid = owner.map(uuid_string);
         if horizon_jvm::device::own_player(uuid.as_deref()).is_ok() {
             *told = Some(owner);
+        }
+    }
+}
+
+/// What the screens' code (java_screen.rs) and the connection's end (remote.rs) ask this
+/// game's own mods' client; without the feature: `java_hooks/screens.rs`, `remote.rs`.
+impl Game<'_> {
+    pub(in crate::game) fn java_own_all() -> bool {
+        own_all()
+    }
+    pub(in crate::game) fn java_own_keys() -> Vec<i32> {
+        own_keys()
+    }
+    pub(in crate::game) fn java_own_key(key: i32, keycode: i32, mods: i32, down: bool) {
+        self::key(key, keycode, mods, down)
+    }
+    pub(in crate::game) fn java_device_screen_open() -> bool {
+        screen_open()
+    }
+    pub(in crate::game) fn java_device_left() {
+        left()
+    }
+
+    /// The device client's HUD (this game's own JVM), over the server's: tells it the HUD's
+    /// size, and draws what it drew.
+    pub(in crate::game) fn draw_own_client_hud(
+        &mut self,
+        batch: &mut horizon_client::hud::HudBatch,
+    ) {
+        gui_size(batch.width as i32, batch.height as i32);
+        // An own client beside the server's mods hears the HUD's size even when the
+        // server's mods draw no HUD.
+        if own_client() && self.java.hud.is_none() {
+            self.java.hud = Some(Default::default());
+        }
+        let ops = hud_ops();
+        if !ops.is_empty() {
+            self.draw_java_ops(batch, &ops);
         }
     }
 }

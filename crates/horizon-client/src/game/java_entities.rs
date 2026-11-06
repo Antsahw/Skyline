@@ -5,6 +5,7 @@
 //! [`CHANNEL`] (game/java_server.rs); this game draws them with its entity pass, and aims at
 //! them: an attack or a use of one goes to the server as vanilla's packets do, which hands
 //! it to the mods.
+#![cfg(feature = "java-mods")]
 use super::Game;
 use horizon_client::mesher::Vertex;
 use horizon_client::mobs::{Part, anim::Poses, render};

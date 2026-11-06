@@ -48,7 +48,7 @@ impl JumpsRefused {
 
 /// Java mods' hooks are about guest `uuid` while it acts: the player they were about before.
 pub(super) fn set_actor(uuid: u128) -> Option<String> {
-    super::super::java_server::set_java_actor(Some(horizon_protocol::crypto::uuid_string(uuid)))
+    Game::set_java_actor(Some(horizon_protocol::crypto::uuid_string(uuid)))
 }
 
 impl Game<'_> {

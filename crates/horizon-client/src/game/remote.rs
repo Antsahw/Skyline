@@ -1224,8 +1224,7 @@ impl Game<'_> {
         if let Some(old) = self.remote.as_mut().and_then(|r| r.heard_level.take()) {
             self.native_client_level_unload(&old);
         }
-        #[cfg(feature = "java-mods")]
-        super::java_device::left();
+        Game::java_device_left();
         if self.remote.is_some() {
             self.native_client_disconnecting();
         }
@@ -5968,9 +5967,7 @@ impl Game<'_> {
     /// One client tick while connected (Minecraft.tick with a ClientLevel).
     pub(super) fn tick_remote(&mut self) -> Result<()> {
         // The Java mods' fluids' looks, once their models load (this process's server).
-        #[cfg(feature = "java-mods")]
         self.java_mod_fluids();
-        #[cfg(feature = "java-mods")]
         self.java_mod_item_models();
         self.tick_remote_level()?;
         // The rockets boosting this player tick after it, also while it waits
@@ -5980,7 +5977,6 @@ impl Game<'_> {
         self.native_net.to_server = 0;
         self.native_tick();
         self.tell_native_now();
-        #[cfg(feature = "java-mods")]
         self.tick_device_client();
         // Far tiles the samplers asked for (`lod_net`).
         if let Some(r) = &self.remote {
