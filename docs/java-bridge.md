@@ -17,31 +17,32 @@ saying something works.
 | JVM, JNI natives, Rust→Java calls | `crates/horizon-jvm/src/lib.rs` (natives: `native_*`), `events.rs` (every call into Java: `server_tick`, `use_block`, `menu_click`, `screen_input`, `random_ticks`, `block_entities`, `game_time`, `export_*`), `content.rs` (content build + cache, `FORMAT`), `libs.rs` (Fabric's libraries) |
 | Boot | `java/dev/horizonlab/bridge/Boot.java`, `fabric/FabricBoot.java` (Knot, entrypoints, headless client boot), `Natives.java` (Java→Rust) |
 | Server mirror | `java/platform/.../HorizonServer.java`: set-up (`setUp`, `level`), the tick (`tick`: players, events, hooks, menus, block entities, frames), menus shown in Horizon's window (`syncMenus`, `SHOWN`), payloads (`payload`), `syncInventories` (end of every call) |
-| Horizon's items for mods' blocks | `HorizonItems.java` (shadows, block callbacks, held items, changes back); Rust `java_server.rs` (`java_items_json`, `java_items_changed`, `JAVA_HELD_ITEMS`) |
+| Horizon's items for mods' blocks | `HorizonItems.java` (shadows, block callbacks, held items, changes back); Rust `java_server/items.rs` (`java_items_json`, `java_items_changed`, `JAVA_HELD_ITEMS`, hoppers) |
 | Mod block entities | `HorizonBlockEntities.java`: `LIVE` (mods' own, ticked, saved in `horizon-java/block_entities/`), `COPIES` (Horizon's vanilla ones as lasting copies, refreshed each tick, written back on change), Fabric load/unload events |
 | Ticks, light, data, hooks | `HorizonTicks.java`, `HorizonLight.java`, `HorizonData.java` (data packs, recipes), `HorizonHooks.java` (mods' injections fired by name), `HorizonMixinTable.java` (every patch of every kind, where it runs, which actions go to the mirror), `HorizonTickets.java` (mods' chunk tickets → Horizon's kept chunks), `HorizonChunkLoads.java` (chunks loaded through vanilla's chunk system: pregenerators) |
 | Headless client | `HorizonClient.java`: an allocated `Minecraft` (options, font, gui, window, language with mods' translations, sound/text-input managers, game mode), a `LocalPlayer` per player, screens (`openScreen`, client menus, `frame`, `input`, `tickScreen`), client-only screens (`setScreen` via `GuiMixin`, `CLIENT_ONLY`), the client half of item use (`useItem`), the client's tick (`clientTick`), `/modconfig`, `as(player, …)` swaps `minecraft.player` and `gui.screen` |
 | Screen drawing | `HorizonGraphics.java` records `GuiGraphicsExtractor` calls as JSON ops (blit, sprite, fill, gradient, text, item, decorations, tooltips, pose, `typing`) |
 | Mods' messages | `HorizonLoop.java`: server→client payloads queued and delivered after `syncMenus` (`flush`); client→server run at once. Mixins: `PlayNetworkingMixin` (server side), `ClientPlayNetworkingMixin` |
 | Mixins | `java/platform/horizon-platform.mixins.json` (`client` list: headless-client only) |
-| Mods' entities | `HorizonEntities.java` (live per level, ticked as `tickNonPassenger`, saved in `horizon-java/entities/`, attack/interact), `HorizonEntityRender.java` (the mod's renderer submits into a recording collector: part trees once, poses + matrix + texture per tick), `HorizonSpawner.java` (natural spawning, the levels' biomes), `HorizonPackets.java` (sounds and particles to Horizon's players), mixins `ServerChunkCacheMixin` (a chunk source holding nothing), `PathNavigationRegionMixin`, `BlockScanMixin`, `ItemModelResolverMixin` + `ItemStackRenderStateMixin` (held items), `EntitySelectorMixin`; Rust: `game/java_entities.rs` (draw, aim), `java_server.rs` (`send_java_entities`, `java_entity_attack`/`interact`, `/summon`) |
+| Mods' entities | `HorizonEntities.java` (live per level, ticked as `tickNonPassenger`, saved in `horizon-java/entities/`, attack/interact), `HorizonEntityRender.java` (the mod's renderer submits into a recording collector: part trees once, poses + matrix + texture per tick), `HorizonSpawner.java` (natural spawning, the levels' biomes), `HorizonPackets.java` (sounds and particles to Horizon's players), mixins `ServerChunkCacheMixin` (a chunk source holding nothing), `PathNavigationRegionMixin`, `BlockScanMixin`, `ItemModelResolverMixin` + `ItemStackRenderStateMixin` (held items), `EntitySelectorMixin`; Rust: `game/java_entities.rs` (draw, aim), `java_server/entities.rs` (`send_java_entities`, `java_entity_attack`/`interact`, `routed_hit`), `java_server/commands.rs` (`/summon`) |
 | GPU (mods that draw with the GPU) | `crates/horizon-jvm/src/gpu/` (`mod.rs`: renderpearl's device on wgpu, natives on `dev.horizonlab.bridge.Gpu`; `spirv.rs`: combined samplers split for naga), `HorizonGpu.java` (the renderpearl backend: textures, buffers, transient memory, encoder, passes, pipelines), `HorizonGraphics` (pictures in picture, GPU textures as HUD images), `HorizonClient.guiRenderer` (the game renderer's GPU parts) |
 | Mods' worldgen | `HorizonWorldgen.java` (also the biome queries: `biomes`, `findBiome`), `HorizonChunks.java` (chunk copies for code that reads chunks: saplings), `HorizonTints.java` (mods' block tints for the mesher) (vanilla's chunk steps on the mirror's level, chunks back as vanilla saves them), mixin `WorldGenRegionMixin`; Rust: `game/java_worldgen.rs` (`JavaTerrain`, wraps `VanillaTerrain` in `world_loading::make_streaming`), mods' biomes in `biome.rs` (`mod_biomes`) and the biome registry (`lan/data.rs`) |
 | Content conversion | `crates/horizon-port-pack` (`oracle.rs`, `carry.rs`), `HorizonContent.java` (facts, creative tabs), `crates/horizon-client/src/mod_content.rs` (content root) |
 | Recording, replays | `HorizonPacketTap.java` (the window's player's packets through a vanilla client pipeline), mixin `TapConnectionMixin`; Rust: `lan/packet_tap.rs` (kept from `lan/conn.rs`), `events::client_packets`/`wants_packets`/`client_closed`; Horizon's replay viewer `lan/replay.rs` (`--replay FILE.mcpr`); `HorizonClientCommands.java` (mods' Fabric client commands) |
 | Voice chat, device mods, the player's own client | `HorizonDeviceMods.java` (which mods use the player's sound devices; where each mod's client code runs, per player), `HorizonDeviceClient.java` (their client half in a game connected to another's server: the mods the server lacks, or every mod), `crates/horizon-jvm/src/device.rs`, `game/java_device.rs`; test `tools/java_bridge/voice_test.sh` |
-| Game side (Rust) | `crates/horizon-client/src/game/java_mods.rs` (start, content, creative), `java_server.rs` (actions from Java, menus, block entities, random ticks, `JAVA_STATES`, `JAVA_WINDOWS`), `java_screen.rs` (draws frames, sends input, key maps; `Screen::JavaMod` and `CLIENT_WINDOW` for client-only screens) |
+| Game side (Rust) | `crates/horizon-client/src/game/java_mods.rs` (the `java` state; `bridge.rs`: start, content, creative), `java_server.rs` (the types Horizon's files name) + feature-only `java_server/` by area: `tick.rs` (the tick, `apply_java_actions`, `with_java_world`, saves), `blocks.rs` (`JavaBlocks`, random ticks, fluids, neighbours, breaks, level writes, `JAVA_STATES`), `players.rs` (hurts, effects, falls, jumps, teleports, deaths, chat), `menus.rs` (`java_open_menu`, clicks, screens' input, `JAVA_WINDOWS`), `commands.rs`, `items.rs` (items, hoppers, pickups, drops), `entities.rs` (snapshots, attacks, rides, `routed_hit`); `java_screen.rs` (draws frames, sends input, key maps; `Screen::JavaMod` and `CLIENT_WINDOW` for client-only screens; plain, so a plain client draws a bridge server's screens; the server's sends in feature-only `java_screen/host.rs`) |
+| Plain build (no `java-mods`) | `game/java_hooks/{blocks,players,screens,entities,worldgen,lan,remote}.rs`: every hook Horizon's files call, answering "none"; `java_mods/off.rs`, `java_server/off.rs`: the state. Horizon's own files carry no `cfg(feature = "java-mods")`: the bridge's files are feature-only (`#![cfg]`: `java_device`, `java_entities`, `java_profile`, `java_worldgen`, `creatures/java.rs`, `mounts/java.rs`, `world_loading/java.rs`) or plain hook glue (`<file>/java.rs` in the game) |
 | NeoForge (prototype) | `java/dev/horizonlab/bridge/neo/NeoBoot.java`, `src/neoforge.rs`, `java_mods.rs` (`start_neoforge`, `HORIZON_NEOFORGE`), `java/neoforge/` (fixture, prototype platform), `tools/java_bridge/neoforge/`: see [java-bridge-neoforge.md](java-bridge-neoforge.md) |
 
 ## How a tick flows
 
-1. Horizon's server tick → `java_server.rs` (`tick_java_server`) → `events::game_time`, `events::server_tick` →
+1. Horizon's server tick → `java_server/tick.rs` (`tick_java_server`) → `events::game_time`, `events::server_tick` →
    `HorizonServer.tick`: the headless client's tick first (`HorizonClient.clientTick`), players mirrored, Fabric events fired, mods' hooks, levels' ticks,
    block entities (`HorizonBlockEntities.tick`), open menus (`stillValid`, `broadcastChanges`),
    screens (`HorizonClient.sendFrames`: tasks, screen ticks, frames), `syncInventories`
    (Horizon's block entities written back, menus shown, mods' messages delivered).
 2. Java sends results back as actions (`Natives.*` → `events::Action`), applied in
-   `java_server.rs` (`apply_java_actions`).
+   `java_server/tick.rs` (`apply_java_actions`).
 3. Horizon's world changes of Java mod blocks reach Java through `world::SET_HOOK` →
    `events::block_entities` (block entities exist from placement).
 4. Mods' entities: `HorizonEntities.tick` in the server tick; after it `events::entities`
@@ -3321,6 +3322,21 @@ client's tick, 7–24 ms (the mods' frame-start hooks up to 19 ms in the first m
 HUD).
 
 ## Hooks in Horizon's shared files (after the upstream sync)
+
+**Since bridge-p0 (2026-11-06):** Horizon's own files have no `cfg(feature = "java-mods")` left: each
+calls a hook that exists in both builds (a `Game` method or associated function; free-function
+hooks became associated ones, `Game::java_fluid(state)`), whose plain answer is in
+`game/java_hooks/<area>.rs` (one file per C PR) and whose body is in a feature-only file.
+`java_server.rs` is split by area (`java_server/{tick,blocks,players,menus,commands,items,entities}.rs`).
+The lower crates' bridge children have neutral names: render `assets/mod_fluids.rs`,
+`biome/mod_biomes.rs`, `datapack/mod_jars.rs`, `hud/mod_textures.rs`, `mesher/mod_blocks.rs`,
+`options_ui/mod_rows.rs`, `particles/mod_particles.rs`, `streaming/mod_tickets.rs`; client lib
+`item_render/mod_quads.rs`, `lan/conn/tap.rs`, `lan/containers/mod_windows.rs`,
+`lan/data/mod_biomes.rs`, `lan/guest/mod_abilities.rs`, `lan/hub/mod_guests.rs`,
+`landing/routed_fall.rs`, `menu/crafted_takes.rs`, `mod_content/own_states.rs`,
+`save/mod_presets.rs`, `title/create_world/mod_presets.rs`, `vanillagen/oracle.rs`. The
+launcher's fork fallback is `launcher/src/java_variant/fork.rs`. A new hook: its call in
+Horizon's file, its stub in `java_hooks/<area>.rs`, its body in a feature-only file.
 
 **Since bridge-upstream-prep-2 (2026-11-05):** logic left Horizon's files for `<file>/java.rs`
 child modules and `game/java_*.rs`; Game's `java_*` fields are one `java: JavaGame`

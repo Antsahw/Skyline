@@ -10,7 +10,7 @@ dependency cycles in the Java platform). Baseline: upstream main `2b74332fbe`, f
 
 - **~70 PRs.** Without the crate and gameplay bodies upstream sees ~20k lines; with them ~66k (reviewer said ~64k).
 - **Two fork-side refactors come first**, or the planned order doesn't compile:
-  - **P0** (`bridge-split-prep`, no behaviour change): split `game/java_server.rs` (lines 1–807 plain-build, 808–4514
+  - **P0** — **done** (`bridge-p0`, 2026-11-06; see below). Was: (`bridge-split-prep`, no behaviour change): split `game/java_server.rs` (lines 1–807 plain-build, 808–4514
     feature) into shared types + `off.rs` + per-area files; same for `java_screen.rs` (1,361 lines compiled in the
     plain build — decision: gate it, or keep plain clients able to draw a bridge server's screens); off-stubs per area
     (`game/java_hooks/{blocks,players,screens,entities,worldgen,lan,remote}.rs`); rename generic lower-crate
@@ -29,11 +29,37 @@ dependency cycles in the Java platform). Baseline: upstream main `2b74332fbe`, f
 - build.rs downloads Fabric and compiles Java: keep horizon-jvm out of `default-members`, or skip the Java step
   without a JDK, so plain `cargo test --workspace` stays offline.
 
+## P0 as done (bridge-p0)
+
+- `game/java_server.rs`: shared types (`Who`, `JavaBreak`, `ModEvent`, `add_effect_asking_mods`,
+  `java_item_storage`) in every build; `java_server/off.rs` (plain state); feature-only
+  `java_server/{tick,blocks,players,menus,commands,items,entities}.rs`.
+- `game/java_screen.rs` stays plain (decision: a plain client joined to a bridge server draws its
+  screens, HUD, overlay, keys and view from the frames the server sends; no JVM involved). Its
+  server half is feature-only `java_screen/host.rs`; this game's own mods' client's part is
+  hooked (`java_hooks/screens.rs`). G2 is then `host.rs` plus `java_device.rs`, not 1,361 lines.
+- `game/java_hooks/{blocks,players,screens,entities,worldgen,lan,remote}.rs`: plain-build stubs per
+  C PR (C1 blocks, C2 players, C3 screens, C4 entities, C5 worldgen, C6 lan, C7 remote);
+  `java_hooks.rs` lists them (one line each). `java_mods/off.rs` holds C0's (start, content,
+  levels' names, entry's owner record and exit).
+- No `cfg(feature = "java-mods")` in Horizon's own files (game.rs, entry.rs, creatures.rs,
+  remote.rs, mods.rs, world_loading.rs, levels.rs, remote_vehicles.rs, lan_actions.rs,
+  initial_spawn.rs, agent.rs). Free-function hooks are `Game` associated functions
+  (`Game::java_fluid`), so their path is the same in both builds. Bridge modules declared from
+  game.rs carry their own `#![cfg]`.
+- Lower crates' `*/java.rs` renamed (`mod_*` / descriptive: docs/java-bridge.md, "Hooks in
+  Horizon's shared files"). Launcher: `java_variant/fork.rs` (`install_from_fork`, `or_fork`).
+- Measured against merge base `41d5649ed5` (without horizon-jvm, tools/java_bridge, docs/java-bridge*):
+  upstream's own files +5,777 −850 → +5,737 −851 (244 files), `cfg(feature = "java-mods")` lines in
+  them 30 → 0; the plain build's java_server code 807 lines → 124 (+ 466 in `java_hooks/`, the C PRs'
+  stubs).
+- Re-run `hunks.py`/`sizes2.py` on the new tip before cutting C PRs.
+
 ## Fork-only (never upstream)
 
 `.github/workflows/java-mods-release.yml`; the README rewrite; the AGENTS.md paragraph; `launcher/java-mods-keys.txt`;
-`launcher/src/java_release.rs`; in `java_variant.rs` `install_from_fork`, `fork_commit`, `refresh_from_fork` and the
-fork fallbacks (`java_bug_report.rs` uses `marked_commit`); backend.rs `option_env!("HORIZON_LAUNCHER_NO_SELF_UPDATE")`;
+`launcher/src/java_release.rs`; `launcher/src/java_variant/fork.rs` (`install_from_fork`, the
+fork fallbacks) (`java_bug_report.rs` uses `marked_commit`); backend.rs `option_env!("HORIZON_LAUNCHER_NO_SELF_UPDATE")`;
 research-lock.json `cleanroom`; docs `java-bridge-{112,neoforge,tasks,boss,survey,pitch,perf,upstream}.md`; tools
 `*112*`, `neoforge/`, `survey/`, `setup_cloud.sh`; in the crate `src/{neoforge,boot112}.rs`, `tests/boot112.rs`,
 `java/neoforge`, `java/platform112`, `dev/neo/NeoBoot`, `dev/c112/Boot112`.
