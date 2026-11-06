@@ -29,7 +29,7 @@ saying something works.
 | Mods' worldgen | `HorizonWorldgen.java` (also the biome queries: `biomes`, `findBiome`), `HorizonChunks.java` (chunk copies for code that reads chunks: saplings), `HorizonTints.java` (mods' block tints for the mesher) (vanilla's chunk steps on the mirror's level, chunks back as vanilla saves them), mixin `WorldGenRegionMixin`; Rust: `game/java_worldgen.rs` (`JavaTerrain`, wraps `VanillaTerrain` in `world_loading::make_streaming`), mods' biomes in `biome.rs` (`mod_biomes`) and the biome registry (`lan/data.rs`) |
 | Content conversion | `crates/horizon-port-pack` (`oracle.rs`, `carry.rs`), `HorizonContent.java` (facts, creative tabs), `crates/horizon-client/src/mod_content.rs` (content root) |
 | Recording, replays | `HorizonPacketTap.java` (the window's player's packets through a vanilla client pipeline), mixin `TapConnectionMixin`; Rust: `lan/packet_tap.rs` (kept from `lan/conn.rs`), `events::client_packets`/`wants_packets`/`client_closed`; Horizon's replay viewer `lan/replay.rs` (`--replay FILE.mcpr`); `HorizonClientCommands.java` (mods' Fabric client commands) |
-| Voice chat, device mods | `HorizonDeviceMods.java` (which mods use the player's sound devices; where their client code runs), `HorizonDeviceClient.java` (their client half in a game connected to another's server), `crates/horizon-jvm/src/device.rs`, `game/java_device.rs`; test `tools/java_bridge/voice_test.sh` |
+| Voice chat, device mods, the player's own client | `HorizonDeviceMods.java` (which mods use the player's sound devices; where each mod's client code runs, per player), `HorizonDeviceClient.java` (their client half in a game connected to another's server: the mods the server lacks, or every mod), `crates/horizon-jvm/src/device.rs`, `game/java_device.rs`; test `tools/java_bridge/voice_test.sh` |
 | Game side (Rust) | `crates/horizon-client/src/game/java_mods.rs` (start, content, creative), `java_server.rs` (actions from Java, menus, block entities, random ticks, `JAVA_STATES`, `JAVA_WINDOWS`), `java_screen.rs` (draws frames, sends input, key maps; `Screen::JavaMod` and `CLIENT_WINDOW` for client-only screens) |
 | NeoForge (prototype) | `java/dev/horizonlab/bridge/neo/NeoBoot.java`, `src/neoforge.rs`, `java_mods.rs` (`start_neoforge`, `HORIZON_NEOFORGE`), `java/neoforge/` (fixture, prototype platform), `tools/java_bridge/neoforge/`: see [java-bridge-neoforge.md](java-bridge-neoforge.md) |
 
@@ -613,13 +613,43 @@ counts is what a mod's client code does.
   ignores `voice_host` (it asks Fabric's side, which is the client's here). SVC's licence:
   All Rights Reserved (its jar runs as it is; nothing of it is in the repo).
 
-## Each game runs its own mods' client (`HORIZON_JAVA_OWN_CLIENT`, bridge-generic-2)
+## Each game runs its own mods' client (`HORIZON_JAVA_OWN_CLIENT`, bridge-generic-2; by default for mods the server lacks, bridge-own-client)
 
 The generic fix for per-player client state (Ludovic's condition 2 took the per-mod lists
 away): as in vanilla, a player's mods' client half runs in **their own game**, not in a server's
-one headless client shared by every player. Off by default for now: `HORIZON_JAVA_OWN_CLIENT=1`
-on both the host (or server) and the players' games (regress `maps-lan` and `rei-lan` set it).
-It generalises the device mods' path (voice chat, above) from some mods to all of them.
+one headless client shared by every player. It generalises the device mods' path (voice chat,
+above) from some mods to all of them.
+- **By default, per join (bridge-own-client, 2026-11-06)**: a Horizon server whose Java mods run
+  tells each joining game their ids (`horizon:java_server_mods`, `device::SERVER_MODS_CHANNEL`,
+  sent with the greeting in `send_java_keys`; `HorizonDeviceMods.ids`). After `JOIN_AFTER` (40
+  ticks) the game's `device::join(host, port, uuid, name, server_mods)` decides
+  (`HorizonDeviceClient.join`, `HorizonDeviceMods.missing`): the mods this game has and the
+  server doesn't (Fabric, Fabric API, the game and Horizon never count) run here.
+  - **No list arrived** (a vanilla or Paper server, a Horizon server without Java mods or whose
+    Java failed): every mod's client half runs here, as with the switch (`*`): log line `every
+    mod's client half runs here for this player, on host:port (the server runs no Java mods)`.
+  - **The server runs some, not all** (`+`): the own client runs only those mods and what they
+    depend on (`HorizonDeviceMods.ownRuns`, `withDependencies`: `runs()` answers false for the
+    rest), log line `X run here for this player (the server doesn't run them)`. Its HUD is drawn
+    over the server's (the device HUD layer), its keys are added to the server's (a key goes to
+    both: `own_client_also`), its settings screens are added to Options → Mods (opened here), the
+    HUD's size goes to both; the inventory overlay stays the server's.
+  - **Nothing missing**: the device mods' client as before (voice chat), or nothing.
+  The game tells the server on `RUNS_OWN_CHANNEL` (`*,ids`, `+,ids` or device ids); the server
+  keeps a set per player (`HorizonDeviceMods.RUN_THEIR_OWN`: `runsTheirOwn(uuid, mods)`, log
+  `Player's own game runs X's client half`), leaves those mods' client code out for that player
+  and sends their channels to that game (`deviceChannel(channel, player)`).
+- **Joining needs the mod list to match only for mods that change the world**: a carried Java
+  mod with no block, item or data (Xaero's, Jade, a HUD) is `side = "client"` (`carry.rs`
+  `changes_world`; content FORMAT 17), so a server without it accepts the player (it was
+  refused before: "Not on this server: xaerominimap").
+- The own client has no single-player server (`HorizonClient.joined`: Xaero then names its data
+  by the server's address, as a vanilla client) and the world spawn the server told the game
+  (`spawn` in the tick's state → `HorizonServer.ownSpawn` → the mirror's `effectiveRespawnData`;
+  Xaero's `handleSetSpawn` read null before).
+- `HORIZON_JAVA_OWN_CLIENT=1` on both sides keeps the old switch: every mod's client half in each
+  game whatever the server runs, the server's messages waiting for a game's client (regress
+  `maps-lan` and `rei-lan` set it).
 - **In a game connected to another's server** (LAN guest, a dedicated server's player;
   `game/java_device.rs` `tick_own_client`, `HorizonDeviceClient` `own*`,
   `HorizonServer.ownClientTick`): its JVM keeps a **mirror of what it sees**: a server's mirror
@@ -653,9 +683,15 @@ It generalises the device mods' path (voice chat, above) from some mods to all o
   client code for such a player (Better Combat's swings and recipe viewers over a mod's menu
   for a guest with the switch on); a player whose game has no Java mods gets no mod client at
   all with the switch on. JourneyMap + VoxelMap together: VoxelMap's client entrypoint fails
-  (both register `worldinfo:world_id`, as in the real game). Default on once those are done.
+  (both register `worldinfo:world_id`, as in the real game). With the server running some mods,
+  the own client's inventory overlay (a recipe viewer the server lacks) isn't shown, and its
+  mouse-button bindings go to the server only.
 - Test: `regress.py --jars <journeymap, REI + Architectury + Cloth + FD, fabric-api> maps-lan
-  rei-lan`.
+  rei-lan`; by default: `maps-client-only` (a Horizon server with no Java mods, the player with
+  Xaero), `maps-client-vanilla` (vanilla's server jar from `.local`, offline: `server_test.sh`
+  `VANILLA_SERVER=1`), `maps-client-some` (the server runs Jade, the player Jade + Xaero).
+  `server_test.sh` takes `SERVER_MODS`/`PLAYER_MODS` folders (regress: `server_mods=[...]`,
+  `log="player"` to check the player's log).
 
 ## Mods that change vanilla's behaviour (the mixin table, routed actions)
 
@@ -1972,6 +2008,15 @@ Naturalist (mobs with ModelPart models, Fabric API only). The repo's own critter
 (`ENTITY=naturalist:bear` for another mod's).
 
 ## Status
+
+Client-side mods on any server (2026-11-06, `bridge-own-client`, brief section 5): the player's own
+game runs the client half of the mods the server doesn't run, by default (no switch): every mod's
+against a vanilla server or a Horizon server without Java mods, only the missing ones beside a
+Horizon server's mods (its HUD over the server's). Carried mods with no world content are
+client-side, so servers without them accept the player. Headless: Xaero's minimap drawn for a
+dedicated server's player with no Java mods on the server (`maps-client-only`), against vanilla's
+server jar (`maps-client-vanilla`), and beside the server's Jade (`maps-client-some`). See "Each
+game runs its own mods' client" above.
 
 Xaero's maps at full resolution (2026-11-06, `bridge-hud-res`, brief section 3): the game sends its
 GUI scale and framebuffer with each size input, Java keeps a window per player (applied in `as()`),

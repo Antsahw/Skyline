@@ -1930,8 +1930,28 @@ mod run {
                     Vec::new()
                 })
             });
+            // Every Java mod's id: a joining game runs the client half of those it has and
+            // this server doesn't (game/java_device.rs).
+            static MOD_IDS: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+            let mod_ids = MOD_IDS.get_or_init(|| {
+                horizon_jvm::device::mod_ids().unwrap_or_else(|e| {
+                    log::warn!("Java mods: their ids can't be listed: {e}");
+                    String::new()
+                })
+            });
             for conn in placed {
                 if state.greeted.insert(conn) {
+                    if !mod_ids.is_empty() {
+                        host.hub.send_to(
+                            conn,
+                            &C::CustomPayload(
+                                horizon_protocol::packets::configuration::CustomPayload {
+                                    channel: horizon_jvm::device::SERVER_MODS_CHANNEL.into(),
+                                    data: mod_ids.clone().into_bytes(),
+                                },
+                            ),
+                        );
+                    }
                     // The inventory overlay is there (REI's item list): its first, empty, frame.
                     Self::send_java_overlay_frame(host, conn, "[]");
                     if !config_mods.is_empty() {

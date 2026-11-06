@@ -16,9 +16,19 @@ struct Device {
     joined: Option<String>,
     /// The device mods running here (their ids: their channels' namespaces).
     mods: Vec<String>,
-    /// Every mod's client half runs here for this game's player (`HORIZON_JAVA_OWN_CLIENT`):
-    /// its HUD, overlay, client-only screens and key bindings are this JVM's, not the server's.
+    /// Mods' client half runs here for this game's player (the mods the server doesn't run,
+    /// or every mod): their HUD, client-only screens and key bindings are this JVM's.
     own: bool,
+    /// The own client runs every mod (the server runs no Java mods, or
+    /// `HORIZON_JAVA_OWN_CLIENT`): the server's HUD, overlay, keys and settings list are unused.
+    /// Else it runs only the mods the server lacks, beside the server's.
+    all: bool,
+    /// The Java mods the server said it runs ([`horizon_jvm::device::SERVER_MODS_CHANNEL`]).
+    server_mods: Option<String>,
+    /// The own client's key bindings (beside the server's, when it runs only some mods).
+    keys: Vec<i32>,
+    /// The own client's mods with a settings screen (beside the server's).
+    config: Vec<String>,
     /// The player's UUID as Java writes it (the own client's input is theirs).
     uuid: String,
     /// The own client's client-only screen is the one shown.
@@ -31,16 +41,53 @@ static DEVICE: Mutex<Device> = Mutex::new(Device {
     joined: None,
     mods: Vec::new(),
     own: false,
+    all: false,
+    server_mods: None,
+    keys: Vec::new(),
+    config: Vec::new(),
     uuid: String::new(),
     screen: false,
     inventory: 0,
 });
 
-/// Whether this game's own JVM runs every mod's client half for its player (connected to
-/// another's server): the server's HUD, overlay, keys and settings list are then not used.
+/// Whether this game's own JVM runs mods' client half for its player (connected to another's
+/// server): every mod's, or those the server doesn't run.
 pub(super) fn own_client() -> bool {
     let device = DEVICE.lock().unwrap_or_else(|e| e.into_inner());
     device.own && device.joined.is_some()
+}
+
+/// Whether this game's own JVM runs every mod's client half: the server's HUD, overlay, keys
+/// and settings list are then not used.
+pub(super) fn own_all() -> bool {
+    let device = DEVICE.lock().unwrap_or_else(|e| e.into_inner());
+    device.own && device.all && device.joined.is_some()
+}
+
+/// Whether this game's own JVM runs only the mods the server lacks, beside the server's.
+fn own_some() -> bool {
+    let device = DEVICE.lock().unwrap_or_else(|e| e.into_inner());
+    device.own && !device.all && device.joined.is_some()
+}
+
+/// The server's Java mods ([`horizon_jvm::device::SERVER_MODS_CHANNEL`]), as it greets this game.
+pub(super) fn server_mods(data: &[u8]) {
+    let mods = String::from_utf8_lossy(data).into_owned();
+    log::info!(
+        "Java mods: the server runs {} Java mods",
+        mods.split(',').filter(|m| !m.is_empty()).count()
+    );
+    DEVICE.lock().unwrap_or_else(|e| e.into_inner()).server_mods = Some(mods);
+}
+
+/// The own client's key bindings when it runs beside the server's mods (to add to theirs).
+pub(super) fn own_keys() -> Vec<i32> {
+    let device = DEVICE.lock().unwrap_or_else(|e| e.into_inner());
+    if device.own && !device.all && device.joined.is_some() {
+        device.keys.clone()
+    } else {
+        Vec::new()
+    }
 }
 
 /// Ticks the player has been in the world before the device client joins: the server has
@@ -139,6 +186,10 @@ pub(super) fn left() {
     HUD.lock().unwrap_or_else(|e| e.into_inner()).clear();
     let mut device = DEVICE.lock().unwrap_or_else(|e| e.into_inner());
     device.own = false;
+    device.all = false;
+    device.server_mods = None;
+    device.keys.clear();
+    device.config.clear();
     device.screen = false;
     device.inventory = 0;
     if device.joined.take().is_some()
@@ -185,12 +236,23 @@ impl Game<'_> {
             let (host, port) = host_port(&r.session.address);
             let uuid = uuid_string(r.profile());
             let name = r.profile_name.clone();
-            match horizon_jvm::device::join(&host, port, &uuid, &name) {
+            // What the server said it runs: none by now (a server with no Java mods, a vanilla
+            // one) and every mod's client half runs here.
+            let server_mods = DEVICE
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .server_mods
+                .clone();
+            match horizon_jvm::device::join(&host, port, &uuid, &name, server_mods.as_deref()) {
                 Ok(None) => return, // Java is still starting.
                 Ok(Some(mut mods)) => {
                     let mut device = DEVICE.lock().unwrap_or_else(|e| e.into_inner());
                     device.joined = Some(key);
-                    device.own = mods.first().is_some_and(|m| m == "*");
+                    let marker = mods.first().cloned();
+                    device.own = matches!(marker.as_deref(), Some("*" | "+"));
+                    device.all = marker.as_deref() == Some("*");
+                    // The server is told the marker too (every mod's, or these).
+                    let data = mods.join(",").into_bytes();
                     if device.own {
                         mods.remove(0);
                     }
@@ -200,7 +262,6 @@ impl Game<'_> {
                         return;
                     }
                     let own = device.own;
-                    let data = device.mods.join(",").into_bytes();
                     drop(device);
                     self.send(S::CustomPayload(CustomPayload {
                         channel: horizon_jvm::device::RUNS_OWN_CHANNEL.into(),
@@ -274,6 +335,21 @@ impl Game<'_> {
     /// What the server's games are told as they join, from this game's own client: the keys
     /// its mods bind, the mods with a settings screen, and that the inventory overlay is here.
     fn own_client_greet(&mut self) {
+        if own_some() {
+            // Beside the server's mods: their keys and settings screens are added to the
+            // server's; the inventory overlay stays the server's.
+            self.own_client_keys();
+            if let Ok(mods) = horizon_jvm::events::config_mods() {
+                DEVICE.lock().unwrap_or_else(|e| e.into_inner()).config =
+                    mods.iter().map(|(id, _)| id.clone()).collect();
+                for m in mods {
+                    if !self.settings.mods.java.iter().any(|(id, _)| *id == m.0) {
+                        self.settings.mods.java.push(m);
+                    }
+                }
+            }
+            return;
+        }
         match horizon_jvm::events::bound_keys() {
             Ok(keys) => self.remote_java_keys(&serde_json::to_vec(&keys).unwrap_or_default()),
             Err(e) => log::warn!("Java mods: this game's own client's key bindings: {e}"),
@@ -318,7 +394,9 @@ impl Game<'_> {
     /// and frame there; what it draws shows here, what it sends goes to the server.
     fn tick_own_client(&mut self) {
         // Its key bindings, again now and then (mods register some as their client starts).
-        if self.ticks.is_multiple_of(100)
+        if self.ticks.is_multiple_of(100) && own_some() {
+            self.own_client_keys();
+        } else if self.ticks.is_multiple_of(100)
             && let Ok(keys) = horizon_jvm::events::bound_keys()
         {
             self.remote_java_keys(&serde_json::to_vec(&keys).unwrap_or_default());
@@ -344,6 +422,13 @@ impl Game<'_> {
             "food": p.health.food.food, "sat": p.health.food.saturation,
             "perm": i32::from(sneaking) << 8, "w": w, "h": h,
         });
+        if let Some(spawn) = self.spawn {
+            state["spawn"] = json!([
+                spawn.x.floor() as i32,
+                spawn.y.floor() as i32,
+                spawn.z.floor() as i32
+            ]);
+        }
         if let Some(inventory) = self.own_client_inventory() {
             state["inv"] = json!(inventory);
         }
@@ -352,6 +437,15 @@ impl Game<'_> {
             log::warn!("Java mods: this game's own client's tick failed: {e}");
         }
         self.own_client_shows();
+    }
+
+    /// The own client's key bindings beside the server's mods': added to the server's.
+    fn own_client_keys(&mut self) {
+        let Ok(keys) = horizon_jvm::events::bound_keys() else {
+            return;
+        };
+        self.java.binds.keys.extend(keys.iter().copied());
+        DEVICE.lock().unwrap_or_else(|e| e.into_inner()).keys = keys;
     }
 
     /// Input for the own client (its HUD's size, the inventory overlay's, its client-only
@@ -369,25 +463,46 @@ impl Game<'_> {
         self.own_client_shows();
     }
 
-    /// Whether this input goes to the own client: all but a server menu's window (its screen
-    /// is the server's, made where the menu is).
+    /// Whether this input goes to the own client (only): all but a server menu's window (its
+    /// screen is the server's, made where the menu is). Beside the server's mods: its own
+    /// client-only screen and its mods' settings screens; keys and the HUD's size go to both
+    /// ([`Self::own_client_also`]), the inventory overlay to the server.
     pub(super) fn own_client_takes(input: &Value) -> bool {
-        if !own_client() {
+        let device = DEVICE.lock().unwrap_or_else(|e| e.into_inner());
+        if !(device.own && device.joined.is_some()) {
             return false;
         }
         let kind = input.get("kind").and_then(Value::as_str);
         let window = input.get("window").and_then(Value::as_i64).unwrap_or(-1) as i32;
+        if window == super::java_screen::CLIENT_WINDOW && device.screen {
+            return true;
+        }
+        if !device.all {
+            let config = input.get("mod").and_then(Value::as_str);
+            return kind == Some("modconfig")
+                && config.is_some_and(|m| device.config.iter().any(|c| c == m));
+        }
         matches!(kind, Some("bind" | "modconfig"))
             || window == super::java_screen::HUD_WINDOW
             || window == super::java_screen::OVERLAY_WINDOW
-            || window == super::java_screen::CLIENT_WINDOW
-                && DEVICE.lock().unwrap_or_else(|e| e.into_inner()).screen
+    }
+
+    /// Whether this input goes to the own client as well as to the server: its mods run beside
+    /// the server's, and both hear the keys and the HUD's size.
+    pub(super) fn own_client_also(input: &Value) -> bool {
+        if !own_some() {
+            return false;
+        }
+        let window = input.get("window").and_then(Value::as_i64).unwrap_or(-1) as i32;
+        input.get("kind").and_then(Value::as_str) == Some("bind")
+            || window == super::java_screen::HUD_WINDOW
     }
 
     /// What the own client made since: its HUD, overlay, client-only screen and chat lines
     /// shown here; its messages to the server sent.
     fn own_client_shows(&mut self) {
         let window = super::java_screen::CLIENT_WINDOW;
+        let all = own_all();
         for action in horizon_jvm::events::take_actions() {
             match action {
                 horizon_jvm::events::Action::Tell { text, .. } => {
@@ -396,13 +511,22 @@ impl Game<'_> {
                 horizon_jvm::events::Action::Overlay { text, .. } => {
                     self.titles.set_overlay(chat_text(&text), false);
                 }
-                horizon_jvm::events::Action::HudFrame { frame, .. } => {
+                horizon_jvm::events::Action::HudFrame { frame, .. } if all => {
                     self.remote_java_hud(frame.as_bytes());
                 }
-                horizon_jvm::events::Action::View { scale, .. } => {
+                // Beside the server's mods: its HUD over the server's (as a device client's).
+                horizon_jvm::events::Action::HudFrame { frame, .. } => {
+                    if let Ok(Value::Array(ops)) = serde_json::from_str::<Value>(&frame) {
+                        let ops = self.take_java_images(&ops);
+                        *HUD.lock().unwrap_or_else(|e| e.into_inner()) = ops;
+                    }
+                }
+                horizon_jvm::events::Action::View { scale, .. }
+                    if all || (scale - 1.0).abs() > 1e-4 =>
+                {
                     self.remote_java_view(&serde_json::to_vec(&scale).unwrap_or_default());
                 }
-                horizon_jvm::events::Action::OverlayFrame { frame, .. } => {
+                horizon_jvm::events::Action::OverlayFrame { frame, .. } if all => {
                     self.remote_java_overlay(frame.as_bytes());
                 }
                 horizon_jvm::events::Action::ClientScreen { open, .. } => {
@@ -461,8 +585,8 @@ impl Game<'_> {
         }
     }
 
-    /// Server: a player's game runs the device mods' client half itself.
-    pub(super) fn java_device_runs_own(&mut self, host: &mut LanHost, conn: u32) {
+    /// Server: a player's game runs some mods' client half itself (`data`: which, as it said).
+    pub(super) fn java_device_runs_own(&mut self, host: &mut LanHost, conn: u32, data: &[u8]) {
         let Some(uuid) = host
             .hub
             .guests
@@ -472,7 +596,8 @@ impl Game<'_> {
         else {
             return;
         };
-        if let Err(e) = horizon_jvm::device::runs_their_own(&uuid_string(uuid)) {
+        let mods = String::from_utf8_lossy(data);
+        if let Err(e) = horizon_jvm::device::runs_their_own(&uuid_string(uuid), &mods) {
             log::warn!("Java mods: {e}");
         }
     }

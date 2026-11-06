@@ -1115,6 +1115,9 @@ public final class HorizonServer {
      * only gives the headless client what it runs on, so the client is this player's alone, as
      * a vanilla client is, and its tick, frame, HUD and screens are the host's own code.
      */
+    /** The world spawn the server told this game, for its own client's mirror (ownClientTick). */
+    static volatile net.minecraft.core.BlockPos ownSpawn = net.minecraft.core.BlockPos.ZERO;
+
     static void ownClientTick(long tick, String id, String name, String dimension, double[] motion, int mode,
                               float health, float[] food, int permission, String[] inventory) {
         Thread.currentThread().setContextClassLoader(HorizonServer.class.getClassLoader());
@@ -1132,6 +1135,17 @@ public final class HorizonServer {
             return;
         }
         ((MinecraftServerAccess) server).horizon$setTickCount((int) tick);
+        // The world spawn the server told this game (handleSetSpawn's; Xaero's minimap reads it
+        // at the join): the mirror has no world data of its own.
+        try {
+            java.lang.reflect.Field respawn = MinecraftServer.class.getDeclaredField("effectiveRespawnData");
+            respawn.setAccessible(true);
+            var spawn = net.minecraft.world.level.storage.LevelData.RespawnData.of(
+                    net.minecraft.world.level.Level.OVERWORLD, ownSpawn, 0f, 0f);
+            if (!spawn.equals(respawn.get(server))) respawn.set(server, spawn);
+        } catch (ReflectiveOperationException e) {
+            if (FAILURES.merge("this game's spawn", 1, Integer::sum) <= 1) Natives.log("Java mods: no spawn for this game's own client: " + e);
+        }
         try {
             ServerPlayer player = mirrorPlayer(0, new String[] {id}, new String[] {name}, new String[] {dimension}, motion,
                     new int[] {mode}, new float[] {health}, food, new int[] {permission}, inventory, tick);

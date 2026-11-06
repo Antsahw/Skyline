@@ -16,7 +16,7 @@ impl Game<'_> {
     /// A payload on one of the Java mods' channels (game/java_screen.rs,
     /// game/java_entities.rs, game/java_device.rs), handled: false for any other channel.
     pub(super) fn remote_java_payload(&mut self, channel: &str, data: &[u8]) -> bool {
-        // A game running its own mods' client (HORIZON_JAVA_OWN_CLIENT) draws those itself.
+        // A game running every mod's client itself draws those itself.
         let own = super::super::java_screen::own_java_client();
         if !own && channel.starts_with("horizon:java_") {
             self.send_java_own_skin();
@@ -33,6 +33,10 @@ impl Game<'_> {
             super::super::java_entities::CHANNEL => self.remote_java_entities(data),
             #[cfg(feature = "java-mods")]
             super::super::java_entities::PARTICLES => self.remote_java_particles(data),
+            #[cfg(feature = "java-mods")]
+            horizon_jvm::device::SERVER_MODS_CHANNEL => {
+                super::super::java_device::server_mods(data)
+            }
             #[cfg(feature = "java-mods")]
             _ if super::super::java_device::takes(channel) => {
                 super::super::java_device::payload(channel, data)

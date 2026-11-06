@@ -6,8 +6,12 @@
 # and X Y Z (the player's block), S (the server's folder). Prints the logs' failures.
 #   MODS=~/mp tools/java_bridge/server_test.sh '$G key e tap; sleep 6'
 #   JAVA_ONLY=1 ... : after a Java-only change (no game rebuild; see java.sh)
+#   SERVER_MODS=dir PLAYER_MODS=dir: the server's and the player's own jars (default MODS for
+#     both; an empty folder: no Java mods there). VANILLA_SERVER=1: vanilla's own server jar
+#     from .local (offline mode; nothing of it leaves .local), no Java mods on it.
 R=$(cd "$(dirname "$0")/../.." && pwd)
-: "${MODS:?MODS: a folder of mod jars}" "${OUT:=/tmp}" "${PORT:=25611}"
+: "${SERVER_MODS:=$MODS}" "${PLAYER_MODS:=$MODS}"
+: "${SERVER_MODS:?MODS: a folder of mod jars}" "${OUT:=/tmp}" "${PORT:=25611}"
 if ! "${JAVA_HOME:-/nonexistent}/bin/java" -version 2>&1 | grep -q '"25'; then
   JAVA_HOME=$(ls -d /usr/lib/jvm/*25* 2>/dev/null | head -1)
 fi
@@ -36,18 +40,25 @@ done
 scratch() {
   local d; d=$(mktemp -d "/tmp/hz-$1.XXXX")
   mkdir -p "$d/mods-java" "$d/home" "$d/lh" "$d/data" "$d/conf"
-  cp "$MODS"/*.jar "$d/mods-java/"
+  [ -n "$2" ] && cp "$2"/*.jar "$d/mods-java/" 2>/dev/null
   echo "$d"
 }
-SD=$(scratch server); echo "$SD" > /tmp/hz-bridge-server
+SD=$(scratch server "$( [ -z "$VANILLA_SERVER" ] && echo "$SERVER_MODS")"); echo "$SD" > /tmp/hz-bridge-server
 printf 'server-port=%s\nonline-mode=false\nwhite-list=false\nenforce-whitelist=false\nlevel-seed=%s\ngamemode=survival\nspawn-protection=0\nmotd=Horizon bridge test\n' \
   "$PORT" "${SEED:-1234}" > "$SD/server.properties"
 echo 'eula=true' > "$SD/eula.txt"
 mkfifo "$SD/console"
+if [ -n "$VANILLA_SERVER" ]; then
+  # Vanilla's server, from the player's own prepared files (never committed).
+  JAR=$(ls "$R/.local/minecraft/26.3/jars/server.jar" "$R/.local/downloads/server-26.3.jar" 2>/dev/null | head -1)
+  [ -n "$JAR" ] || { echo "no vanilla server jar in .local"; exit 1; }
+  (cd "$SD" && exec "$JAVA_HOME/bin/java" -Xmx1G -jar "$JAR" nogui < "$SD/console" > "$SD/server.log" 2>&1) &
+else
 (cd "$SD" && HORIZON_HOME=$SD/home HORIZON_LAUNCHER_HOME=$SD/lh XDG_DATA_HOME=$SD/data XDG_CONFIG_HOME=$SD/conf \
   HORIZON_LAUNCHER_NO_SELF_UPDATE=1 HORIZON_NO_AUDIO=1 HORIZON_JAVA_MODS=1 HORIZON_ROOT=$R \
   exec "$R/target/fast/horizon-client" --resources "$R/.local/horizon-client/26.3" --dedicated --nogui \
   < "$SD/console" > "$SD/server.log" 2>&1) &
+fi
 echo $! > "$SD/pid"
 # The server goes with this script.
 trap 'kill "$(cat "$SD/pid")" 2>/dev/null' EXIT
@@ -55,7 +66,7 @@ exec 3>"$SD/console"
 sv() { echo "$1" >&3; sleep 0.5; }
 for _ in $(seq 600); do grep -q 'Done (' "$SD/server.log" 2>/dev/null && break; sleep 1; done
 grep -q 'Done (' "$SD/server.log" || { echo "the server never started: $SD/server.log"; tail -20 "$SD/server.log"; exit 1; }
-GS=$(scratch player); echo "$GS" > /tmp/hz-bridge-player
+GS=$(scratch player "$PLAYER_MODS"); echo "$GS" > /tmp/hz-bridge-player
 "$R/tools/java_bridge/fps_cap.sh" "$GS"
 (cd "$GS" && HORIZON_HOME=$GS/home HORIZON_LAUNCHER_HOME=$GS/lh XDG_DATA_HOME=$GS/data XDG_CONFIG_HOME=$GS/conf \
   HORIZON_LAUNCHER_NO_SELF_UPDATE=1 HORIZON_NO_AUDIO=1 HORIZON_JAVA_MODS=1 HORIZON_ROOT=$R \

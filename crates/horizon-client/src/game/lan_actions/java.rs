@@ -63,7 +63,7 @@ impl Game<'_> {
         data: &[u8],
     ) {
         if channel == horizon_jvm::device::RUNS_OWN_CHANNEL {
-            self.java_device_runs_own(host, conn)
+            self.java_device_runs_own(host, conn, data)
         } else {
             self.java_device_from_game(host, conn, channel, data)
         }

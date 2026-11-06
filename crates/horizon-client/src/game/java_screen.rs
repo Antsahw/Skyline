@@ -48,7 +48,7 @@ pub(super) const VIEW: &str = "horizon:java_view";
 /// The keys a server's Java mods bind, and which of them this game told it are down.
 #[derive(Default)]
 pub(super) struct JavaBinds {
-    keys: std::collections::HashSet<i32>,
+    pub(super) keys: std::collections::HashSet<i32>,
     down: std::collections::HashSet<i32>,
 }
 
@@ -286,7 +286,7 @@ fn stack(o: &Value) -> Option<ItemStack> {
 pub(super) fn own_java_client() -> bool {
     #[cfg(feature = "java-mods")]
     {
-        super::java_device::own_client()
+        super::java_device::own_all()
     }
     #[cfg(not(feature = "java-mods"))]
     {
@@ -301,6 +301,9 @@ impl Game<'_> {
     pub(super) fn remote_java_keys(&mut self, data: &[u8]) {
         if let Ok(keys) = serde_json::from_slice::<Vec<i32>>(data) {
             self.java.binds.keys = keys.into_iter().collect();
+            // This game's own client's, for the mods the server doesn't run (java_device).
+            #[cfg(feature = "java-mods")]
+            self.java.binds.keys.extend(super::java_device::own_keys());
         }
     }
 
@@ -399,11 +402,15 @@ impl Game<'_> {
             if let Some(mappings) = mappings {
                 input["mappings"] = json!(mappings);
             }
-            // This game's own client has the mods' key bindings.
+            // This game's own client has the mods' key bindings (beside the server's: both).
             #[cfg(feature = "java-mods")]
             if Self::own_client_takes(&input) {
                 self.own_client_input(&input);
                 return;
+            }
+            #[cfg(feature = "java-mods")]
+            if Self::own_client_also(&input) {
+                self.own_client_input(&input);
             }
             let data = input.to_string().into_bytes();
             self.send(S::CustomPayload(CustomPayload {
@@ -669,6 +676,11 @@ impl Game<'_> {
         #[cfg(feature = "java-mods")]
         {
             super::java_device::gui_size(batch.width as i32, batch.height as i32);
+            // An own client beside the server's mods hears the HUD's size even when the
+            // server's mods draw no HUD.
+            if super::java_device::own_client() && self.java.hud.is_none() {
+                self.java.hud = Some(Default::default());
+            }
             let ops = super::java_device::hud_ops();
             if !ops.is_empty() {
                 self.draw_java_ops(batch, &ops);
@@ -1179,11 +1191,15 @@ impl Game<'_> {
             self.device_screen_input(&input);
             return;
         }
-        // This game's own client (every mod's client half here): its windows' input.
+        // This game's own client (mods' client half here): its windows' input.
         #[cfg(feature = "java-mods")]
         if Self::own_client_takes(&input) {
             self.own_client_input(&input);
             return;
+        }
+        #[cfg(feature = "java-mods")]
+        if Self::own_client_also(&input) {
+            self.own_client_input(&input);
         }
         let data = input.to_string().into_bytes();
         self.send(S::CustomPayload(CustomPayload {

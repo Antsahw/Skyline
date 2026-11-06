@@ -11,8 +11,13 @@
 use jni::objects::{GlobalRef, JClass, JString, JValue};
 use std::sync::Mutex;
 
-/// The channel a game says on, as it joins, that it runs the device mods' client half itself.
+/// The channel a game says on, as it joins, which mods' client half it runs itself (comma
+/// separated; `*` first: every mod's; `+` first: the mods the server lacked; else device mods).
 pub const RUNS_OWN_CHANNEL: &str = "horizon:java_device_mods";
+
+/// The channel a Horizon server running Java mods tells a joining game their ids on (comma
+/// separated): the game runs the client half of the mods it has and the server doesn't.
+pub const SERVER_MODS_CHANNEL: &str = "horizon:java_server_mods";
 
 static OUT: Mutex<Vec<(String, Vec<u8>)>> = Mutex::new(Vec::new());
 
@@ -97,21 +102,44 @@ pub fn own_player(uuid: Option<&str>) -> Result<(), String> {
     })
 }
 
-/// Server: this player's game runs the device mods' client half itself (it said so on
-/// [`RUNS_OWN_CHANNEL`]): their messages go to it.
-pub fn runs_their_own(uuid: &str) -> Result<(), String> {
+/// Server: this player's game runs these mods' client half itself (it said so on
+/// [`RUNS_OWN_CHANNEL`], `mods` as it said them): they're left out here for that player, and
+/// their messages go to it.
+pub fn runs_their_own(uuid: &str, mods: &str) -> Result<(), String> {
     let Some(class) = loop_class() else {
         return Ok(());
     };
     call(class, |env, class| {
         let uuid = env.new_string(uuid)?;
+        let mods = env.new_string(mods)?;
         env.call_static_method(
             class,
             "runsTheirOwn",
-            "(Ljava/lang/String;)V",
-            &[JValue::Object(&uuid)],
+            "(Ljava/lang/String;Ljava/lang/String;)V",
+            &[JValue::Object(&uuid), JValue::Object(&mods)],
         )?;
         Ok(())
+    })
+}
+
+/// Server: every Java mod's id (what [`SERVER_MODS_CHANNEL`] tells joining games). Empty while
+/// Java isn't up.
+pub fn mod_ids() -> Result<String, String> {
+    static CLASS: std::sync::OnceLock<Option<GlobalRef>> = std::sync::OnceLock::new();
+    if !crate::events::ready() {
+        return Ok(String::new());
+    }
+    let Some(class) = CLASS
+        .get_or_init(|| class("dev/horizonlab/platform/HorizonDeviceMods"))
+        .as_ref()
+    else {
+        return Ok(String::new());
+    };
+    call(class, |env, class| {
+        let value = env
+            .call_static_method(class, "ids", "()Ljava/lang/String;", &[])?
+            .l()?;
+        Ok(env.get_string(&JString::from(value))?.into())
     })
 }
 
@@ -139,9 +167,17 @@ pub fn from_game(uuid: &str, channel: &str, data: &[u8]) -> Result<(), String> {
     })
 }
 
-/// Game: it joined another's server at `host:port` as `uuid`. `Ok(None)` while Java isn't up
-/// yet (ask again later); `Ok(Some(mods))`: the device mods running here (empty: none).
-pub fn join(host: &str, port: u16, uuid: &str, name: &str) -> Result<Option<Vec<String>>, String> {
+/// Game: it joined another's server at `host:port` as `uuid`; `server_mods` is what the
+/// server said it runs ([`SERVER_MODS_CHANNEL`]; None: it said nothing, it runs no Java mods).
+/// `Ok(None)` while Java isn't up yet (ask again later); `Ok(Some(mods))`: what runs here, as
+/// the game tells the server on [`RUNS_OWN_CHANNEL`] (empty: nothing).
+pub fn join(
+    host: &str,
+    port: u16,
+    uuid: &str,
+    name: &str,
+    server_mods: Option<&str>,
+) -> Result<Option<Vec<String>>, String> {
     let Some(class) = client_class() else {
         return Ok(None);
     };
@@ -149,16 +185,21 @@ pub fn join(host: &str, port: u16, uuid: &str, name: &str) -> Result<Option<Vec<
         let host = env.new_string(host)?;
         let uuid = env.new_string(uuid)?;
         let name = env.new_string(name)?;
+        let server = match server_mods {
+            Some(mods) => env.new_string(mods)?.into(),
+            None => jni::objects::JObject::null(),
+        };
         let value = env
             .call_static_method(
                 class,
                 "join",
-                "(Ljava/lang/String;ILjava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+                "(Ljava/lang/String;ILjava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
                 &[
                     JValue::Object(&host),
                     JValue::Int(port as i32),
                     JValue::Object(&uuid),
                     JValue::Object(&name),
+                    JValue::Object(&server),
                 ],
             )?
             .l()?;

@@ -1656,6 +1656,49 @@ CASES = {
         forbid=[r"journeymap.common.event.FabricServerEvents\]: java", r"handler\$\w+\$xaero\w*\$\w+\): java"],
         look="server-1.png: JourneyMap's minimap top right, Xaero's top left; server-2.png: Xaero's World Map",
     ),
+    "maps-client-only": dict(
+        about="A client-side mod on a server that doesn't run it: a Horizon dedicated server with no Java mods, its "
+              "player with Xaero's Minimap; the player's own game runs Xaero's client half (by default, no switch) "
+              "and draws its minimap",
+        mods=["xaero"], server_mods=[], log="player", scene="none", server=True, env={"HORIZON_JAVA_DEBUG": "gpu"},
+        steps=['sleep 60; $G state > $S/player.json'],
+        checks=[check_file("player.json", r'"screen":"playing"', "the player plays"),
+                check_log(r"every mod's client half runs here for this player, on localhost:\d+ \(the server runs no Java mods\)",
+                          "the player's own game runs its mods' client half (the server said none)"),
+                check_log(r"gpu: a blit of horizon:dynamic/gpu\d+", "the minimap's GPU target is drawn on the HUD")],
+        forbid=[r"this game's own client has no mirror", r"own client's tick failed"],
+        look="server-1.png: Xaero's minimap top left, mapped around the player",
+    ),
+    "maps-client-vanilla": dict(
+        about="maps-client-only against vanilla's own server jar (offline mode, from .local): Xaero's minimap in the "
+              "player's own game",
+        mods=["xaero"], server_mods=[], log="player", scene="none", server=True,
+        env={"HORIZON_JAVA_DEBUG": "gpu", "VANILLA_SERVER": "1"},
+        steps=['sleep 60; $G state > $S/player.json'],
+        checks=[check_file("player.json", r'"screen":"playing"', "the player plays"),
+                check_log(r"every mod's client half runs here for this player, on localhost:\d+ \(the server runs no Java mods\)",
+                          "the player's own game runs its mods' client half"),
+                check_log(r"gpu: a blit of horizon:dynamic/gpu\d+", "the minimap's GPU target is drawn on the HUD")],
+        forbid=[r"this game's own client has no mirror", r"own client's tick failed"],
+        look="server-1.png: Xaero's minimap top left on a vanilla server",
+    ),
+    "maps-client-some": dict(
+        about="A server running some of the player's mods (Jade), not all (Xaero's Minimap): the player's own game "
+              "runs only Xaero's client half, drawn over the server's HUD (Jade's box stays the server's)",
+        mods=["jade", "xaero"], server_mods=["jade"], log="player", scene="none", server=True,
+        env={"HORIZON_JAVA_DEBUG": "gpu"},
+        steps=['$G look 0 80 >/dev/null; sleep 60; $G state > $S/player.json; cp $S/logs/latest.log $S/server-log.txt'],
+        checks=[check_file("player.json", r'"screen":"playing"', "the player plays"),
+                check_log(r"xaerominimap run here for this player \(the server doesn't run them\)",
+                          "the player's own game runs the mods the server lacks"),
+                check_log(r"gpu: a blit of horizon:dynamic/gpu\d+", "the minimap's GPU target is drawn on the HUD"),
+                check_file("server-log.txt", r"Player's own game runs [^\n]*xaerominimap's client half",
+                           "the server was told which mods the player's game runs"),
+                check_file("server-log.txt", r"\A(?![\s\S]*Player's own game runs [^\n]*jade)",
+                           "Jade still runs on the server for the player")],
+        forbid=[r"this game's own client has no mirror", r"own client's tick failed", r"Jade failed"],
+        look="server-1.png: Xaero's minimap top left (the player's own game), Jade's box at the top (the server's)",
+    ),
     "rei-lan": dict(
         about="REI per player, as in vanilla (each game runs its own client: HORIZON_JAVA_OWN_CLIENT): a LAN guest with 4 oak logs turns on its craftable-only filter and sees what it can craft; the host's stays off, its list full",
         mods=["rei", "architectury", "cloth", "fd"], scene="none", lan=True, env={"HORIZON_JAVA_OWN_CLIENT": "1"},
@@ -2181,6 +2224,15 @@ def run_game(case, name, jars, out, extra_env, pack=None, join_within=None):
             config.update(HORIZON_OFFLINE_SKIN=str(skin), HORIZON_OFFLINE_SKIN_MODEL="slim")
         env = dict(os.environ, MODS=str(mods), SCENE=case["scene"], OUT=str(out), NO_BUILD="1", **extra_env,
                    **case.get("env", {}), **config)
+        if "server_mods" in case:
+            # The server's own jars (server_test.sh's SERVER_MODS): those of the case's named
+            # here; the player's game has all of them.
+            server = top / "server-mods"
+            server.mkdir()
+            for jar in jars:
+                if any(fnmatch.fnmatch(jar.name.lower(), g) for n in case["server_mods"] for g in MODS[n]):
+                    shutil.copy(jar, server)
+            env["SERVER_MODS"] = str(server)
         if pack is not None:
             # The pack's own folder (launch.sh takes its config/ too); its content kept between runs.
             env.update(MODS=str(pack), CACHE=str(out.parent / "pack-cache"),
@@ -2199,6 +2251,10 @@ def run_game(case, name, jars, out, extra_env, pack=None, join_within=None):
         if case.get("server"):
             scratch = Path(Path("/tmp/hz-bridge-server").read_text().strip())
             log_path = scratch / "logs" / "latest.log"
+            if case.get("log") == "player":
+                # The checks read the player's game's log (log="player").
+                player = Path(Path("/tmp/hz-bridge-player").read_text().strip())
+                log_path = player / "home" / "logs" / "latest.log"
         elif case.get("install"):
             scratch = Path(Path("/tmp/hz-bridge-install").read_text().strip())
             log_path = scratch / "home" / "logs" / "latest.log"

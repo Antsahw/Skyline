@@ -2453,8 +2453,10 @@ public final class HorizonClient {
         // its connections are memory ones): mods name their per-world data by it (Xaero's
         // minimap: "waypoints" of the world folder).
         try {
+            // Not a game's own client connected to another's server: it has none, as a vanilla
+            // client there (Xaero's minimap names its data by the server's address then).
             if (HorizonServer.server() instanceof net.minecraft.client.server.IntegratedServer integrated
-                    && minecraft.getSingleplayerServer() == null) {
+                    && !HorizonDeviceClient.own() && minecraft.getSingleplayerServer() == null) {
                 set(Minecraft.class, minecraft, "singleplayerServer", integrated);
             }
         } catch (ReflectiveOperationException e) {

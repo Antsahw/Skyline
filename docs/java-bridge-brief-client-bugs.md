@@ -122,7 +122,7 @@ defaults (:1814).
 texture is the player's skin id; F5 front screenshot sleeves in fixture colours on slim arms. Jar:
 `skinlayers3d-fabric-1.11.4-mc26.3.jar`, fabric-api.
 
-## 5. Client-side mods work in single player, not on a multiplayer server
+## 5. Client-side mods work in single player, not on a multiplayer server (done: bridge-own-client)
 
 **Today:** mods' client halves run in the **server's** process (its headless client, `as(player)`). A game joined to
 another server runs only "device mods" in its own JVM (`HorizonDeviceClient.join` :121-127 returns "" unless
@@ -143,6 +143,13 @@ server software.
 **Test:** `server_test.sh` gains `SERVER_MODS`/`PLAYER_MODS` and optional `VANILLA_SERVER=1` (`java -jar
 .local/…/server.jar nogui`, offline; never committed); regress `maps-client-only` (server empty, player Xaero): player
 log line + `gpu: a blit of horizon:dynamic/gpu`, minimap screenshot; then against a vanilla server.
+
+**Done (2026-11-06, `bridge-own-client`):** as planned, plus two causes found on the way: a Horizon
+server with *any* Java mods refused a player with Xaero ("Not on this server: xaerominimap": carried
+mods were all `side = "both"`; now mods with no world content are `client`), and Xaero's own client
+failed at its join (a single-player server and no spawn in the own client's mirror). Regress
+`maps-client-only`, `maps-client-vanilla`, `maps-client-some`; docs/java-bridge.md "Each game runs
+its own mods' client".
 
 ## Plumbing already there
 
