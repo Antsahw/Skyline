@@ -962,7 +962,11 @@ pub fn setup(
             }
             humanoid(p, s, &h);
             if player {
-                player_model_visibility(p, m.extra.hidden_model_parts, m.extra.spectator);
+                player_model_visibility(
+                    p,
+                    m.extra.hidden_model_parts | m.extra.mod_drawn_parts,
+                    m.extra.spectator,
+                );
             }
             if m.ai.aggressive && !bow {
                 // SkeletonModel melee pose.

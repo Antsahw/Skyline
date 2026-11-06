@@ -2520,6 +2520,9 @@ impl Game<'_> {
             S::CustomPayload(p) if p.channel == super::java_screen::INPUT => {
                 self.java_screen_input(host, conn, &p.data)
             }
+            S::CustomPayload(p) if p.channel == super::java_screen::OWN_SKIN => {
+                self.java_own_skin(host, conn, &p.data)
+            }
             S::CustomPayload(p) if p.channel == horizon_protocol::quiet::CHANNEL => {
                 self.guest_quiet_commands(host, conn, &p.data)
             }

@@ -790,6 +790,7 @@ impl Game<'_> {
         false
     }
     pub(super) fn java_screen_input(&mut self, _host: &mut LanHost, _conn: u32, _data: &[u8]) {}
+    pub(super) fn java_own_skin(&mut self, _host: &mut LanHost, _conn: u32, _data: &[u8]) {}
     pub(super) fn save_java_mods(&mut self) {}
     pub(super) fn java_world_closing(&mut self) {}
     pub(super) fn java_entity_attack(&mut self, _host: &mut LanHost, _conn: u32, _id: i32) -> bool {
@@ -1532,7 +1533,34 @@ mod run {
             // world (whole sections, HorizonServer.section) serves it too.
             let neighbours = self.java_neighbours_json(&players);
             let items = self.java_items_json(&players);
+            // Players' `textures` (the profiles they logged in with) the mods' client hasn't
+            // yet: their skins, for what mods build from them (3D skin layers).
+            let textures: Vec<(String, String, Option<String>)> = {
+                static TOLD: std::sync::Mutex<Option<std::collections::HashMap<String, String>>> =
+                    std::sync::Mutex::new(None);
+                let mut told = TOLD.lock().unwrap_or_else(|e| e.into_inner());
+                let told = told.get_or_insert_with(std::collections::HashMap::new);
+                self.lan
+                    .iter()
+                    .flat_map(|h| &h.hub.guests)
+                    .filter_map(|g| {
+                        let t = g.properties.iter().find(|p| p.name == "textures")?;
+                        let uuid = uuid_string(g.uuid);
+                        (told.get(&uuid) != Some(&t.value)).then(|| {
+                            told.insert(uuid.clone(), t.value.clone());
+                            (uuid, t.value.clone(), t.signature.clone())
+                        })
+                    })
+                    .collect()
+            };
             let (ticked, entities) = self.with_java_world(|| {
+                for (uuid, value, signature) in &textures {
+                    if let Err(e) =
+                        horizon_jvm::events::profile_textures(uuid, value, signature.as_deref())
+                    {
+                        log::warn!("Java mods: a player's skin wasn't passed: {e}");
+                    }
+                }
                 if let Some(rules) = &rules
                     && let Err(e) = horizon_jvm::events::game_rules(rules)
                 {
@@ -3602,6 +3630,36 @@ mod run {
                     log::warn!("Java mods: input to a mod's screen failed: {e}");
                 }
                 self.apply_java_actions(Some(host));
+            }
+        }
+
+        /// A player's own skin from its game ([`OWN_SKIN`](super::super::java_screen::OWN_SKIN):
+        /// slim flag, 64x64 RGBA): the Java mods' client builds that player's look from it.
+        pub(in crate::game) fn java_own_skin(
+            &mut self,
+            host: &mut LanHost,
+            conn: u32,
+            data: &[u8],
+        ) {
+            let Some((&slim, rgba)) = data.split_first() else {
+                return;
+            };
+            if rgba.len() != 64 * 64 * 4 || !java_mods_on() {
+                return;
+            }
+            let Some(uuid) = host
+                .hub
+                .guests
+                .iter()
+                .find(|g| g.conn == conn)
+                .map(|g| uuid_string(g.uuid))
+            else {
+                return;
+            };
+            let ran =
+                self.with_java_world(|| horizon_jvm::events::own_skin(&uuid, slim != 0, rgba));
+            if let Err(e) = ran {
+                log::warn!("Java mods: a player's own skin wasn't passed: {e}");
             }
         }
 

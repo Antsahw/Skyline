@@ -23,6 +23,11 @@ pub(super) const INPUT: &str = "horizon:java_screen_input";
 /// clicks a `KeyMapping` with no screen open.
 pub(super) const KEYS: &str = "horizon:java_keys";
 
+/// Game to server, once as it meets a server's Java mods: the player's own skin where no
+/// server knows it (an offline name's, from the launcher): a byte 1 for slim arms (else 0),
+/// then the 64x64 RGBA rows. Mods that build from a player's skin (3D skin layers) use it.
+pub(super) const OWN_SKIN: &str = "horizon:java_own_skin";
+
 /// Server to game: the Java mods with a settings screen (`[[id, name], ...]`), sent once as a
 /// player joins; the game lists them on its Mods page, and asks for one on [`INPUT`]
 /// (`{"kind": "modconfig", "mod": id}`): the server opens it as a client-only screen.

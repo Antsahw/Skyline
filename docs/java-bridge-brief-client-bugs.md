@@ -92,6 +92,9 @@ before/after. Jars: Xaero's Minimap 26.6.2, World Map 1.47.2 (+ XaeroPlus 2.37.2
 
 ## 4. 3D Skin Layers draws wrong (white boxes at the arms)
 
+**Done (bridge-skin-layers, 2026-11-06):** see java-bridge.md "Players' real skins in the headless client";
+regress `skinlayers-skin`.
+
 **Today:** mirrored players are `new GameProfile(uuid, name)` with no properties (`HorizonServer.java:1180`);
 `SkinManagerMixin` always answers `DefaultPlayerSkin.get(profile)`; downloads blocked (`SkinDownloaderMixin`);
 `avatar()` (`HorizonEntityRender.java:745-752`); `modParts` (:939) renders the mod's voxels textured with that

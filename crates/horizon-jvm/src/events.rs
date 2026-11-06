@@ -1762,6 +1762,75 @@ pub fn screen_input(uuid: &str, input: &str) -> Result<(), String> {
     .map_err(|e| crate::describe(&mut env, e))
 }
 
+/// A game's own skin (an offline name's, from its launcher: `horizon:java_own_skin`) for a
+/// player: 64x64 RGBA rows and whether its arms are slim. Mods that build from a player's skin
+/// (3D skin layers) use it (`HorizonSkins.ownSkin`).
+pub fn own_skin(uuid: &str, slim: bool, rgba: &[u8]) -> Result<(), String> {
+    call_skins(|env, class| {
+        let uuid = env.new_string(uuid)?;
+        let rgba = env.byte_array_from_slice(rgba)?;
+        env.call_static_method(
+            class,
+            "ownSkin",
+            "(Ljava/lang/String;Z[B)V",
+            &[
+                JValue::Object(&uuid),
+                JValue::Bool(slim as u8),
+                JValue::Object(&rgba),
+            ],
+        )?;
+        Ok(())
+    })
+}
+
+/// A player's `textures` profile property as Horizon's server has it (`HorizonSkins.textures`):
+/// the mirrored player's profile carries it, and its skin is fetched for mods that read it.
+pub fn profile_textures(uuid: &str, value: &str, signature: Option<&str>) -> Result<(), String> {
+    call_skins(|env, class| {
+        let uuid = env.new_string(uuid)?;
+        let value = env.new_string(value)?;
+        let signature = env.new_string(signature.unwrap_or(""))?;
+        env.call_static_method(
+            class,
+            "textures",
+            "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V",
+            &[
+                JValue::Object(&uuid),
+                JValue::Object(&value),
+                JValue::Object(&signature),
+            ],
+        )?;
+        Ok(())
+    })
+}
+
+fn call_skins(
+    f: impl FnOnce(&mut JNIEnv, &JClass) -> jni::errors::Result<()>,
+) -> Result<(), String> {
+    static SKINS_CLASS: std::sync::OnceLock<Option<GlobalRef>> = std::sync::OnceLock::new();
+    let class = SKINS_CLASS
+        .get_or_init(|| {
+            let bridge = crate::get()?;
+            let mut env = bridge.vm().attach_current_thread_permanently().ok()?;
+            match bridge.find_class(&mut env, "dev/horizonlab/platform/HorizonSkins") {
+                Ok(class) => env.new_global_ref(class).ok(),
+                Err(_) => {
+                    let _ = env.exception_clear();
+                    None
+                }
+            }
+        })
+        .as_ref()
+        .ok_or("no platform mod")?;
+    let bridge = crate::get().ok_or("Java isn't running")?;
+    let mut env = bridge
+        .vm()
+        .attach_current_thread_permanently()
+        .map_err(|e| e.to_string())?;
+    env.with_local_frame(8, |env| f(env, <&JClass>::from(class.as_obj())))
+        .map_err(|e| crate::describe(&mut env, e))
+}
+
 /// The platform's `HorizonClient` (the headless client), when Fabric runs its client side.
 fn client_class() -> Option<&'static GlobalRef> {
     static CLIENT_CLASS: std::sync::OnceLock<Option<GlobalRef>> = std::sync::OnceLock::new();

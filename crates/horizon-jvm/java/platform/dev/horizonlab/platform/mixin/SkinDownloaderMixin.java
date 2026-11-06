@@ -12,13 +12,14 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
  * The headless client downloads no textures (FrozenLib's capes, through the skin manager's
- * downloader): the asset is named and left to the player's own game, which draws it.
+ * downloader): the asset is named and left to the player's own game, which draws it. Only
+ * players' skins are fetched (HorizonSkins' own downloader), for what mods build from them.
  */
 @Mixin(SkinTextureDownloader.class)
 public abstract class SkinDownloaderMixin {
     @Inject(method = "downloadAndRegisterSkin", at = @At("HEAD"), cancellable = true)
     private void horizon$noDownload(Identifier id, java.nio.file.Path file, String url, boolean legacy,
                                     CallbackInfoReturnable<CompletableFuture<ClientAsset.Texture>> cir) {
-        if (HorizonClient.headless()) cir.setReturnValue(CompletableFuture.completedFuture(new ClientAsset.DownloadedTexture(id, url)));
+        if (HorizonClient.headless() && !dev.horizonlab.platform.HorizonSkins.fetches(this)) cir.setReturnValue(CompletableFuture.completedFuture(new ClientAsset.DownloadedTexture(id, url)));
     }
 }

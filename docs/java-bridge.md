@@ -98,7 +98,7 @@ saying something works.
 - The `LocalPlayer` carries the server player's id, UUID, profile, eye height and size (Jade's
   ray started at the feet before), and its old positions.
 - The headless client has services (the mirrored server's: profiles), a skin manager giving
-  each profile's default skin (`SkinManagerMixin`), a texture manager of named views
+  each player's real skin (`SkinManagerMixin` → `HorizonSkins`, below), a texture manager of named views
   (`TextureManagerMixin`, `HorizonTextures`: `getTexture(id)` knows the PNG; `register`
   keeps mods' textures by name), and atlas sprites (`TextureAtlasMixin`, `HorizonSprites`):
   each sprite is made from its PNG and `.mcmeta` (nine-slice), its texture found through the
@@ -1019,8 +1019,29 @@ gets SPIR-V, vertex layouts and uniform lists.
   parts there), and renders each leaf part alone through vanilla's `ModelPart.render`: a part
   whose quads differ from its own cubes' faces is the mod's. Those are shown (the mirrored
   player's skin-part flags are all off), the others' cubes skipped, and the root rendered into
-  custom geometry with the skin texture. Horizon still draws its flat outer layers
-  too; downloaded skins (not resource ids) don't reach Horizon's atlas.
+  custom geometry with the skin texture, with the names of the parts the mod drew (`parts`).
+- **Players' real skins in the headless client** (`HorizonSkins`, bridge-skin-layers, 2026-11-06):
+  the mod's voxels were built from the profile's default skin (Ari/Steve) and laid over the
+  player's real one (white or red boxes at the arms, slim/wide mismatch). Now:
+  - a mirrored player's profile carries the `textures` property Horizon's server has for it
+    (`java_server.rs` passes each guest's once, `events::profile_textures`); `SkinManagerMixin`
+    answers `HorizonSkins.get`, which fetches the skin through a real `SkinTextureDownloader`
+    (skins only: `SkinDownloaderMixin` lets only that one through; files in the game folder's
+    `horizon-java/skins/`) under vanilla's id `minecraft:skins/<sha1>`, Horizon's own atlas key
+    for that skin (`skins::skin_location`), so `java_sprite` finds it;
+  - an offline name's launcher skin (`HORIZON_OFFLINE_SKIN`), which no server knows: the game
+    sends it once when it first hears a server's Java mods (`horizon:java_own_skin`: slim byte +
+    64x64 RGBA, `remote/java.rs` `send_java_own_skin`); the server registers it as a
+    `DynamicTexture` `horizon:offline_skin/<uuid>` (`events::own_skin` → `HorizonSkins.ownSkin`)
+    and makes the player's avatar again; `java_sprite` maps that id to this game's
+    `horizon/offline_skin` slot when the uuid is its own player's (other players' games don't
+    have that skin: they keep Horizon's flat layers for that player);
+  - Horizon leaves its own outer layers (flat, or its own 3D ones) out where a mod draws them
+    and the mesh's skin is in the atlas (`MobExtra::mod_drawn_parts`, ORed into the hidden
+    `PlayerModelPart` bits in `anim.rs`; `java_mod_drawn_parts`).
+  Regress `skinlayers-skin` (a slim test skin from `tools/java_bridge/fixture_skin.py`, never
+  Mojang art). Left: the mod draws all parts whatever the player's Skin Customization says (the
+  mirror's flags are off; Horizon's hidden parts aren't passed).
 
 ## Create's machines, contraptions and items (bridge-gpu-13)
 
@@ -1276,6 +1297,12 @@ gpu-13 made a bearing's contraption assemble, draw and turn. Left:
   `framebufferWidth` etc. directly; `windowRenderState` and the GUI projection must follow too.
   With `guiScale` in the scratch options.txt the Java side logs a harmless `Failed to load options`
   NPE (`Options.guiScale()` null at `resizeGui`): it was there before this change.
+- **Skins: `PlayerInfo` looks its skin up once** (`SkinManager.createLookup` keeps the future
+  `get` gave): a skin that arrives later only shows on a new `PlayerInfo`, so `HorizonSkins`
+  drops the player's avatar (`HorizonEntityRender.forgetAvatar`). A `DownloadedTexture`'s
+  `texturePath()` is its id itself (`skins/<sha1>`, no `textures/` prefix or `.png`); 3D Skin
+  Layers reads the pixels with `TextureManager.getTexture(id)` → `DynamicTexture.getPixels()`
+  when the resource manager hasn't the id. `NativeImage.setPixel` takes ARGB.
 
 - **One Vulkan device list a process.** On the user's Fedora 43 PC (RX 9070 XT, RADV, vulkan-loader
   1.4.341, Mesa 25.3.6) a second `vkEnumeratePhysicalDevices` in the process segfaults in the
