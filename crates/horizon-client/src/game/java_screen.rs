@@ -79,7 +79,8 @@ pub(super) struct JavaOverlay {
     sent_mouse: Option<(i32, i32)>,
     /// When the last mouse move went (moves go at most every [`MOVE_EVERY`]).
     sent_mouse_at: Option<std::time::Instant>,
-    sent_size: Option<(i32, i32)>,
+    /// The GUI size and scale last sent.
+    sent_size: Option<(i32, i32, i32)>,
     typing: bool,
     /// A press went to the overlay: its drags and release go there too.
     pressed: bool,
@@ -95,13 +96,64 @@ pub(super) struct JavaOverlay {
 #[derive(Default)]
 pub(super) struct JavaImages {
     slots: Vec<(String, usize, u32, u32)>,
+    /// Images bigger than a big slot (a full-screen map, a minimap at a high GUI scale), each
+    /// with a texture of its own (`HudBatch::images`), as sent: least recently stored first.
+    own: Vec<(String, horizon_client::hud::HudImage)>,
+    next_own: u32,
+}
+
+/// At most this many images with their own texture (a full-screen map and a few minimaps).
+const OWN_IMAGES: usize = 8;
+
+impl JavaImages {
+    /// The images with their own texture, for this frame's HUD batch.
+    pub(super) fn own_images(&self) -> Vec<horizon_client::hud::HudImage> {
+        self.own.iter().map(|(_, image)| image.clone()).collect()
+    }
+
+    /// Image `name` (`w` x `h`) into a texture of its own: its own again (a new version),
+    /// else a new one, the least recently stored going past [`OWN_IMAGES`].
+    fn store_own(&mut self, name: &str, w: u32, h: u32, rgba: Vec<u8>) {
+        let (id, version) = match self.own.iter().position(|(n, _)| n == name) {
+            Some(i) => {
+                let (_, old) = self.own.remove(i);
+                (old.id, old.version + 1)
+            }
+            None => {
+                if self.own.len() >= OWN_IMAGES {
+                    self.own.remove(0);
+                }
+                self.next_own += 1;
+                (self.next_own, 0)
+            }
+        };
+        self.own.push((
+            name.to_owned(),
+            horizon_client::hud::HudImage {
+                id,
+                version,
+                width: w,
+                height: h,
+                rgba: std::sync::Arc::new(rgba),
+            },
+        ));
+    }
+
+    /// Image `name`'s own texture: its id and size.
+    fn own_image(&self, name: &str) -> Option<(u32, u32, u32)> {
+        self.own
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, i)| (i.id, i.width, i.height))
+    }
 }
 
 /// What Java mods last drew on the window's HUD.
 #[derive(Default)]
 pub(super) struct JavaHud {
     ops: Vec<Value>,
-    sent_size: Option<(i32, i32)>,
+    /// The GUI size and scale last sent.
+    sent_size: Option<(i32, i32, i32)>,
 }
 
 /// The mod screen a window shows, as its last frame drew it.
@@ -112,7 +164,8 @@ pub(super) struct JavaScreen {
     /// What the server last heard: the mouse (and when), and the GUI's size.
     sent_mouse: Option<(i32, i32)>,
     sent_mouse_at: Option<std::time::Instant>,
-    sent_size: Option<(i32, i32)>,
+    /// The GUI size and scale last sent.
+    sent_size: Option<(i32, i32, i32)>,
     /// A text box of the screen has the keyboard (the frame's `typing`): it takes the
     /// inventory key's letter too.
     typing: bool,
@@ -404,29 +457,28 @@ impl Game<'_> {
             return;
         }
         let size = (batch.width as i32, batch.height as i32);
+        let scale = batch.scale;
         let mouse = (self.cursor.0 as i32, self.cursor.1 as i32);
         let overlay = &mut self.java.overlay;
         let open = !overlay.open;
-        let send_size = !open && overlay.sent_size != Some(size);
+        let send_size = !open && overlay.sent_size != Some((size.0, size.1, scale as i32));
         let now = std::time::Instant::now();
         let send_mouse = move_due(overlay.sent_mouse, overlay.sent_mouse_at, mouse, now);
         overlay.open = true;
-        overlay.sent_size = Some(size);
+        overlay.sent_size = Some((size.0, size.1, scale as i32));
         if send_mouse {
             overlay.sent_mouse = Some(mouse);
             overlay.sent_mouse_at = Some(now);
         }
         if open {
-            self.send_java_screen_input(
-                OVERLAY_WINDOW,
-                json!({"kind": "open", "width": size.0, "height": size.1}),
-            );
+            self.send_java_screen_input(OVERLAY_WINDOW, {
+                let mut open = self.java_size_input(size, scale);
+                open["kind"] = json!("open");
+                open
+            });
         }
         if send_size {
-            self.send_java_screen_input(
-                OVERLAY_WINDOW,
-                json!({"kind": "size", "width": size.0, "height": size.1}),
-            );
+            self.send_java_screen_input(OVERLAY_WINDOW, self.java_size_input(size, scale));
         }
         if send_mouse {
             self.send_java_screen_input(
@@ -512,12 +564,10 @@ impl Game<'_> {
             return;
         };
         let size = (batch.width as i32, batch.height as i32);
-        if hud.sent_size != Some(size) {
-            hud.sent_size = Some(size);
-            self.send_java_screen_input(
-                HUD_WINDOW,
-                json!({"kind": "size", "width": size.0, "height": size.1}),
-            );
+        let scale = batch.scale;
+        if hud.sent_size != Some((size.0, size.1, scale as i32)) {
+            hud.sent_size = Some((size.0, size.1, scale as i32));
+            self.send_java_screen_input(HUD_WINDOW, self.java_size_input(size, scale));
         }
         let ops = std::mem::take(&mut self.java.hud.as_mut().expect("checked").ops);
         if !ops.is_empty() {
@@ -573,23 +623,21 @@ impl Game<'_> {
         };
         // The screen lays out in this GUI size, and hovers where the mouse is.
         let size = (batch.width as i32, batch.height as i32);
+        let scale = batch.scale;
         let mouse = (self.cursor.0 as i32, self.cursor.1 as i32);
         let screen = self.java.screen.as_mut().expect("checked");
         let now = std::time::Instant::now();
         let (send_size, send_mouse) = (
-            screen.sent_size != Some(size),
+            screen.sent_size != Some((size.0, size.1, scale as i32)),
             move_due(screen.sent_mouse, screen.sent_mouse_at, mouse, now),
         );
-        screen.sent_size = Some(size);
+        screen.sent_size = Some((size.0, size.1, scale as i32));
         if send_mouse {
             screen.sent_mouse = Some(mouse);
             screen.sent_mouse_at = Some(now);
         }
         if send_size {
-            self.send_java_screen_input(
-                window,
-                json!({"kind": "size", "width": size.0, "height": size.1}),
-            );
+            self.send_java_screen_input(window, self.java_size_input(size, scale));
         }
         if send_mouse {
             self.send_java_screen_input(
@@ -666,35 +714,63 @@ impl Game<'_> {
                 {
                     // A mod's dynamic texture: its slot, the part of it the image fills.
                     let name = o.get("texture").and_then(Value::as_str).unwrap_or_default();
-                    let Some(&(_, slot, w, h)) =
-                        self.java.images.slots.iter().find(|s| s.0 == name)
-                    else {
-                        continue;
-                    };
-                    let atlas = &self.gui.atlas;
-                    let (sprite_name, slot_side) = horizon_client::hud::java_image_slot(slot);
-                    let Some(sprite) = atlas.sprites.get(&sprite_name).copied() else {
-                        continue;
-                    };
-                    let side = slot_side as f32;
-                    let (fw, fh) = (
-                        w.min(slot_side) as f32 / side,
-                        h.min(slot_side) as f32 / side,
-                    );
-                    let (u, v) = ((sprite.u1 - sprite.u0) * fw, (sprite.v1 - sprite.v0) * fh);
-                    let mut r = sprite;
-                    r.u0 = sprite.u0 + int(o, "u0").clamp(0.0, 1.0) * u;
-                    r.u1 =
-                        sprite.u0 + o.get("u1").map_or(1.0, |_| int(o, "u1")).clamp(0.0, 1.0) * u;
-                    r.v0 = sprite.v0 + int(o, "v0").clamp(0.0, 1.0) * v;
-                    r.v1 =
-                        sprite.v0 + o.get("v1").map_or(1.0, |_| int(o, "v1")).clamp(0.0, 1.0) * v;
-                    let color = o
-                        .get("color")
-                        .and_then(Value::as_i64)
-                        .map_or(u32::MAX, argb);
-                    let (x, y, w, h) = rect();
-                    batch.rect_uv(x, y, w, h, r, color);
+                    // One too big for a slot: its own texture, nearest when each of its pixels
+                    // covers whole window pixels (pixel art stays sharp), else linear.
+                    if let Some((id, w, h)) = self.java.images.own_image(name) {
+                        let full = |key: &str| o.get(key).map_or(1.0, |_| int(o, key));
+                        let r = horizon_client::hud::Rect {
+                            u0: int(o, "u0").clamp(0.0, 1.0),
+                            u1: full("u1").clamp(0.0, 1.0),
+                            v0: int(o, "v0").clamp(0.0, 1.0),
+                            v1: full("v1").clamp(0.0, 1.0),
+                            w,
+                            h,
+                        };
+                        let color = o
+                            .get("color")
+                            .and_then(Value::as_i64)
+                            .map_or(u32::MAX, argb);
+                        let (x, y, dw, dh) = rect();
+                        let ratio = |drawn: f32, texels: f32| drawn * batch.scale / texels.max(1.0);
+                        let (rx, ry) = (
+                            ratio(dw.abs(), (r.u1 - r.u0).abs() * w as f32),
+                            ratio(dh.abs(), (r.v1 - r.v0).abs() * h as f32),
+                        );
+                        let whole = |k: f32| k >= 0.99 && (k - k.round()).abs() < 0.02;
+                        let linear = affine || !(whole(rx) && whole(ry));
+                        batch.rect_uv(x, y, dw, dh, r, color);
+                        batch.blend_since(start, horizon_client::hud::Blend::Image(id, linear));
+                    } else {
+                        let Some(&(_, slot, w, h)) =
+                            self.java.images.slots.iter().find(|s| s.0 == name)
+                        else {
+                            continue;
+                        };
+                        let atlas = &self.gui.atlas;
+                        let (sprite_name, slot_side) = horizon_client::hud::java_image_slot(slot);
+                        let Some(sprite) = atlas.sprites.get(&sprite_name).copied() else {
+                            continue;
+                        };
+                        let side = slot_side as f32;
+                        let (fw, fh) = (
+                            w.min(slot_side) as f32 / side,
+                            h.min(slot_side) as f32 / side,
+                        );
+                        let (u, v) = ((sprite.u1 - sprite.u0) * fw, (sprite.v1 - sprite.v0) * fh);
+                        let mut r = sprite;
+                        r.u0 = sprite.u0 + int(o, "u0").clamp(0.0, 1.0) * u;
+                        r.u1 = sprite.u0
+                            + o.get("u1").map_or(1.0, |_| int(o, "u1")).clamp(0.0, 1.0) * u;
+                        r.v0 = sprite.v0 + int(o, "v0").clamp(0.0, 1.0) * v;
+                        r.v1 = sprite.v0
+                            + o.get("v1").map_or(1.0, |_| int(o, "v1")).clamp(0.0, 1.0) * v;
+                        let color = o
+                            .get("color")
+                            .and_then(Value::as_i64)
+                            .map_or(u32::MAX, argb);
+                        let (x, y, w, h) = rect();
+                        batch.rect_uv(x, y, w, h, r, color);
+                    }
                 }
                 kind @ ("blit" | "sprite") => {
                     // A sprite's texture as its atlas's sources lay it out, when the frame says
@@ -893,8 +969,21 @@ impl Game<'_> {
             return;
         }
         use horizon_client::hud::{
-            JAVA_BIG_IMAGE_SLOTS, JAVA_IMAGE_SIZE, JAVA_IMAGE_SLOTS, java_image_slot,
+            JAVA_BIG_IMAGE_SIZE, JAVA_BIG_IMAGE_SLOTS, JAVA_IMAGE_SIZE, JAVA_IMAGE_SLOTS,
+            java_image_slot,
         };
+        // Bigger than a big slot: a texture of its own, as sent. A GPU target or dynamic
+        // texture is only blitted (drawn from there); anything else (a model's texture) keeps
+        // a slot as well, shrunk, for what draws from the atlas.
+        if w > JAVA_BIG_IMAGE_SIZE || h > JAVA_BIG_IMAGE_SIZE {
+            let only_blitted = name.starts_with("horizon:dynamic/");
+            let pixels = rgba[..(w * h * 4) as usize].to_vec();
+            self.java.images.store_own(name, w, h, pixels);
+            if only_blitted {
+                self.java.images.slots.retain(|s| s.0 != name);
+                return;
+            }
+        }
         // Images bigger than a small slot take a big one (small and big slots are evicted
         // apart, least recently stored first).
         let big = w > JAVA_IMAGE_SIZE || h > JAVA_IMAGE_SIZE;
@@ -952,6 +1041,20 @@ impl Game<'_> {
     /// A component as the screen shows it: its translations resolved in the game's language.
     fn translated(&self, text: horizon_client::text::Text) -> horizon_client::text::Text {
         text.resolve_legacy()
+    }
+
+    /// A size input: the GUI's size and scale, and the framebuffer's (mods' full-screen
+    /// targets and pictures in picture are made at those).
+    fn java_size_input(&self, size: (i32, i32), scale: f32) -> Value {
+        let (px_w, px_h) = self.renderer.as_ref().map_or(
+            (
+                (size.0 as f32 * scale) as u32,
+                (size.1 as f32 * scale) as u32,
+            ),
+            |r| (r.config.width, r.config.height),
+        );
+        json!({"kind": "size", "width": size.0, "height": size.1, "scale": scale.round() as i32,
+               "px_w": px_w, "px_h": px_h})
     }
 
     fn send_java_screen_input(&mut self, window: i32, mut input: Value) {

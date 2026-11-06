@@ -3,6 +3,7 @@
 # folder (CLAUDE.md: never real player data), driven by horizon-ctl. Prints the scratch folder;
 # its ctl.sock is the socket. The world has seed SEED (default 1234: the same land each run).
 # JAVA_MODS=0: the Java side off (the plain game, for comparisons).
+# SIZE=WxH: the window's size (default 1280x720); GUI_SCALE=n: options.txt's guiScale.
 # Usage: MODS=~/mods [WORLD=name|none] [SEED=n] [SAVE=world-folder] tools/java_bridge/launch.sh [game args...]
 set -e
 R=$(cd "$(dirname "$0")/../.." && pwd)
@@ -31,6 +32,9 @@ cp -p "$MODS"/*.jar "$S/mods-java/"
 [ -n "$OPTS" ] && cp "$OPTS" "$S/options.txt"
 [ -n "$GRAPHICS" ] && cp "$GRAPHICS" "$S/horizon-graphics.txt"
 "$R/tools/java_bridge/fps_cap.sh" "$S"
+[ -n "$GUI_SCALE" ] && echo "guiScale:$GUI_SCALE" >> "$S/options.txt"
+size=()
+[ -n "$SIZE" ] && size=(--width "${SIZE%x*}" --height "${SIZE#*x}")
 # The pack's resource packs (resourcepacks/ beside MODS, as in a launcher instance), turned on as
 # its options.txt selects them.
 [ -d "$MODS/../resourcepacks" ] && ln -s "$(cd "$MODS/../resourcepacks" && pwd)" "$S/resourcepacks"
@@ -53,7 +57,7 @@ export HORIZON_HOME=$S/home HORIZON_LAUNCHER_HOME=$S/lh XDG_DATA_HOME=$S/data XD
 # WORLD=none starts at the title screen (to make a world through Create New World).
 world=(--world "${WORLD:-W}" --seed "${SEED:-1234}" --creative --wait)
 [ "${WORLD:-W}" = none ] && world=()
-"$R/target/fast/horizon-ctl" --socket "$S/ctl.sock" launch "${world[@]}" --offscreen \
+"$R/target/fast/horizon-ctl" --socket "$S/ctl.sock" launch "${world[@]}" "${size[@]}" --offscreen \
   --game "${GAME:-$R/target/fast/horizon-client}" --resources "$R/.local/horizon-client/26.3" "$@" > "$S/ctl.out" 2>&1
 # --wait waits for a world; at the title screen, for the screen (the mods' content first).
 [ "${WORLD:-W}" = none ] && "$R/target/fast/horizon-ctl" --socket "$S/ctl.sock" wait-for screen title --timeout 900 >> "$S/ctl.out" 2>&1

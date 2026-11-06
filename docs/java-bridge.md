@@ -903,12 +903,24 @@ gets SPIR-V, vertex layouts and uniform lists.
   second per player (`PIP_INTERVAL`); in between the last blit is repeated.
 - Textures the headless client never uploaded (`HorizonTextures.View`: a mod's PNG, a dynamic
   texture) are uploaded the first time a pass samples them; atlases' views bind white.
-- Horizon's window draws images over 64 pixels from 8 slots of 512 (`JAVA_BIG_IMAGE_SLOTS`).
+- Horizon's window draws images over 64 pixels from 16 atlas slots of 512 (`JAVA_BIG_IMAGE_SLOTS`),
+  and images over 512 from **textures of their own** (`HudBatch::images`, up to 8: `JavaImages::own`
+  in `java_screen.rs`; `Blend::Image(id, linear)` runs in `hud.rs`, the HUD's alpha pipeline with
+  the image's bind group). Nearest when each image pixel covers whole window pixels, else linear.
   Only textures a render pass drew into (`HorizonGpu.drawnInto`: not atlases, which
   `TextureAtlas` also draws with passes, nor textures written from memory) become HUD images;
-  real atlases' quads go the headless sprites' way. A bigger one (a full-screen map's target,
-  the window's 1281x720) is read at most 10 times a second per player and sent shrunk
-  (`HorizonGraphics.shrink`, box filter) to 512.
+  real atlases' quads go the headless sprites' way. A big one (over 512: a full-screen map's
+  target, the window's framebuffer) is read at most 10 times a second per player, and shrunk
+  (`HorizonGraphics.shrink`: box filter, any ratio) to the receiver's largest image
+  (`HorizonClient.maxImage`): 2048 for this process's own game (`HorizonDeviceMods.own`, in
+  memory), 512 for a network player.
+- **Each player's window** (`HorizonClient.WINDOWS`): the game sends
+  `{"kind":"size",width,height,scale,px_w,px_h}` (GUI size and scale, framebuffer) on the HUD,
+  screen and overlay windows; `as()` puts the player's window on the headless `Window`
+  (framebuffer and GUI fields, `windowRenderState`, the GUI projection), so pictures in picture
+  are drawn at their GUI scale and full-screen targets at their framebuffer. A size input also
+  resizes the main render target. Test a big window with `SIZE=2560x1440 GUI_SCALE=6` (launch.sh;
+  regress `maps-hires`).
 - A GPU texture's pixels are read when the frame's ops are taken (`HorizonGraphics.ops()`:
   `readPending`), not at its blit: the real GUI draws its elements after the whole screen is
   extracted, and mods rely on it. XaeroPlus clears the World Map's target as Xaero adds it to the
@@ -1212,6 +1224,14 @@ gpu-13 made a bearing's contraption assemble, draw and turn. Left:
 - **Trains** are contraptions on tracks: blocked first by the use order (track placement).
 
 ## 26.3 facts that cost time
+
+- **Xaero's maps size themselves from the window.** The minimap's picture in picture is drawn at
+  `Window.getGuiScale()` (447x267 at scale 3, 858x498 at 6) and the World Map's target is the
+  framebuffer's size (1280x720, 1281 when the window's framebuffer had padding), so a headless
+  window fixed at scale 3 / 1280x720 made them blurry on any bigger screen. `Window` reads
+  `framebufferWidth` etc. directly; `windowRenderState` and the GUI projection must follow too.
+  With `guiScale` in the scratch options.txt the Java side logs a harmless `Failed to load options`
+  NPE (`Options.guiScale()` null at `resizeGui`): it was there before this change.
 
 - **One Vulkan device list a process.** On the user's Fedora 43 PC (RX 9070 XT, RADV, vulkan-loader
   1.4.341, Mesa 25.3.6) a second `vkEnumeratePhysicalDevices` in the process segfaults in the
@@ -1871,6 +1891,14 @@ Naturalist (mobs with ModelPart models, Fabric API only). The repo's own critter
 (`ENTITY=naturalist:bear` for another mod's).
 
 ## Status
+
+Xaero's maps at full resolution (2026-11-06, `bridge-hud-res`, brief section 3): the game sends its
+GUI scale and framebuffer with each size input, Java keeps a window per player (applied in `as()`),
+big images shrink by a fractional box filter to 2048 for the window's own game (512 for network
+players), and Horizon draws images over 512 from their own wgpu textures. At 2560x1440, GUI scale 6:
+the minimap's picture 447x267 → 858x498, the World Map 427x240 → 2048x1152. Regress `maps-hires`.
+Left: network players stay at 512 (deflate or a higher remote cap would need payload limits checked);
+the device client (`HorizonDeviceClient`) still lays out at scale 3.
 
 No code tied to recipe viewers' and HUD mods' internals (2026-11-04, `bridge-generic-ui`,
 Ludovic's second condition for REI, JEI, Jade, AppleSkin, Architectury, Cloth Config): every

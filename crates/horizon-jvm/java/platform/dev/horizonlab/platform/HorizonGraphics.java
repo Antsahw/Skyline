@@ -482,18 +482,21 @@ public final class HorizonGraphics extends GuiGraphicsExtractor {
             var view = (HorizonGpu.View) p[1];
             var name = (String) p[2];
             // A big target (a full-screen map: the window's size) is read at most PIP_INTERVAL
-            // apart for each receiver, and sent shrunk to the window's largest image (512 px).
+            // apart for each receiver, and sent shrunk to fit the receiver's largest image
+            // (maxImage: the window's own game takes more than a network player's).
             int w = view.getWidth(0), h = view.getHeight(0);
-            int shrink = Math.max(1, (Math.max(w, h) + MAX_IMAGE - 1) / MAX_IMAGE);
+            boolean big = Math.max(w, h) > SMALL_IMAGE;
             Object key = java.util.List.of(name, System.identityHashCode(imagesSent));
             long now = System.nanoTime();
-            Long last = shrink > 1 ? BIG_LAST.get(key) : null;
+            Long last = big ? BIG_LAST.get(key) : null;
             byte[] rgba = last != null && now - last < PIP_INTERVAL || view.isClosed() ? null : HorizonGpu.pixels(view);
-            if (rgba != null && shrink > 1) {
-                BIG_LAST.put(key, now);
-                rgba = shrink(rgba, w, h, shrink);
-                w /= shrink;
-                h /= shrink;
+            if (rgba != null && big) BIG_LAST.put(key, now);
+            if (rgba != null && Math.max(w, h) > maxImage) {
+                double k = (double) Math.max(w, h) / maxImage;
+                int nw = Math.max(1, (int) Math.round(w / k)), nh = Math.max(1, (int) Math.round(h / k));
+                rgba = shrink(rgba, w, h, nw, nh);
+                w = nw;
+                h = nh;
             }
             if (DEBUG_GPU) debugImage(name, w, h, rgba);
             int version = rgba == null ? 0 : java.util.Arrays.hashCode(rgba);
@@ -515,33 +518,45 @@ public final class HorizonGraphics extends GuiGraphicsExtractor {
         }
     }
 
-    /** The largest image the window takes (its big image slots), in pixels on a side. */
-    private static final int MAX_IMAGE = 512;
+    /** Images over this many pixels on a side are read at most PIP_INTERVAL apart. */
+    private static final int SMALL_IMAGE = 512;
+    /** The largest image a network player's game takes, in pixels on a side (what goes over the network). */
+    static final int REMOTE_MAX_IMAGE = 512;
+    /** The largest image this process's own game takes (in memory): its own wgpu textures, up to 2048. */
+    static final int LOCAL_MAX_IMAGE = 2048;
+    /** The largest image the receiver of these ops takes, in pixels on a side (bigger ones are shrunk). */
+    int maxImage = REMOTE_MAX_IMAGE;
     private static final java.util.Map<Object, Long> BIG_LAST = new java.util.concurrent.ConcurrentHashMap<>();
 
-    /** RGBA rows {@code w} x {@code h}, each {@code k} x {@code k} block averaged into one pixel. */
-    static byte[] shrink(byte[] rgba, int w, int h, int k) {
-        int nw = w / k, nh = h / k;
+    /**
+     * RGBA rows {@code w} x {@code h} shrunk to {@code nw} x {@code nh} (not bigger) by a box
+     * filter: each new pixel the average of the source area it covers, partly covered source
+     * pixels weighted by how much of them it covers (any ratio, not only whole steps).
+     */
+    static byte[] shrink(byte[] rgba, int w, int h, int nw, int nh) {
         byte[] out = new byte[nw * nh * 4];
-        int n = k * k;
+        double sx = (double) w / nw, sy = (double) h / nh;
+        double[] acc = new double[4];
         for (int y = 0; y < nh; y++) {
+            double y0 = y * sy, y1 = y0 + sy;
             for (int x = 0; x < nw; x++) {
-                int r = 0, g = 0, b = 0, a = 0;
-                for (int dy = 0; dy < k; dy++) {
-                    int row = ((y * k + dy) * w + x * k) * 4;
-                    for (int dx = 0; dx < k; dx++) {
-                        int p = row + dx * 4;
-                        r += rgba[p] & 255;
-                        g += rgba[p + 1] & 255;
-                        b += rgba[p + 2] & 255;
-                        a += rgba[p + 3] & 255;
+                double x0 = x * sx, x1 = x0 + sx;
+                java.util.Arrays.fill(acc, 0);
+                double total = 0;
+                for (int py = (int) y0; py < Math.min(h, (int) Math.ceil(y1)); py++) {
+                    double wy = Math.min(y1, py + 1) - Math.max(y0, py);
+                    if (wy <= 0) continue;
+                    for (int px = (int) x0; px < Math.min(w, (int) Math.ceil(x1)); px++) {
+                        double wx = Math.min(x1, px + 1) - Math.max(x0, px);
+                        if (wx <= 0) continue;
+                        double weight = wx * wy;
+                        int p = (py * w + px) * 4;
+                        for (int c = 0; c < 4; c++) acc[c] += (rgba[p + c] & 255) * weight;
+                        total += weight;
                     }
                 }
                 int o = (y * nw + x) * 4;
-                out[o] = (byte) (r / n);
-                out[o + 1] = (byte) (g / n);
-                out[o + 2] = (byte) (b / n);
-                out[o + 3] = (byte) (a / n);
+                for (int c = 0; c < 4; c++) out[o + c] = (byte) Math.min(255, (int) Math.round(acc[c] / total));
             }
         }
         return out;

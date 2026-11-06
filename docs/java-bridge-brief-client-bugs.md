@@ -61,6 +61,10 @@ Note Zoomify's default C collides with Horizon's `saveToolbarActivator`.
 
 ## 3. Xaero's Minimap / World Map low-res
 
+**Done** (2026-11-06, `bridge-hud-res`): per-player window with scale and framebuffer, fractional shrink
+to 2048 locally (512 remote), own wgpu textures for images over 512; regress `maps-hires`. See
+java-bridge.md, Status.
+
 **Today:** headless window has fixed GUI scale 3 (`windowSize()` HC:681 → 1280x720 for everyone); `width/height` are
 global statics (HC:678) set by any player's size input (HC:3895-3901); the game sends only the GUI-scaled size
 (`java_screen.rs:514-520`). PIPs prepared at that scale (`HorizonGraphics.java:145`, `guiScale()` :371), redrawn ≤
