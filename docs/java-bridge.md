@@ -1828,10 +1828,20 @@ Found in upstream sync 6 (2026-11-05, upstream `41d5649ed`, 1539 commits):
 ```sh
 # Java 25 (JAVA_HOME may point at 21 on these machines; the scripts pick 25)
 export JAVA_HOME=/usr/lib/jvm/java-25-openjdk-amd64 PATH=/usr/lib/jvm/java-25-openjdk-amd64/bin:$PATH
-cargo build --profile fast -p horizon-client -p horizon-client-lib --features horizon-client/java-mods   # ~5 min after a Rust change; horizon-ctl is horizon-client-lib's
-cargo test -p horizon-jvm                                                           # bridge tests
+cargo build --profile fast -p horizon-client -p horizon-client-lib --features horizon-client/java-mods-dev   # ~5 min after a Rust change; horizon-ctl is horizon-client-lib's
+cargo test -p horizon-jvm --features dev                                            # bridge tests (+ prototypes for boot112)
 cargo clippy --profile fast -p horizon-client --features java-mods --bins --lib -- -D warnings -A clippy::manual_range_contains
 ```
+
+**Features (2026-11-06, bridge-gate-2):** `java-mods` is the release build: Fabric only, mods run
+only for the launcher's owner record ("Ownership"). `java-mods-dev` adds the developers' opt-in
+`HORIZON_JAVA_MODS=1` and the stand-in services variable: every script in `tools/java_bridge/`,
+regress and `lan_e2e --java-mods` build or need it. `java-mods-prototypes` (implies `-dev`) adds
+the NeoForge and Forge 1.12 prototypes (`horizon_jvm::{neoforge,boot112}`, `HORIZON_NEOFORGE`,
+`tests/boot112.rs`); without it the game ignores `HORIZON_NEOFORGE`. **Trap:** a `java-mods` build
+started by a script with `HORIZON_JAVA_MODS=1` runs no mods ("no owner record" in the log):
+build with `java-mods-dev`. `tests/test_java_mods_release_features.py` checks the release builds
+name `java-mods` alone.
 
 A build made before `.local/` was prepared has no Fabric API modules (the fixture mods then
 fail to build): prepare, then `touch crates/horizon-jvm/build.rs` and build again.
@@ -2740,8 +2750,8 @@ the game folder (HORIZON_HOME). `OFF=1` runs it without `--java-mods`: no Java m
 For upstream (Ludovic asked for the bridge in the main repo), Java mods are **off unless the
 player turns them on**, per instance:
 - **The game** (built with `java-mods`) starts Java only when opted in: `--java-mods` from the
-  launcher past its owner gate (with `HORIZON_JAVA_MODS_OWNER`, "Ownership" below), or
-  `HORIZON_JAVA_MODS=1` (developers' scripts, servers). Every read of `mods-java/` goes through
+  launcher with an owner record the game confirms (`HORIZON_JAVA_MODS_OWNER`, "Ownership"
+  below), or, in a `java-mods-dev` build only, `HORIZON_JAVA_MODS=1` (developers' scripts, servers). Every read of `mods-java/` goes through
   `java_mods::mod_jars()`, which has no jars otherwise (one log line says how many it left off).
   So no Java start, no Java 25 download, no Fabric download without the switch. The tools set it:
   `launch.sh`, `lan_test.sh`, `server_test.sh` (`HORIZON_JAVA_MODS=1`), `install_test.sh`
@@ -2821,9 +2831,10 @@ Testers no longer build: the fork publishes **the `java-mods` pre-release** on i
   version's own release has no `-java` build, past the owner gate, it takes the fork's: the
   manifest's checksum, the archive's, both from SHA256SUMS signed by a key in java-mods-keys.txt,
   and only if the installed version prepares the manifest's format (`fits`; else "install a
-  newer/older version"). The install marker (`java/.installed`) names `iaxivers/horizon-java-bridge@<commit>`;
-  before each Play (`ensure`) such a build is replaced by a newer one that fits (best effort). A
-  `use-build` build has an empty marker and is never replaced.
+  newer/older version"). The install marker (`java/.installed`) names `iaxivers/horizon-java-bridge@<commit>`.
+  An installed build stays as it is (2026-11-06: no more check for a newer one at each Play): a new
+  version gets its own build, and `horizon-launcher java-mods update [--version T]` downloads the
+  newest that fits on request (`java_variant::update`, past the owner gate).
 - **Tested:** launcher unit tests `java_release::` (signed by a listed key for the channel; other
   keys, the nightly channel, no key, a swapped manifest refused; format check). The workflow on
   GitHub, dry run (branch `java-mods-build`, run 41995308602, ~45 min): both builds, both
@@ -2856,7 +2867,7 @@ download of the server jar. What holds now:
 - **The game downloads no Java** (`find_or_fetch_java_home` is gone): `switch_command` passes the
   launcher's Java 25 as `HORIZON_JAVA_HOME`. The server jar always comes from the player's own
   install (`horizon-prepare`, as upstream).
-- **Developers' runs stay:** `HORIZON_JAVA_MODS=1` / `--java-mods` on the game binary (horizon-ctl,
+- **Developers' runs stay:** `HORIZON_JAVA_MODS=1` (a `java-mods-dev` build) on the game binary (horizon-ctl,
   regress, launch.sh), as Ludovic's own harnesses run the plain game.
 - **Tested headless:** `tools/java_bridge/launcher_switch_test.py` (no owner: `java-mods on` and
   Play download nothing and say "Sign in"; `use-build` works signed out). The window under Xvfb
@@ -2874,13 +2885,13 @@ without them, and its log says why: a player would take the world for modded, an
 opened without its mods loses their blocks and items. `HORIZON_JAVA_OPTIONAL=1` goes on without
 them, as it used to.
 
-### Ownership and licences (2026-11-05, bridge-ownership-1)
+### Ownership and licences (2026-11-05, bridge-ownership-1; owner record 2026-11-06, bridge-gate-2)
 
 The maintainers' conditions, and what holds them:
 - **(a) Fabric Loader, Mixin, Sat4j, ASM and Fabric API are never shipped, vendored, copied or read
   by Horizon's builds.** The repository has none of their files (`check_no_fabric.py --tree`; Python
   test `tests/test_check_no_fabric.py`). A release build (`HORIZON_BRIDGE_PLATFORM=source`, as
-  `java-mods-release.yml` and `package_java_variant.sh` build) now carries **the bridge's own
+  `java-mods-release.yml` and `package_java_variant.sh` build) carries **the bridge's own
   sources too** (`horizon-bridge-src.zip`), not only the platform mod's: build.rs fetches and reads
   nothing of Fabric's, and both steps fail if `.local/bridge` appears on the build machine or an
   archive holds a class or jar of theirs (`check_no_fabric.py <archives>`). On the player's machine,
@@ -2888,28 +2899,71 @@ The maintainers' conditions, and what holds them:
   compiles the bridge (`platform::ensure_bridge`, 7 sources, a few seconds) then the platform mod against them
   (`work/bridge/<key>/`, `work/platform/<key>/`). A developer's build (no `source`) still compiles
   against the jars it fetches into the checkout's `.local/bridge/lib`, on the developer's machine.
+  The release build is **Fabric only**: the NeoForge and 1.12 prototypes are behind
+  `java-mods-prototypes`, which no release enables.
 - **(b) Nothing plays without owning the game, nothing of Mojang's is downloaded for a non-owner.**
   The game downloads nothing of Mojang's, ever (no Java, jars or assets: the game jar is the player's
-  own preparation). Fabric mods run only when `horizon_jvm::gate` says so: `--java-mods` **with**
-  `HORIZON_JAVA_MODS_OWNER`, which only the launcher's `switch_command` sets, on Play's command, after
-  the strict owner gate; or `HORIZON_JAVA_MODS=1`, the developers' explicit opt-in (regress,
-  `launch.sh`, `lan_test.sh`, `server_test.sh`, `lan_e2e --java-mods`). `--java-mods` alone (the game
-  started by hand) runs no mods and fetches nothing: the log and stderr say "Fabric 26.3 mods run only
-  when Horizon's launcher starts the game for a signed-in account that owns Minecraft: Java Edition
-  …", and the game plays without them (no exit 78). The launcher fetches the Java mods build and
-  Mojang's Java 25 only past `owner_signed_in` (`ensure`, `follow`, `java-mods on`). These are local
-  checks, as in every launcher: they keep Horizon from offering a path, not a determined user out.
+  own preparation). Fabric mods run only when `horizon_jvm::gate` says so, and environment variables
+  alone never make it say so:
+  1. **The launcher's owner gate** (`account::launch`, the same check plain Play and
+     `download_for_owner` use) asks the Minecraft services with each account's token whether it
+     owns Minecraft: Java Edition; the last "yes" is kept in memory with its time
+     (`account::LAST_OWNER`).
+  2. **The owner record:** with the switch on, `java_variant::switch_command` writes, from a "yes"
+     at most 5 minutes old, the owner's session file (`account::write_owner_record`: profile UUID
+     and Minecraft access token, 0600, random name, the same writer and reaper as
+     `--session-file`) in `<launcher home>/java-mods-owner/`, and passes its path in
+     `HORIZON_JAVA_MODS_OWNER` beside `--java-mods`. No fresh "yes" (offline): Play refuses ("need
+     the Minecraft services to confirm …; turn Fabric 26.3 mods off to play offline").
+  3. **The game checks it itself** (`gate::decision`, on a thread from the process's first line,
+     `entry.rs`): the record is a regular file, its owner's only, written in the last 10 minutes
+     (`RECORD_LIFE`: a pre-launch command or wrapper may run in between; the launcher's reaper
+     keeps it as long); read once and deleted; its UUID is an
+     account of the launcher's `accounts.json` beside the record's folder; then the game calls
+     `GET /minecraft/profile` (must be that UUID) and `GET /entitlements/mcstore` (must hold
+     `game_minecraft`/`product_minecraft`) on api.minecraftservices.com with the token, as the
+     launcher's `owns_game` does. Only a token Mojang issued to an owner passes. 401/403/404 is a
+     "no"; 429, 5xx and network errors are "no answer". The launcher passes its proxy setting
+     (`proxy::spec_for`) as `HTTPS_PROXY` to the game, which the check and Fabric's downloads use.
+  Why not read the launcher's stored proof (`Secrets.owns`) directly: it lives in the OS keychain
+  (Secret Service, Keychain, Credential Manager), which the game can't read without a keychain
+  stack of its own, and any local file or variable a player can write as well. The token is the
+  one proof the game can check without new crypto. **Trade-off:** Fabric mods need the services
+  reachable at each start (plain Horizon still plays offline). Anything else runs no mods and
+  fetches nothing, and says why in the log/stderr: "Fabric 26.3 mods run only when Horizon's
+  launcher starts the game … (no owner record from the launcher | the owner record is missing,
+  too old or readable by others | … not signed in to the launcher | the Minecraft services did not
+  confirm … | … could not be reached …)". With jars in `mods-java/` the game then **stops**
+  (`not_started`, exit 78, "Java mods: not started: …", which the launcher's Java mods tab shows):
+  a modded world opened without its mods would lose their blocks and items. With no jars it plays. The launcher
+  fetches the Java mods build and Mojang's Java 25 only past `owner_signed_in` (`ensure`, `follow`,
+  `update`, `java-mods on`). A determined user can still patch a binary; these checks keep Horizon
+  from offering a path.
+  **Developers:** `HORIZON_JAVA_MODS=1` (regress, `launch.sh`, `lan_test.sh`, `server_test.sh`,
+  `lan_e2e --java-mods`) and `HORIZON_JAVA_MODS_SERVICES=<url>` (a stand-in services, `install_test.sh`'s
+  `tools/java_bridge/fake_services.py`) exist only in `java-mods-dev` builds.
 - **(c)** Startup and frame time with the bridge off: [java-bridge-perf.md](java-bridge-perf.md),
   "The bridge switched off" (`tools/java_bridge/perf_off.sh`).
-- **Checks:** unit `horizon-jvm gate::` (by hand → no mods; launcher marker → mods; dev opt-in);
-  launcher unit `java_variant::…the_command_becomes_the_java_builds…` (the marker on the gated
-  command, never `HORIZON_JAVA_MODS`); `launcher_switch_test.py` (no owner: nothing downloaded;
-  Play passes the marker; off: none); regress **`direct`** (`install_test.sh DIRECT=1`: scratch
-  install, `--java-mods`, no marker: the message, no `.local/bridge`, no Java runtime, no `libjvm`
-  in the process, the world plays) and **`owner`** (with the marker: Fabric fetched into the install,
-  the fixture loads).
-- **Trap:** a script of your own that starts the game with `--java-mods` now runs no mods: add
-  `HORIZON_JAVA_MODS=1` (developer) or `HORIZON_JAVA_MODS_OWNER=1` (as the launcher, `install_test.sh`).
+- **(d) A warning first:** turning "Fabric 26.3 mods (beta)" on in the window (Home's chip, Play's
+  ⋯ item, Launch…'s switch: all `flip_java_mods`) first shows a confirmation
+  (`java_mods_warning`, texts `java_variant::WARNING_TITLE`/`WARNING`, through `tr`): mods are
+  Java programs with full access to the computer, files and the Minecraft account; only add mods
+  you trust; beta. "Turn on Fabric mods" saves `java_mods_warned` in the instance (asked once per
+  instance); Cancel or a click outside leaves it off. `java-mods on` prints the same text once.
+- **Checks:** unit `horizon-jvm gate::` (hand-set variables and the old word `1` → no mods, before
+  any services call; stale, future, world-readable, unknown-account records refused and deleted;
+  the services' answers; `services_check` against a localhost stand-in: owner, Bedrock only,
+  another profile, refused token, 503, nothing listening; `--features dev`: the opt-in);
+  launcher units `account::…the_owner_record_needs_a_fresh_answer…`,
+  `java_variant::…the_command_becomes_the_java_builds…` (the record's path, never
+  `HORIZON_JAVA_MODS`); `tests/test_java_mods_release_features.py`; regress (install_test.sh, a
+  scratch install): **`direct`** (no record), **`forged_word`** (`HORIZON_JAVA_MODS_OWNER=1` by
+  hand), **`forged_record`** (a hand-written record + accounts.json, made-up token, Mojang's real
+  services): the message, no `.local/bridge`, no Java runtime, the game stopped, no world opened; and
+  **`owner`** (a record whose token the stand-in accepts: "confirmed by the Minecraft services",
+  Fabric fetched into the install, the fixture loads, the record deleted).
+- **Trap:** a script of your own that starts the game with `--java-mods` runs no mods: use a
+  `java-mods-dev` build with `HORIZON_JAVA_MODS=1`, or start it from the launcher.
 
 ### Windows
 

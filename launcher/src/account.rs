@@ -1849,11 +1849,57 @@ pub fn launch(
         }
     }
     if owned {
+        if let Some((account, secrets)) = &pass.owner {
+            if let Ok(mut last) = LAST_OWNER.lock() {
+                *last = Some((account.clone(), secrets.clone(), Instant::now()));
+            }
+        }
         Ok(pass)
     } else {
         Err(NoOwner)
     }
 }
+
+/// The account the last [`launch`] heard own the game from the services, and when: what an owner
+/// record ([`write_owner_record`]) is written from.
+static LAST_OWNER: Mutex<Option<(Account, Secrets, Instant)>> = Mutex::new(None);
+/// How recent that answer must be for the game being started now.
+const OWNER_ANSWER_LIFE: Duration = Duration::from_secs(300);
+
+/// Fabric 26.3 mods' owner record (`horizon_jvm::gate`, docs/java-bridge.md "Ownership"): the
+/// session file of the account the owner gate heard own the game just now (its UUID and
+/// Minecraft token), in `<launcher>/java-mods-owner/`, for the game being started. The game reads
+/// it once, deletes it, checks the account is in `accounts.json` and asks the Minecraft services
+/// with the token itself. None when no owner answered in the last minutes (offline): Fabric mods
+/// then don't start.
+pub fn write_owner_record() -> Result<PathBuf, String> {
+    let last = LAST_OWNER.lock().ok().and_then(|last| last.clone());
+    owner_record(last, &owner_record_dir())
+}
+
+/// [`write_owner_record`] from the owner gate's `last` answer, in `dir`.
+fn owner_record(last: Option<(Account, Secrets, Instant)>, dir: &Path) -> Result<PathBuf, String> {
+    let fresh = last.filter(|(_, _, at)| at.elapsed() <= OWNER_ANSWER_LIFE);
+    let Some((account, secrets, _)) = fresh else {
+        return Err(crate::i18n::tr(OWNER_NOT_CONFIRMED).to_string());
+    };
+    // As long as the game takes it (`horizon_jvm::gate::RECORD_LIFE`): a pre-launch command or
+    // wrapper may run first.
+    write_launch_file(dir, &account, &secrets, OWNER_RECORD_LIFE)
+}
+
+/// How long an owner record waits for its game (the game's `RECORD_LIFE`).
+const OWNER_RECORD_LIFE: Duration = Duration::from_secs(600);
+
+/// Where owner records go: beside `accounts.json`, which the game reads to find the account.
+pub fn owner_record_dir() -> PathBuf {
+    crate::backend::data_dir().join("java-mods-owner")
+}
+
+/// Why Play with Fabric 26.3 mods on can't start them.
+pub const OWNER_NOT_CONFIRMED: &str = "Fabric 26.3 mods need the Minecraft services to confirm \
+     that your account owns Minecraft: Java Edition, and they could not be reached. Connect to \
+     the internet and press Play again, or turn Fabric 26.3 mods off to play offline.";
 
 /// The owner gate before the game starts. With the window's hidden developer option
 /// (`backend::Settings::dev_offline`, `offline_without_owner`) no owner is no refusal: the game
@@ -1879,6 +1925,16 @@ pub fn write_session_file(
     account: &Account,
     secrets: &Secrets,
 ) -> Result<PathBuf, String> {
+    write_file_living(dir, account, secrets, SESSION_FILE_LIFE)
+}
+
+/// [`write_session_file`] in `dir`, whose leftovers older than `life` go.
+fn write_file_living(
+    dir: &Path,
+    account: &Account,
+    secrets: &Secrets,
+    life: Duration,
+) -> Result<PathBuf, String> {
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     // The folder too is this user's only (the files already are).
     #[cfg(unix)]
@@ -1892,7 +1948,7 @@ pub fn write_session_file(
             let old = e
                 .metadata()
                 .and_then(|m| m.modified())
-                .is_ok_and(|m| m.elapsed().is_ok_and(|age| age > Duration::from_secs(120)));
+                .is_ok_and(|m| m.elapsed().is_ok_and(|age| age > life));
             if old {
                 let _ = std::fs::remove_file(e.path());
             }
@@ -1928,7 +1984,7 @@ const SESSION_FILE_LIFE: Duration = Duration::from_secs(120);
 /// deletes each as it reads it; the rest go when the game would refuse them anyway
 /// ([`SESSION_FILE_LIFE`], a game that never started or crashed first) or when the launch failed
 /// ([`discard_unread_sessions`]). Nothing with a token stays on disk.
-static UNREAD: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
+static UNREAD: Mutex<Vec<(PathBuf, Duration)>> = Mutex::new(Vec::new());
 
 /// [`write_session_file`] for a game this launcher is about to start (see [`UNREAD`]).
 fn write_launch_session_file(
@@ -1936,7 +1992,17 @@ fn write_launch_session_file(
     account: &Account,
     secrets: &Secrets,
 ) -> Result<PathBuf, String> {
-    let path = write_session_file(dir, account, secrets)?;
+    write_launch_file(dir, account, secrets, SESSION_FILE_LIFE)
+}
+
+/// [`write_launch_session_file`] for a file the game takes within `life`.
+fn write_launch_file(
+    dir: &Path,
+    account: &Account,
+    secrets: &Secrets,
+    life: Duration,
+) -> Result<PathBuf, String> {
+    let path = write_file_living(dir, account, secrets, life)?;
     let Ok(mut unread) = UNREAD.lock() else {
         return Ok(path);
     };
@@ -1950,23 +2016,23 @@ fn write_launch_session_file(
                 let Ok(mut unread) = UNREAD.lock() else {
                     return;
                 };
-                reap(&mut unread, SESSION_FILE_LIFE);
+                reap(&mut unread);
                 if unread.is_empty() {
                     return;
                 }
             });
     }
-    unread.push(path.clone());
+    unread.push((path.clone(), life));
     Ok(path)
 }
 
-/// Deletes the files of `unread` older than `life` (the game would refuse them) and forgets
+/// Deletes the files of `unread` older than their life (the game would refuse them) and forgets
 /// those gone (read).
-fn reap(unread: &mut Vec<PathBuf>, life: Duration) {
-    unread.retain(|path| {
+fn reap(unread: &mut Vec<(PathBuf, Duration)>) {
+    unread.retain(|(path, life)| {
         let waiting = std::fs::metadata(path)
             .and_then(|m| m.modified())
-            .is_ok_and(|m| m.elapsed().is_ok_and(|age| age <= life));
+            .is_ok_and(|m| m.elapsed().is_ok_and(|age| age <= *life));
         if !waiting {
             let _ = std::fs::remove_file(path);
         }
@@ -1981,7 +2047,7 @@ pub fn discard_unread_sessions() {
         .lock()
         .map(|mut unread| std::mem::take(&mut *unread))
         .unwrap_or_default();
-    for path in files {
+    for (path, _) in files {
         let _ = std::fs::remove_file(path);
     }
 }

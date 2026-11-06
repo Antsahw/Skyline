@@ -162,6 +162,10 @@ pub struct Meta {
     /// Fabric 26.3 mods (beta), off unless the player turns them on (`java_variant`).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub java_mods: bool,
+    /// The player confirmed `java_variant::WARNING` for this instance: turning the mods on again
+    /// asks no more.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub java_mods_warned: bool,
 }
 
 /// A Minecraft: Java Edition instance: the real game of one version, with the Java it runs on
@@ -256,6 +260,8 @@ pub struct Instance {
     pub java: Option<JavaGame>,
     /// Fabric 26.3 mods (beta) on: it plays the version's Java mods build (`java_variant`).
     pub java_mods: bool,
+    /// The player confirmed `java_variant::WARNING` for it.
+    pub java_mods_warned: bool,
 }
 
 impl Instance {
@@ -359,6 +365,7 @@ fn list_in(game_home: &Path, data: &Path) -> Vec<Instance> {
                 launch: meta.launch,
                 java: meta.java,
                 java_mods: meta.java_mods,
+                java_mods_warned: meta.java_mods_warned,
                 id,
                 kind,
                 work,

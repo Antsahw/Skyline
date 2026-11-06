@@ -233,6 +233,13 @@ mod tests {
 ";
         let found = failures_in(log);
         assert_eq!(found.len(), 2);
+        // The owner gate's refusal stops the game the same way (`not_started`): the tab says why.
+        let refused = "[10:00:00] [main/WARN]: Java mods: off: Fabric 26.3 mods run only when Horizon's launcher starts the game (no owner record from the launcher)
+[10:00:00] [main/ERROR]: Java mods: not started: Fabric 26.3 mods run only when Horizon's launcher starts the game (no owner record from the launcher)
+";
+        let gate = failures_in(refused);
+        assert_eq!(gate.len(), 1, "{gate:?}");
+        assert!(gate[0].text.contains("no owner record"));
         assert_eq!(found[0].name.as_deref(), Some("Farmer's Delight"));
         assert!(found[1].text.starts_with("Java mods: not started"));
     }
