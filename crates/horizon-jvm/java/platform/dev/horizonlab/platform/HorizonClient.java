@@ -1775,6 +1775,8 @@ public final class HorizonClient {
                     if (modelsLoaded) HorizonItemModels.exportOnce();
                     long t = HorizonProfile.start();
                     tickOnce();
+                    // The camera's tick (GameRenderer.tick's): its field of view's modifier.
+                    tickView(player.getUUID());
                     // The client level's own block entities of mod blocks (ClientLevel's tick of
                     // them), once a tick per level, as the first of its players.
                     if (minecraft.level != null) {
@@ -1796,6 +1798,8 @@ public final class HorizonClient {
                     HorizonHooks.fireFrame(minecraft.gameRenderer, true);
                     t = HorizonProfile.add("client: frame start", t);
                     sendHud(player);
+                    // The camera's field of view in the frame (Camera.update), as the mods make it.
+                    sendView(player.getUUID());
                     t = HorizonProfile.add("client: HUD", t);
                     HorizonHooks.fireFrame(minecraft.gameRenderer, false);
                     // Then the frame is drawn (GameRenderer.render): the mods' work at its head.
@@ -2351,6 +2355,9 @@ public final class HorizonClient {
 
     private static void joined(net.minecraft.server.level.ServerPlayer player) {
         if (minecraft.level == null || !JOINED.add(player.getUUID())) return;
+        // Their game starts at vanilla's field of view (its scale told again if a mod changes it).
+        VIEW_SENT.remove(player.getUUID());
+        FOV_MODIFIERS.remove(player.getUUID());
         // Mods that failed before a player was there: told now (HorizonFailures).
         HorizonFailures.flush();
         // The client's server is the mirror, in this process (as single player's is, and as
@@ -2766,17 +2773,75 @@ public final class HorizonClient {
 
     private static final java.util.Map<java.util.UUID, Keys> KEYS = new java.util.concurrent.ConcurrentHashMap<>();
 
-    /** The mods' own KeyMappings (Fabric's KeyMappingHelper registry), vanilla's left to Horizon. */
+    private static java.util.List<KeyMapping> modKeys = java.util.List.of();
+    private static int modKeysOf = -1;
+    private static java.util.Set<String> vanillaKeys;
+
+    /**
+     * The mods' own KeyMappings: every one made (KeyMapping.ALL, whether through Fabric's
+     * KeyMappingHelper or a plain {@code new KeyMapping}), minus vanilla's (those Options makes:
+     * its KeyMapping fields), which Horizon handles itself. Read again when ALL grows.
+     */
     @SuppressWarnings("unchecked")
-    static java.util.List<KeyMapping> modKeys() {
+    static synchronized java.util.List<KeyMapping> modKeys() {
         try {
-            Class<?> registry = Class.forName("net.fabricmc.fabric.impl.client.keymapping.KeyMappingRegistryImpl");
-            Field list = registry.getDeclaredField("MODDED_KEY_BINDINGS");
-            list.setAccessible(true);
-            return new java.util.ArrayList<>((java.util.List<KeyMapping>) list.get(null));
+            var all = (java.util.Map<String, KeyMapping>) field(KeyMapping.class, null, "ALL");
+            if (all.size() == modKeysOf) return modKeys;
+            if (vanillaKeys == null) vanillaKeys = vanillaKeyNames();
+            var list = new java.util.ArrayList<KeyMapping>();
+            for (KeyMapping mapping : new java.util.ArrayList<>(all.values())) {
+                if (!vanillaKeys.contains(mapping.getName())) list.add(mapping);
+            }
+            java.util.Collections.sort(list);
+            modKeys = java.util.List.copyOf(list);
+            modKeysOf = all.size();
+            var names = new StringBuilder();
+            for (KeyMapping mapping : modKeys) names.append(names.isEmpty() ? "" : ", ").append(mapping.getName());
+            Natives.log("Horizon's client: " + modKeys.size() + " mod key binding(s)" + (modKeys.isEmpty() ? "" : ": " + names));
         } catch (ReflectiveOperationException | RuntimeException e) {
-            return java.util.List.of();
+            if (modKeysOf != -2) Natives.log("Horizon's client: the mods' key bindings can't be read: " + e);
+            modKeysOf = -2;
         }
+        return modKeys;
+    }
+
+    /** Vanilla's mappings: the ones Options holds in its own fields (keyUp, keyHotbarSlots...). */
+    private static java.util.Set<String> vanillaKeyNames() throws ReflectiveOperationException {
+        java.util.Set<String> names = new java.util.HashSet<>();
+        if (minecraft == null || minecraft.options == null) return names;
+        for (Field f : net.minecraft.client.Options.class.getDeclaredFields()) {
+            if (java.lang.reflect.Modifier.isStatic(f.getModifiers()) || f.getName().equals("keyMappings")) continue;
+            f.setAccessible(true);
+            if (f.getType() == KeyMapping.class || KeyMapping.class.isAssignableFrom(f.getType())) {
+                if (f.get(minecraft.options) instanceof KeyMapping k) names.add(k.getName());
+            } else if (f.getType() == KeyMapping[].class && f.get(minecraft.options) instanceof KeyMapping[] keys) {
+                for (KeyMapping k : keys) if (k != null) names.add(k.getName());
+            }
+        }
+        return names;
+    }
+
+    /**
+     * The mods' key bindings for the player's Controls page, as JSON: {@code [{name, category,
+     * key, default, label, categoryLabel}]} (keys as options.txt names them, labels in the
+     * client's language), in vanilla's order (KeyMapping.compareTo: category, then name).
+     */
+    public static String keyMappings() {
+        Thread.currentThread().setContextClassLoader(HorizonClient.class.getClassLoader());
+        var out = new com.google.gson.JsonArray();
+        for (KeyMapping mapping : modKeys()) {
+            var o = new com.google.gson.JsonObject();
+            o.addProperty("name", mapping.getName());
+            var category = mapping.getCategory();
+            o.addProperty("category", category.id().toString());
+            var key = key(mapping);
+            o.addProperty("key", key == null ? "key.keyboard.unknown" : key.getName());
+            o.addProperty("default", mapping.getDefaultKey().getName());
+            o.addProperty("label", net.minecraft.network.chat.Component.translatable(mapping.getName()).getString());
+            o.addProperty("categoryLabel", category.label().getString());
+            out.add(o);
+        }
+        return out.toString();
     }
 
     /**
@@ -2821,16 +2886,30 @@ public final class HorizonClient {
      * A key of a player's game, pressed or released while playing (KeyboardHandler.keyPress:
      * KeyMapping.set, and click on a press), kept for that player's client tick.
      */
-    static void bind(java.util.UUID player, int scancode, boolean down) {
-        bind(player, com.mojang.blaze3d.platform.InputConstants.Type.KEYBOARD.getOrCreate(scancode), down);
+    static void bind(java.util.UUID player, int scancode, boolean down, java.util.List<String> mappings) {
+        bind(player, com.mojang.blaze3d.platform.InputConstants.Type.KEYBOARD.getOrCreate(scancode), down, mappings);
     }
 
     /** A mouse button of a player's game while playing (MouseHandler.onButton: KeyMapping.set and click). */
-    static void bindMouse(java.util.UUID player, int button, boolean down) {
-        bind(player, com.mojang.blaze3d.platform.InputConstants.Type.MOUSE.getOrCreate(button), down);
+    static void bindMouse(java.util.UUID player, int button, boolean down, java.util.List<String> mappings) {
+        bind(player, com.mojang.blaze3d.platform.InputConstants.Type.MOUSE.getOrCreate(button), down, mappings);
     }
 
-    private static void bind(java.util.UUID player, com.mojang.blaze3d.platform.InputConstants.Key pressed, boolean down) {
+    /** The mapping names of a bind input ({@code "mappings"}: the player's game's own bindings), or null. */
+    private static java.util.List<String> mappings(com.google.gson.JsonObject in) {
+        if (!in.has("mappings") || !in.get("mappings").isJsonArray()) return null;
+        var names = new java.util.ArrayList<String>();
+        for (var e : in.getAsJsonArray("mappings")) names.add(e.getAsString());
+        return names;
+    }
+
+    /**
+     * {@code mappings}: the mods' mappings the player's game binds to this key (its Controls,
+     * which the player may have changed), set in that player's keys only; null: those whose
+     * key here is the one pressed (a game that sent no names).
+     */
+    private static void bind(java.util.UUID player, com.mojang.blaze3d.platform.InputConstants.Key pressed, boolean down,
+            java.util.List<String> names) {
         Keys keys = KEYS.computeIfAbsent(player, p -> new Keys(
                 java.util.concurrent.ConcurrentHashMap.newKeySet(), new java.util.concurrent.ConcurrentHashMap<>()));
         // Vanilla's use key, when its button's own presses come (mods take every button: the
@@ -2844,7 +2923,7 @@ public final class HorizonClient {
             }
         }
         for (KeyMapping mapping : modKeys()) {
-            if (!pressed.equals(key(mapping))) continue;
+            if (names != null ? !names.contains(mapping.getName()) : !pressed.equals(key(mapping))) continue;
             if (DEBUG_INPUT) Natives.log("bind " + pressed.getName() + (down ? " down" : " up") + ": " + mapping.getName());
             if (down) {
                 keys.down().add(mapping);
@@ -3096,6 +3175,99 @@ public final class HorizonClient {
                 clickCount.setInt(mapping, 0);
             }
         }
+    }
+
+    // ---- Mods' field of view (the camera's, which zoom mods change) ---------------------------
+
+    /** Each player's camera FOV modifiers (Camera.oldFovModifier, fovModifier), swapped onto the one camera. */
+    private static final java.util.Map<java.util.UUID, float[]> FOV_MODIFIERS = new java.util.concurrent.ConcurrentHashMap<>();
+    /** The FOV scale each player's game was last told ({@link #sendView}). */
+    private static final java.util.Map<java.util.UUID, Float> VIEW_SENT = new java.util.concurrent.ConcurrentHashMap<>();
+    private static boolean cameraReady;
+    private static java.lang.reflect.Method calculateFov;
+    private static Field fovModifier, oldFovModifier, cameraFov;
+
+    private static net.minecraft.client.Camera camera() {
+        try {
+            if (minecraft == null || minecraft.gameRenderer == null) return null;
+            var camera = (net.minecraft.client.Camera) field(net.minecraft.client.renderer.GameRenderer.class, minecraft.gameRenderer, "mainCamera");
+            if (camera == null) return null;
+            if (!cameraReady) {
+                cameraReady = true;
+                // Made without its constructor: its client (tickFov and calculateFov read the
+                // options) and modifiers at rest.
+                set(net.minecraft.client.Camera.class, camera, "minecraft", minecraft);
+                calculateFov = net.minecraft.client.Camera.class.getDeclaredMethod("calculateFov", float.class);
+                calculateFov.setAccessible(true);
+                fovModifier = net.minecraft.client.Camera.class.getDeclaredField("fovModifier");
+                oldFovModifier = net.minecraft.client.Camera.class.getDeclaredField("oldFovModifier");
+                cameraFov = net.minecraft.client.Camera.class.getDeclaredField("fov");
+                fovModifier.setAccessible(true);
+                oldFovModifier.setAccessible(true);
+                cameraFov.setAccessible(true);
+                var hooks = HorizonHooks.hooking(net.minecraft.client.Camera.class,
+                        java.util.Set.of("tick", "tickFov", "calculateFov", "getFov", "modifyFovBasedOnDeathOrFluid", "calculateHudFov"));
+                Natives.log("Horizon's client: " + hooks.size() + " mod hook(s) on the camera's field of view"
+                        + (hooks.isEmpty() ? "" : ": " + String.join(", ", hooks)));
+            }
+            return calculateFov == null ? null : camera;
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            if (calculateFov == null && cameraReady) return null;
+            Natives.log("Horizon's client: no camera field of view: " + e);
+            cameraReady = true;
+            calculateFov = null;
+            return null;
+        }
+    }
+
+    /** The camera's tick (Camera.tick, tickFov) for the player's client: their modifiers on it. */
+    private static void tickView(java.util.UUID player) {
+        var camera = camera();
+        if (camera == null) return;
+        float[] m = FOV_MODIFIERS.computeIfAbsent(player, p -> new float[] {1f, 1f});
+        try {
+            oldFovModifier.setFloat(camera, m[0]);
+            fovModifier.setFloat(camera, m[1]);
+            camera.tick();
+            m[0] = oldFovModifier.getFloat(camera);
+            m[1] = fovModifier.getFloat(camera);
+        } catch (Throwable t) {
+            if (HUD_FAILURES.merge("camera tick", 1, Integer::sum) == 1) Natives.log("Horizon's client: the camera's tick failed: " + t);
+        }
+    }
+
+    /**
+     * The player's field of view as the mods make it, in the frame: Camera.calculateFov (the
+     * mods' hooks on it: Zoomify's zoom), written to the camera's fov as update does, then
+     * getFov (theirs on it). Over vanilla's own (options' FOV times the modifier, which
+     * Horizon applies itself; death and fluids are inert here), the scale Horizon's camera
+     * takes: sent to the player's game when it changes.
+     */
+    private static void sendView(java.util.UUID player) {
+        var camera = camera();
+        if (camera == null) return;
+        float[] m = FOV_MODIFIERS.computeIfAbsent(player, p -> new float[] {1f, 1f});
+        float scale = 1f;
+        try {
+            oldFovModifier.setFloat(camera, m[0]);
+            fovModifier.setFloat(camera, m[1]);
+            float modded = (float) calculateFov.invoke(camera, 1f);
+            cameraFov.setFloat(camera, modded);
+            modded = camera.getFov();
+            float base = minecraft.options.fov().get() * m[1];
+            if (base > 0 && Float.isFinite(modded) && modded > 0) scale = modded / base;
+        } catch (Throwable t) {
+            Throwable cause = t instanceof java.lang.reflect.InvocationTargetException e && e.getCause() != null ? e.getCause() : t;
+            if (HUD_FAILURES.merge("camera fov", 1, Integer::sum) == 1) {
+                Natives.log("Horizon's client: the camera's field of view failed: " + cause);
+                HorizonFailures.report("the camera's field of view", cause);
+            }
+        }
+        Float sent = VIEW_SENT.get(player);
+        if (sent == null ? Math.abs(scale - 1f) < 1e-4f : Math.abs(scale - sent) < 1e-4f) return;
+        VIEW_SENT.put(player, scale);
+        if (DEBUG_INPUT) Natives.log("view " + player + ": fov scale " + scale);
+        Natives.view(player.toString(), scale);
     }
 
     // ---- The client in a world: its level, what it looks at, its HUD --------------------------
@@ -3863,14 +4035,14 @@ public final class HorizonClient {
         if (kind.equals("bind") && in.has("mouse")) {
             int button = in.get("mouse").getAsInt();
             boolean down = in.get("down").getAsBoolean();
-            bindMouse(id, button, down);
+            bindMouse(id, button, down, mappings(in));
             mousePress(id, button, in.has("mods") ? in.get("mods").getAsInt() : 0, down);
             return;
         }
         if (kind.equals("bind")) {
             int key = in.get("key").getAsInt();
             boolean down = in.get("down").getAsBoolean();
-            bind(id, key, down);
+            bind(id, key, down, mappings(in));
             keyPress(id, key, in.has("keycode") ? in.get("keycode").getAsInt() : key,
                     in.has("mods") ? in.get("mods").getAsInt() : 0, down);
             return;

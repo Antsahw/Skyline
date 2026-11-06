@@ -1851,6 +1851,8 @@ mod run {
             #[derive(Default)]
             struct Told {
                 keys: Option<Vec<i32>>,
+                /// The mods' key bindings for the players' Controls (KEY_MAPPINGS' JSON).
+                mappings: Option<String>,
                 calls: u32,
                 /// The players' games told the keys as they are, and those greeted at all.
                 told: std::collections::HashSet<u32>,
@@ -1879,8 +1881,17 @@ mod run {
                     state.keys = Some(keys);
                     state.told.clear();
                 }
+                let mappings = horizon_jvm::events::key_mappings().unwrap_or_else(|e| {
+                    log::warn!("Java mods: their key bindings can't be listed: {e}");
+                    "[]".into()
+                });
+                if state.mappings.as_ref() != Some(&mappings) {
+                    state.mappings = Some(mappings);
+                    state.told.clear();
+                }
             }
             let keys = state.keys.clone().unwrap_or_default();
+            let mappings = state.mappings.clone().unwrap_or_default();
             // The Java mods with a settings screen, for the players' Mods pages (read once:
             // the mods' entrypoints don't change while the game runs).
             static CONFIG_MODS: std::sync::OnceLock<Vec<(String, String)>> =
@@ -1907,7 +1918,21 @@ mod run {
                         );
                     }
                 }
-                if !state.told.insert(conn) || keys.is_empty() {
+                if !state.told.insert(conn) {
+                    continue;
+                }
+                if !mappings.is_empty() && mappings != "[]" {
+                    host.hub.send_to(
+                        conn,
+                        &C::CustomPayload(
+                            horizon_protocol::packets::configuration::CustomPayload {
+                                channel: super::super::java_screen::KEY_MAPPINGS.into(),
+                                data: mappings.clone().into_bytes(),
+                            },
+                        ),
+                    );
+                }
+                if keys.is_empty() {
                     continue;
                 }
                 host.hub.send_to(
@@ -2098,6 +2123,28 @@ mod run {
                             .map(|g| g.conn)
                         {
                             Self::send_java_hud_frame(host, conn, &frame);
+                        }
+                    }
+                    horizon_jvm::events::Action::View { uuid, scale } => {
+                        let Some(host) = host.as_deref_mut().or(self.lan.as_mut()) else {
+                            continue;
+                        };
+                        if let Some(conn) = host
+                            .hub
+                            .guests
+                            .iter()
+                            .find(|g| uuid_string(g.uuid) == uuid)
+                            .map(|g| g.conn)
+                        {
+                            host.hub.send_to(
+                                conn,
+                                &C::CustomPayload(
+                                    horizon_protocol::packets::configuration::CustomPayload {
+                                        channel: super::super::java_screen::VIEW.into(),
+                                        data: serde_json::to_vec(&scale).unwrap_or_default(),
+                                    },
+                                ),
+                            );
                         }
                     }
                     horizon_jvm::events::Action::ClientScreen { uuid, open } => {

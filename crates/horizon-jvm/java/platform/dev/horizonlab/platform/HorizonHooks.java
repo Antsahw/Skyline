@@ -775,6 +775,34 @@ public final class HorizonHooks {
         });
     }
 
+    /**
+     * The mods' handlers merged into {@code owner} that target one of {@code methods}, of any
+     * injector (@Inject, @ModifyReturnValue, @WrapOperation...): "mixin.handler (@Kind on
+     * method)" each, Fabric API's and Horizon's own left out. For logs: who hooks what.
+     */
+    static List<String> hooking(Class<?> owner, java.util.Set<String> methods) {
+        List<String> found = new ArrayList<>();
+        for (Method m : owner.getDeclaredMethods()) {
+            MixinMerged merged = m.getAnnotation(MixinMerged.class);
+            if (merged == null || merged.mixin().startsWith("net.fabricmc.") || merged.mixin().startsWith("dev.horizonlab.platform.")) continue;
+            ClassNode node = mixinNode(merged.mixin());
+            if (node == null) continue;
+            for (MethodNode handler : node.methods) {
+                if (!handlerNamed(m.getName(), handler.name)) continue;
+                for (AnnotationNode a : annotations(handler.invisibleAnnotations, handler.visibleAnnotations)) {
+                    if (!(get(a, "method") instanceof List<?> specs)) continue;
+                    for (Object spec : specs) {
+                        String target = parseSpec((String) spec)[0];
+                        if (!methods.contains(target)) continue;
+                        String kind = a.desc.substring(a.desc.lastIndexOf('/') + 1, a.desc.length() - 1);
+                        found.add(merged.mixin() + "." + handler.name + " (@" + kind + " on " + target + ")");
+                    }
+                }
+            }
+        }
+        return found;
+    }
+
     private static ClassNode mixinNode(String name) {
         try (var in = HorizonHooks.class.getClassLoader().getResourceAsStream(name.replace('.', '/') + ".class")) {
             if (in == null) return null;

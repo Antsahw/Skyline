@@ -8349,7 +8349,9 @@ impl Game<'_> {
     /// controller alike.
     fn look_turn(&mut self, x: f64, y: f64) {
         self.tutorial.mouse(x, y);
-        let zoom = self.zoom_turn_scale();
+        // A Java mod's zoom slows turning as much as it narrows the view (its own
+        // MouseHandler.turnPlayer hooks don't run headless).
+        let zoom = self.zoom_turn_scale() * f64::from(self.java.view.scale(1.0).min(1.0));
         self.turn_player(x * zoom, y * zoom);
     }
     /// `Minecraft.pause`: a single-player game with a pausing screen open.

@@ -170,6 +170,9 @@ pub enum Action {
     /// What mods draw on a player's HUD (Jade, AppleSkin), drawn by their client code in the
     /// headless client each tick: operations as a screen frame's, sent when they change.
     HudFrame { uuid: String, frame: String },
+    /// A player's field of view as mods make it (`Camera.calculateFov`'s hooks: a zoom mod),
+    /// over vanilla's: the scale their game's camera takes (1: none), sent when it changes.
+    View { uuid: String, scale: f32 },
     /// What mods draw over a player's inventory (REI's item list), drawn in the headless
     /// client's inventory screen while the player's is open: sent when it changes.
     OverlayFrame { uuid: String, frame: String },
@@ -1691,6 +1694,27 @@ pub fn bound_keys() -> Result<Vec<i32>, String> {
         })
         .map_err(|e| crate::describe(&mut env, e))?;
     serde_json::from_str(&json).map_err(|e| e.to_string())
+}
+
+/// The Java mods' key bindings (HorizonClient.keyMappings): `[{name, category, key, default,
+/// label, categoryLabel}]` as JSON, for players' Controls pages. "[]" without a headless client.
+pub fn key_mappings() -> Result<String, String> {
+    let Some(class) = client_class() else {
+        return Ok("[]".into());
+    };
+    let bridge = crate::get().ok_or("Java isn't running")?;
+    let mut env = bridge
+        .vm()
+        .attach_current_thread_permanently()
+        .map_err(|e| e.to_string())?;
+    env.with_local_frame(8, |env| -> jni::errors::Result<String> {
+        let class = <&JClass>::from(class.as_obj());
+        let value = env
+            .call_static_method(class, "keyMappings", "()Ljava/lang/String;", &[])?
+            .l()?;
+        Ok(env.get_string(&JString::from(value))?.into())
+    })
+    .map_err(|e| crate::describe(&mut env, e))
 }
 
 /// The Java mods with a settings screen (HorizonClient.configMods): `[id, name]` pairs, for

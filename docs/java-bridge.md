@@ -406,6 +406,40 @@ inventory through what a vanilla client does for any mod. Tested with REI 26.3.8
   folder: on a dedicated server Horizon's own log, whose lines were overwritten.
   Regress `server-log`.
 
+## Mods' key bindings in Controls, mods' field of view (bridge-modkeys-fov)
+
+- **Mods' key bindings are Horizon's.** `HorizonClient.modKeys()` is every `KeyMapping` made
+  (`KeyMapping.ALL`: Fabric's `KeyMappingHelper` ones and plain `new KeyMapping`s alike) minus
+  vanilla's (the ones `Options` holds in its own fields), sorted as vanilla's list is; logged
+  once each time it grows (`N mod key binding(s): ...`). `keyMappings()` sends them
+  (`{name, category, key, default, label, categoryLabel}`, labels in the headless language) on
+  `horizon:java_key_mappings` beside `horizon:java_keys` (`send_java_keys`; own client:
+  `own_client_greet`). The game keeps them in `settings.keys` (`KeyBinds::set_mods`):
+  Controls → Key Binds lists them after vanilla's (in a vanilla category when the mod uses one,
+  else under the mod's own category heading), rebindable and resettable with conflict marks
+  across both lists; options.txt keeps them as `key_<name>:<key>` after vanilla's
+  (`OptionsFile::mod_keys`, kept whether or not the mod is there). A key or button press
+  while playing sends `"mappings": [names]` with its `bind` input: the mods' mappings the
+  player's Controls bind to it; Java sets those in that player's `Keys` only (no write to the
+  shared `KeyMapping.key`). A game that got no mappings sends none and Java matches by its own
+  keys as before. Regress `keys`, `keys-rebind` (G→H in the Controls UI, saved, G then
+  inert), `keys-server`.
+- **Mods' field of view on Horizon's camera.** 26.3 keeps FOV in `Camera` (`tick` →
+  private `tickFov`, private `calculateFov(float)`, `update` writes `fov`, `getFov()`); the
+  headless camera (allocated) gets its `minecraft` once and each player's
+  `oldFovModifier`/`fovModifier` swapped on: `camera.tick()` after the client tick
+  (`tickView`), then in the frame `calculateFov(1f)` (the mods' hooks run: Zoomify's
+  `@ModifyReturnValue`), written to `fov`, `getFov()` (hooks there too) over `options.fov ×
+  fovModifier` (death and fluids are inert headless) = the scale sent on change
+  (`Natives.view` → `Action::View` → `horizon:java_view`; own client: local). The game eases
+  it over the tick (`JavaView`) and multiplies `fov_degrees` after the native mods' FOV, so
+  `zoom_magnification`, far terrain's zoom aim and `horizon-ctl state`'s new `player.fov` see
+  it; turning slows by the same scale while it is below 1 (the mods' `turnPlayer` hooks don't
+  run headless). The hooks on the camera's FOV methods are logged once (`N mod hook(s) on the
+  camera's field of view: <mixin>.<handler> (@Kind on method)`, `HorizonHooks.hooking`).
+  Mods that change `AbstractClientPlayer.getFieldOfViewModifier` instead cancel out (the
+  headless camera has no camera entity: modifier 1). Regress `fov` (fixture `fovmod`).
+
 ## Cloth Config's screens, client waypoints, Litematica and Chat Heads (bridge-client-13)
 
 - **Mods with a `-` in their id were never carried** ("mod id \"cloth-config\" is not
@@ -1212,6 +1246,17 @@ gpu-13 made a bearing's contraption assemble, draw and turn. Left:
 - **Trains** are contraptions on tracks: blocked first by the use order (track placement).
 
 ## 26.3 facts that cost time
+
+- **The field of view is the camera's, not the game renderer's.** `Camera.tick` → private
+  `tickFov` (modifier eased halfway), private `calculateFov(float)` (options' FOV × lerped
+  modifier, then death/fluid), `update(DeltaTracker)` stores it in `fov`, public `getFov()`.
+  Zoom mods hook `calculateFov`/`getFov` there; `GameRenderer.getFov` is gone.
+- **`KeyMapping.ALL` is every mapping** (private static `Map<String, KeyMapping>`; public
+  `KeyMapping.get(name)`); Fabric's `MODDED_KEY_BINDINGS` misses mods that make a plain `new
+  KeyMapping`. A category's label key is `key.category.<namespace>.<path>`
+  (`Identifier.toLanguageKey("key.category")`).
+- **A mixin config's package holds only mixins**: a mod (or fixture) class in it fails to load
+  with `IllegalClassLoadError: ... is in a defined mixin package`.
 
 - **One Vulkan device list a process.** On the user's Fedora 43 PC (RX 9070 XT, RADV, vulkan-loader
   1.4.341, Mesa 25.3.6) a second `vkEnumeratePhysicalDevices` in the process segfaults in the

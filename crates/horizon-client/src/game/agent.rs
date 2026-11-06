@@ -497,6 +497,8 @@ impl Game<'_> {
                 "sneaking": self.keys.contains(&KeyCode::ShiftLeft),
                 "sprinting": p.sprinting,
                 "fov_modifier": self.view.fov_modifier,
+                // The camera's field of view now (degrees), mods' changes and zooms in it.
+                "fov": self.eye_position().map(|eye| self.fov_degrees(1.0, eye)),
                 "health": p.health.health(),
                 "absorption": p.health.absorption(),
                 // The hurt animation's ticks left (the camera's hurt tilt).

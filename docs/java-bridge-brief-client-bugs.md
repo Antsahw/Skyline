@@ -6,6 +6,8 @@ All fixes generic (no mod-specific code). 26.3 facts checked with javap on the c
 
 ## 1. Mods' key bindings missing from Controls (Zoomify, Spell Engine)
 
+**Done** (bridge-modkeys-fov): see java-bridge.md "Mods' key bindings in Controls"; regress `keys-rebind`, `keys-server`.
+
 **Today:** Java collects mod keys only from Fabric's `KeyMappingRegistryImpl.MODDED_KEY_BINDINGS` (HC:2771
 `modKeys`); `boundKeys` (HC:2786) sends scancodes only (-1 all, -200 wheel, -100-n mouse) on `horizon:java_keys`
 (`java_server.rs:1850`); the game keeps a `Vec<i32>` (`java_screen.rs:174`); `java_bind_key` (`java_screen.rs:212`,
@@ -34,6 +36,8 @@ registering via Fabric's helper are missed by `modKeys()`: check with `HORIZON_J
 Spell Engine + deps.
 
 ## 2. Zoomify's zoom does nothing (mods' FOV not applied)
+
+**Done** (bridge-modkeys-fov), tested with the `fovmod` fixture (Zoomify's way); Zoomify itself not tried (no jar here).
 
 **Today:** in 26.3 FOV lives in `Camera` (`tickFov()`, private `calculateFov(float)`, `modifyFovBasedOnDeathOrFluid`,
 `update(DeltaTracker)` writing `fov`/`hudFov`, public `getFov()`). The headless camera is `Natives.allocate(Camera.class)`
