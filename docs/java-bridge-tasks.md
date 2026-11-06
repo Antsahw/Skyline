@@ -1936,13 +1936,13 @@ entities-10's last commit (TACZ third person) and generic-ui's notes. Not merged
 `bridge-worldgen-5-farnoise-wip` (marked not for merge).
 Conflicts and how they were settled:
 - **upstream-prep-2 vs upstream sync 6:** upstream built native mods' chunk tickets
-  (`mod_forced`): ours sit on it now (`set_ticketed` in streaming/java.rs fills `mod_forced`;
+  (`mod_forced`): ours sit on it now (`set_ticketed` in streaming/mod_tickets.rs fills `mod_forced`;
   prep's `java::Tickets` dropped). Upstream's `open_unplaced_container` and menu `extra` data
   kept (prep's copy in containers/java.rs dropped). Registry entries are NBT upstream now:
   `push_mod_biomes` and worldgen-9's extra dimension types write NBT. The moved fall code got
   `MotionWorld.health`; `noise_only.rs` needs `R: 'static` (upstream's surface rule cache).
 - **Branches made before prep-2** edited code it moved: worldgen-9's `java_mods.rs` went into
-  `java_mods/bridge.rs`; gpu-14's own boxes/occlusion into `mod_content/java.rs`,
+  `java_mods/bridge.rs`; gpu-14's own boxes/occlusion into `mod_content/own_states.rs`,
   `content/states.rs` (+ its test into `content/tests/state_table.rs`), `oracle/own_states.rs`;
   client-14's `java_binds` is `java.binds`; generic-2's own-client guards are in
   `remote_java_payload`. Every hook prep left still has its callers (checked by name).

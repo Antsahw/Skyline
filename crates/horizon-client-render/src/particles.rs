@@ -5,7 +5,7 @@
 //! notes, redstone dust, totem, end rod, biome ash and spores, falling leaves,
 //! spells and dragon breath. Constructors, ticks, sizes, colours and light
 //! follow the vanilla classes; sprite sets come from `particles/*.json`.
-mod java;
+mod mod_particles;
 use crate::{
     blocks::{BlockFacts, Fluid},
     collisions::SceneCollisions,

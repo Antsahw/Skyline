@@ -15,7 +15,7 @@ use horizon_protocol::{
 };
 use horizon_world::nbt::Tag;
 use std::collections::HashMap;
-mod java;
+mod mod_windows;
 
 /// Encode a captured level sound and its broadcast radius without a live hub.
 /// Entity-bound events use the entity packet; ordinary level sounds retain

@@ -2,7 +2,7 @@
 //! Controls, Key Binds, Mouse Settings, Chat Settings, Accessibility,
 //! Language and Resource Packs, laid out like vanilla's HeaderAndFooter /
 //! OptionsList screens and drawn with the shared widgets.
-mod java;
+mod mod_rows;
 use std::time::Instant;
 
 pub use crate::settings::Opt;
@@ -2915,7 +2915,7 @@ impl OptionsUi {
                             Row::Buttons(if dead { inactive(widget) } else { widget }, None)
                         }
                     })
-                    .chain(java::mod_rows(s))
+                    .chain(mod_rows::mod_rows(s))
                     .collect()
             }
             Page::NativeMod(i) => self.native_rows(s, i),

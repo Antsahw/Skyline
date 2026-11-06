@@ -13,7 +13,7 @@ use std::{
     collections::{BTreeMap, HashMap, HashSet},
     path::{Path, PathBuf},
 };
-mod java;
+mod mod_biomes;
 
 /// RegistryDataLoader.SYNCHRONIZED_REGISTRIES, in vanilla's order.
 pub const SYNCHRONIZED: &[&str] = &[
@@ -400,7 +400,7 @@ impl SyncData {
                     .collect()
             });
             file_order(&mut entries);
-            java::push_mod_biomes(key, resources, &mut entries);
+            mod_biomes::push_mod_biomes(key, resources, &mut entries);
             let mut e = Entries {
                 names: Vec::new(),
                 data: Vec::new(),

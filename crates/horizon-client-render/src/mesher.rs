@@ -4,9 +4,9 @@
 //! cardinal shading, tint sources, block offsets; see `lighting`). Fluids
 //! follow `FluidRenderer` (see `fluid`).
 mod fluid;
-mod java;
 mod leaf_culling;
 mod lighting;
+mod mod_blocks;
 pub mod packed;
 mod sides;
 use crate::connected::{Pick, TileLayer};
@@ -28,7 +28,9 @@ use horizon_world::{
     fluid::{FluidKind, FluidState},
     registry::BlockStateId,
 };
-pub use java::{ModFluidLook, hide_model_drawn_by_block_entity, set_mod_fluids, set_mod_tints};
+pub use mod_blocks::{
+    ModFluidLook, hide_model_drawn_by_block_entity, set_mod_fluids, set_mod_tints,
+};
 #[cfg(test)]
 pub(crate) use sides::sort_tinted;
 pub use sides::{Part, Sides, group_parts};
@@ -652,7 +654,7 @@ impl MeshTables {
         }
         let mut covers = std::collections::HashMap::new();
         let mut info = Vec::with_capacity(facts.states.len());
-        let mod_tints = java::mod_tints();
+        let mod_tints = mod_blocks::mod_tints();
         for (id, s) in facts.states.iter().enumerate() {
             let state = assets
                 .registry
@@ -688,7 +690,7 @@ impl MeshTables {
                 }
                 "melon_stem" | "pumpkin_stem" => ([Tint::Stem(prop("age")); 2], 1),
                 "lily_pad" => ([Tint::LilyPad; 2], 1),
-                _ => java::mod_tint(&mod_tints, &s.name),
+                _ => mod_blocks::mod_tint(&mod_tints, &s.name),
             };
             // getShadeBrightness overrides; the default is 0.2 for full collision shapes.
             let overrides = [
@@ -749,7 +751,7 @@ impl MeshTables {
                 emission: s.emission,
                 tier: hdr_tier(name, s.emission),
                 emissive,
-                fluid: java::mod_liquid(FluidState::from_block(state)?, s, prop),
+                fluid: mod_blocks::mod_liquid(FluidState::from_block(state)?, s, prop),
                 model: s.render_shape == RenderShape::Model,
                 block_entity: s.block_entity,
                 tints,
@@ -1480,7 +1482,7 @@ impl Mesher<'_> {
         let info = &self.tables.info;
         let full_faces = &self.tables.full_faces;
         let catalog = &self.render.model_catalog;
-        let java = java::SectionJava::new(&self.render.sprite_layers);
+        let java = mod_blocks::SectionJava::new(&self.render.sprite_layers);
         let mut models = Vec::new();
         for y in 0..16 {
             for z in 0..16 {

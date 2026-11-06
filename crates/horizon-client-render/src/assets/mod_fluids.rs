@@ -1,4 +1,4 @@
-//! Mods' fluids' sprites for the Java mod bridge's fluids (mesher/java.rs).
+//! Mods' fluids' sprites for the Java mod bridge's fluids (mesher/mod_blocks.rs).
 use crate::Result;
 use horizon_world::registry::{BlockRegistry, BlockStateId};
 use std::path::Path;

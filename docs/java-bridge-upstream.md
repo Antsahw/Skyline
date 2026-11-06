@@ -67,7 +67,7 @@ hooks PR.
 | world.rs | `SET_HOOK` static + its call in `set` | H | every block write (the mirror hears Horizon's changes); `native_block_changed` sees only `Level.setBlock` |
 | mesher.rs | `mod java;` + `pub use`; tint fallback arm `java::mod_tint`; `fluid: java::mod_liquid(..)`; one `SectionJava::new` per section, `java.fluid(id)`, `java.drawn_by_block_entity(id)` (`#[inline]`) | H | mods' tints, fluids and block-entity-drawn blocks in the hot loop |
 | mesher/fluid.rs | `mod_look` param + 3 branches | H | the mod fluid's own sprites/tint inside `tesselate` |
-| streaming.rs | `ticketed` field (+1 init) | H | the Java mods' share of upstream's `mod_forced` (native mods' tickets, upstream sync 6): `set_ticketed` (streaming/java.rs) puts their chunks there, so upstream's own ranges and ticket sources keep them; nothing else left in streaming.rs (merge batch 12) |
+| streaming.rs | `ticketed` field (+1 init) | H | the Java mods' share of upstream's `mod_forced` (native mods' tickets, upstream sync 6): `set_ticketed` (streaming/mod_tickets.rs) puts their chunks there, so upstream's own ranges and ticket sources keep them; nothing else left in streaming.rs (merge batch 12) |
 | streaming.rs | column guards (3), `near_forced` rank, `Ranges::priority` | G | a proto finished/saved over a loaded column (bug fix); forced chunks' priority |
 | datapack.rs | `structures_only` field (+5 inits), `set_reader`, `pack.skips(..)`, `Box<Zip>`→`Arc<Zip>` | H/G | mods' structure-only packs; the reader shares the zip |
 | hud.rs | `mod java;` + `pub use`, `java_slots`, `walk_java_textures`, one test expectation | H | mods' GUI textures and dynamic images in the HUD atlas |
@@ -178,7 +178,7 @@ Every PR builds and passes **without** `java-mods`; from PR 10 on, CI also build
 
 **Phase 2, hook points, no Java yet (`skip-release`).**
 9. Generic hook points in the lower crates: `LevelAccess::foreign_fluid*`, `SET_HOOK`,
-   chunk tickets (`streaming/java.rs` → rename `tickets.rs`), mod tints/fluids in the mesher,
+   chunk tickets (`streaming/mod_tickets.rs` → rename `tickets.rs`), mod tints/fluids in the mesher,
    mod biomes, block revisions. Names without "java" where the hook is generic. ~400 lines.
 
 **Phase 3, the bridge, behind `java-mods` (off by default).**

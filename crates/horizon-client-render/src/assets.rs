@@ -1,4 +1,4 @@
-mod java;
+mod mod_fluids;
 use crate::Result;
 use horizon_world::{
     DATA_VERSION,
@@ -355,7 +355,7 @@ impl RenderAssets {
         ] {
             sprites.insert(root, &format!("minecraft:block/{name}"))?;
         }
-        java::insert_mod_fluid_sprites(root, registry, &mut sprites, draws)?;
+        mod_fluids::insert_mod_fluid_sprites(root, registry, &mut sprites, draws)?;
         for stage in 0..10 {
             sprites.insert(root, &format!("minecraft:block/destroy_stage_{stage}"))?;
             sprites.insert(root, &format!("minecraft:block/destroy_oit_stage_{stage}"))?;

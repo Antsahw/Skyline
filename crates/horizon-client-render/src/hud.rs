@@ -12,8 +12,8 @@ use std::{
 use wgpu::util::DeviceExt;
 
 pub mod cit_glint;
-mod java;
-pub use java::{
+mod mod_textures;
+pub use mod_textures::{
     JAVA_BIG_IMAGE_SIZE, JAVA_BIG_IMAGE_SLOTS, JAVA_IMAGE_SIZE, JAVA_IMAGE_SLOTS, java_image_slot,
 };
 mod pack_text;
@@ -850,7 +850,7 @@ impl HudAtlas {
             let name = map_slot_sprite(i).unwrap_or_default();
             images.push((name.into(), 128, 128, vec![0; 128 * 128 * 4]));
         }
-        java::java_slots(images);
+        mod_textures::java_slots(images);
         // The minimap extra's image (game/extras.rs).
         images.push((
             MINIMAP_SPRITE.into(),
@@ -1128,7 +1128,7 @@ impl HudAtlas {
             for ns in namespaces.flatten() {
                 if ns.file_name() != "minecraft" {
                     walk(&ns.path().join("textures/gui"), &mut files);
-                    java::walk_java_textures(&ns.path(), folders, &mut files);
+                    mod_textures::walk_java_textures(&ns.path(), folders, &mut files);
                 }
             }
         }

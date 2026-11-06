@@ -17,8 +17,8 @@ use crate::{
 use std::sync::Arc;
 
 mod bundle;
-mod java;
-pub use java::CraftedTake;
+mod crafted_takes;
+pub use crafted_takes::CraftedTake;
 pub mod place;
 
 /// `ServerPlayer.getRecipeBook`: whether the player knows a recipe.

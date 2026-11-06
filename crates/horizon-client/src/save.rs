@@ -52,11 +52,11 @@ use std::{
 pub const VERSION_NAME: &str = horizon_core::VANILLA_VERSION;
 
 mod gateway;
-mod java;
 #[cfg(test)]
 mod loot_tests;
-use java::PresetDimensions;
-pub use java::{PRESET_KEY, preset_dimensions};
+mod mod_presets;
+use mod_presets::PresetDimensions;
+pub use mod_presets::{PRESET_KEY, preset_dimensions};
 
 /// Snapshot live block entities and custom names for a save batch without
 /// mutating the world. Each map is visited once, retaining its iteration order

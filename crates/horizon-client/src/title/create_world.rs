@@ -6,7 +6,7 @@ use crate::{
     text::Text,
     ui,
 };
-mod java;
+mod mod_presets;
 
 /// MenuTabBar.HEIGHT: the header above the tab area.
 const TAB_BAR: f32 = 24.0;

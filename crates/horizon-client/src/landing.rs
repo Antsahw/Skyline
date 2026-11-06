@@ -24,7 +24,7 @@ use horizon_world::{
     registry::BlockStateId,
 };
 use std::{collections::BTreeMap, fs, path::Path};
-mod java;
+mod routed_fall;
 
 /// A living entity is about to handle a fall (`LivingFallEvent`). Mods may
 /// change the distance and damage multiplier, or cancel fall handling.

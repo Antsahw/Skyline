@@ -1,7 +1,7 @@
 //! Data packs (`<world>/datapacks`: folders and zips with `pack.mcmeta`) and
 //! the parts of them commands use: `.mcfunction` functions (with macros and
 //! line continuation), function tags and predicates.
-mod java;
+mod mod_jars;
 mod reader;
 use crate::zip::Zip;
 use horizon_world::{

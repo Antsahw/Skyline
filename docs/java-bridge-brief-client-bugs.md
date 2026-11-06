@@ -73,7 +73,7 @@ java-bridge.md, Status.
 global statics (HC:678) set by any player's size input (HC:3895-3901); the game sends only the GUI-scaled size
 (`java_screen.rs:514-520`). PIPs prepared at that scale (`HorizonGraphics.java:145`, `guiScale()` :371), redrawn ≤
 every 100 ms. GPU images capped at 512 px with integer shrink (`readPending` :480-515, `MAX_IMAGE` :519,
-`shrink` :523). Rust: 16 HUD atlas slots of 512 (`horizon-client-render/src/hud/java.rs:18-19`), nearest-neighbour.
+`shrink` :523). Rust: 16 HUD atlas slots of 512 (`horizon-client-render/src/hud/mod_textures.rs:18-19`), nearest-neighbour.
 
 **Cause:** World Map (certain): 1281x720 → shrink 3 → **427x240** stretched (regress `maps-server` even pins
 427x240). Minimap: rendered for a 720p scale-3 window, upscaled 2–3× at 1440p/4K. Anything 513–1024 px halved.

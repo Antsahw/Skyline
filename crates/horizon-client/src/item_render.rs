@@ -11,9 +11,9 @@ mod glint_atlas;
 #[cfg(test)]
 mod glint_tests;
 pub mod gui;
-mod java;
+mod mod_quads;
 mod special;
-pub use java::{java_item_models_from_json, set_java_item_models};
+pub use mod_quads::{java_item_models_from_json, set_java_item_models};
 
 use crate::{
     block_entity_render::{ModelPart, diffuse},
