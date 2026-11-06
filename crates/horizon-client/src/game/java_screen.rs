@@ -28,11 +28,80 @@ pub(super) const KEYS: &str = "horizon:java_keys";
 /// (`{"kind": "modconfig", "mod": id}`): the server opens it as a client-only screen.
 pub(super) const CONFIG_MODS: &str = "horizon:java_config_mods";
 
+/// Server to game: the Java mods' key bindings (`[{name, category, key, default, label,
+/// categoryLabel}]`, labels in the server's language), sent as a player joins and when they
+/// change: the game lists them on its Controls page, keeps the player's own keys for them in
+/// options.txt (`key_<name>`), and names the mappings a key is bound to in its `bind` input
+/// (`"mappings": [name, ...]`), which Java sets in that player's keys only.
+pub(super) const KEY_MAPPINGS: &str = "horizon:java_key_mappings";
+
+/// Server to game: the player's field of view as the Java mods make it (`Camera.calculateFov`'s
+/// hooks: a zoom mod's), over vanilla's: a number, the scale the camera takes (1: none), sent
+/// when it changes.
+pub(super) const VIEW: &str = "horizon:java_view";
+
 /// The keys a server's Java mods bind, and which of them this game told it are down.
 #[derive(Default)]
 pub(super) struct JavaBinds {
     keys: std::collections::HashSet<i32>,
     down: std::collections::HashSet<i32>,
+}
+
+/// The Java mods' field-of-view scale ([`VIEW`]): the last told, and the two ticks it eases
+/// between in frames.
+pub(super) struct JavaView {
+    target: f32,
+    old: f32,
+    now: f32,
+}
+impl Default for JavaView {
+    fn default() -> Self {
+        Self {
+            target: 1.0,
+            old: 1.0,
+            now: 1.0,
+        }
+    }
+}
+impl JavaView {
+    /// A client tick: the scale told since is this tick's.
+    pub(super) fn tick(&mut self) {
+        self.old = self.now;
+        self.now = self.target;
+    }
+    /// The scale in a frame, `partial` into the tick.
+    pub(super) fn scale(&self, partial: f32) -> f32 {
+        let s = self.old + (self.now - self.old) * partial.clamp(0.0, 1.0);
+        if s.is_finite() && s > 0.0 { s } else { 1.0 }
+    }
+}
+
+/// The mods' key bindings in [`KEY_MAPPINGS`]'s JSON.
+fn mod_keys(data: &[u8]) -> Option<Vec<horizon_client::keybinds::ModKey>> {
+    let list = serde_json::from_slice::<Vec<Value>>(data).ok()?;
+    let text = |o: &Value, k: &str| o.get(k).and_then(Value::as_str).unwrap_or("").to_owned();
+    Some(
+        list.iter()
+            .filter_map(|o| {
+                let name = o.get("name")?.as_str()?;
+                Some(horizon_client::keybinds::ModKey {
+                    name: horizon_client::keybinds::intern(name),
+                    category: text(o, "category"),
+                    default: o
+                        .get("default")
+                        .and_then(Value::as_str)
+                        .unwrap_or("key.keyboard.unknown")
+                        .to_owned(),
+                    label: o
+                        .get("label")
+                        .and_then(Value::as_str)
+                        .unwrap_or(name)
+                        .to_owned(),
+                    category_label: text(o, "categoryLabel"),
+                })
+            })
+            .collect(),
+    )
 }
 /// The window of a client-only screen (a mod's `Gui.setScreen` with no menu: its settings, a
 /// guide book): no menu's window is open under it. Its frames say this window, and
@@ -177,6 +246,30 @@ impl Game<'_> {
         }
     }
 
+    /// The server's Java mods' key bindings ([`KEY_MAPPINGS`]): the Controls page's rows.
+    pub(super) fn remote_java_key_mappings(&mut self, data: &[u8]) {
+        if let Some(mods) = mod_keys(data) {
+            self.settings.keys.set_mods(mods);
+        }
+    }
+
+    /// The field-of-view scale the server's Java mods make ([`VIEW`]).
+    pub(super) fn remote_java_view(&mut self, data: &[u8]) {
+        if let Ok(scale) = serde_json::from_slice::<f32>(data) {
+            self.java.view.target = if scale.is_finite() && scale > 0.0 {
+                scale
+            } else {
+                1.0
+            };
+        }
+    }
+
+    /// The mods' mappings the player's Controls bind to an input (`key.keyboard.g`), for the
+    /// `bind` input's `mappings`; `None` when the server told none (it matches by its keys).
+    fn java_mappings_for(&self, key: &str) -> Option<Vec<&'static str>> {
+        (!self.settings.keys.mod_keys().is_empty()).then(|| self.settings.keys.mods_for(key))
+    }
+
     /// The server's Java mods with a settings screen ([`CONFIG_MODS`]): the Mods page's list.
     pub(super) fn remote_java_config_mods(&mut self, data: &[u8]) {
         if let Ok(mods) = serde_json::from_slice::<Vec<(String, String)>>(data) {
@@ -210,14 +303,22 @@ impl Game<'_> {
     /// A key of the window, for Java mods' key bindings: pressed while playing (no screen), or
     /// released after it was sent down (KeyboardHandler.keyPress: KeyMapping.set and click).
     pub(super) fn java_bind_key(&mut self, key: KeyCode, pressed: bool) {
-        if self.java.binds.keys.is_empty() || self.remote.is_none() {
+        if (self.java.binds.keys.is_empty() && self.settings.keys.mod_keys().is_empty())
+            || self.remote.is_none()
+        {
             return;
         }
         let Some(code) = sdl_key(key) else {
             return;
         };
+        // The mods' mappings this key is bound to in the player's Controls.
+        let mappings =
+            horizon_client::keybinds::key_name(key).and_then(|name| self.java_mappings_for(name));
         // -1: a mod takes every key (MaLiLib's hotkeys, in KeyboardHandler.keyPress).
-        if !self.java.binds.keys.contains(&code) && !self.java.binds.keys.contains(&-1) {
+        if !self.java.binds.keys.contains(&code)
+            && !self.java.binds.keys.contains(&-1)
+            && mappings.as_ref().is_none_or(Vec::is_empty)
+        {
             return;
         }
         let send = if pressed {
@@ -235,8 +336,11 @@ impl Game<'_> {
             }
             #[cfg(feature = "java-mods")]
             super::java_device::key(code, sdl_keycode(key, code), mods, pressed);
-            let input = json!({"kind": "bind", "key": code, "keycode": sdl_keycode(key, code),
+            let mut input = json!({"kind": "bind", "key": code, "keycode": sdl_keycode(key, code),
                 "mods": mods, "down": pressed});
+            if let Some(mappings) = mappings {
+                input["mappings"] = json!(mappings);
+            }
             // This game's own client has the mods' key bindings.
             #[cfg(feature = "java-mods")]
             if Self::own_client_takes(&input) {
@@ -273,9 +377,12 @@ impl Game<'_> {
     /// `-100 - button` is bound ([`KEYS`]), released after it was sent down.
     pub(super) fn java_bind_mouse(&mut self, button: winit::event::MouseButton, pressed: bool) {
         use winit::event::MouseButton as B;
-        if self.java.binds.keys.is_empty() || self.remote.is_none() {
+        if (self.java.binds.keys.is_empty() && self.settings.keys.mod_keys().is_empty())
+            || self.remote.is_none()
+        {
             return;
         }
+        let mappings = self.java_mappings_for(&horizon_client::keybinds::mouse_name(button));
         // SDL's numbers, as 26.3's InputConstants.Type.MOUSE keys are (left 1, middle 2, right 3).
         let number = match button {
             B::Left => 1,
@@ -286,7 +393,7 @@ impl Game<'_> {
             B::Other(n) => i32::from(n),
         };
         let code = -100 - number;
-        if !self.java.binds.keys.contains(&code) {
+        if !self.java.binds.keys.contains(&code) && mappings.as_ref().is_none_or(Vec::is_empty) {
             return;
         }
         let send = if pressed {
@@ -295,9 +402,11 @@ impl Game<'_> {
             self.java.binds.down.remove(&code)
         };
         if send {
-            let data = json!({"kind": "bind", "mouse": number, "down": pressed})
-                .to_string()
-                .into_bytes();
+            let mut input = json!({"kind": "bind", "mouse": number, "down": pressed});
+            if let Some(mappings) = mappings {
+                input["mappings"] = json!(mappings);
+            }
+            let data = input.to_string().into_bytes();
             self.send(S::CustomPayload(CustomPayload {
                 channel: INPUT.into(),
                 data,

@@ -278,6 +278,9 @@ impl Game<'_> {
             Ok(keys) => self.remote_java_keys(&serde_json::to_vec(&keys).unwrap_or_default()),
             Err(e) => log::warn!("Java mods: this game's own client's key bindings: {e}"),
         }
+        if let Ok(mappings) = horizon_jvm::events::key_mappings() {
+            self.remote_java_key_mappings(mappings.as_bytes());
+        }
         match horizon_jvm::events::config_mods() {
             Ok(mods) => {
                 self.remote_java_config_mods(&serde_json::to_vec(&mods).unwrap_or_default())
@@ -319,6 +322,9 @@ impl Game<'_> {
             && let Ok(keys) = horizon_jvm::events::bound_keys()
         {
             self.remote_java_keys(&serde_json::to_vec(&keys).unwrap_or_default());
+            if let Ok(mappings) = horizon_jvm::events::key_mappings() {
+                self.remote_java_key_mappings(mappings.as_bytes());
+            }
         }
         let Some(p) = self.player.as_ref() else {
             return;
@@ -392,6 +398,9 @@ impl Game<'_> {
                 }
                 horizon_jvm::events::Action::HudFrame { frame, .. } => {
                     self.remote_java_hud(frame.as_bytes());
+                }
+                horizon_jvm::events::Action::View { scale, .. } => {
+                    self.remote_java_view(&serde_json::to_vec(&scale).unwrap_or_default());
                 }
                 horizon_jvm::events::Action::OverlayFrame { frame, .. } => {
                     self.remote_java_overlay(frame.as_bytes());

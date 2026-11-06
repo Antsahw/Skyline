@@ -81,6 +81,8 @@ impl Game<'_> {
     /// `Camera.tick`: the eye height and the field-of-view modifier ease
     /// halfway toward the player's each tick.
     pub(super) fn tick_fov(&mut self) {
+        // The Java mods' scale (a zoom mod's) eases over the tick as the modifier does.
+        self.java.view.tick();
         let first_person = self.camera_type.first_person();
         let effect = self.fov_effect_scale();
         let target = self.fov_player().map_or(1.0, |player| {
@@ -138,6 +140,11 @@ impl Game<'_> {
         let vanilla = self.zoomed_fov_degrees(fov);
         let mut degrees = vanilla;
         self.native_compute_fov(partial, camera, &mut degrees);
+        // The Java mods' hooks on Camera.calculateFov (Zoomify's zoom), as a scale of vanilla's.
+        let java = self.java.view.scale(partial);
+        if java != 1.0 && degrees.is_finite() {
+            degrees = (degrees * java).clamp(1.0, 179.0);
+        }
         if degrees.is_finite() && (1.0..=179.0).contains(&degrees) {
             degrees
         } else {

@@ -304,10 +304,44 @@ pub fn learn_layout(event: &winit::event::KeyEvent) {
     }
 }
 
+/// A Java mod's key binding (its `KeyMapping`), as the server's mods describe it: listed on
+/// the Controls page after vanilla's, saved as `key_<name>:<key>` with them.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ModKey {
+    pub name: &'static str,
+    /// `KeyMapping.Category`'s id (`minecraft:misc`: one of vanilla's categories).
+    pub category: String,
+    pub default: String,
+    /// The mapping's and its category's names in the client's language, from the mod.
+    pub label: String,
+    pub category_label: String,
+}
+
+/// A mod's mapping name as `&'static str`, like vanilla's: each name is kept once for the
+/// whole run (a server's mods name a few dozen).
+pub fn intern(name: &str) -> &'static str {
+    static NAMES: std::sync::Mutex<Vec<&'static str>> = std::sync::Mutex::new(Vec::new());
+    if let Some(n) = MAPPINGS.iter().find(|m| m.0 == name) {
+        return n.0;
+    }
+    let mut names = NAMES.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(n) = names.iter().find(|n| **n == name) {
+        return n;
+    }
+    let n: &'static str = Box::leak(name.to_owned().into_boxed_str());
+    names.push(n);
+    n
+}
+
 /// Current bindings by mapping name.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct KeyBinds {
     keys: BTreeMap<&'static str, String>,
+    /// The Java mods' mappings the server told this game (none without them).
+    mods: Vec<ModKey>,
+    /// Mods' mappings as options.txt has them (`key_<name>`), kept whether or not their mods
+    /// are here now, and written back.
+    saved_mods: BTreeMap<String, String>,
 }
 impl Default for KeyBinds {
     fn default() -> Self {
@@ -316,6 +350,8 @@ impl Default for KeyBinds {
                 .iter()
                 .map(|(n, d, _)| (*n, (*d).to_owned()))
                 .collect(),
+            mods: Vec::new(),
+            saved_mods: BTreeMap::new(),
         }
     }
 }
@@ -344,12 +380,22 @@ impl KeyBinds {
             .find(|m| m.0 == name)
             .map_or("key.keyboard.unknown", |m| m.1)
     }
+    /// The default key of a vanilla or mod mapping.
+    pub fn default_key(&self, name: &str) -> &str {
+        match self.mods.iter().find(|m| m.name == name) {
+            Some(m) => &m.default,
+            None => Self::default_of(name),
+        }
+    }
     pub fn is_default(&self, name: &str) -> bool {
-        self.get(name) == Self::default_of(name)
+        self.get(name) == self.default_key(name)
     }
     pub fn set(&mut self, name: &str, key: &str) {
         if let Some((n, _, _)) = MAPPINGS.iter().find(|m| m.0 == name) {
             self.keys.insert(n, key.to_owned());
+        } else if let Some(m) = self.mods.iter().find(|m| m.name == name) {
+            self.keys.insert(m.name, key.to_owned());
+            self.saved_mods.insert(m.name.to_owned(), key.to_owned());
         }
     }
     pub fn saved(&self) -> Vec<(&'static str, String)> {
@@ -358,10 +404,58 @@ impl KeyBinds {
             .map(|(n, _, _)| (*n, self.get(n).to_owned()))
             .collect()
     }
-    pub fn reset_all(&mut self) {
-        *self = Self::default();
+    /// Mods' mappings to write to options.txt (`key_<name>`), these mods' and earlier ones'.
+    pub fn saved_mods(&self) -> &BTreeMap<String, String> {
+        &self.saved_mods
     }
-    /// Mappings sharing `name`'s key (KeyMapping.same), for conflict marks.
+    /// Mods' mappings read from options.txt, applied when their mods are told ([`Self::set_mods`]).
+    pub fn load_mods(&mut self, saved: BTreeMap<String, String>) {
+        self.saved_mods = saved;
+        for m in self.mods.clone() {
+            let key = self.saved_mods.get(m.name).cloned().unwrap_or(m.default);
+            self.keys.insert(m.name, key);
+        }
+    }
+    /// The Java mods' mappings now (a server's, told as the player joins; none after leaving):
+    /// each on its saved key, else its default.
+    pub fn set_mods(&mut self, mods: Vec<ModKey>) {
+        for m in std::mem::take(&mut self.mods) {
+            self.keys.remove(m.name);
+        }
+        for m in &mods {
+            let key = self
+                .saved_mods
+                .get(m.name)
+                .cloned()
+                .unwrap_or_else(|| m.default.clone());
+            self.keys.insert(m.name, key.clone());
+            self.saved_mods.insert(m.name.to_owned(), key);
+        }
+        self.mods = mods;
+    }
+    pub fn mod_keys(&self) -> &[ModKey] {
+        &self.mods
+    }
+    /// The mods' mappings bound to `key` (an options.txt key name), in their order.
+    pub fn mods_for(&self, key: &str) -> Vec<&'static str> {
+        self.mods
+            .iter()
+            .filter(|m| self.get(m.name) == key)
+            .map(|m| m.name)
+            .collect()
+    }
+    pub fn reset_all(&mut self) {
+        let mods = std::mem::take(&mut self.mods);
+        for m in &mods {
+            self.saved_mods.insert(m.name.to_owned(), m.default.clone());
+        }
+        let saved = std::mem::take(&mut self.saved_mods);
+        *self = Self::default();
+        self.saved_mods = saved;
+        self.set_mods(mods);
+    }
+    /// Mappings sharing `name`'s key (KeyMapping.same), for conflict marks: vanilla's and the
+    /// mods' alike.
     pub fn conflicts(&self, name: &str) -> Vec<&'static str> {
         let key = self.get(name);
         if key == "key.keyboard.unknown" {
@@ -369,10 +463,11 @@ impl KeyBinds {
         }
         MAPPINGS
             .iter()
-            .filter(|(n, _, _)| {
+            .map(|m| m.0)
+            .chain(self.mods.iter().map(|m| m.name))
+            .filter(|n| {
                 *n != name && self.get(n) == key && (!self.is_default(n) || !self.is_default(name))
             })
-            .map(|(n, _, _)| *n)
             .collect()
     }
     /// The mapping a physical input triggers (first in list order).
@@ -599,6 +694,49 @@ mod tests {
         assert_eq!(k.translate_all(KeyCode::Digit2), [Ok(KeyCode::Digit2)]);
         assert_eq!(k.translate_all(KeyCode::Digit9), [Ok(KeyCode::Digit9)]);
         assert_eq!(k.translate_all(KeyCode::F3), [Ok(KeyCode::F3)]);
+    }
+    fn zoom(default: &str) -> ModKey {
+        ModKey {
+            name: intern("key.zoomy.zoom"),
+            category: "zoomy:main".into(),
+            default: default.into(),
+            label: "Zoom".into(),
+            category_label: "Zoomy".into(),
+        }
+    }
+    #[test]
+    fn mod_keys_take_saved_keys_rebind_and_conflict_with_vanilla() {
+        let mut k = KeyBinds::default();
+        k.load_mods(BTreeMap::from([(
+            "key.zoomy.zoom".to_owned(),
+            "key.keyboard.v".to_owned(),
+        )]));
+        // Before the server tells its mods, nothing is bound to the saved key.
+        assert!(k.mods_for("key.keyboard.v").is_empty());
+        k.set_mods(vec![zoom("key.keyboard.z")]);
+        assert_eq!(k.get("key.zoomy.zoom"), "key.keyboard.v");
+        assert!(!k.is_default("key.zoomy.zoom"));
+        assert_eq!(k.mods_for("key.keyboard.v"), ["key.zoomy.zoom"]);
+        // Moved to C, Save Toolbar's: both are marked (KeyMapping.same, one not default).
+        k.set("key.zoomy.zoom", "key.keyboard.c");
+        assert!(
+            k.conflicts("key.zoomy.zoom")
+                .contains(&"key.saveToolbarActivator")
+        );
+        assert_eq!(k.conflicts("key.saveToolbarActivator"), ["key.zoomy.zoom"]);
+        // A mod key changes no vanilla key's meaning.
+        assert_eq!(k.translate_all(KeyCode::KeyC), [Ok(KeyCode::KeyC)]);
+        k.set("key.zoomy.zoom", "key.keyboard.h");
+        assert_eq!(
+            k.saved_mods().get("key.zoomy.zoom").map(String::as_str),
+            Some("key.keyboard.h")
+        );
+        k.reset_all();
+        assert_eq!(k.get("key.zoomy.zoom"), "key.keyboard.z");
+        // Leaving the server: its mods' keys go, their saved keys stay.
+        k.set_mods(Vec::new());
+        assert!(k.mods_for("key.keyboard.z").is_empty());
+        assert!(k.saved_mods().contains_key("key.zoomy.zoom"));
     }
     #[test]
     fn display_names() {

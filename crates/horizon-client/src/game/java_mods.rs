@@ -12,6 +12,8 @@ pub(super) struct JavaGame {
     pub(super) screen: Option<super::java_screen::JavaScreen>,
     /// The keys the server's Java mods bind (game/java_screen.rs).
     pub(super) binds: super::java_screen::JavaBinds,
+    /// The field-of-view scale the Java mods make (game/java_screen.rs's VIEW).
+    pub(super) view: super::java_screen::JavaView,
     /// What Java mods last drew on the HUD (game/java_screen.rs).
     pub(super) hud: Option<super::java_screen::JavaHud>,
     pub(super) overlay: super::java_screen::JavaOverlay,

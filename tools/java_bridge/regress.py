@@ -784,6 +784,49 @@ CASES = {
         steps=['$C key g tap >/dev/null; sleep 1; $C key g tap >/dev/null; sleep 1; $C messages > $S/messages.json'],
         checks=[check_file("messages.json", r"key G pressed by", "the mod saw G")],
     ),
+    "keys-rebind": dict(
+        about="Mods' key bindings in Horizon's Controls (keysmod's G under Miscellaneous): rebound to H there, "
+              "saved in options.txt; H then reaches the mod, G no longer does",
+        fixtures=["keysmod"], scene="none",
+        steps=['$C options keybinds >/dev/null; sleep 1; $C click field-0 >/dev/null; $C type ping >/dev/null; sleep 0.5; $C ui > $S/ui1.json',
+               '$C click g >/dev/null; sleep 0.3; $C key h tap >/dev/null; sleep 0.5; $C ui > $S/ui2.json',
+               'for i in 1 2 3 4 5; do $C state | grep -q \'"screen":"playing"\' && break; $C key esc tap >/dev/null; sleep 0.4; done; '
+               'cp $S/options.txt $S/options-saved.txt; $C key g tap >/dev/null; sleep 1.5; $C messages > $S/after-g.json',
+               '$C key h tap >/dev/null; sleep 1.5; $C messages > $S/after-h.json'],
+        checks=[check_file("ui1.json", r'"id":"g"', "Key Binds lists the mod's mapping (on G)"),
+                check_file("ui2.json", r'"id":"h"', "rebound to H on the Controls page"),
+                check_file("options-saved.txt", r"(?m)^key_key\.horizon_keys\.ping:key\.keyboard\.h$", "saved as key_<name>:<key>"),
+                check_file("after-g.json", r"\A(?![\s\S]*key G pressed by)", "G no longer reaches the mod"),
+                check_file("after-h.json", r"key G pressed by", "H reaches the mod's mapping")],
+        look="the Key Binds page filtered to the mod's row, H on its button",
+    ),
+    "keys-server": dict(
+        about="A dedicated server's player: the mods' key bindings in their Controls, rebound there (G to H), pressed by name",
+        fixtures=["keysmod"], scene="none", server=True,
+        steps=['sleep 3; $G options keybinds >/dev/null; sleep 1; $G click field-0 >/dev/null; $G type ping >/dev/null; sleep 0.5; $G ui > $S/ui1.json',
+               '$G click g >/dev/null; sleep 0.3; $G key h tap >/dev/null; sleep 0.5; $G ui > $S/ui2.json; '
+               'for i in 1 2 3 4 5; do $G state | grep -q \'"screen":"playing"\' && break; $G key esc tap >/dev/null; sleep 0.4; done; '
+               '$G key h tap >/dev/null; sleep 1.5; $G messages > $S/after-h.json'],
+        checks=[check_file("ui1.json", r'"id":"g"', "the player's Key Binds lists the server mod's mapping"),
+                check_file("ui2.json", r'"id":"h"', "rebound to H"),
+                check_file("after-h.json", r"key G pressed by", "H reaches the mod for that player")],
+    ),
+    "fov": dict(
+        about="Mods' field of view on Horizon's camera (fovmod: @ModifyReturnValue on Camera.calculateFov halves it "
+              "while its Z key, a plain new KeyMapping in its own category, is held)",
+        fixtures=["fovmod"], scene="none",
+        steps=['$C state > $S/before.json',
+               '$C key z down >/dev/null; sleep 1.5; $C state > $S/zoomed.json',
+               '$C key z up >/dev/null; sleep 1.5; $C state > $S/after.json',
+               '$C options keybinds >/dev/null; sleep 1; $C click field-0 >/dev/null; $C type zoom >/dev/null; sleep 0.5; $C ui > $S/ui.json'],
+        checks=[check_log(r"mod hook\(s\) on the camera's field of view: \S*CameraMixin\S* \(@ModifyReturnValue on calculateFov\)",
+                          "the mod's hook on Camera.calculateFov is found"),
+                check_log(r"mod key binding\(s\): .*key\.horizon_fov\.zoom", "a plain new KeyMapping is a mod's key binding"),
+                check_file("zoomed.json", r'"fov":35(\.0+)?[,}]', "Z held: the camera's FOV is half of 70"),
+                check_file("after.json", r'"fov":70(\.0+)?[,}]', "Z released: back to 70"),
+                check_file("ui.json", r'"id":"z"', "Key Binds lists the zoom key")],
+        look="none-2.png zoomed in (half the FOV) against none-3.png; none-4.png the Key Binds page with 'Horizon FOV'",
+    ),
     "entity": dict(
         about="A mod's mob (the crittermod fixture): summoned, ticked, drawn",
         fixtures=["crittermod"], scene="entity",

@@ -351,7 +351,7 @@ public final class HorizonDeviceClient {
     /** A key of the player's game while playing (a device mod's key binding, its key handlers). */
     public static void key(int key, int keycode, int mods, boolean down) {
         if (!on) return;
-        HorizonClient.bind(local.getUUID(), key, down);
+        HorizonClient.bind(local.getUUID(), key, down, null);
         try {
             HorizonClient.firePress(key, keycode, mods, down);
         } catch (Throwable t) {

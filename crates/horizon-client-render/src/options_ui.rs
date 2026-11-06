@@ -10,7 +10,7 @@ pub use crate::settings::Opt;
 use crate::{
     gamepad::{self, GlyphStyle},
     hud::{HudAtlas, HudBatch, rgba},
-    keybinds::{self, CATEGORIES, KeyBinds, MAPPINGS},
+    keybinds::{self, CATEGORIES, MAPPINGS},
     lang::{self, LanguageInfo},
     settings::{SOUND_SOURCES, Settings},
     text::{self, Style, Text},
@@ -19,6 +19,13 @@ use crate::{
 
 fn tr(key: &str) -> Text {
     Text::translate(key, &[])
+}
+/// A key mapping's name: vanilla's translated, a Java mod's as its mod names it.
+fn key_label(s: &Settings, name: &str) -> Text {
+    match s.keys.mod_keys().iter().find(|m| m.name == name) {
+        Some(m) => Text::literal(m.label.clone()),
+        None => tr(name),
+    }
 }
 fn generic(caption: &str, value: Text) -> Text {
     Text::translate("options.generic_value", &[tr(caption), value])
@@ -1985,7 +1992,7 @@ fn tooltip_text(s: &Settings, wd: &Widget) -> Option<Text> {
             }
             let names = conflicts
                 .iter()
-                .map(|c| lang::get(c))
+                .map(|c| key_label(s, c).plain())
                 .collect::<Vec<_>>()
                 .join(", ");
             Some(Text::translate(
@@ -2056,7 +2063,7 @@ fn narrate_widget(
             Act::Key(name) => {
                 let bound = s.keys.get(name) != "key.keyboard.unknown";
                 n.what = What::Named {
-                    title: bind(tr(name), bound),
+                    title: bind(key_label(s, name), bound),
                     active,
                 };
             }
@@ -2069,7 +2076,7 @@ fn narrate_widget(
             }
             Act::ResetKey(name) => {
                 n.what = What::Named {
-                    title: t("narrator.controls.reset", &[tr(name)]),
+                    title: t("narrator.controls.reset", &[key_label(s, name)]),
                     active,
                 };
             }
@@ -3108,18 +3115,48 @@ impl OptionsUi {
                     list: false,
                     row: 0,
                 });
-                let mut mappings: Vec<(&str, &str)> =
-                    MAPPINGS.iter().map(|(n, _, c)| (*n, *c)).collect();
+                // Vanilla's mappings, then the Java mods' (theirs in vanilla's categories
+                // there, their own categories after, in the order the mods' list has them):
+                // (name, category order, category, label).
+                let mod_categories: Vec<&str> = {
+                    let mut seen: Vec<&str> = Vec::new();
+                    for m in s.keys.mod_keys() {
+                        if !m.category.starts_with("minecraft:")
+                            && !seen.contains(&m.category.as_str())
+                        {
+                            seen.push(&m.category);
+                        }
+                    }
+                    seen
+                };
+                let mut mappings: Vec<(&'static str, usize, String, String)> = MAPPINGS
+                    .iter()
+                    .map(|(n, _, c)| {
+                        let order = CATEGORIES.iter().position(|x| x == c).unwrap_or(99);
+                        (*n, order, (*c).to_owned(), lang::get(n))
+                    })
+                    .collect();
+                for m in s.keys.mod_keys() {
+                    let order = match m.category.strip_prefix("minecraft:") {
+                        Some(c) => CATEGORIES.iter().position(|x| *x == c).unwrap_or(99),
+                        None => {
+                            100 + mod_categories
+                                .iter()
+                                .position(|c| *c == m.category)
+                                .unwrap_or(0)
+                        }
+                    };
+                    let category = m
+                        .category
+                        .strip_prefix("minecraft:")
+                        .map_or_else(|| m.category.clone(), str::to_owned);
+                    mappings.push((m.name, order, category, m.label.clone()));
+                }
                 let query = self.settings_search.value.to_lowercase();
-                mappings.retain(|(name, _)| {
-                    query.is_empty() || lang::get(name).to_lowercase().contains(&query)
+                mappings.retain(|(_, _, _, label)| {
+                    query.is_empty() || label.to_lowercase().contains(&query)
                 });
-                mappings.sort_by(|a, b| {
-                    let ca = CATEGORIES.iter().position(|c| *c == a.1).unwrap_or(99);
-                    let cb = CATEGORIES.iter().position(|c| *c == b.1).unwrap_or(99);
-                    ca.cmp(&cb)
-                        .then_with(|| lang::get(a.0).cmp(&lang::get(b.0)))
-                });
+                mappings.sort_by(|a, b| a.1.cmp(&b.1).then_with(|| a.3.cmp(&b.3)));
                 let row_left = cx - 170.0;
                 let scrollbar_x = row_left + 340.0 + 6.0 + 2.0;
                 // VideoSettingsScreen.addTitle: a changed graphics API needs a restart.
@@ -3140,18 +3177,27 @@ impl OptionsUi {
                 }
                 let list_start = out.len();
                 let mut y = top + 2.0 - self.scroll;
-                let mut last_category = "";
-                for (name, category) in mappings {
+                let mut last_category = String::new();
+                for (name, order, category, label) in mappings {
                     if category != last_category {
-                        last_category = category;
                         rows.begin(&out, y);
-                        let label =
+                        let heading = if order < 100 {
                             Text::translate(&format!("key.category.minecraft.{category}"), &[])
-                                .with_style(&Style {
-                                    bold: Some(true),
-                                    underlined: Some(true),
-                                    ..Style::default()
-                                });
+                        } else {
+                            Text::literal(
+                                s.keys
+                                    .mod_keys()
+                                    .iter()
+                                    .find(|m| m.category == category)
+                                    .map_or(category.as_str(), |m| m.category_label.as_str()),
+                            )
+                        };
+                        last_category = category;
+                        let label = heading.with_style(&Style {
+                            bold: Some(true),
+                            underlined: Some(true),
+                            ..Style::default()
+                        });
                         out.push(Widget {
                             x: 0.0,
                             y: y + 7.0,
@@ -3175,7 +3221,7 @@ impl OptionsUi {
                         w: 200.0,
                         h: 9.0,
                         kind: WKind::Text {
-                            text: tr(name),
+                            text: Text::literal(label),
                             color: u32::MAX,
                             centered: false,
                         },
@@ -3203,7 +3249,7 @@ impl OptionsUi {
                     }
                     let reset_x = scrollbar_x - 50.0 - 10.0;
                     let change_x = reset_x - 5.0 - 75.0;
-                    let name_static = MAPPINGS.iter().find(|m| m.0 == name).map_or("", |m| m.0);
+                    let name_static = name;
                     out.push(button(change_x, y, 75.0, message, Act::Key(name_static)));
                     if !conflicts.is_empty() {
                         out.push(Widget {
@@ -4342,7 +4388,8 @@ impl OptionsUi {
                         }
                         Act::Key(name) => self.selected_key = Some(name),
                         Act::ResetKey(name) => {
-                            s.keys.set(name, KeyBinds::default_of(name));
+                            let default = s.keys.default_key(name).to_owned();
+                            s.keys.set(name, &default);
                             events.push(Event::Changed);
                         }
                         Act::ResetKeys => {
@@ -5293,7 +5340,8 @@ impl OptionsUi {
                         }
                         Act::Key(name) => self.selected_key = Some(name),
                         Act::ResetKey(name) => {
-                            s.keys.set(name, KeyBinds::default_of(name));
+                            let default = s.keys.default_key(name).to_owned();
+                            s.keys.set(name, &default);
                             events.push(Event::Changed);
                         }
                         Act::ResetKeys => {

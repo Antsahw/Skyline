@@ -6,6 +6,8 @@ impl Game<'_> {
     /// A new server: its Java mods (if any) say which keys they bind once we're in.
     pub(super) fn java_new_server(&mut self) {
         self.java.binds = Default::default();
+        self.java.view = Default::default();
+        self.settings.keys.set_mods(Vec::new());
         self.java.overlay = Default::default();
         self.settings.mods.java.clear();
     }
@@ -21,6 +23,8 @@ impl Game<'_> {
             super::super::java_screen::HUD_CHANNEL if !own => self.remote_java_hud(data),
             super::super::java_screen::CHANNEL => self.remote_java_screen(data),
             super::super::java_screen::KEYS if !own => self.remote_java_keys(data),
+            super::super::java_screen::KEY_MAPPINGS if !own => self.remote_java_key_mappings(data),
+            super::super::java_screen::VIEW if !own => self.remote_java_view(data),
             #[cfg(feature = "java-mods")]
             super::super::java_entities::CHANNEL => self.remote_java_entities(data),
             #[cfg(feature = "java-mods")]
