@@ -1177,7 +1177,7 @@ public final class HorizonServer {
             // The real constructor, so a mirror has what vanilla's code expects of a player:
             // attributes, synced data, inventory, food, abilities. The mixins answer what it
             // asks of the server that only a running world would know.
-            player = new ServerPlayer(server, level, new GameProfile(uuid, name),
+            player = new ServerPlayer(server, level, HorizonSkins.profile(uuid, name),
                     net.minecraft.server.level.ClientInformation.createDefault());
             mirror(player);
             ServerGamePacketListenerImpl connection = allocate(ServerGamePacketListenerImpl.class);

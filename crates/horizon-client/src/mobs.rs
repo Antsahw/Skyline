@@ -1154,6 +1154,9 @@ pub struct Extra {
     /// The skin layers a player hides (`PlayerModelPart` bits, set to
     /// `Avatar.DATA_PLAYER_MODE_CUSTOMISATION` inverted); 0 shows all.
     pub hidden_model_parts: u8,
+    /// The skin layers a mod draws its own way on this player (3D skin layers' voxels, from
+    /// the Java mods), same bits: Horizon's own are left out.
+    pub mod_drawn_parts: u8,
     /// `AvatarRenderState.isSpectator`: a player in spectator mode shows only its head.
     pub spectator: bool,
     pub elytra: ElytraAnimation,

@@ -737,7 +737,12 @@ public final class HorizonEntityRender {
     }
 
     /** Each mirrored player's client avatar: what player renderers draw. */
-    private static final Map<java.util.UUID, net.minecraft.client.player.RemotePlayer> AVATARS = new java.util.HashMap<>();
+    private static final Map<java.util.UUID, net.minecraft.client.player.RemotePlayer> AVATARS = new ConcurrentHashMap<>();
+
+    /** A player's skin changed (HorizonSkins): its avatar is made again, its skin looked up anew. */
+    static void forgetAvatar(java.util.UUID id) {
+        AVATARS.remove(id);
+    }
 
     /**
      * The player as a client sees another (a RemotePlayer in its client level), where the
@@ -969,9 +974,15 @@ public final class HorizonEntityRender {
             java.util.List<ModelPart> shown = new java.util.ArrayList<>();
             boolean any = false;
             int light = (Integer) submit[4], overlay = (Integer) submit[5];
+            // The parts' names (the model's: "hat", "left_sleeve"), for Horizon to leave its
+            // own versions of the mod's parts out.
+            Map<ModelPart, String> names = new IdentityHashMap<>();
+            partNames(root, names);
+            JsonArray drawn = new JsonArray();
             for (ModelPart part : parts) {
                 if (part != root && ((Map<?, ?>) children.get(part)).isEmpty() && drawnByMod(part, light, overlay)) {
                     any = true;
+                    if (names.containsKey(part)) drawn.add(names.get(part));
                     // The mirrored player's skin parts (the client's settings, which Horizon
                     // keeps itself) are all off: the mod's parts are shown.
                     if (!part.visible) {
@@ -993,6 +1004,7 @@ public final class HorizonEntityRender {
                 JsonObject o = new JsonObject();
                 o.addProperty("tex", texture);
                 o.addProperty("overlay", recorder.overlay);
+                o.add("parts", drawn);
                 StringBuilder v = new StringBuilder(n * 64).append('[');
                 for (int i = 0; i < n; i++) {
                     float[] x = recorder.vertices.get(i);
@@ -1004,7 +1016,8 @@ public final class HorizonEntityRender {
                 }
                 o.add("v", new HorizonJson.Raw(v.append(']').toString()));
                 out.add(o);
-                if (FAILED.add("mod parts drawn")) {
+                // Once per texture: a player's skin arriving shows as a new line.
+                if (FAILED.add("mod parts drawn " + texture)) {
                     Natives.log("Java mods: mods draw " + n / 4 + " quads of a player's model parts their own way (" + texture + ")");
                 }
             } finally {
@@ -1013,6 +1026,15 @@ public final class HorizonEntityRender {
             }
         } catch (Throwable t) {
             if (FAILED.add("mod parts")) Natives.log("Java mods: the player's model parts mods draw couldn't be drawn: " + t);
+        }
+    }
+
+    /** Each part under {@code part} by its name in its parent. */
+    @SuppressWarnings("unchecked")
+    private static void partNames(ModelPart part, Map<ModelPart, String> out) throws ReflectiveOperationException {
+        for (var child : ((Map<String, ModelPart>) children.get(part)).entrySet()) {
+            out.put(child.getValue(), child.getKey());
+            partNames(child.getValue(), out);
         }
     }
 

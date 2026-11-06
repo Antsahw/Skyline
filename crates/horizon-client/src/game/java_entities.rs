@@ -76,6 +76,22 @@ struct Mesh {
     vertices: Vec<[f32; 8]>,
     /// Per vertex: Java's ARGB.
     colors: Vec<u32>,
+    /// A player's model parts the mod draws its own way (3D skin layers' voxels), as
+    /// `PlayerModelPart` bits (`mobs::anim`'s): Horizon leaves its own out.
+    parts: u8,
+}
+
+/// `PlayerModelPart`'s bit of a player model's outer-layer part, by its name in the model.
+fn model_part_bit(name: &str) -> u8 {
+    match name {
+        "jacket" => 1 << 1,
+        "left_sleeve" => 1 << 2,
+        "right_sleeve" => 1 << 3,
+        "left_pants" => 1 << 4,
+        "right_pants" => 1 << 5,
+        "hat" => 1 << 6,
+        _ => 0,
+    }
 }
 
 #[derive(Clone)]
@@ -256,6 +272,9 @@ struct RawModel {
     /// An emissive render type (eyes, glow layers): drawn at full light.
     #[serde(default)]
     glow: bool,
+    /// A player model's parts the mod draws its own way (`HorizonEntityRender.modParts`).
+    #[serde(default)]
+    parts: Vec<String>,
 }
 
 impl RawModel {
@@ -286,6 +305,10 @@ impl RawModel {
             glow: self.glow,
             vertices,
             colors,
+            parts: self
+                .parts
+                .iter()
+                .fold(0, |bits, p| bits | model_part_bit(p)),
         })
     }
 }
@@ -535,6 +558,7 @@ impl Game<'_> {
         if changed {
             self.all_sections_changed();
         }
+        self.java_mod_drawn_parts();
         // Other players on mods' mobs sit there (HumanoidModel's riding pose), as a
         // passengers packet would put them on a vehicle of Horizon's.
         let riders = &self.java.entities.riders;
@@ -546,6 +570,65 @@ impl Game<'_> {
                 m.extra.mount = None;
                 m.extra.passenger = false;
             }
+        }
+    }
+
+    /// The players' outer-layer parts mods draw their own way (3D skin layers' voxels), which
+    /// Horizon then leaves out of its own model of them: those of meshes it can draw (their
+    /// skin in the atlas), so a player whose skin this game hasn't keeps Horizon's.
+    fn java_mod_drawn_parts(&mut self) {
+        let drawn = |s: &Shown| {
+            s.meshes
+                .iter()
+                .filter(|m| m.parts != 0 && self.java_sprite(&m.sprite).is_some())
+                .fold(0u8, |bits, m| bits | m.parts)
+        };
+        let own: u8 = self
+            .java
+            .entities
+            .own
+            .iter()
+            .map(drawn)
+            .fold(0, |a, b| a | b);
+        // A mirrored player's entry: 0x7ff00000 and its entity id's low bits
+        // (HorizonEntityRender.player).
+        let others: HashMap<u32, u8> = self
+            .java
+            .entities
+            .now
+            .iter()
+            .filter(|s| s.kind == "minecraft:player")
+            .map(|s| (s.id as u32 & 0xfffff, drawn(s)))
+            .filter(|(_, bits)| *bits != 0)
+            .collect();
+        let mut seen = own;
+        if let Some(m) = self.player_model.as_mut() {
+            m.extra.mod_drawn_parts = own;
+        }
+        for m in &mut self.mobs {
+            if &*m.kind.id == "minecraft:player" {
+                let bits = others.get(&(m.id & 0xfffff)).copied().unwrap_or(0);
+                m.extra.mod_drawn_parts = bits;
+                seen |= bits;
+            }
+        }
+        static LOGGED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        if seen != 0 && !LOGGED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+            let names: Vec<&str> = [
+                "jacket",
+                "left_sleeve",
+                "right_sleeve",
+                "left_pants",
+                "right_pants",
+                "hat",
+            ]
+            .into_iter()
+            .filter(|n| seen & model_part_bit(n) != 0)
+            .collect();
+            log::info!(
+                "Java mods: Horizon leaves out its own layers mods draw on players: {}",
+                names.join(" ")
+            );
         }
     }
 
@@ -621,6 +704,15 @@ impl Game<'_> {
         let atlas = &self.gui.atlas;
         if let Some(r) = atlas.sprites.get(key) {
             return Some(*r);
+        }
+        // A game's own offline skin (`HorizonSkins.ownId`: `horizon:offline_skin/<uuid>`): this
+        // game's launcher skin when the uuid is its player's, in its skin slot. A downloaded
+        // skin (`skins/<sha1>`) is in the atlas under that key already, once Horizon draws it.
+        if let Some(uuid) = key.strip_prefix("horizon:offline_skin/") {
+            let own = self.remote.as_ref().map(|r| r.profile())?;
+            return (uuid.replace('-', "") == format!("{own:032x}"))
+                .then(|| atlas.sprites.get("horizon/offline_skin").copied())
+                .flatten();
         }
         let (slot, w, h) = self.java_image_slot(key)?;
         let (sprite, side) = horizon_client::hud::java_image_slot(slot);

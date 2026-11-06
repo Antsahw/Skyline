@@ -25,6 +25,8 @@ pub(super) struct JavaGame {
     /// Players who joined while the Java mods' data-pack load functions hadn't run, with the
     /// ticks they have waited, and the ticks since the functions ran (`hold_join`).
     pub(super) held_joins: Vec<(u32, u32, u32)>,
+    /// The launcher's offline skin went to this server's Java mods (`remote/java.rs`).
+    pub(super) own_skin_sent: bool,
 }
 
 #[cfg(feature = "java-mods")]

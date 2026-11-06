@@ -552,6 +552,20 @@ CASES = {
         forbid=[r"the player's model parts mods draw couldn't be drawn"],
         look="none-1: the player from the front; jacket, sleeves and trousers stand out in 3D",
     ),
+    "skinlayers-skin": dict(
+        about="3D Skin Layers on the player's own skin (the launcher's offline skin, a slim test skin with bright "
+              "outer layers): the mod's voxels built from and drawn with it, Horizon's flat layers left out under them",
+        mods=["skinlayers", "fabric-api"], scene="none", skin_fixture=True,
+        steps=['$C command "fill ~-4 ~ ~-4 ~4 ~3 ~4 air" >/dev/null; $C command "time set noon" >/dev/null; '
+               'sleep 6; $C key f5 tap >/dev/null; $C key f5 tap >/dev/null; $C look 0 10 >/dev/null; sleep 4'],
+        checks=[check_log(r"the player's own skin \(slim\) for [0-9a-f-]+ came from its game", "the game sends its offline skin"),
+                check_log(r"mods draw [1-9][0-9]* quads of a player's model parts their own way \(horizon:offline_skin/",
+                          "the layers' meshes are built from and drawn with the player's own skin"),
+                check_log(r"Java mods: Horizon leaves out its own layers mods draw on players: [a-z_ ]*sleeve",
+                          "Horizon's flat layers give way to the mod's (the sleeves too)")],
+        forbid=[r"the player's model parts mods draw couldn't be drawn"],
+        look="none-1: the player from the front: magenta and cyan sleeves on slim arms, green jacket, yellow hat",
+    ),
     "hud": dict(
         about="Jade's tooltip and AppleSkin on Horizon's HUD",
         mods=["fd", "jade", "appleskin"], scene="none", env={"HORIZON_JAVA_DEBUG": "hud"},
@@ -2068,6 +2082,12 @@ def run_game(case, name, jars, out, extra_env, pack=None, join_within=None):
                 (folder / rel).parent.mkdir(parents=True, exist_ok=True)
                 (folder / rel).write_text(text)
             config = {"CONFIG": str(folder)}
+        if case.get("skin_fixture"):
+            # The player's offline skin from the launcher: a test skin made here (slim arms,
+            # bright outer layers), never Mojang's art.
+            skin = out / "fixture-skin.png"
+            subprocess.run([sys.executable, str(TOOLS / "fixture_skin.py"), str(skin)], check=True)
+            config.update(HORIZON_OFFLINE_SKIN=str(skin), HORIZON_OFFLINE_SKIN_MODEL="slim")
         env = dict(os.environ, MODS=str(mods), SCENE=case["scene"], OUT=str(out), NO_BUILD="1", **extra_env,
                    **case.get("env", {}), **config)
         if pack is not None:
