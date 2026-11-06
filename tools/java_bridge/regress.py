@@ -493,7 +493,7 @@ CASES = {
                "$C command \"summon item $(at $X+2.5) $((Y+2)) $(at $Z-1.5) {Item:{id:'minecraft:iron_ingot',count:3},PickupDelay:200}\" >/dev/null; "
                "$C command \"summon item $(at $X+3.5) $((Y+3)) $(at $Z+1.5) {Item:{id:'minecraft:wheat',count:2},PickupDelay:200}\" >/dev/null; "
                "$C command \"summon item $(at $X-1.5) $((Y+3)) $(at $Z-1.5) {Item:{id:'minecraft:cobblestone',count:2},PickupDelay:200}\" >/dev/null; "
-               "$C command \"summon item $(at $X-1.5) $Y $(at $Z+1.5) {Item:{id:'minecraft:raw_iron',count:1},PickupDelay:200}\" >/dev/null; "
+               "$C command \"summon item $(at $X-1.5) $Y $(at $Z+0.5) {Item:{id:'minecraft:raw_iron',count:1},PickupDelay:200}\" >/dev/null; "
                "sleep 15; $C entities 12 > $S/items.json; $C look-at block $((X+2)) $Y $((Z-2)) up >/dev/null; sleep 1"],
         checks=[check_log(r'ber create:depot at .*Item:\{count:3,id:"minecraft:iron_ingot"\}', "the depot holds the thrown ingots"),
                 check_log(r"ber create:millstone at .*(minecraft:wheat|create:wheat_flour)", "the millstone took the wheat"),
@@ -547,6 +547,38 @@ CASES = {
         forbid=[r"no renderer for create:saw", r"no client copy of create:", r"Java mods: drawing create:mechanical_mixer"],
         look="createparts-0: the burner under its basin, the mixer over it, the press over a basin, the saw "
              "with its blade, no pale squares on the floor under them; createparts-2 from closer",
+    ),
+    "createpump": dict(
+        about="Create's pump (bridge-create-1): a pump turned by a motor drinks a water source of Horizon's through "
+              "a pipe into a fluid tank, which draws the water (the client's copy loads the server's update "
+              "packets through the packet listener, Create's sendData goes through the chunk cache's blockChanged; "
+              "the client level's biome tints); pipes draw their arms and rims (a block model's parts in a "
+              "world, addPartsWithInfo, drawn at its place), in water too",
+        mods=["create"], optional=["fabric-api"], scene="createpump", env={"HORIZON_JAVA_DEBUG": "ber"}, timeout=900,
+        steps=['sleep 12; read X Y Z < $S/pos; $C blocks $((X+3)) $Y $((Z-2)) $((X+3)) $Y $((Z-2)) > $S/pit.json',
+               'read X Y Z < $S/pos; $C command "tp @s $(awk "BEGIN{print $X+0.5}") $Y $(awk "BEGIN{print $Z-0.5}") -90 10" >/dev/null; sleep 3',
+               'read X Y Z < $S/pos; $C command "tp @s $(awk "BEGIN{print $X+3.5}") $((Y+1)) $(awk "BEGIN{print $Z+1.5}") 0 55" >/dev/null; sleep 3'],
+        checks=[check_file("pit.json", r'"blocks":\[\]', "the pump drank the water source (Horizon's block gone)"),
+                check_log(r"ber create:fluid_tank at .*: [1-9]\d* model\(s\).*Fluid:\{amount:[1-9]", "the tank holds water and draws it"),
+                check_log(r"create:fluid_pipe\}\[down=false,east=false,north=true,south=true[^\]]*\] draws [1-9]\d* quads in a world",
+                          "the pipe draws its arms and rim (its model's parts in a world)"),
+                check_log(r"create:fluid_pipe\}\[[^\]]*waterlogged=true[^\]]*\] draws [1-9]\d* quads in a world",
+                          "the pipes laid through water too")],
+        forbid=[r"Java mods: drawing create:", r"couldn't load its update packet", r"model in a world couldn't be read"],
+        look="createpump-1: the pipe whole from the pit to the pump, its rim at the open end, water in the tank's "
+             "window; createpump-2: the pipes in the water whole",
+    ),
+    "createfan": dict(
+        about="Create's fan blows the player (bridge-create-1): a mod's block entity setting a mirrored player's "
+              "motion (from its motion as Horizon moved it) reaches the player's client as vanilla's "
+              "ClientboundSetEntityMotionPacket (Natives.playerMotion)",
+        mods=["create"], optional=["fabric-api"], scene="createfan", timeout=900,
+        steps=['read X Y Z < $S/pos; $C command "tp @s $(awk "BEGIN{print $X+0.5}") $Y $(awk "BEGIN{print $Z+0.5}") -90 10" >/dev/null; '
+               'sleep 0.3; $C state > $S/before.json; sleep 6; $C state > $S/after.json; python3 -c "import json;'
+               'b=json.load(open(\'$S/before.json\'))[\'player\'][\'position\'];a=json.load(open(\'$S/after.json\'))[\'player\'][\'position\'];'
+               'print(\'blown\' if b[0]-a[0]>0.8 else \'still\', b[0]-a[0])" > $S/blown.txt'],
+        checks=[check_file("blown.txt", r"^blown", "the fan's wind pushed the player west, away from it")],
+        look="createfan-0: the fan ahead, further than where the player stood",
     ),
     "jeifluids": dict(
         about="Fluids in screens: JEI's list draws water from its still sprite (vanilla's blitTiledSprite, "

@@ -50,6 +50,8 @@ public final class HorizonClientBlockEntities {
         volatile boolean changed;
         long loadedAt;
         long usedAt;
+        /** The client tick it last ticked at (made this tick: ticked as it was made). */
+        long tickedAt = -1;
 
         Copy(BlockEntity server, BlockEntity client) {
             this.server = server;
@@ -82,6 +84,10 @@ public final class HorizonClientBlockEntities {
             if (DEBUG) Natives.log("cbe: client copy of " + made.getClass().getName() + " at " + pos.toShortString());
             copy.loadedAt = now;
             COPIES.computeIfAbsent(level, l -> new java.util.concurrent.ConcurrentHashMap<>()).put(key, copy);
+            // Its first client tick at once (a client's block entity ticks before its first
+            // frame): mods set their client state up there (Create's mixer adds its head's
+            // animation behaviour; its renderer drawing a copy made this tick failed on it).
+            tickOnce(level, copy);
         } else {
             refresh(level, copy);
         }
@@ -148,27 +154,64 @@ public final class HorizonClientBlockEntities {
         if (DEBUG && now % 100 == 0) Natives.log("cbe: " + list.size() + " client block entities tick in " + level.dimension().identifier());
         Thread before = HorizonServer.clientHalf;
         HorizonServer.clientHalf = Thread.currentThread();
+        // The client level's entities are the server's own (HorizonClient.entities): a client
+        // block entity moving one (Create's fan's air current, run on both sides) moved it twice.
+        // A client moves its copies only; the server's entities keep their motion.
+        java.util.List<Object[]> motions = serverMotions(serverLevel);
         try {
             for (Copy copy : list) {
                 refresh(level, copy);
-                if (!copy.tickerMade) {
-                    copy.tickerMade = true;
-                    copy.ticker = ticker(level, copy.client);
-                }
-                if (copy.ticker == null) continue;
-                try {
-                    copy.ticker.tick(level, copy.client.getBlockPos(), copy.client.getBlockState(), copy.client);
-                } catch (Throwable t) {
-                    // One mod's client block entity failing doesn't stop the others; it ticks no more.
-                    copy.ticker = null;
-                    Throwable root = t;
-                    while (root.getCause() != null && root.getCause() != root) root = root.getCause();
-                    Natives.log("Horizon's client: a mod's block entity at " + copy.client.getBlockPos() + " failed in its client tick: " + root);
-                    HorizonFailures.report("a block entity's client tick", root);
-                }
+                if (copy.tickedAt == now) continue;
+                tickCopy(level, copy);
             }
         } finally {
             HorizonServer.clientHalf = before;
+            for (Object[] m : motions) {
+                var e = (net.minecraft.world.entity.Entity) m[0];
+                if (e.getDeltaMovement() != m[1]) e.setDeltaMovement((net.minecraft.world.phys.Vec3) m[1]);
+            }
+        }
+    }
+
+    /** The server's entities of a level with their motion now. */
+    private static java.util.List<Object[]> serverMotions(Level serverLevel) {
+        java.util.List<Object[]> out = new ArrayList<>();
+        if (!(serverLevel instanceof ServerLevel server)) return out;
+        try {
+            for (var e : HorizonServer.entities(server).getAll()) out.add(new Object[] {e, e.getDeltaMovement()});
+        } catch (Throwable t) {
+            // None kept: as before.
+        }
+        return out;
+    }
+
+    /** A copy's tick outside the level's (its first, as it is made), as the client's half. */
+    private static void tickOnce(ClientLevel level, Copy copy) {
+        Thread before = HorizonServer.clientHalf;
+        HorizonServer.clientHalf = Thread.currentThread();
+        try {
+            tickCopy(level, copy);
+        } finally {
+            HorizonServer.clientHalf = before;
+        }
+    }
+
+    private static void tickCopy(ClientLevel level, Copy copy) {
+        copy.tickedAt = now;
+        if (!copy.tickerMade) {
+            copy.tickerMade = true;
+            copy.ticker = ticker(level, copy.client);
+        }
+        if (copy.ticker == null) return;
+        try {
+            copy.ticker.tick(level, copy.client.getBlockPos(), copy.client.getBlockState(), copy.client);
+        } catch (Throwable t) {
+            // One mod's client block entity failing doesn't stop the others; it ticks no more.
+            copy.ticker = null;
+            Throwable root = t;
+            while (root.getCause() != null && root.getCause() != root) root = root.getCause();
+            Natives.log("Horizon's client: a mod's block entity at " + copy.client.getBlockPos() + " failed in its client tick: " + root);
+            HorizonFailures.report("a block entity's client tick", root);
         }
     }
 
@@ -221,11 +264,44 @@ public final class HorizonClientBlockEntities {
     /** A copy loaded again from the server's block entity, when it updated or changed. */
     private static void refresh(ClientLevel level, Copy copy) {
         if (!copy.updated && !(copy.changed && now - copy.loadedAt >= REFRESH_TICKS)) return;
-        CompoundTag tag = updateTag(copy.server, level, copy.updated);
+        boolean packet = copy.updated;
         copy.updated = false;
         copy.changed = false;
         copy.loadedAt = now;
+        // A block update is the server's update packet: loaded as the client's packet listener
+        // loads it (its lambda), so mods' wraps of that load run (Create's onDataPacket: its
+        // read(.., clientPacket=true), where a tank's shown fluid level chases its contents).
+        if (packet && loadPacket(copy.server, copy.client)) return;
+        CompoundTag tag = updateTag(copy.server, level, packet);
         if (tag != null) load(level, copy.client, tag);
+    }
+
+    private static java.lang.reflect.Method packetLoad;
+    private static boolean noPacketLoad;
+
+    /** ClientPacketListener.handleBlockEntityData's load of a block entity: false when it can't run. */
+    private static boolean loadPacket(BlockEntity server, BlockEntity client) {
+        if (noPacketLoad) return false;
+        try {
+            if (!(server.getUpdatePacket() instanceof ClientboundBlockEntityDataPacket data)) return false;
+            var listener = HorizonClient.minecraft().getConnection();
+            if (listener == null) return false;
+            if (packetLoad == null) {
+                packetLoad = net.minecraft.client.multiplayer.ClientPacketListener.class.getDeclaredMethod(
+                        "lambda$handleBlockEntityData$0", ClientboundBlockEntityDataPacket.class, BlockEntity.class);
+                packetLoad.setAccessible(true);
+            }
+            packetLoad.invoke(listener, data, client);
+            return true;
+        } catch (NoSuchMethodException e) {
+            noPacketLoad = true;
+            Natives.log("Horizon's client: block entities' update packets load without the packet listener: " + e);
+            return false;
+        } catch (Throwable t) {
+            Throwable root = t instanceof java.lang.reflect.InvocationTargetException i && i.getCause() != null ? i.getCause() : t;
+            Natives.log("Horizon's client: the client's block entity at " + client.getBlockPos() + " couldn't load its update packet: " + root);
+            return false;
+        }
     }
 
     /** The client's block entity as a chunk brings it: the type's, loaded from the update tag. */

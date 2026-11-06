@@ -24,6 +24,7 @@ import net.minecraft.client.renderer.rendertype.RenderType;
 import net.minecraft.client.renderer.state.level.CameraRenderState;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.server.level.ServerLevel;
+import java.util.Optional;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 
@@ -245,9 +246,12 @@ public final class HorizonEntityRender {
             }
             if (!near) continue;
             var renderer = blockRenderer(be.getType());
-            if (renderer == null) continue;
+            // A model whose parts in a world aren't its own (worldParts): drawn here, at its place.
+            JsonArray world = worldParts(level, be);
+            if (renderer == null && world == null) continue;
             JsonArray itemsHere = new JsonArray();
-            JsonArray models = blockModels(renderer, HorizonClientBlockEntities.of(be), itemsHere);
+            JsonArray models = renderer == null ? new JsonArray() : blockModels(renderer, HorizonClientBlockEntities.of(be), itemsHere);
+            if (world != null) models.addAll(world);
             if (DEBUG_BER) debugBlock(level, be, models.size(), itemsHere.size());
             // HORIZON_JAVA_DEBUG=ber: what each block state's renderer drew, once.
             if (DEBUG_BER && DRAWN_LOGGED.add(be.getBlockState())) {
@@ -267,7 +271,7 @@ public final class HorizonEntityRender {
             o.addProperty("id", BLOCK_IDS.computeIfAbsent(pos.asLong(), k -> -1 - BLOCK_IDS.size()));
             o.addProperty("type", BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(be.getType()).toString());
             o.addProperty("block", true);
-            if (whole(be)) o.addProperty("whole", true);
+            if (world != null || whole(be)) o.addProperty("whole", true);
             o.addProperty("x", pos.getX());
             o.addProperty("y", pos.getY());
             o.addProperty("z", pos.getZ());
@@ -299,6 +303,18 @@ public final class HorizonEntityRender {
             data = "(not saved: " + t + ")";
         }
         if (data.length() > 400) data = data.substring(0, 400) + "...";
+        // The client's copy too (what its renderer reads), when it differs.
+        var copy = HorizonClientBlockEntities.of(be);
+        if (copy != be) {
+            String c;
+            try {
+                c = copy.saveWithoutMetadata(level.registryAccess()).toString();
+            } catch (Throwable t) {
+                c = "(not saved: " + t + ")";
+            }
+            if (c.length() > 300) c = c.substring(0, 300) + "...";
+            if (!c.equals(data)) data += "; client copy: " + c;
+        }
         var pos = be.getBlockPos();
         Natives.log("ber " + BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(be.getType()) + " at " + pos.getX() + " " + pos.getY()
                 + " " + pos.getZ() + ": " + models + " model(s), " + items + " item(s), " + data);
@@ -351,6 +367,78 @@ public final class HorizonEntityRender {
         // Not kept until the models are loaded (the first ticks).
         if (HorizonClient.modelsLoaded()) WHOLE.put(state, result);
         return result;
+    }
+
+    /** Per block state: its model's addPartsWithInfo (a wrapper's parts in a world), or null when it has none. */
+    private static final Map<net.minecraft.world.level.block.state.BlockState, Optional<Method>> WORLD_METHOD = new ConcurrentHashMap<>();
+    /** Block states some place of which drew other parts in a world than the model's own: drawn here everywhere. */
+    private static final java.util.Set<net.minecraft.world.level.block.state.BlockState> WORLD_DRAWN = ConcurrentHashMap.newKeySet();
+    /** Each place's world parts as last made: its state, the game time, the quads. */
+    private record WorldParts(net.minecraft.world.level.block.state.BlockState state, long time, JsonArray models) {}
+    private static final Map<ServerLevel, Map<Long, WorldParts>> WORLD_PARTS = new java.util.WeakHashMap<>();
+    /** How often a place's world parts are made again (they follow its block entity's data and its neighbours). */
+    private static final int WORLD_PARTS_TICKS = 10;
+
+    private static Method partsMethod(Object model) {
+        for (Class<?> c = model.getClass(); c != null; c = c.getSuperclass()) {
+            for (Method m : c.getDeclaredMethods()) {
+                var types = m.getParameterTypes();
+                if (m.getName().equals("addPartsWithInfo") && types.length == 5 && !java.lang.reflect.Modifier.isStatic(m.getModifiers())
+                        && types[1] == net.minecraft.core.BlockPos.class && types[4] == List.class) {
+                    m.setAccessible(true);
+                    return m;
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * A block whose client model draws other parts in a world than its own (a wrapper's
+     * {@code addPartsWithInfo(BlockAndTintGetter, BlockPos, BlockState, RandomSource, List)}:
+     * Create's fluid pipes add their arms and rims from the block entity's connections, its
+     * shafts their brackets): those parts at its place in the client's level, as quads, and
+     * the block drawn whole here (Horizon's chunk, which has only the model's own parts, leaves
+     * that state out: a pipe drew only its middle). Null for every other block. Once one place
+     * of a state differs, every place of that state is drawn here (the chunk leaves the state out).
+     */
+    private static JsonArray worldParts(ServerLevel level, net.minecraft.world.level.block.entity.BlockEntity be) {
+        if (!HorizonClient.modelsLoaded()) return null;
+        var state = be.getBlockState();
+        try {
+            var model = net.minecraft.client.Minecraft.getInstance().getModelManager().getBlockStateModelSet().get(state);
+            Method parts = WORLD_METHOD.computeIfAbsent(state, s -> Optional.ofNullable(partsMethod(model))).orElse(null);
+            if (parts == null) return null;
+            long key = be.getBlockPos().asLong();
+            long now = level.getGameTime();
+            Map<Long, WorldParts> places;
+            synchronized (WORLD_PARTS) {
+                places = WORLD_PARTS.computeIfAbsent(level, l -> new java.util.HashMap<>());
+            }
+            WorldParts kept = places.get(key);
+            if (kept != null && kept.state() == state && now - kept.time() >= 0 && now - kept.time() < WORLD_PARTS_TICKS) {
+                return WORLD_DRAWN.contains(state) ? kept.models() : null;
+            }
+            var list = new java.util.ArrayList<net.minecraft.client.renderer.block.dispatch.BlockStateModelPart>();
+            var client = HorizonClient.clientLevel(level);
+            parts.invoke(model, client, be.getBlockPos(), state, net.minecraft.util.RandomSource.create(42), list);
+            int n = 0;
+            for (var part : list) {
+                for (var side : net.minecraft.core.Direction.values()) n += part.getQuads(side).size();
+                n += part.getQuads(null).size();
+            }
+            JsonArray out = new JsonArray();
+            if (n > 0) blockModel(out, new PoseStack(), list, null, null);
+            places.put(key, new WorldParts(state, now, out));
+            if (n != chunkQuads(state) && WORLD_DRAWN.add(state) && DEBUG_BER) {
+                Natives.log("Java mods: " + state + " draws " + n + " quads in a world, " + chunkQuads(state) + " of its own: drawn whole by its block entity");
+            }
+            return WORLD_DRAWN.contains(state) ? out : null;
+        } catch (Throwable t) {
+            Throwable root = t instanceof java.lang.reflect.InvocationTargetException i && i.getCause() != null ? i.getCause() : t;
+            if (FAILED.add("world " + state.getBlock())) Natives.log("Java mods: " + state + "'s model in a world couldn't be read: " + root);
+            return null;
+        }
     }
 
     /** The quads the client's model of a block state has (what a chunk would draw of it), or -1. */

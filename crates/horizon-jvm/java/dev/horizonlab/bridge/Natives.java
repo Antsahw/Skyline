@@ -16,6 +16,9 @@ public final class Natives {
     public static native void itemsChanged(String json);
 
     /** Moves a player (by UUID) to a dimension ("minecraft:the_nether"), position and rotation. */
+    /** A mod's block entity set a player's motion: the player's client moves at it (ClientboundSetEntityMotionPacket). */
+    public static native void playerMotion(String uuid, double x, double y, double z);
+
     public static native void teleport(String uuid, String dimension, double x, double y, double z, float yaw, float pitch);
 
     /**

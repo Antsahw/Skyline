@@ -710,6 +710,11 @@ fn boot(env: &mut JNIEnv, jars: &[PathBuf]) -> jni::errors::Result<String> {
                 fn_ptr: native_overlay as *mut c_void,
             },
             NativeMethod {
+                name: "playerMotion".into(),
+                sig: "(Ljava/lang/String;DDD)V".into(),
+                fn_ptr: native_player_motion as *mut c_void,
+            },
+            NativeMethod {
                 name: "teleport".into(),
                 sig: "(Ljava/lang/String;Ljava/lang/String;DDDFF)V".into(),
                 fn_ptr: native_teleport as *mut c_void,
@@ -1090,6 +1095,26 @@ extern "system" fn native_tell(mut env: JNIEnv, _class: JClass, uuid: JString, t
         };
         let (uuid, text) = (String::from(uuid), String::from(text));
         events::push(events::Action::Tell { uuid, text });
+    }));
+}
+
+/// `Natives.playerMotion(String uuid, double x, double y, double z)`.
+extern "system" fn native_player_motion(
+    mut env: JNIEnv,
+    _class: JClass,
+    uuid: JString,
+    x: sys::jdouble,
+    y: sys::jdouble,
+    z: sys::jdouble,
+) {
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let Ok(uuid) = env.get_string(&uuid) else {
+            return;
+        };
+        events::push(events::Action::PlayerMotion {
+            uuid: uuid.into(),
+            velocity: [x, y, z],
+        });
     }));
 }
 

@@ -18,6 +18,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import net.minecraft.world.phys.Vec3;
 import java.util.concurrent.ConcurrentHashMap;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerEntityEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
@@ -1034,6 +1035,42 @@ public final class HorizonServer {
         HorizonWorldgen.forget(dimension, x, z, token);
     }
 
+    /** Each mirrored player's last position Horizon gave (its motion, a tick to the next) and the motion set before the block entities. */
+    private static final Map<UUID, Vec3> LAST_POSITION = new java.util.HashMap<>();
+    private static final Map<UUID, Vec3> MOTION_BEFORE = new java.util.HashMap<>();
+
+    /**
+     * Before the block entities tick: each player's motion as Horizon moved it (its position
+     * since the last tick; Horizon's own velocity doesn't come over), so a mod's block entity
+     * that adds to it (Create's fan: {@code motion + (wind - motion) / 8}) works from it.
+     */
+    private static void playerMotionsBefore() {
+        MOTION_BEFORE.clear();
+        for (ServerPlayer player : PLAYERS) {
+            Vec3 at = player.position();
+            Vec3 last = LAST_POSITION.put(player.getUUID(), at);
+            Vec3 motion = last == null || last.distanceToSqr(at) > 100 ? Vec3.ZERO : at.subtract(last);
+            player.setDeltaMovement(motion);
+            MOTION_BEFORE.put(player.getUUID(), player.getDeltaMovement());
+        }
+    }
+
+    /**
+     * After: a player whose motion a mod's block entity set (Create's fan blowing at it, its
+     * belt carrying it) is told it (Natives.playerMotion: ClientboundSetEntityMotionPacket to
+     * its client). Vanilla's clients run the same block entities and move their own player;
+     * here the server's half stands in for the client's (the client level holds no player of
+     * the player's own). Entities' pushes and hurts are left to Horizon.
+     */
+    private static void playerMotionsAfter() {
+        for (ServerPlayer player : PLAYERS) {
+            Vec3 before = MOTION_BEFORE.get(player.getUUID());
+            Vec3 now = player.getDeltaMovement();
+            if (before == null || now == before || now.distanceToSqr(before) < 1.0E-8) continue;
+            Natives.playerMotion(player.getUUID().toString(), now.x, now.y, now.z);
+        }
+    }
+
     /** The mirrored levels (one a dimension Horizon has). */
     public static java.util.List<ServerLevel> levels() {
         return new ArrayList<>(LEVELS.values());
@@ -1342,7 +1379,13 @@ public final class HorizonServer {
 
     /** ServerChunkCache.blockChanged on a mirrored level: its block entity is saved with the others. */
     public static void blockChanged(Level level, net.minecraft.core.BlockPos pos) {
-        if (level != null) HorizonBlockEntities.changed(level, pos);
+        if (level == null) return;
+        HorizonBlockEntities.changed(level, pos);
+        // Vanilla's chunk holder sends the block's update and its block entity's update packet
+        // (Create's sendData goes this way, not through sendBlockUpdated): the client's copy loads it.
+        if (level instanceof ServerLevel server && clientHalf != Thread.currentThread()) {
+            HorizonClientBlockEntities.updated(server, pos);
+        }
     }
 
     /** The mirrored server's services (HorizonServices). */
@@ -1714,7 +1757,9 @@ public final class HorizonServer {
         phase = HorizonProfile.add("scheduled ticks", phase);
         // Horizon's items on and in the mods' blocks (HorizonItems: a depot catching one).
         HorizonItems.touchBlocks();
+        playerMotionsBefore();
         HorizonBlockEntities.tick();
+        playerMotionsAfter();
         phase = HorizonProfile.add("block entities", phase);
         HorizonChunkLoads.tick();
         HorizonTickets.tick(new ArrayList<>(LEVELS.values()));

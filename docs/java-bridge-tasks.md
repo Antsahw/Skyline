@@ -198,15 +198,15 @@ By area:
   **gpu-14:** the wheel turns in Horizon's flowing and falling water (FlowScore -1, speed 8,
   scene `waterwheel`); a wheel placed in the first ticks had no block entity (fixed). The mixer
   draws its head now (client copies); ask what else was "bugged".
-  Also: **crushing wheels** do nothing (they process item entities thrown between them: the
-  same item-entity path as the depot, mixins); **fluid pipes draw broken** in water (a pipe
+  Also: ~~**crushing wheels**~~ (mixins-11) do nothing (they process item entities thrown between them: the
+  same item-entity path as the depot, mixins); ~~**fluid pipes draw broken**~~ (create-1) in water (a pipe
   through a water block: its middle segment missing, the outline bigger than the model;
   check the pipe's connection states after neighbour updates in the mirror, and multipart
   models of waterlogged mod blocks).
-  And **mechanical pumps** "non functional" (a pump moves fluid between pipes and takes water
+  And ~~**mechanical pumps**~~ (create-1) "non functional" (a pump moves fluid between pipes and takes water
   source blocks from the world: Java removing and reading Horizon's fluids through the mirror;
   check with pump + pipes into a tank, his screenshot's setup may lack pipes).
-  **Mechanical saw** works (it fells the tree) but its blade doesn't draw (the saw's moving part,
+  ~~**Mechanical saw**~~ (gpu-14) works (it fells the tree) but its blade doesn't draw (the saw's moving part,
   a block-entity renderer part like the shafts; a black hole where it should be). **Ponder**
   (Create's tutorial: hold W over an item's tooltip) is missing: its keybind on tooltips, then
   a screen that draws small 3D scenes of a fake level through vanilla's renderer. Research
@@ -216,9 +216,17 @@ By area:
   and the item's `useOn` first, as vanilla). And a client tick error: `ParticleEngine.
   createParticle` on a null (Horizon's client has no vanilla `ParticleEngine`: a mod making a
   particle client-side must get one that hands the particle to Horizon's particles; client chat).
-  **Blaze burners** work but draw wrong: the blaze head looks doubled/overlapping and a pale
+  ~~**Blaze burners**~~ (gpu-14) work but draw wrong: the blaze head looks doubled/overlapping and a pale
   blue-white flat square under it (the same pale square as the press/mixer report: likely one
   sprite or render type wrong for animated/emissive block-entity parts; gpu-13).
+  **Done in `bridge-create-1`** (java-bridge.md, "Create's pumps, pipes and fans"; regress
+  `createpump`, `createfan`): pumps worked (a source drunk into a tank) but the tank never showed
+  its fluid (client copies now load update packets as a client does, blockChanged included; the
+  client level's tints); pipes draw their arms and rims, in water too (block models' parts in a
+  world, drawn with the block entity); fans blow players (a mod block entity's motion on a
+  player goes to its client). Saw blade, burner head and pale squares (gpu-14) and crushing
+  wheels/fans with items (mixins-11) checked working. Left: Horizon's mobs in a fan's wind (their
+  mirror copies' motion isn't written back: entities chat); pipes over 64 blocks away aren't drawn.
   **Done in `bridge-client-14`: value boxes (a held right-click opens the settings board in
   this port; the wheel is generic now too), goggles, the toolbox screen, the frogport's sounds,
   the `ParticleEngine` NPE.**
@@ -227,7 +235,7 @@ By area:
   vanilla's `SoundManager` (`Minecraft.getSoundManager().play(SoundInstance)`, looping and moving
   sounds); Horizon's client has no vanilla sound engine: give mods one that hands their sounds
   to Horizon's audio. Casings work (tester).
-  **Encased fans** do nothing: a fan's air current pushes entities and processes item entities
+  ~~**Encased fans**~~ (items: mixins-11; players: create-1; Horizon's mobs not yet) do nothing: a fan's air current pushes entities and processes item entities
   in front of it (Java moving Horizon's entities: players, mobs, items; the same item-entity
   path as the depot and crushing wheels, plus entity motion set from a mod).
   **Mechanical arms** draw but do nothing: their pick-up/drop-off points are chosen by

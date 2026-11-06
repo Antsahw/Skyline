@@ -111,6 +111,9 @@ pub enum Action {
         yaw: f32,
         pitch: f32,
     },
+    /// A mod's block entity set a player's motion (Create's fan blowing, its belt carrying):
+    /// the player's client is to move at `velocity` (vanilla's ClientboundSetEntityMotionPacket).
+    PlayerMotion { uuid: String, velocity: [f64; 3] },
     /// `ServerPlayer.teleport` and the connection's: the player is to be moved there.
     Teleport {
         uuid: String,

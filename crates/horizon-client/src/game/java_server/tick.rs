@@ -724,6 +724,19 @@ impl Game<'_> {
                         );
                     }
                 }
+                horizon_jvm::events::Action::PlayerMotion { uuid, velocity } => {
+                    // As vanilla's server tells a client its player's motion
+                    // (ClientboundSetEntityMotionPacket): the client moves it from there.
+                    let Some(host) = host.as_deref_mut().or(self.lan.as_mut()) else {
+                        continue;
+                    };
+                    if let Some(g) = host.hub.guests.iter().find(|g| uuid_string(g.uuid) == uuid) {
+                        g.send(&C::SetEntityMotion(play::SetEntityMotion {
+                            id: g.entity_id,
+                            velocity,
+                        }));
+                    }
+                }
                 horizon_jvm::events::Action::TabName { uuid, json } => {
                     let Some(host) = host.as_deref_mut().or(self.lan.as_mut()) else {
                         continue;

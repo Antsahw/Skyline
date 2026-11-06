@@ -1315,8 +1315,60 @@ gpu-13 made a bearing's contraption assemble, draw and turn. Left:
   case to add.
 - **Trains** are contraptions on tracks: blocked first by the use order (track placement).
 
+## Create's pumps, pipes and fans (bridge-create-1)
+
+Generic fixes found with Create Fly; regress `createpump`, `createfan` (scenes `createpump`,
+`createfan`); `createitemsin`'s scene got a glass pane north of its lava.
+- **Pumps worked; the tank never showed it.** A pump drinks Horizon's water source through the
+  mirror (read and removed: `LevelMixin`) into a tank, but the tank's renderer read the client
+  copy's fluid level, which never moved: Create syncs with `sendData` →
+  `ServerChunkCache.blockChanged` (not `sendBlockUpdated`), which marked the copy only
+  "changed" (a plain reload, `read(clientPacket=false)`, where the shown level doesn't chase).
+  Now `blockChanged` is an update too (vanilla's chunk holder sends the block entity's update
+  packet there), and an update loads through `ClientPacketListener`'s own lambda
+  (`lambda$handleBlockEntityData$0`), so mods' wraps of that load run (Create's
+  `onDataPacket`). gpu-14 had this; the batch-12 merge kept client-14's plain load.
+- **The client level's biome tints** (`ClientLevel.getBlockTint`): made without its constructor,
+  it has no tint caches (vanilla's nor Fabric's `customColorCache`); `ClientLevelMixin` computes
+  each tint (`calculateBlockTint`). Create's tank drawing water (Fabric's fluid colour) NPE'd.
+- **Block models whose parts depend on the world** (a wrapper's `addPartsWithInfo(BlockAndTintGetter,
+  BlockPos, BlockState, RandomSource, List)`: Create's fluid pipes add their arms, rims and
+  casing from the block entity's connections, pumps their rims, shafts their brackets).
+  Horizon's chunk drew only the model's own parts (a pipe was its middle stub, in water or
+  not). `HorizonEntityRender.worldParts`: for a block entity whose state's model has one, the
+  parts at its place in the client's level, as quads, sent with its renderer's (also for
+  blocks with no renderer), made again every 10 ticks or when its state changes; once one
+  place of a state gives other quads than the model alone, the state is drawn `whole` (its
+  chunk model left out) and every place of it is drawn so. Limit: like every block entity's
+  drawing, within 64 blocks of a player (a far pipe isn't drawn).
+- **A client copy's first tick as it is made** (`HorizonClientBlockEntities.get`): a renderer
+  drawing a copy made this tick (Create's mixer) failed before its client behaviours existed.
+- **Client code doesn't move the server's entities**: the client level's entities are the
+  mirror's own objects (`HorizonClient.entities`); a client block entity moving them (Create's
+  fan's air current runs on both sides) moved them twice. Their motion is put back after the
+  client copies tick. **A block a client sets** (`ClientLevel.setBlock` on a mirror: Create's
+  crushing wheel fixing its controller client-side) sets nothing (it NPE'd on the missing
+  prediction handler and stopped that block entity's client tick).
+- **Mods' block entities push players** (`HorizonServer.playerMotionsBefore/After`,
+  `Natives.playerMotion` → `Action::PlayerMotion` → `ClientboundSetEntityMotionPacket` to the
+  player's client). Before the block entities tick, each mirrored player's motion is its move
+  since the last tick (Horizon's velocity doesn't come over); a block entity that changes it
+  (Create's fan blowing; belts carrying players should too) sends the result. Vanilla's clients
+  run the same block entity and move their own player; the client level here holds no player
+  of the player's own, so the server's half stands in. Not done: Horizon's mobs in a fan's wind
+  (they stand in the mirror only as `HorizonNeighbours` copies, whose motion isn't written back).
+- Checked, working on this branch: the saw's blade, the blaze burner's head (one), no pale
+  squares (gpu-14), crushing wheels and fans processing item entities (mixins-11).
+
 ## 26.3 facts that cost time
 
+- **`SyncedBlockEntity.sendData` goes through `ServerChunkCache.blockChanged`**, not
+  `ServerLevel.sendBlockUpdated`: a client copy has to treat both as the update packet. And a
+  client copy loaded with plain `loadWithComponents` reads with `clientPacket=false`; mods do
+  their client-side syncing (lerped levels, behaviours) only in the packet's load
+  (`lambda$handleBlockEntityData$0`, which their `WrapOperation`s target).
+- **A `BlockStateModel`'s parts in a world** (`addPartsWithInfo` with a `BlockAndTintGetter` and
+  position) can differ completely from `collectParts`: Create's pipes have no arms without it.
 - **The field of view is the camera's, not the game renderer's.** `Camera.tick` → private
   `tickFov` (modifier eased halfway), private `calculateFov(float)` (options' FOV × lerped
   modifier, then death/fluid), `update(DeltaTracker)` stores it in `fov`, public `getFov()`.
@@ -2009,6 +2061,12 @@ Naturalist (mobs with ModelPart models, Fabric API only). The repo's own critter
 (`ENTITY=naturalist:bear` for another mod's).
 
 ## Status
+
+Create's pumps, pipes and fans (2026-11-06, `bridge-create-1`): a pump fills a tank from
+Horizon's water and the tank shows it (client copies load the update packets as a client does),
+pipes draw whole, in water too (block models' parts in a world), fans blow players (mods' block
+entities setting a player's motion). See "Create's pumps, pipes and fans". Regress `createpump`,
+`createfan`. Left: Horizon's mobs in a fan's wind; far pipes (over 64 blocks) not drawn.
 
 Client-side mods on any server (2026-11-06, `bridge-own-client`, brief section 5): the player's own
 game runs the client half of the mods the server doesn't run, by default (no switch): every mod's
