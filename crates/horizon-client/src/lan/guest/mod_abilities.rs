@@ -55,6 +55,7 @@ mod tests {
                 sender: PlayerSender::new(tx, Default::default()),
                 latency: Default::default(),
                 address: "127.0.0.1:25565".parse().unwrap(),
+                expected: false,
             },
             2,
             [0.0, 64.0, 0.0],
