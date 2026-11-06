@@ -28,7 +28,7 @@ pub const MANIFEST: &str = "java-mods.json";
 /// (`horizon_jvm::gate`, `game/java_mods/bridge.rs` `opted_in`) that a launcher built before
 /// it can't satisfy: players with that older launcher are then told to download a new one
 /// instead of getting a build that runs no mods.
-pub const CONTRACT: u32 = 1;
+pub const CONTRACT: u32 = 2;
 /// The page players download the fork's launcher from.
 pub fn release_page() -> String {
     format!("https://github.com/{REPO}/releases/tag/{TAG}")

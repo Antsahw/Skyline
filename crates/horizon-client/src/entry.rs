@@ -15,6 +15,14 @@ pub fn main_with(mods: crate::mod_api::Mods) {
     horizon_threads::configure_allocator();
     horizon_client::telemetry::mark_start();
     horizon_client::spans::startup::init(std::time::Instant::now());
+    // Fabric mods' owner record (`horizon_jvm::gate`): read now, while it is fresh, beside the
+    // start; the bridge waits for the answer when it needs it.
+    #[cfg(feature = "java-mods")]
+    if std::env::args().any(|a| a == horizon_jvm::gate::ARG) {
+        let _ = std::thread::Builder::new()
+            .name("Java mods owner".into())
+            .spawn(horizon_jvm::gate::decision);
+    }
     let args: Vec<String> = std::env::args().skip(1).collect();
     let game_args = args.iter().take_while(|a| *a != "--dedicated");
     let help = game_args

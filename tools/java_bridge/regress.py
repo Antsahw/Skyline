@@ -136,32 +136,67 @@ def screen_has(slot, item):
     return rf'"item":"{re.escape(item)}"[^}}]*"slot":{slot}\b|"slot":{slot}[^}}]*"item":"{re.escape(item)}"'
 
 
+# A step for the ownership cases refused: what was fetched, and whether the game went on, in
+# $I/direct.txt. The game stops (exit 78) rather than open the world without its mods.
+NOTHING_FETCHED = ('sleep 3; { [ -e "$I/version/.local/bridge" ] && echo "fabric: fetched" || echo "fabric: none"; '
+                   'ls -A "$I/lh/minecraft/runtime" 2>/dev/null | grep -q . && echo "java: fetched" || echo "java: none"; '
+                   'pgrep -f "^$I/version/horizon-client" >/dev/null && echo "game: running" || echo "game: stopped"; '
+                   'ls "$I/home/saves/W/region" 2>/dev/null | grep -q . && echo "world: opened" || echo "world: none"; '
+                   '} > "$I/direct.txt"')
+NOTHING_FETCHED_CHECKS = [
+    check_file("direct.txt", r"fabric: none", "nothing of Fabric's downloaded (no .local/bridge)"),
+    check_file("direct.txt", r"java: none", "no Java runtime downloaded"),
+    check_file("direct.txt", r"game: stopped", "the game stopped instead of playing without the mods"),
+    check_file("direct.txt", r"world: none", "the world was not opened without its mods"),
+]
+
+
 CASES = {
     "direct": dict(
-        about="Ownership: the game started by hand with --java-mods (no launcher, no signed-in owner) runs no "
+        about="Ownership: the game started by hand with --java-mods (no launcher, no owner record) runs no "
               "mods, downloads nothing (no Fabric, no Java, nothing of Mojang's), says the launcher is needed "
-              "and plays without them (install_test.sh DIRECT=1: a scratch install, as a player's)",
+              "and stops instead of opening the world without them (install_test.sh DIRECT=1: a scratch install, as a player's)",
         fixtures=["hellomod"], scene="none", install=True, env={"DIRECT": "1"},
-        steps=['{ [ -e "$I/version/.local/bridge" ] && echo "fabric: fetched" || echo "fabric: none"; '
-               'grep -q libjvm "/proc/$PID/maps" && echo "jvm: loaded" || echo "jvm: none"; '
-               'ls -A "$I/lh/minecraft/runtime" 2>/dev/null | grep -q . && echo "java: fetched" || echo "java: none"; '
-               '$G state > "$I/state.json"; } > "$I/direct.txt"'],
-        checks=[check_log(r"Java mods: off: Fabric 26\.3 mods run only when Horizon's launcher starts the game for a "
-                          r"signed-in account that owns", "the log says the launcher with a signed-in owner is needed"),
-                check_file("direct.txt", r"fabric: none", "nothing of Fabric's downloaded (no .local/bridge)"),
-                check_file("direct.txt", r"java: none", "no Java runtime downloaded"),
-                check_file("direct.txt", r"jvm: none", "no JVM in the game's process"),
-                check_json("state.json", ["screen"], "playing", "the world plays without the mods")],
+        steps=[NOTHING_FETCHED],
+        checks=[check_log(r"Java mods: not started: Fabric 26\.3 mods run only when Horizon's launcher starts the game for a "
+                          r"signed-in account that owns.*no owner record", "the log says the launcher with a signed-in owner is needed"),
+                *NOTHING_FETCHED_CHECKS],
+        forbid=[r"Java mods: JVM", r"Java mods: Fabric loaded", r"downloading https"],
+    ),
+    "forged_word": dict(
+        about="Ownership: --java-mods with HORIZON_JAVA_MODS_OWNER=1 set by hand (the old launcher word, no "
+              "owner record) runs no mods and downloads nothing (install_test.sh FORGED=word)",
+        fixtures=["hellomod"], scene="none", install=True, env={"FORGED": "word"},
+        steps=[NOTHING_FETCHED],
+        checks=[check_log(r"Java mods: not started: Fabric 26\.3 mods run only .*the owner record is missing",
+                          "the hand-set variable is no owner record"),
+                *NOTHING_FETCHED_CHECKS],
+        forbid=[r"Java mods: JVM", r"Java mods: Fabric loaded", r"downloading https"],
+    ),
+    "forged_record": dict(
+        about="Ownership: an owner record written by hand (an account in the launcher's accounts.json, a "
+              "made-up token) is checked with Mojang's own services, which refuse the token or can't be "
+              "reached: no mods, nothing downloaded (install_test.sh FORGED=record)",
+        fixtures=["hellomod"], scene="none", install=True, env={"FORGED": "record"},
+        steps=[NOTHING_FETCHED],
+        checks=[check_log(r"Java mods: not started: Fabric 26\.3 mods run only .*\(the Minecraft services (did not confirm|"
+                          r"could not be reached)", "the services decided, not the file"),
+                *NOTHING_FETCHED_CHECKS],
         forbid=[r"Java mods: JVM", r"Java mods: Fabric loaded", r"downloading https"],
     ),
     "owner": dict(
-        about="Ownership: the game as the launcher starts it past its owner gate (--java-mods and "
-              "HORIZON_JAVA_MODS_OWNER, a scratch install): Fabric is fetched on this machine and the mod loads",
+        about="Ownership: the game as the launcher starts it past its owner gate (--java-mods and an owner "
+              "record whose token a stand-in for the Minecraft services accepts, a scratch install): Fabric "
+              "is fetched on this machine and the mod loads",
         fixtures=["hellomod"], scene="none", install=True, timeout=900,
-        steps=['sleep 2; ls "$I/version/.local/bridge/lib" > "$I/fabric.txt"'],
-        checks=[check_log(r"Java mods: Fabric loaded .*horizon_hello", "Fabric and the mod loaded"),
+        steps=['sleep 2; ls "$I/version/.local/bridge/lib" > "$I/fabric.txt"; '
+               '[ -e "$I/lh/java-mods-owner/session-test.json" ] && echo kept > "$I/record.txt" || echo read > "$I/record.txt"'],
+        checks=[check_log(r"Java mods: on \(the launcher's owner, confirmed by the Minecraft services\)",
+                          "the game confirmed the owner itself"),
+                check_log(r"Java mods: Fabric loaded .*horizon_hello", "Fabric and the mod loaded"),
                 check_file("fabric.txt", r"fabric-loader-0\.20\.1\.jar",
-                           "Fabric Loader fetched on this machine, into the install's own .local/bridge")],
+                           "Fabric Loader fetched on this machine, into the install's own .local/bridge"),
+                check_file("record.txt", r"read", "the game deleted the owner record it read")],
     ),
     "pot": dict(
         about="Farmer's Delight: the cooking pot's screen opens; beef moved into it",
@@ -2038,7 +2073,7 @@ def build(java_only):
             sys.exit(f"Java build failed:\n{r.stderr[-2000:]}")
         return {"HORIZON_JAVA_JARS": r.stdout.strip().splitlines()[-1]}
     r = subprocess.run(["cargo", "build", "-q", "--profile", "fast", "-p", "horizon-client",
-                        "-p", "horizon-client-lib", "--features", "horizon-client/java-mods"], cwd=ROOT, env=env,
+                        "-p", "horizon-client-lib", "--features", "horizon-client/java-mods-dev"], cwd=ROOT, env=env,
                        capture_output=True, text=True)
     if r.returncode != 0:
         sys.exit(f"build failed:\n{r.stderr[-3000:]}")

@@ -22,10 +22,14 @@ pub const OPT_IN_ARG: &str = "--java-mods";
 /// The game's variable that turns Fabric mods on for developers' harnesses
 /// (`horizon_jvm::gate::DEV_VAR`): never passed by the launcher.
 const OPT_IN_VAR: &str = "HORIZON_JAVA_MODS";
-/// What tells the game, beside [`OPT_IN_ARG`], that this command passed the owner gate
-/// (`horizon_jvm::gate::OWNER_VAR`): without it the game runs no Fabric mods and downloads
-/// nothing for them. Set only by [`switch_command`], which runs on Play's command after the gate.
+/// The owner record's path, beside [`OPT_IN_ARG`] (`horizon_jvm::gate::OWNER_VAR`): the session
+/// file of the account the owner gate just heard own the game (`account::write_owner_record`),
+/// which the game checks with the Minecraft services itself. Without one that passes the game
+/// runs no Fabric mods and downloads nothing for them. Set only by [`switch_command`], which runs
+/// on Play's command after the gate.
 pub const OWNER_VAR: &str = "HORIZON_JAVA_MODS_OWNER";
+/// The Minecraft services the game checks the owner record with (`horizon_jvm::gate::SERVICES`).
+const SERVICES_URL: &str = "https://api.minecraftservices.com/";
 /// Written once the build is all there.
 const COMPLETE: &str = ".installed";
 /// The Java home the game runs the mods on (`horizon_jvm::JAVA_HOME_VAR`).
@@ -35,6 +39,17 @@ const JAVA_MAJOR: u32 = 25;
 /// What Play and the switch say before a sign-in.
 pub const SIGN_IN_FIRST: &str = "Sign in with a Microsoft account that owns Minecraft: Java \
      Edition first: Fabric 26.3 mods download nothing before that.";
+
+/// What turning Fabric 26.3 mods on says first, once per instance (the window's confirmation,
+/// `java_mods_page`; the command line prints it): the title, then its paragraphs.
+pub const WARNING_TITLE: &str = "Turn on Fabric 26.3 mods (beta)?";
+pub const WARNING: [&str; 3] = [
+    "Fabric mods are Java programs. They run with full access to your computer, your files and \
+     your Minecraft account, like any program you install.",
+    "Only add mods you trust, from their authors' own pages.",
+    "Fabric 26.3 mods in Horizon are a beta: mods may fail, and worlds played with them may not \
+     open without them.",
+];
 
 /// The strict owner gate (never the developer option's offline pass), asked before any download
 /// for the mods, as `backend::download_for_owner` asks it before downloading the game.
@@ -153,12 +168,6 @@ pub fn install_from_fork(tag: &str, progress: impl Fn(f32)) -> Result<(), String
         &java_release::marker(&manifest),
         &progress,
     )
-}
-
-/// The fork's commit installed as `tag`'s Fabric mods build, when it came from the fork's release.
-fn fork_commit(tag: &str) -> Option<String> {
-    let text = fs::read_to_string(dir(tag).join(COMPLETE)).ok()?;
-    java_release::marked_commit(&text).map(str::to_owned)
 }
 
 /// Downloads `url` (`sha256`), unpacks it and makes it `tag`'s Java mods build.
@@ -289,8 +298,8 @@ pub fn use_build(tag: &str, program: &Path) -> Result<(), String> {
 }
 
 /// What keeps two downloads of a build (the switch turning on, Play, an install's
-/// [`follow`], `use-build`) from writing the same `.java.partial` at once: each waits for the
-/// one before it, then finds the build there.
+/// [`follow`], `use-build`, `java-mods update`) from writing the same `.java.partial` at once:
+/// each waits for the one before it, then finds the build there.
 static BUILD_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// [`BUILD_LOCK`], held until the guard drops; a panic in the holder doesn't keep it shut.
@@ -298,8 +307,10 @@ fn one_at_a_time() -> std::sync::MutexGuard<'static, ()> {
     BUILD_LOCK.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// Installs `tag`'s Java mods build unless it has it (the release of that tag, from GitHub), and
-/// Java 25 unless there is one: only past the owner gate, when something is missing.
+/// Installs `tag`'s Java mods build unless it has it (the release of that tag, from GitHub, else
+/// the fork's), and Java 25 unless there is one: only past the owner gate, when something is
+/// missing. An installed build stays as it is: a new version gets its own, and [`update`]
+/// replaces it when the player asks.
 pub fn ensure(tag: &str, progress: impl Fn(f32)) -> Result<(), String> {
     ensure_with(tag, &progress, &|line| eprintln!("{line}"))
 }
@@ -307,15 +318,11 @@ pub fn ensure(tag: &str, progress: impl Fn(f32)) -> Result<(), String> {
 /// [`ensure`], saying what it does in `log` (the window's game log) as it goes.
 pub fn ensure_with(tag: &str, progress: &dyn Fn(f32), log: &dyn Fn(&str)) -> Result<(), String> {
     let _one = one_at_a_time();
-    let fork = fork_commit(tag);
-    if is_installed(tag) && java_home().is_some() && fork.is_none() && has_game_files(tag) {
+    if is_installed(tag) && java_home().is_some() && has_game_files(tag) {
         return Ok(());
     }
     owner_signed_in()?;
     ensure_game_files(tag, log)?;
-    if let Some(installed) = fork {
-        refresh_from_fork(tag, &installed, progress, log);
-    }
     if !is_installed(tag) {
         log(&crate::i18n::trf(
             "Downloading the Fabric mods build for {tag}…",
@@ -435,36 +442,16 @@ fn fetch(tag: &str, progress: &dyn Fn(f32)) -> Result<(), String> {
     })
 }
 
-/// A build from the fork's release, replaced by a newer one that fits `tag` and this launcher
-/// ([`java_release::fits`]). Best effort: the installed build plays when the check or the
-/// download fails, and `log` says why.
-fn refresh_from_fork(tag: &str, installed: &str, progress: &dyn Fn(f32), log: &dyn Fn(&str)) {
-    let keys = java_release::keys();
-    let fetch = |url: &str| backend::fetch_small(url);
-    let newer = java_release::manifest(&keys, &fetch).and_then(|manifest| {
-        let version = backend::version_dir(tag);
-        java_release::fits(&manifest, java_release::prepared_format(&version), tag)?;
-        Ok(manifest.commit != installed)
-    });
-    let not_updated = |e: &str| {
-        log(&crate::i18n::trf(
-            "The Fabric mods build of {tag} was not updated (the one installed plays): {why}",
-            &[("tag", tag), ("why", e)],
-        ))
-    };
-    match newer {
-        Ok(true) => {
-            log(&crate::i18n::trf(
-                "Downloading a newer Fabric mods build for {tag}…",
-                &[("tag", tag)],
-            ));
-            if let Err(e) = install_from_fork(tag, progress) {
-                not_updated(&e);
-            }
-        }
-        Ok(false) => {}
-        Err(e) => not_updated(&e),
-    }
+/// Downloads `tag`'s Java mods build again, the newest that fits it and this launcher
+/// (`java-mods update`): the only way an installed build changes besides a new version. Past the
+/// owner gate.
+pub fn update(tag: &str, progress: impl Fn(f32)) -> Result<(), String> {
+    let _one = one_at_a_time();
+    let log = |line: &str| eprintln!("{line}");
+    owner_signed_in()?;
+    ensure_game_files(tag, &log)?;
+    fetch(tag, &progress)?;
+    ensure_java(&log).map(|_| ())
 }
 
 /// After `release` installed as `tag`: its Java mods build too, when an instance with the switch
@@ -521,8 +508,17 @@ pub fn apply(cmd: &mut Command, instance: &crate::instances::Instance) -> Result
 }
 
 /// Turns the plain game's command (`backend::client_command`) into the Java mods build's: the
-/// same arguments, folder and variables, with [`OPT_IN_ARG`].
+/// same arguments, folder and variables, with [`OPT_IN_ARG`] and the owner record the owner gate
+/// allows ([`OWNER_VAR`]). Refused when there is none (no owner answered just now: offline).
 pub fn switch_command(cmd: &mut Command) -> Result<(), String> {
+    let record = account::write_owner_record()?;
+    switch_command_for(cmd, &record).inspect_err(|_| {
+        let _ = fs::remove_file(&record);
+    })
+}
+
+/// [`switch_command`] with the owner record at `record`.
+fn switch_command_for(cmd: &mut Command, record: &Path) -> Result<(), String> {
     let plain = PathBuf::from(cmd.get_program());
     let version = plain
         .parent()
@@ -559,9 +555,16 @@ pub fn switch_command(cmd: &mut Command) -> Result<(), String> {
         }
     }
     // Play builds this command only past the owner gate (`client_as`, the window's session,
-    // MCP's `play`): the game runs the mods only with this beside the argument. A developer's
+    // MCP's `play`): the game runs the mods only with an owner record it confirms. A developer's
     // `HORIZON_JAVA_MODS=1` in the launcher's own environment doesn't reach it.
-    next.env_remove(OPT_IN_VAR).env(OWNER_VAR, "1");
+    next.env_remove(OPT_IN_VAR).env(OWNER_VAR, record);
+    // The launcher's proxy (Settings > Proxy) for the game's own requests: the owner check with
+    // the Minecraft services and Fabric's downloads (horizon-jvm's agent reads HTTPS_PROXY).
+    if !cmd.get_envs().any(|(k, _)| k == "HTTPS_PROXY") {
+        if let Some(spec) = crate::proxy::spec_for(SERVICES_URL) {
+            next.env("HTTPS_PROXY", spec);
+        }
+    }
     next.arg(OPT_IN_ARG);
     *cmd = next;
     Ok(())
@@ -688,8 +691,9 @@ mod tests {
             .arg("res")
             .env("HORIZON_HOME", &scratch)
             .env_remove("GONE");
+        let record = scratch.join("owner.json");
         // No build yet: refused, the command left as it was.
-        let err = switch_command(&mut cmd).unwrap_err();
+        let err = switch_command_for(&mut cmd, &record).unwrap_err();
         assert!(err.contains("v1.2.3"), "{err}");
         assert_eq!(PathBuf::from(cmd.get_program()), version.join(CLIENT));
 
@@ -697,7 +701,7 @@ mod tests {
         fs::create_dir_all(&staged).unwrap();
         fs::write(staged.join(CLIENT), "").unwrap();
         place(&staged, &version.join(DIR), "").unwrap();
-        switch_command(&mut cmd).unwrap();
+        switch_command_for(&mut cmd, &record).unwrap();
         assert_eq!(
             PathBuf::from(cmd.get_program()),
             version.join(DIR).join(CLIENT)
@@ -711,8 +715,8 @@ mod tests {
         let envs: Vec<_> = cmd.get_envs().collect();
         assert!(envs.contains(&("HORIZON_HOME".as_ref(), Some(scratch.as_os_str()))));
         assert!(envs.contains(&("GONE".as_ref(), None)));
-        // The owner gate's word for the game, and never the developers' opt-in.
-        assert!(envs.contains(&(OWNER_VAR.as_ref(), Some("1".as_ref()))));
+        // The owner record for the game, and never the developers' opt-in.
+        assert!(envs.contains(&(OWNER_VAR.as_ref(), Some(record.as_os_str()))));
         assert!(envs.contains(&(OPT_IN_VAR.as_ref(), None)));
         let _ = fs::remove_dir_all(&scratch);
     }
