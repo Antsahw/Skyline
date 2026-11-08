@@ -2,6 +2,8 @@
 exclude = ["launcher", "crates/horizon-telemetry-server", "crates/horizon-mod-registry", "third_party/wgpu-hal", "third_party/naga", "third_party/libmimalloc-sys"]
 members = [
     "crates/horizon-core",
+    # Java runtimes in processes of their own (Fabric 1.20.1): docs/java-bridge-120.md.
+    "crates/horizon-jvm-remote",
     "crates/horizon-dualsense",
     "crates/horizon-narrator",
     "crates/horizon-threads",

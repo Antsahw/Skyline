@@ -1624,6 +1624,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "horizon-jvm-remote"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "horizon-mcp"
 version = "0.1.0"
 dependencies = [

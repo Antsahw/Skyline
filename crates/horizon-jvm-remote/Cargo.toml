@@ -1,0 +1,14 @@
+[package]
+name = "horizon-jvm-remote"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version = "1.90"
+description = "Java runtimes in processes of their own: a framed socket protocol with re-entrant calls, and the child JVM's start (Fabric 1.20.1 first)"
+
+[dependencies]
+# launch.json (fetch120.py) and the 1.20.1 report.
+serde_json = "1"
+
+[lints]
+workspace = true
