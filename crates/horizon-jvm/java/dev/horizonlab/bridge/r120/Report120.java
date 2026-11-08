@@ -34,6 +34,7 @@ final class Report120 {
         out.putAll(boot.timings());
         out.put("mapped_classes", n == null ? 0 : n.classes());
         section(out, "mods", this::mods);
+        out.put("dependency_overrides", boot.overrides());
         out.put("entrypoints", boot.entrypoints());
         section(out, "blocks", this::blocks);
         section(out, "items", this::items);

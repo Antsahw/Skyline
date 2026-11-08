@@ -74,6 +74,8 @@ public final class Boot120 implements RemoteRuntime {
     /** mod id -> entrypoint key -> "ok" or the failure. */
     private final Map<String, Map<String, String>> entrypoints = new LinkedHashMap<>();
     private final List<String> problems = new ArrayList<>();
+    /** Mods whose declared Fabric Loader range was overridden (Overrides120). */
+    private Map<String, Map<String, String>> overrides = Map.of();
     private String report;
 
     @Override
@@ -117,6 +119,10 @@ public final class Boot120 implements RemoteRuntime {
         return entrypoints;
     }
 
+    Map<String, Map<String, String>> overrides() {
+        return overrides;
+    }
+
     List<String> problems() {
         return problems;
     }
@@ -131,6 +137,19 @@ public final class Boot120 implements RemoteRuntime {
         Files.createDirectories(options.gameDir);
         Files.createDirectories(options.mods);
         logConfig();
+        // Mods held back only by their declared loader range get Fabric's own dependency
+        // override, before Fabric Loader resolves them (Overrides120).
+        long t0 = System.nanoTime();
+        try {
+            overrides = Overrides120.write(options.gameDir, options.mods, options.addMods);
+            for (Map.Entry<String, Map<String, String>> e : overrides.entrySet()) {
+                Host.log("mod " + e.getKey() + " declares Fabric Loader " + e.getValue().get("fabricloader")
+                        + ": overridden (" + e.getValue().get("by") + ")");
+            }
+        } catch (Exception e) {
+            problems.add("dependency overrides: " + root(e));
+        }
+        timings.put("overrides_ms", ms(t0));
         System.setProperty("fabric.gameJarPath", options.gameJar.toAbsolutePath().toString());
         System.setProperty("fabric.modsFolder", options.mods.toAbsolutePath().toString());
         if (!options.addMods.isEmpty()) {

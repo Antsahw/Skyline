@@ -45,5 +45,7 @@ r = json.load(open(sys.argv[1]))
 failed = [f"{m} {k}: {v}" for m, e in r["entrypoints"].items() for k, v in e.items() if v != "ok"]
 print(f"{len(r['mods'])} mods, {len(r['blocks'])} blocks, {len(r['items'])} items in {r['start_ms']} ms on Java {r['java']}")
 print(f"entrypoints failed: {len(failed)}" + "".join("\n  " + f for f in failed))
+over = r.get("dependency_overrides") or {}
+print(f"loader ranges overridden: {len(over)}" + "".join(f"\n  {m} (declares {o['fabricloader']}, {o['by']})" for m, o in over.items()))
 print(f"problems: {r['problems'] or 'none'}")
 PY
