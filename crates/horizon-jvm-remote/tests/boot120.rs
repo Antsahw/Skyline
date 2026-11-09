@@ -443,5 +443,36 @@ fn right_clicking_a_block_runs_its_1_20_1_code_on_horizons_blocks() {
         .unwrap_or_else(|| panic!("the record is dropped into the world: {used:?}"));
     assert_eq!(dropped.count, 1, "{dropped:?}");
     assert_eq!(dropped.dimension, "minecraft:overworld");
+
+    // Phase 3c: their block entities tick. A lit furnace with fuel and something to smelt is
+    // 1.20.1's own ticking code end to end -- it needs the block entity loaded from Horizon,
+    // the recipes bound, and what it changes sent back -- with no mod in the way.
+    let world = WithEntity {
+        block: OneBlock("minecraft:furnace[facing=north,lit=true]".into()),
+        entity: "{id:\"minecraft:furnace\",x:0,y:64,z:0,BurnTime:200s,CookTime:0s,\
+                 CookTimeTotal:200s,Items:[{Slot:0b,id:\"minecraft:raw_iron\",Count:1b},\
+                 {Slot:1b,id:\"minecraft:coal\",Count:1b}]}"
+            .into(),
+    };
+    let ticked = runtime
+        .tick_block_entities(&world, "minecraft:overworld", &[0, 64, 0])
+        .expect("the furnace ticks");
+    assert_eq!(ticked.ticked, 1, "the furnace has a ticker: {ticked:?}");
+    let after = ticked
+        .block_entities
+        .iter()
+        .find(|e| e.pos == [0, 64, 0])
+        .unwrap_or_else(|| panic!("the furnace changed and came back: {ticked:?}"));
+    // One tick of smelting: it burned a tick of fuel and cooked for a tick.
+    assert!(
+        after.snbt.contains("BurnTime:199s"),
+        "a tick of fuel burned: {}",
+        after.snbt
+    );
+    assert!(
+        after.snbt.contains("CookTime:1s"),
+        "it cooked for a tick: {}",
+        after.snbt
+    );
     runtime.stop();
 }

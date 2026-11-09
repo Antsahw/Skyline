@@ -15,7 +15,7 @@
 //! or ejects, ticking machines and menus are the next steps.
 
 use horizon_jvm_remote::boot120::{self, Fabric120, Runtime120, Side};
-use horizon_jvm_remote::mirror120::{UseBlock, World120};
+use horizon_jvm_remote::mirror120::{SetBlock, SetBlockEntity, SpawnItem, UseBlock, World120};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -235,6 +235,15 @@ fn wait_for_runtime() -> Option<std::sync::MutexGuard<'static, Option<Runtime120
     }
 }
 
+/// Said once: a tick of the mods' block entities that failed. A tick runs twenty times a
+/// second, so the same failure would otherwise fill the log.
+fn tick_failed_once(e: &str) {
+    static SAID: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if !SAID.swap(true, std::sync::atomic::Ordering::Relaxed) {
+        log::warn!("1.20.1 mods: ticking their block entities failed: {e}");
+    }
+}
+
 /// Said once, the first time a click lands before the runtime is up (it boots in the
 /// background, which takes a while for a big pack): after that the clicks pass quietly.
 fn booting_once() {
@@ -401,42 +410,8 @@ impl super::Game<'_> {
                 return None;
             }
         };
-        for set in &used.set {
-            if set.dimension != self.dim.id() {
-                continue;
-            }
-            match super::render_control::parse_state(registry, &set.state) {
-                Ok(state) => {
-                    if let Err(e) = self.place_state(set.pos, state, false) {
-                        log::warn!("1.20.1 mods: placing {}: {e:?}", set.state);
-                    }
-                }
-                Err(e) => log::warn!("1.20.1 mods: a mod set {}: {e}", set.state),
-            }
-        }
-        // The block entities the mods' code changed (a cooking pot's items and progress):
-        // kept as they saved them, after the blocks so one it placed is already there.
-        for set in &used.block_entities {
-            if set.dimension != self.dim.id() {
-                continue;
-            }
-            self.set_block_entity_120(set.pos, &set.snbt);
-        }
-        // What the mods' code dropped or ejected into the world (a chest spilling its items,
-        // a machine putting its output out), spawned by Horizon, which owns the entities.
-        for item in &used.spawned {
-            if item.dimension != self.dim.id() || item.count <= 0 {
-                continue;
-            }
-            let stack = horizon_client::items::ItemStack {
-                item: item.item.as_str().into(),
-                count: item.count as u32,
-                damage: item.damage.max(0) as u32,
-                extra: None,
-            };
-            // `ItemEntity.setDefaultPickUpDelay`: 10 ticks before anyone can pick it up.
-            self.spawn_item(stack, item.pos, item.motion, 10);
-        }
+        let dimension = self.dim.id().to_owned();
+        self.apply_java120(&dimension, &used.set, &used.block_entities, &used.spawned);
         // The held stack as the mods' code left it (worn, used up, turned into another).
         let after = (used.item.as_str(), used.count, used.damage);
         let before = held.as_ref().map_or(("minecraft:air", 0, 0), |h| {
@@ -472,6 +447,95 @@ impl super::Game<'_> {
             return Some(false);
         }
         None
+    }
+
+    /// One tick of the mods' own block entities in this level: their code runs (a cooking pot
+    /// cooks), on Horizon's world, and what it set, changed and dropped lands here.
+    ///
+    /// A tick is every 50 ms and nobody is waiting on any one of them, so a runtime that is
+    /// busy is skipped rather than waited for (unlike a click, which a person is waiting on).
+    pub(in crate::game) fn tick_java120_block_entities(&mut self) {
+        if self.remote.is_some() {
+            return;
+        }
+        // Their block entities, which Horizon keeps as `BlockEntity::Mod`: a mod's own type,
+        // kept as its NBT. Vanilla's are Horizon's to tick.
+        let mut positions: Vec<i32> = Vec::new();
+        for ((x, y, z), entity) in &self.world.block_entities {
+            if matches!(entity, horizon_client::containers::BlockEntity::Mod(_)) {
+                positions.extend([*x, *y, *z]);
+            }
+        }
+        if positions.is_empty() {
+            return;
+        }
+        let dimension = self.dim.id().to_owned();
+        let ticked = {
+            let Ok(mut guard) = RUNTIME.try_lock() else {
+                return;
+            };
+            let Some(runtime) = guard.as_mut() else {
+                return;
+            };
+            runtime.tick_block_entities(&Level(self), &dimension, &positions)
+        };
+        let ticked = match ticked {
+            Ok(ticked) => ticked,
+            Err(e) => {
+                tick_failed_once(&e);
+                return;
+            }
+        };
+        self.apply_java120(
+            &dimension,
+            &ticked.set,
+            &ticked.block_entities,
+            &ticked.spawned,
+        );
+    }
+
+    /// What a call in the mods' world left for Horizon: the blocks it set, the block entities
+    /// it changed and the items it dropped, in that order (a block entity belongs to the block
+    /// that is there once the sets have landed).
+    fn apply_java120(
+        &mut self,
+        dimension: &str,
+        set: &[SetBlock],
+        block_entities: &[SetBlockEntity],
+        spawned: &[SpawnItem],
+    ) {
+        let registry = self.pack.assets.registry;
+        for s in set {
+            if s.dimension != dimension {
+                continue;
+            }
+            match super::render_control::parse_state(registry, &s.state) {
+                Ok(state) => {
+                    if let Err(e) = self.place_state(s.pos, state, false) {
+                        log::warn!("1.20.1 mods: placing {}: {e:?}", s.state);
+                    }
+                }
+                Err(e) => log::warn!("1.20.1 mods: a mod set {}: {e}", s.state),
+            }
+        }
+        for e in block_entities {
+            if e.dimension == dimension {
+                self.set_block_entity_120(e.pos, &e.snbt);
+            }
+        }
+        for item in spawned {
+            if item.dimension != dimension || item.count <= 0 {
+                continue;
+            }
+            let stack = horizon_client::items::ItemStack {
+                item: item.item.as_str().into(),
+                count: item.count as u32,
+                damage: item.damage.max(0) as u32,
+                extra: None,
+            };
+            // `ItemEntity.setDefaultPickUpDelay`: 10 ticks before anyone can pick it up.
+            self.spawn_item(stack, item.pos, item.motion, 10);
+        }
     }
 
     /// A 1.20.1 mod's block entity as its code saved it (`saveWithFullMetadata` in SNBT): what

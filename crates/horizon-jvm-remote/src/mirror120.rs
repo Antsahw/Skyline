@@ -82,6 +82,19 @@ pub struct UseBlock {
     pub creative: bool,
 }
 
+/// What a tick of the mods' block entities did.
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct Ticked {
+    /// How many of the positions had a block entity with a ticker that ran.
+    pub ticked: i32,
+    /// The blocks the ticking code set, in order.
+    pub set: Vec<SetBlock>,
+    /// The block entities it changed, in order.
+    pub block_entities: Vec<SetBlockEntity>,
+    /// The items it dropped or ejected, in order.
+    pub spawned: Vec<SpawnItem>,
+}
+
 /// What a right-click did.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Used {
@@ -212,6 +225,38 @@ impl Handler for InWorld<'_> {
 }
 
 impl Runtime120 {
+    /// One tick of the mods' block entities at `positions` of `dimension`: their own ticking
+    /// code (a cooking pot cooking), run in the runtime on `world`. What it set, changed and
+    /// dropped comes back for Horizon to apply, as a right-click's does.
+    pub fn tick_block_entities(
+        &mut self,
+        world: &dyn World120,
+        dimension: &str,
+        positions: &[i32],
+    ) -> Result<Ticked, String> {
+        let args = [
+            Value::Str(dimension.to_owned()),
+            Value::I32s(positions.to_vec()),
+        ];
+        let mut handler = InWorld {
+            world,
+            set: Vec::new(),
+            block_entities: Vec::new(),
+            spawned: Vec::new(),
+            log: self.log.clone(),
+        };
+        let values = self.call_values("tickBlockEntities", &args, &mut handler)?;
+        Ok(Ticked {
+            ticked: match values.first() {
+                Some(Value::I32(v)) => *v,
+                other => return Err(format!("tickBlockEntities: answer 0 is {other:?}")),
+            },
+            set: handler.set,
+            block_entities: handler.block_entities,
+            spawned: handler.spawned,
+        })
+    }
+
     /// A player's right-click on a block, run by the mods' code in the 1.20.1 runtime with
     /// `world` as its world.
     pub fn use_block(&mut self, world: &dyn World120, used: &UseBlock) -> Result<Used, String> {

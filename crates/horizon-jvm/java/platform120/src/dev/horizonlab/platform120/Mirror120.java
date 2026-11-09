@@ -481,6 +481,69 @@ public final class Mirror120 {
         return new Object[] {code, BuiltInRegistries.ITEM.getKey(after.getItem()).toString(), after.getCount(), after.getDamageValue()};
     }
 
+    /**
+     * One tick of the mods' block entities at `positions` (x, y, z each) of `dimension`: a
+     * cooking pot cooks, a machine runs. Each is loaded from Horizon as a chunk would load it
+     * ({@link #blockEntity}), its block's own ticker is run once, and what changed goes back
+     * when the call ends ({@link #finish}) -- the same path a right-click takes.
+     *
+     * <p>Loaded and saved per tick rather than kept alive between them: a block entity's state
+     * is what it saves (that is how one survives a restart), so a tick reads what the last one
+     * wrote. A mod that keeps something only in a field, never in its NBT, loses it between
+     * ticks; keeping them live is the next step, and the one that makes this cheap.
+     */
+    public static Object[] tickBlockEntities(String dimension, int[] positions) {
+        begin();
+        ServerLevel level = level(dimension);
+        int ticked = 0;
+        for (int i = 0; i + 2 < positions.length; i += 3) {
+            BlockPos pos = new BlockPos(positions[i], positions[i + 1], positions[i + 2]);
+            if (tickOne(level, pos)) ticked++;
+        }
+        finish();
+        return new Object[] {ticked};
+    }
+
+    /** One block entity's tick; false when there is nothing there to tick. */
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private static boolean tickOne(ServerLevel level, BlockPos pos) {
+        BlockState state = blockState(level, pos);
+        if (!(state.getBlock() instanceof net.minecraft.world.level.block.EntityBlock block)) {
+            return false;
+        }
+        BlockEntity entity = blockEntity(level, pos);
+        if (entity == null) return false;
+        if (TICK_FAILED.contains(kind(entity))) return false;
+        net.minecraft.world.level.block.entity.BlockEntityTicker ticker =
+                block.getTicker(level, state, entity.getType());
+        if (ticker == null) return false;
+        try {
+            ticker.tick(level, pos, state, entity);
+        } catch (RuntimeException | LinkageError e) {
+            // One mod's bad tick must not stop the rest of them.
+            tickFailed(entity, e);
+            return false;
+        }
+        return true;
+    }
+
+    /** A block entity type's id, for saying which one misbehaved. */
+    private static String kind(BlockEntity entity) {
+        return BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(entity.getType()) + "";
+    }
+
+    /**
+     * A tick that threw: said once, and that type is not ticked again. A mod whose tick fails
+     * once fails every tick, and the world would fill with the same line twenty times a second.
+     */
+    private static void tickFailed(BlockEntity entity, Throwable e) {
+        if (TICK_FAILED.add(kind(entity))) {
+            log("the tick of " + kind(entity) + " failed, and is left out from now on: " + e);
+        }
+    }
+
+    private static final java.util.Set<String> TICK_FAILED = new java.util.HashSet<>();
+
     private static ItemStack stack(String item, int count, int damage) {
         ResourceLocation id = ResourceLocation.tryParse(item);
         if (id == null || count <= 0) return ItemStack.EMPTY;

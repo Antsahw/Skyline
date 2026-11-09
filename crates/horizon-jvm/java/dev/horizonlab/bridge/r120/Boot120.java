@@ -100,6 +100,9 @@ public final class Boot120 implements RemoteRuntime {
             case "useBlock":
                 // A right-click of Horizon's player on a block (platform120's Mirror120.useBlock).
                 return mirror("useBlock", args);
+            case "tickBlockEntities":
+                // One tick of the mods' block entities Horizon knows of (Mirror120).
+                return mirror("tickBlockEntities", args);
             case "ping":
                 return new Object[] {"pong"};
             default:

@@ -412,8 +412,26 @@ is lost until the downgrade tables land.
 Tested: the record goes back out of the jukebox (`JukeboxBlock.use` → `dropRecording` →
 `addFreshEntity`), and comes back as an item for Horizon to spawn.
 
-Next: ticking block entities (a cooking pot holds its items but never cooks), then the chunk
-mirror and batched deltas, then menus.
+**Their block entities tick** (phase 3c): every server tick, Horizon hands the runtime the
+positions of the block entities it keeps as a mod's own (`BlockEntity::Mod`), and each one's
+block ticker runs once on the mirror -- a cooking pot cooks, a machine runs. What the tick set,
+changed and dropped comes back the same way a right-click's does (`apply_java120`).
+
+Each is loaded from Horizon and saved back per tick rather than kept alive between them: a
+block entity's state is what it saves, so a tick reads what the last one wrote. A mod that
+keeps something only in a field and never in its NBT loses it between ticks, and every ticking
+machine costs a call and an event per tick. Keeping them live in the runtime, as the 26.3
+bridge does (`HorizonBlockEntities.LIVE`), is what makes this cheap and is the next step here.
+
+A tick that throws is said once and that block entity type is not ticked again: a tick runs
+twenty times a second, and a mod whose tick fails fails every one of them. A runtime busy with
+another call skips the tick rather than waiting (nobody is waiting on a tick, unlike a click).
+
+Tested: a lit furnace with fuel and something to smelt burns a tick of fuel and cooks for a
+tick -- 1.20.1's own ticking code, needing the block entity loaded from Horizon, the recipes
+bound, and the change sent back, with no mod in the way.
+
+Next: the chunk mirror and batched deltas, then menus.
 
 ## How the bridge is laid out (Phase 0)
 
@@ -499,9 +517,9 @@ NeoForge could run beside Fabric 26.3 rather than in its place.
    (the top-150 list), and Horizon's recipe book showing content mods' recipes.
 3. **machine120.** 3a done: right-clicks run the mods' code on a mirror `ServerLevel`. 3b done:
    block entities cross both ways, a mod's own kept as opaque NBT, and what a mod drops or
-   ejects reaches Horizon (all above). Next: ticking block entities, the chunk mirror and
-   batched deltas ("Measured"), the downgrade tables, the Fabric Transfer API on Horizon's
-   containers.
+   ejects reaches Horizon, and their block entities tick (all above). Next: keeping those
+   block entities live between ticks, the chunk mirror and batched deltas ("Measured"), the
+   downgrade tables, the Fabric Transfer API on Horizon's containers.
 4. **gui120.** `GuiGraphics` recorder → `screenFrame` JSON, menus, input, slot clicks (its own lane).
 5. **Events and networking.** Fabric API 1.20.1 events at the bridge's hook points, mod packets.
 6. **Entities and worldgen.** Data-driven registries from a real server load (mods' biomes

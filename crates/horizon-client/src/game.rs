@@ -7954,6 +7954,8 @@ impl Game<'_> {
         self.native_tick();
         self.tell_native_now();
         self.tick_java_server();
+        #[cfg(feature = "java-mods-120")]
+        self.tick_java120_block_entities();
         self.tick_world(running)
     }
     /// What the tick runs after the local player's own update: effects, the
