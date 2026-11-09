@@ -270,6 +270,46 @@ compiled into `horizon-jvm-remote` (its build.rs, `BRIDGE120_JAR`). `fetch120.py
 `build120.sh`'s platform jar must exist on the machine; the game says which command to run if
 they don't.
 
+### In the game: the phase 2 milestone (2026-11-09)
+
+The 14 mods in `mods-java-1.20.1/` of a scratch game folder, the game built with
+`--features java-mods-120` and run off-screen (llvmpipe under Xvfb) through `horizon-ctl`:
+
+- **Made and loaded:** the first start makes the 16 content mods in about 25 s (boot included)
+  and layers them in. Later starts read them from the cache: no Java starts.
+- **Placed and drawn:** Farmer's Delight's rice bag, stove, cooking pot and tomato crate,
+  Supplementaries' checker block, Tech Reborn's ruby block and machine frame, and the Waystones
+  waystone, each with its own model and textures.
+- **Saved and reloaded:** all eight are still there after quit and restart (`execute if block`).
+- **Drops:** each drops itself through its own upgraded loot table (`/loot ... mine`).
+- **Crafting:** Farmer's Delight's beetroot crate → 9 beetroot, and Waystones' ender pearl +
+  amethyst shard → 4 warp dust, crafted in the inventory grid.
+- **Items:** the skillet, tomato, cooking pot, rice bag, warp dust, waystone, sconce and iron
+  knife show in the hotbar with their icons and names. Picking up the knife gives vanilla's
+  "Hunt and Gather", so the mods' item tags hold.
+
+**A bigger pack, the same way: 36 jars** (Biomes O' Plenty with TerraBlender and GlitchCore,
+Chipped, Handcrafted, Supplementaries, Farmer's Delight, Waystones, Traveler's Backpack, Carry
+On, Lootr, Comforts, Dungeons and Taverns, Terralith, YUNG's Better Dungeons, their libraries,
+JEI, Jade, Sodium...) became 36 content mods in 37 s at the game's first start. That's
+Biomes O' Plenty's 429 blocks, 308 recipes and 401 loot tables, Chipped's 6981 blocks,
+Handcrafted's 267 blocks and 285 recipes, and Comforts' and Traveler's Backpack's. In the
+game, Handcrafted's chair and table, Chipped's woven wool and decorated terracotta, Biomes
+O' Plenty's rose quartz, redwood log and jacaranda planks, and the backpack were placed and
+drawn with their own models. Lootr's barrel draws as the missing texture: Lootr draws its
+blocks through a custom Fabric model loader, the mod's own rendering code (phase 7).
+
+Found and fixed on the way:
+- One vanilla state the facts named but 26.3 doesn't have (`minecraft:piglin_head[rotation=0]`:
+  26.3's heads gained `powered`) made the game refuse **every** content mod. `content120` now
+  keeps only the vanilla blocks and states that 26.3 also has, from the prepared `facts.json`.
+- Horizon's recipe book index, which `/recipe` reads, lists vanilla's and the data packs'
+  recipes only, not content mods'. Crafting reads both. That's Horizon's, the same for every
+  content mod: content mods' recipes don't show in the recipe book yet.
+
+Not yet: what the mods' code does (the cooking pot cooks, the stove lights, machines run,
+screens open). That is phase 3 on.
+
 ## How the bridge is laid out (Phase 0)
 
 | Part | Size | What it is |
@@ -348,8 +388,10 @@ NeoForge could run beside Fabric 26.3 rather than in its place.
      scan (`java<=21` → a Java 21 child) instead of by hand.
    - 1c: Horizon's game starts the child when `mods-java-1.20.1/` holds jars (the gate,
      `game/java_*.rs`), and the report feeds `horizon-port-pack`.
-2. **placed120.** Content conversion for blocks, items, models, sprites (in progress, above).
-   **Milestone:** a 1.20.1 mod block is placed, drawn, saved and reloaded.
+2. **placed120.** Done for the 14-mod set (Phase 2 status): blocks, items, models, textures,
+   recipes, loot and tags. **Milestone met:** 1.20.1 mod blocks placed, drawn, saved and
+   reloaded; they drop themselves and their recipes craft. Next here: more mods through it
+   (the top-150 list), and Horizon's recipe book showing content mods' recipes.
 3. **machine120.** Mirror 1.20.1 `ServerLevel` with the chunk mirror and batched deltas
    ("Measured"), block entities, the downgrade tables, the Fabric Transfer API on Horizon's
    containers.

@@ -7,7 +7,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn main() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../horizon-jvm/java/dev/horizonlab/bridge");
+    let root =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../horizon-jvm/java/dev/horizonlab/bridge");
     let out = PathBuf::from(std::env::var("OUT_DIR").unwrap());
     let jar = out.join("bridge120.jar");
     let mut sources = Vec::new();
@@ -30,7 +31,15 @@ fn main() {
     let classes = out.join("bridge120-classes");
     let _ = std::fs::remove_dir_all(&classes);
     let compiled = Command::new(&javac)
-        .args(["--release", "17", "-proc:none", "-nowarn", "-encoding", "UTF-8", "-d"])
+        .args([
+            "--release",
+            "17",
+            "-proc:none",
+            "-nowarn",
+            "-encoding",
+            "UTF-8",
+            "-d",
+        ])
         .arg(&classes)
         .args(&sources)
         .status()

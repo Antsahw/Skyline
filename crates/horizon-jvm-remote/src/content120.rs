@@ -14,7 +14,7 @@ use crate::wire::Value;
 use std::path::{Path, PathBuf};
 
 /// The version of what this module writes: bump it when the facts or the carry-over change.
-const FORMAT: u32 = 1;
+const FORMAT: u32 = 2;
 
 /// The stamp of a set of jars: their names, sizes and modification times, and [`FORMAT`].
 pub fn stamp(jars: &[PathBuf]) -> String {
@@ -100,6 +100,76 @@ fn nested_jars(jar: &Path, mods: &Path, depth: u32) {
     }
 }
 
+/// Vanilla's blocks in the facts as 26.3 has them. The facts are 1.20.1's, and the carry-over
+/// borrows vanilla states for mods' shapes (`"shape": "minecraft:piglin_head[rotation=0]"`): a
+/// state 26.3 doesn't have (its heads gained `powered`) makes the game refuse every content mod.
+/// So a vanilla block 26.3 lacks, or whose property names changed, leaves the facts, and of the
+/// others only the states 26.3 has stay. 26.3's states come from the prepared `facts.json`.
+fn vanilla_as_in_26_3(facts: &Path, resources: &Path) -> Result<(), String> {
+    use serde_json::Value;
+    use std::collections::{BTreeMap, BTreeSet};
+    let read = |p: &Path| -> Result<Value, String> {
+        let text = std::fs::read_to_string(p).map_err(|e| format!("{}: {e}", p.display()))?;
+        serde_json::from_str(&text).map_err(|e| format!("{}: {e}", p.display()))
+    };
+    let prepared = read(&resources.join("facts.json"))?;
+    // 26.3: block -> its states as sorted "k=v,..." keys.
+    let mut states: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for s in prepared["states"].as_array().into_iter().flatten() {
+        let Some(id) = s.get(0).and_then(Value::as_str) else {
+            continue;
+        };
+        let key = state_key(s.get(4).and_then(|x| x.get("properties")));
+        states.entry(id.to_owned()).or_default().insert(key);
+    }
+    let mut ours = read(facts)?;
+    let Some(blocks) = ours["blocks"].as_object_mut() else {
+        return Ok(());
+    };
+    let vanilla: Vec<String> = blocks
+        .keys()
+        .filter(|k| k.starts_with("minecraft:"))
+        .cloned()
+        .collect();
+    for id in vanilla {
+        let Some(theirs) = states.get(&id) else {
+            blocks.remove(&id);
+            continue;
+        };
+        let block = &mut blocks[&id];
+        let Some(own) = block["states"].as_object_mut() else {
+            continue;
+        };
+        own.retain(|key, _| theirs.contains(&sorted(key)));
+        if own.is_empty() {
+            blocks.remove(&id);
+        }
+    }
+    let text = serde_json::to_string(&ours).map_err(|e| e.to_string())?;
+    std::fs::write(facts, text).map_err(|e| format!("{}: {e}", facts.display()))
+}
+
+/// A state's properties as a key with the names sorted: "a=1,b=x".
+fn state_key(properties: Option<&serde_json::Value>) -> String {
+    let mut parts: Vec<String> = properties
+        .and_then(|p| p.as_object())
+        .map(|o| {
+            o.iter()
+                .map(|(k, v)| format!("{k}={}", v.as_str().unwrap_or_default()))
+                .collect()
+        })
+        .unwrap_or_default();
+    parts.sort();
+    parts.join(",")
+}
+
+/// A facts state key ("rotation=0,powered=true", in the block's property order) sorted.
+fn sorted(key: &str) -> String {
+    let mut parts: Vec<&str> = key.split(',').filter(|p| !p.is_empty()).collect();
+    parts.sort_unstable();
+    parts.join(",")
+}
+
 /// Builds the content mods of `jars` into `cache` with the running 1.20.1 runtime (booted with
 /// these jars and the platform jar), for the prepared game at `resources`: the folders to load.
 pub fn build(
@@ -142,10 +212,58 @@ pub fn build(
             &namespaces
         }
     ));
+    vanilla_as_in_26_3(&facts, resources)?;
     // Every jar is carried: its assets and data under its own namespaces.
     let all: Vec<String> = records.iter().map(|r| r.key.clone()).collect();
     horizon_port_pack::pipeline::carry(&work, Some(resources), &all, &log_line)?;
     let _ = std::fs::remove_dir_all(&instance);
     std::fs::write(cache.join("stamp"), stamp(jars)).map_err(|e| format!("stamp: {e}"))?;
     Ok(carried(&work))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn vanilla_states_26_3_lacks_leave_the_facts() {
+        let dir = std::env::temp_dir().join(format!("content120-vanilla-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        // 26.3's prepared facts: heads gained `powered`; stone as ever; no `minecraft:grass`.
+        let prepared = serde_json::json!({"states": [
+            ["minecraft:stone", false, false, "", {"id": "minecraft:stone"}],
+            ["minecraft:piglin_head", false, false, "", {"id": "minecraft:piglin_head", "properties": {"rotation": "0", "powered": "false"}}],
+            ["minecraft:oak_slab", false, false, "", {"id": "minecraft:oak_slab", "properties": {"type": "top", "waterlogged": "false"}}],
+        ], "defaults": {}});
+        std::fs::write(dir.join("facts.json"), prepared.to_string()).unwrap();
+        let facts = dir.join("oracle-facts.json");
+        let ours = serde_json::json!({"blocks": {
+            "minecraft:stone": {"states": {"": {}}},
+            "minecraft:piglin_head": {"states": {"rotation=0": {}}},
+            "minecraft:grass": {"states": {"": {}}},
+            "minecraft:oak_slab": {"states": {"waterlogged=false,type=top": {}, "waterlogged=true,type=top": {}}},
+            "farmersdelight:stove": {"states": {"facing=north": {}}},
+        }});
+        std::fs::write(&facts, ours.to_string()).unwrap();
+        vanilla_as_in_26_3(&facts, &dir).unwrap();
+        let got: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&facts).unwrap()).unwrap();
+        let blocks = got["blocks"].as_object().unwrap();
+        let ids: Vec<&String> = blocks.keys().collect();
+        assert_eq!(
+            ids,
+            [
+                "farmersdelight:stove",
+                "minecraft:oak_slab",
+                "minecraft:stone"
+            ]
+        );
+        let slab: Vec<&String> = blocks["minecraft:oak_slab"]["states"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .collect();
+        assert_eq!(slab, ["waterlogged=false,type=top"]);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 }
