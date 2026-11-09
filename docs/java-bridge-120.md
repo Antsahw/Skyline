@@ -205,6 +205,71 @@ mod works in a world yet; that's phases 2–7. 39 of the 149 use APIs that newer
 about (mostly `sun.misc.Unsafe`, in bundled libraries). None of those is a blocker on Java 25
 today. The table: `survey120-top150.tsv` beside this plan.
 
+## Phase 2 status: the mods' blocks and items as Horizon content (2026-11-09)
+
+Common mods first: the blocks and items they add become Horizon content mods, made the way the
+26.3 bridge makes its own (horizon-jvm's `content.rs`). The 1.20.1 runtime writes the oracle
+facts of what the mods register, and `horizon-port-pack`'s carry-over turns each jar into a
+folder content mod: block declarations from the vanilla template of the same class and shapes,
+with the mod's own numbers; models, textures, recipes, loot and tags upgraded to 26.3's formats.
+
+**platform120: the bridge's code inside 1.20.1, built as Loom builds a mod.**
+`java/platform120/src` is plain Java written with Mojang's names, as the 26.3 platform is.
+`tools/java_bridge/build120.sh`:
+1. merges Mojang's mappings with intermediary into one Tiny file (`Remap120`, on Fabric's
+   tiny-remapper, pinned in `fabric120.build_tools`);
+2. remaps Mojang's jar to Mojang's names to compile against;
+3. compiles platform120;
+4. remaps it to intermediary, with an intermediary → Mojang class table, into
+   `~/.cache/horizon-120/1.20.1/horizon/platform120.jar`.
+
+Every output derives from Mojang's files and stays in the cache. A build takes about 1 minute
+the first time and seconds after. Later phases' Mixins and mirror code go into the same mod.
+
+**Content120** (platform120) writes the facts from 1.20.1's registries. For blocks: class
+chain, properties, every state's hardness, light, shapes, sounds and map colour, set and wood
+types. For items: stack size, rarity, durability, food and armour, as 1.21.1 components.
+**Tags120** loads the data packs as a server does but without a world (vanilla's, Fabric API's
+convention tags, every mod's own data through Fabric API's pack source) and resolves every
+block and item tag with vanilla's `TagLoader`. With 14 mods that's 312 block tags and 652 item
+tags, so the old Fabric convention tags (`c:iron_ingots`, `c:shears`) that 1.20.1 recipes name
+get their real members. Drops and placement need a level: the mods' loot tables come from their
+jars.
+
+**1.20.x data in 26.3's shape** (`horizon-port-pack/src/legacy120.rs`). The carry-over upgrades
+1.21.1's data to 26.3's, and this first takes 1.20.x's to 1.21.1's:
+- the plural folders (`recipes/` → `recipe/`, `loot_tables/` → `loot_table/`, `tags/items/` →
+  `tags/item/`, ...);
+- recipe results as item stacks (`{"item"}` and smelting's or stonecutting's bare id →
+  `{"id", "count"}`);
+- loot tool matches (`items` list and `tag` → one holder set, `enchantments` → the
+  `minecraft:enchantments` sub-predicate, which the 26.3 step names `tool/can_silk_touch` and
+  `tool/can_shear`);
+- `set_nbt` / `copy_nbt` → their custom-data successors.
+
+A jar's files in the old folders are read as 1.20.x's, since 1.21 and later never read those
+folders.
+
+**The 14 mods** (the Phase 1 set) become 16 content mods in about 40 s, including the boot:
+
+| Mod | Blocks | Items | Recipes | Loot tables |
+|---|---:|---:|---:|---:|
+| Farmer's Delight | 90 | 90 | 147 | 100 |
+| Supplementaries | 203 | 43 | 261 | 177 |
+| Tech Reborn | 307 | 373 | 760 | 274 |
+| Waystones | 25 | 7 | 32 | 25 |
+
+Recipes of the mods' own types (Farmer's Delight's cooking pot, Tech Reborn's machines) are
+carried as they are: they need the mods' machines (phase 3).
+
+**In the game:** `game/java_mods_120.rs` behind the `java-mods-120` feature (no JNI: the
+1.20.1 runtime is a child process). When `mods-java-1.20.1/` beside `options.txt` holds jars,
+the game makes their content mods once per set of jars (cached under their stamp in
+`.horizon-cache/java-120`) and layers them in like the 26.3 bridge's. The bridge's classes come
+compiled into `horizon-jvm-remote` (its build.rs, `BRIDGE120_JAR`). `fetch120.py`'s folder and
+`build120.sh`'s platform jar must exist on the machine; the game says which command to run if
+they don't.
+
 ## How the bridge is laid out (Phase 0)
 
 | Part | Size | What it is |
@@ -283,8 +348,8 @@ NeoForge could run beside Fabric 26.3 rather than in its place.
      scan (`java<=21` → a Java 21 child) instead of by hand.
    - 1c: Horizon's game starts the child when `mods-java-1.20.1/` holds jars (the gate,
      `game/java_*.rs`), and the report feeds `horizon-port-pack`.
-2. **placed120.** Content conversion for blocks, items, models, sprites. **Milestone:** a 1.20.1
-   mod block is placed, drawn, saved and reloaded.
+2. **placed120.** Content conversion for blocks, items, models, sprites (in progress, above).
+   **Milestone:** a 1.20.1 mod block is placed, drawn, saved and reloaded.
 3. **machine120.** Mirror 1.20.1 `ServerLevel` with the chunk mirror and batched deltas
    ("Measured"), block entities, the downgrade tables, the Fabric Transfer API on Horizon's
    containers.

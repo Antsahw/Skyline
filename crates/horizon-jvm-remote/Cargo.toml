@@ -7,8 +7,13 @@ rust-version = "1.90"
 description = "Java runtimes in processes of their own: a framed socket protocol with re-entrant calls, and the child JVM's start (Fabric 1.20.1 first)"
 
 [dependencies]
+# The 1.20.1 mods' content as Horizon content mods (content120.rs), as horizon-jvm's content.rs
+# does for 26.3's.
+horizon-port-pack = { path = "../horizon-port-pack" }
 # launch.json (fetch120.py) and the 1.20.1 report.
 serde_json = "1"
+# Mods nested in mods' jars (Fabric's jar-in-jar) with assets of their own.
+zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [lints]
 workspace = true

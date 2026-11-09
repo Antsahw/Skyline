@@ -92,10 +92,35 @@ public final class Boot120 implements RemoteRuntime {
             case "report":
                 if (game == null) throw new IllegalStateException("not started");
                 return new Object[] {report = new Report120(this).write()};
+            case "facts":
+                // The mods' content for Horizon (platform120's Content120): the facts file
+                // horizon-port-pack's carry-over reads; returns the mods' namespaces.
+                if (game == null) throw new IllegalStateException("not started");
+                return new Object[] {facts((String) args[0])};
             case "ping":
                 return new Object[] {"pong"};
             default:
                 throw new UnsupportedOperationException(method);
+        }
+    }
+
+    /**
+     * Writes the content facts to {@code out} with the platform's Content120 (the platform jar,
+     * build120.sh's, among the mods); returns the mods' namespaces, comma separated.
+     */
+    String facts(String out) throws Exception {
+        Thread thread = Thread.currentThread();
+        ClassLoader before = thread.getContextClassLoader();
+        thread.setContextClassLoader(game);
+        try {
+            Class<?> content = Class.forName("dev.horizonlab.platform120.Content120", true, game);
+            return (String) content.getMethod("exportFacts", String.class).invoke(null, out);
+        } catch (ClassNotFoundException e) {
+            throw new IllegalStateException("the platform jar isn't loaded (tools/java_bridge/build120.sh, then --add-mods it)");
+        } catch (java.lang.reflect.InvocationTargetException e) {
+            throw e.getCause() instanceof Exception x ? x : e;
+        } finally {
+            thread.setContextClassLoader(before);
         }
     }
 
@@ -327,12 +352,13 @@ public final class Boot120 implements RemoteRuntime {
         System.setProperty("log4j.configurationFile", file.toAbsolutePath().toString());
     }
 
-    /** Standalone: {@code Boot120 [--report FILE] --game-jar ... --mappings ... --game-dir ...}. */
+    /** Standalone: {@code Boot120 [--report FILE] [--facts FILE] --game-jar ... --mappings ... --game-dir ...}. */
     public static void main(String[] args) throws Exception {
-        String out = null;
+        String out = null, factsOut = null;
         List<String> rest = new ArrayList<>();
         for (int i = 0; i < args.length; i++) {
             if (args[i].equals("--report") && i + 1 < args.length) out = args[++i];
+            else if (args[i].equals("--facts") && i + 1 < args.length) factsOut = args[++i];
             else rest.add(args[i]);
         }
         Boot120 boot = new Boot120();
@@ -340,6 +366,7 @@ public final class Boot120 implements RemoteRuntime {
         String report = boot.boot();
         if (out != null) Files.writeString(Path.of(out), report);
         Host.log("report: " + report.length() + " chars" + (out != null ? " -> " + out : ""));
+        if (factsOut != null) Host.log("facts for " + boot.facts(factsOut) + " -> " + factsOut);
         System.exit(0);
     }
 }

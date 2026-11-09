@@ -126,6 +126,13 @@
     "fabric_api_url": "https://maven.fabricmc.net/net/fabricmc/fabric-api/fabric-api/0.92.12+1.20.1/fabric-api-0.92.12+1.20.1.jar",
     "fabric_api_mirror": "https://github.com/FabricMC/fabric/releases/download/0.92.12%2B1.20.1/fabric-api-0.92.12%2B1.20.1.jar",
     "fabric_api_sha256": "4197ff4fbdac13cffccd267c1bc59e9fbabb2b5683a9d5f8023f4b5ea16a1c1e",
-    "note": "Fabric 1.20.1 in a JVM of its own (docs/java-bridge-120.md), pinned apart from the 26.3 side's fabric-libs.tsv / fabric-api.tsv so either can move alone: the newest Fabric Loader and the newest Fabric API built for 1.20.1. Mojang's version JSON is pinned by SHA-1 and vouches for the client jar, its mappings and libraries (SHA-1s inside). Java 25 by default (1.20.1 asks for 17: java-runtime-gamma); a pack can choose 17. Fetched by tools/java_bridge/fetch120.py, never committed."
+    "build_tools": [
+      {
+        "file": "tiny-remapper-0.15.0-fat.jar",
+        "url": "https://maven.fabricmc.net/net/fabricmc/tiny-remapper/0.15.0/tiny-remapper-0.15.0-fat.jar",
+        "sha256": "ca93f562ab05daea928c7b89a355188c068d6154c9f7f485e8704dbaf35bfd44"
+      }
+    ],
+    "note": "Fabric 1.20.1 in a JVM of its own (docs/java-bridge-120.md), pinned apart from the 26.3 side's fabric-libs.tsv / fabric-api.tsv so either can move alone: the newest Fabric Loader and the newest Fabric API built for 1.20.1. Mojang's version JSON is pinned by SHA-1 and vouches for the client jar, its mappings and libraries (SHA-1s inside). Java 25 by default (1.20.1 asks for 17: java-runtime-gamma); a pack can choose 17. Fetched by tools/java_bridge/fetch120.py, never committed. build_tools: Fabric's tiny-remapper (with ASM and mapping-io inside), for tools/java_bridge/build120.sh only: it remaps Mojang's jar to Mojang's names for compiling and the bridge's compiled 1.20.1 code to intermediary, as Loom does; never on a game's class path."
   }
 }

@@ -71,6 +71,7 @@ fn config(cache: PathBuf, bridge: PathBuf, game: PathBuf, lines: Lines) -> Fabri
         bridge,
         game_dir: game,
         mods: None,
+        platform: None,
         side: Side::Client,
         max_heap: "3G".into(),
         jvm_args: vec![],

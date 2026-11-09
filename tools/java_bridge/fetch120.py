@@ -15,7 +15,8 @@ Writes into OUT/1.20.1/:
   versions/client.txt                         Mojang's mappings (official <- Mojang's names:
                                               the boot and report code are written in those)
   libraries/...                               the client's libraries for this OS and arch
-  fabric/...                                  Fabric Loader + ASM + Mixin, intermediary, Fabric API
+  fabric/...                                  Fabric Loader + ASM + Mixin, intermediary, Fabric API;
+                                              fabric/tools/: build120.sh's remapper
   assets/                                     with --assets: the index and objects (later phases)
   launch.json                                 read by horizon-jvm-remote's boot120.rs and run120.sh
 """
@@ -119,6 +120,11 @@ def plan(vj, lock, out, name=None, machine=None):
     fabric_api = os.path.join(fab_dir, os.path.basename(lock["fabric_api_url"]))
     sources = [lock["fabric_api_url"]] + ([lock["fabric_api_mirror"]] if lock.get("fabric_api_mirror") else [])
     jobs.append((sources, fabric_api, "sha256", lock["fabric_api_sha256"]))
+    build_tools = []
+    for tool in lock.get("build_tools", []):
+        path = os.path.join(fab_dir, "tools", tool["file"])
+        jobs.append(([tool["url"]], path, "sha256", tool["sha256"]))
+        build_tools.append(path)
     for lib in vj["libraries"]:
         if not allowed(lib, name, machine):
             continue
@@ -144,6 +150,8 @@ def plan(vj, lock, out, name=None, machine=None):
         "game_jar": game_jar,
         "mojang_mappings": mojang,
         "fabric_api": fabric_api,
+        # build120.sh's remapper: never on a game's class path.
+        "build_tools": build_tools,
         "loader_version": os.path.basename(loader[0])[len("fabric-loader-"):-len(".jar")],
         "java_major": lock["java_major"],
         "java_major_mojang": vj["javaVersion"]["majorVersion"],

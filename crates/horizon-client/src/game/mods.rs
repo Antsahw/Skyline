@@ -85,6 +85,9 @@ pub(super) fn content_root(
     // what turns them on and off).
     #[cfg(feature = "java-mods")]
     let dev = &[dev, super::java_mods::java_content(root).as_slice()].concat();
+    // So are the 1.20.1 mods' (mods-java-1.20.1/, docs/java-bridge-120.md).
+    #[cfg(feature = "java-mods-120")]
+    let dev = &[dev, super::java_mods_120::content(root).as_slice()].concat();
     let mut paths = horizon_mods::find(&here.join(mod_list::DIR));
     paths.retain(|p| !dev.contains(p));
     paths.extend(dev.iter().cloned());

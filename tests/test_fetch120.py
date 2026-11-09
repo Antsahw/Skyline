@@ -46,6 +46,7 @@ LOCK = {
     "intermediary_url": "https://f/intermediary-1.20.1-v2.jar", "intermediary_sha256": "d" * 64,
     "fabric_api_url": "https://f/fabric-api.jar", "fabric_api_mirror": "https://g/fabric-api.jar",
     "fabric_api_sha256": "e" * 64,
+    "build_tools": [{"file": "tiny-remapper-fat.jar", "url": "https://f/tr.jar", "sha256": "f" * 64}],
 }
 
 
@@ -80,6 +81,9 @@ class Fetch120(unittest.TestCase):
         self.assertEqual(by_file["client.txt"][1], "sha1")
         # A library without a URL is not downloaded (nor put on the class path).
         self.assertNotIn("1.jar", cp)
+        # The build tools are fetched, but never put on a game's class path.
+        self.assertEqual([os.path.basename(p) for p in launch["build_tools"]], ["tiny-remapper-fat.jar"])
+        self.assertNotIn("tiny-remapper-fat.jar", cp)
 
 
 if __name__ == "__main__":

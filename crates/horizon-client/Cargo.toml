@@ -46,6 +46,7 @@ horizon-mods = { path = "../horizon-mods", default-features = false, features = 
 # Java mods (Fabric jars) in an embedded JVM, started only when mods-java/ holds jars; the
 # `java-mods` feature. Needs a JDK to build.
 horizon-jvm = { path = "../horizon-jvm", optional = true }
+horizon-jvm-remote = { path = "../horizon-jvm-remote", optional = true }
 wgpu = { version = "30.0.1", default-features = false, features = ["std", "parking_lot", "vulkan", "metal", "wgsl", "naga-ir"] }
 winit = "0.30.13"
 pollster = "0.4"
@@ -119,6 +120,10 @@ controllers = ["horizon-client-lib/controllers", "dep:gilrs", "dep:horizon-duals
 # Runs Java mods from mods-java/ in an embedded JVM (the Java mod bridge, crates/horizon-jvm).
 # Off by default; with it on and no jars, the game starts no JVM.
 java-mods = ["dep:horizon-jvm"]
+# Fabric 1.20.1 mods from mods-java-1.20.1/, unmodified, in a JVM of their own (no JNI:
+# crates/horizon-jvm-remote, docs/java-bridge-120.md). Off by default; with it on and no jars,
+# nothing starts.
+java-mods-120 = ["dep:horizon-jvm-remote"]
 # Records the call sites of mob random draws (`mob_ai_probe` traces).
 rng-trace = ["horizon-core/rng-trace", "horizon-client-lib/rng-trace"]
 # Rust's allocations go to the system heap instead of mimalloc, where heap profilers that replace

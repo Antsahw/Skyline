@@ -1358,6 +1358,7 @@ dependencies = [
  "horizon-hdr",
  "horizon-items",
  "horizon-jvm",
+ "horizon-jvm-remote",
  "horizon-mod-api-gen",
  "horizon-mods",
  "horizon-narrator",
@@ -1627,7 +1628,9 @@ dependencies = [
 name = "horizon-jvm-remote"
 version = "0.1.0"
 dependencies = [
+ "horizon-port-pack",
  "serde_json",
+ "zip 2.6.1",
 ]
 
 [[package]]

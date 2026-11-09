@@ -37,6 +37,9 @@ pub struct Fabric120 {
     pub game_dir: PathBuf,
     /// The mods (default `<game_dir>/mods`).
     pub mods: Option<PathBuf>,
+    /// The bridge's 1.20.1 platform mod (`tools/java_bridge/build120.sh`'s `platform120.jar`):
+    /// what writes the content facts. Without it the runtime boots and reports, no more.
+    pub platform: Option<PathBuf>,
     pub side: Side,
     /// The child's heap (`-Xmx`), e.g. "3G".
     pub max_heap: String,
@@ -130,9 +133,18 @@ pub fn runtime_args(config: &Fabric120, launch: &Launch) -> Vec<String> {
         }
         .into(),
     ];
+    let mut add = Vec::new();
     if !own_fabric_api {
+        add.push(launch.fabric_api.clone());
+    }
+    add.extend(config.platform.iter().cloned());
+    if !add.is_empty() {
         args.push("--add-mods".into());
-        args.push(launch.fabric_api.to_string_lossy().into_owned());
+        args.push(
+            std::env::join_paths(&add)
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+        );
     }
     args
 }
@@ -245,10 +257,15 @@ pub fn start(config: &Fabric120) -> Result<(Runtime120, String), String> {
 impl Runtime120 {
     /// Runs a command in the runtime (`report`, `ping`) and returns its answer.
     pub fn call(&mut self, command: &str) -> Result<String, String> {
+        self.call_with(command, &[])
+    }
+
+    /// Runs a command with arguments (`facts` and the file to write) and returns its answer.
+    pub fn call_with(&mut self, command: &str, args: &[Value]) -> Result<String, String> {
         let mut handler = Phase1 {
             log: self.log.clone(),
         };
-        let values = self.child.call(command, &[], &mut handler).map_err(|e| {
+        let values = self.child.call(command, args, &mut handler).map_err(|e| {
             let lines = self.child.last_lines();
             format!(
                 "{command}: {e}; the runtime's last lines:\n{}",
@@ -294,6 +311,7 @@ mod tests {
             bridge: "/b".into(),
             game_dir: game.to_path_buf(),
             mods: None,
+            platform: None,
             side: Side::Client,
             max_heap: "2G".into(),
             jvm_args: vec![],

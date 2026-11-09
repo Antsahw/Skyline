@@ -13,6 +13,7 @@ pub mod fetch;
 pub mod import;
 pub mod inventory;
 pub mod jar;
+pub mod legacy120;
 pub(crate) mod legacy_structure_mods;
 mod lithostitched;
 pub mod modrinth;

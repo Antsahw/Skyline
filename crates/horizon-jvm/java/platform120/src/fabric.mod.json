@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "id": "horizon_platform120",
+  "version": "0.1.0",
+  "name": "Horizon platform (1.20.1)",
+  "description": "The Horizon bridge's side of a 1.20.1 game: the mods' content for Horizon (docs/java-bridge-120.md). Built from the bridge's sources on the player's machine.",
+  "environment": "*",
+  "depends": {"minecraft": "1.20.1", "fabricloader": ">=0.14"}
+}

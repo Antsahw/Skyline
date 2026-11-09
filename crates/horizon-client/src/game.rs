@@ -159,6 +159,8 @@ mod java_device;
 #[cfg(feature = "java-mods")]
 mod java_entities;
 mod java_mods;
+#[cfg(feature = "java-mods-120")]
+mod java_mods_120;
 #[cfg(feature = "java-mods")]
 mod java_profile;
 mod java_screen;

@@ -899,6 +899,10 @@ pub fn carry(
         // carried as the JSON vanilla reads, unless the jar has that JSON too.
         let lang = legacy_lang::legacy_lang(&name).filter(|json| !names.contains(json));
         let name = lang.clone().unwrap_or(name);
+        // A 1.20.x data folder (`recipes/`, `tags/items/`) under 1.21's name, its files upgraded
+        // to 1.21.1's shape below (legacy120). A jar with both keeps the newer file.
+        let legacy = crate::legacy120::data_path(&name).filter(|new| !names.contains(new));
+        let name = legacy.clone().unwrap_or(name);
         let Some(keep) = place(&name, &owned) else {
             continue;
         };
@@ -949,6 +953,7 @@ pub fn carry(
             {
                 if let Ok(mut recipe) = serde_json::from_slice::<Value>(&bytes) {
                     tags_used(&recipe, &mut convention);
+                    let from_120 = legacy.is_some() && crate::legacy120::recipe(&mut recipe);
                     let renamed = renamed_ids(&mut recipe);
                     let upgraded = upgrade_recipe(&mut recipe);
                     if upgraded {
@@ -956,7 +961,7 @@ pub fn carry(
                     } else {
                         report.recipes_kept.push(file.to_owned());
                     }
-                    if upgraded || renamed {
+                    if upgraded || renamed || from_120 {
                         bytes = serde_json::to_vec_pretty(&recipe).unwrap_or(bytes);
                     }
                 }
@@ -1054,6 +1059,9 @@ pub fn carry(
                 }
                 if let Ok(mut table) = serde_json::from_slice::<Value>(&bytes) {
                     let before = table.clone();
+                    if legacy.is_some() {
+                        crate::legacy120::loot(&mut table);
+                    }
                     upgrade_loot(&mut table);
                     renamed_ids(&mut table);
                     if table != before {
