@@ -310,6 +310,45 @@ Found and fixed on the way:
 Not yet: what the mods' code does (the cooking pot cooks, the stove lights, machines run,
 screens open). That is phase 3 on.
 
+## Phase 3a status: the mods' code runs on Horizon's blocks (2026-11-09)
+
+A right-click on a block runs in the 1.20.1 runtime as vanilla 1.20.1 runs it:
+`ServerPlayerGameMode.useItemOn`, so the block's own `use`, Fabric API's `UseBlockCallback`
+and the item's `useOn` are the mods' and vanilla's own code. They run on a **mirror world**
+(platform120's `Mirror120`) whose blocks are Horizon's:
+
+- **Reads** (`Level.getBlockState`/`getFluidState`) call Horizon (`blockState`, answered by the
+  `World120` Horizon passes to `Runtime120::use_block`). **Writes** (`Level.setBlock`) are
+  kept for the rest of the call (the mod reads its own write) and sent back as `setBlock`
+  events; Horizon applies them when the call returns. States cross by name; a property one
+  side lacks is dropped.
+- The mirror's server, levels and player list are made without their constructors (there is
+  no real server in this runtime); its players with vanilla's. Mixins quiet what needs a
+  running server: sounds, particles, level and game events, neighbour updates (Horizon makes
+  its own for what was set). Scheduled ticks are kept, not run (yet).
+- Its **data** is loaded as a server loads it: the registry layers, with the data packs'
+  worldgen and dimensions (and the registries mods add through Fabric API's
+  `DynamicRegistries`: Moonlight's), then recipes, loot tables, advancements and functions,
+  with the **tags bound** (`CampfireBlock.canLight` asks `#minecraft:campfires`).
+- What **other mods do at the end of those constructors** is replayed (`Constructed120`, the
+  26.3 bridge's `HorizonHooks.constructed` in small): the handlers merged into each class
+  (`@MixinMerged`) whose `@Inject` is at `<init>` RETURN/TAIL are called with the arguments
+  a server would have given. Without it Lithium's cached world height was 0 and every block
+  read as outside the world.
+
+Tested (`tests/boot120.rs`, a one-block fake world, with the 14 mods loaded): flint and steel
+lights vanilla's campfire (`CONSUME`, worn by 1), makes fire on stone, and **Farmer's
+Delight's own `StoveBlock.use` lights its stove** (`SUCCESS`, worn by 1).
+
+In the game (`game/java_mods_120.rs`): the runtime stays up after the content is made, or
+boots in the background when the content came from the cache (~30 s for the 36-jar pack;
+clicks pass until then). A click on a block of a 1.20.1 mod's namespace, or with one of
+their items, goes to it at `useItemOn`'s head (`java120_use_block`, beside the 26.3 bridge's
+hook in `lan_actions.rs`); what it set and what it did to the held stack land in Horizon.
+
+Next: block entities (the cooking pot, chests, machines' inventories), then their ticking
+and menus.
+
 ## How the bridge is laid out (Phase 0)
 
 | Part | Size | What it is |
@@ -392,7 +431,8 @@ NeoForge could run beside Fabric 26.3 rather than in its place.
    recipes, loot and tags. **Milestone met:** 1.20.1 mod blocks placed, drawn, saved and
    reloaded; they drop themselves and their recipes craft. Next here: more mods through it
    (the top-150 list), and Horizon's recipe book showing content mods' recipes.
-3. **machine120.** Mirror 1.20.1 `ServerLevel` with the chunk mirror and batched deltas
+3. **machine120.** 3a done: right-clicks run the mods' code on a mirror `ServerLevel`
+   (above). Next: block entities, ticks, the chunk mirror and batched deltas
    ("Measured"), block entities, the downgrade tables, the Fabric Transfer API on Horizon's
    containers.
 4. **gui120.** `GuiGraphics` recorder → `screenFrame` JSON, menus, input, slot clicks (its own lane).

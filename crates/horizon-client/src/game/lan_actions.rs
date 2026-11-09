@@ -2159,6 +2159,13 @@ impl Game<'_> {
                         {
                             return (swing, true, false);
                         }
+                        // The same for the 1.20.1 mods' code (their own JVM).
+                        #[cfg(feature = "java-mods-120")]
+                        if let Some(swing) =
+                            g.java120_use_block(hit.pos, p.face, hit.point, hand == Hand::Off)
+                        {
+                            return (swing, true, false);
+                        }
                         let attempt = g.was_block_placement_attempt(hand);
                         g.forced_hit = Some(hit);
                         g.guest_use = Some(GuestUse::OnBlock(hand));
