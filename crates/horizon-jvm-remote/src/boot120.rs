@@ -201,7 +201,7 @@ pub fn new_java_options(major: Option<i64>) -> Vec<String> {
 /// A running 1.20.1 runtime.
 pub struct Runtime120 {
     pub child: Child,
-    log: Log,
+    pub(crate) log: Log,
 }
 
 /// Horizon's side of the conversation in phase 1: the runtime's log lines; no world yet, so
@@ -265,18 +265,28 @@ impl Runtime120 {
         let mut handler = Phase1 {
             log: self.log.clone(),
         };
-        let values = self.child.call(command, args, &mut handler).map_err(|e| {
-            let lines = self.child.last_lines();
-            format!(
-                "{command}: {e}; the runtime's last lines:\n{}",
-                lines.join("\n")
-            )
-        })?;
+        let values = self.call_values(command, args, &mut handler)?;
         values
             .first()
             .and_then(Value::as_str)
             .map(str::to_string)
             .ok_or_else(|| format!("{command}: no text in the answer"))
+    }
+
+    /// A call with Horizon's side answered by `handler`; its errors carry the runtime's last lines.
+    pub(crate) fn call_values(
+        &mut self,
+        command: &str,
+        args: &[Value],
+        handler: &mut dyn Handler,
+    ) -> Result<Vec<Value>, String> {
+        self.child.call(command, args, handler).map_err(|e| {
+            let lines = self.child.last_lines();
+            format!(
+                "{command}: {e}; the runtime's last lines:\n{}",
+                lines.join("\n")
+            )
+        })
     }
 
     /// Says goodbye and waits for the process to end.

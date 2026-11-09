@@ -19,6 +19,7 @@ import net.fabricmc.mappingio.tree.MemoryMappingTree;
 import net.fabricmc.tinyremapper.NonClassCopyMode;
 import net.fabricmc.tinyremapper.OutputConsumerPath;
 import net.fabricmc.tinyremapper.TinyRemapper;
+import net.fabricmc.tinyremapper.extension.mixin.MixinExtension;
 import net.fabricmc.tinyremapper.TinyUtils;
 
 /**
@@ -94,6 +95,9 @@ public final class Remap120 {
                 .withMappings(TinyUtils.createTinyMappingProvider(mappings, from, to))
                 .renameInvalidLocals(true)
                 .rebuildSourceFilenames(true)
+                // platform120's Mixins name their targets in Mojang's names: remapped as Loom does
+                // without a refmap (the annotations' strings rewritten in place).
+                .extension(new MixinExtension())
                 .build();
         Files.deleteIfExists(out);
         Files.createDirectories(out.toAbsolutePath().getParent());

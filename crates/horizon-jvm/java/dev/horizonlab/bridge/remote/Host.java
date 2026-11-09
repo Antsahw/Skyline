@@ -25,6 +25,13 @@ public final class Host {
         else System.out.println("[horizon-remote] " + line);
     }
 
+    /** An event for Horizon (see {@link Peer#event}): from the conversation thread, sent with the reply. */
+    public static void event(String method, Object... args) {
+        Peer p = peer;
+        if (p == null) throw new IllegalStateException("not running under Horizon");
+        p.event(method, args);
+    }
+
     /** A call into Horizon (see {@link Peer#call}). */
     public static Object[] call(String method, Object... args) {
         Peer p = peer;

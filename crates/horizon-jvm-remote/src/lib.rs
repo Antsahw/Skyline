@@ -11,6 +11,7 @@
 pub mod boot120;
 pub mod child;
 pub mod content120;
+pub mod mirror120;
 pub mod peer;
 pub mod wire;
 

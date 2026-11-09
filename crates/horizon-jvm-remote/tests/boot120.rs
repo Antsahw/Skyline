@@ -251,3 +251,129 @@ fn fabric_1_20_1_boots_in_its_own_jvm_and_reports() {
     }
     runtime.stop();
 }
+
+/// A world of one block (at 0 64 0), stone below it, air elsewhere.
+struct OneBlock(String);
+
+impl horizon_jvm_remote::mirror120::World120 for OneBlock {
+    fn block_state(&self, dimension: &str, x: i32, y: i32, z: i32) -> Option<String> {
+        assert_eq!(dimension, "minecraft:overworld");
+        Some(match (x, y, z) {
+            (0, 64, 0) => self.0.clone(),
+            (0, 63, 0) => "minecraft:stone".into(),
+            _ => "minecraft:air".into(),
+        })
+    }
+}
+
+fn flint_and_steel_on_top() -> horizon_jvm_remote::mirror120::UseBlock {
+    horizon_jvm_remote::mirror120::UseBlock {
+        uuid: "6b1f0b8e-2a63-4a2a-9a0c-6c1d2f3e4a5b".into(),
+        name: "Tester".into(),
+        dimension: "minecraft:overworld".into(),
+        pos: [0, 64, 0],
+        face: 1,
+        hit: [0.5, 65.0, 0.5],
+        hand: 0,
+        item: "minecraft:flint_and_steel".into(),
+        count: 1,
+        damage: 0,
+        creative: false,
+    }
+}
+
+/// Phase 3a: a right-click on a block runs the 1.20.1 code of the block and the item, in the
+/// child, on Horizon's blocks; what it sets comes back. Vanilla's campfire, then Farmer's
+/// Delight's stove (a mod's own `use`), both lit with flint and steel, which wears by one.
+/// Needs build120.sh's platform jar, and Farmer's Delight among HORIZON_120_MODS for the stove
+/// (the other mods there are loaded too).
+#[test]
+fn right_clicking_a_block_runs_its_1_20_1_code_on_horizons_blocks() {
+    use horizon_jvm_remote::mirror120::SetBlock;
+    let Some(cache) = cache() else { return };
+    let Some(bridge) = bridge_classes() else {
+        return;
+    };
+    let platform = cache.join("horizon/platform120.jar");
+    if !platform.exists() {
+        eprintln!(
+            "no {}: run tools/java_bridge/build120.sh (skipping)",
+            platform.display()
+        );
+        return;
+    }
+    let delight = std::env::var_os("HORIZON_120_MODS").and_then(|d| {
+        std::fs::read_dir(d)
+            .ok()?
+            .flatten()
+            .map(|e| e.path())
+            .find(|p| p.to_string_lossy().contains("farmers-delight"))
+    });
+    let game = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("game120-use");
+    let _ = std::fs::remove_dir_all(&game);
+    let mods = game.join("mods");
+    std::fs::create_dir_all(&mods).unwrap();
+    // All of HORIZON_120_MODS: the mirror has to hold with other mods' Mixins in the same
+    // classes (Lithium's in Level, ...).
+    if let Some(jar) = &delight {
+        for entry in std::fs::read_dir(jar.parent().unwrap()).unwrap() {
+            let path = entry.unwrap().path();
+            std::fs::copy(&path, mods.join(path.file_name().unwrap())).unwrap();
+        }
+    }
+    let lines: Lines = Arc::default();
+    let mut cfg = config(cache, bridge, game, lines);
+    cfg.platform = Some(platform);
+    let (mut runtime, _) = boot120::start(&cfg).expect("boots");
+
+    let world = OneBlock(
+        "minecraft:campfire[facing=north,lit=false,signal_fire=false,waterlogged=false]".into(),
+    );
+    let used = runtime
+        .use_block(&world, &flint_and_steel_on_top())
+        .expect("campfire");
+    // CONSUME: a server's answer (the swing is the client's).
+    assert_eq!(used.result, 1, "{used:?}");
+    assert_eq!(
+        (used.item.as_str(), used.count, used.damage),
+        ("minecraft:flint_and_steel", 1, 1)
+    );
+    assert_eq!(
+        used.set,
+        [SetBlock {
+            dimension: "minecraft:overworld".into(),
+            pos: [0, 64, 0],
+            state: "minecraft:campfire[facing=north,lit=true,signal_fire=false,waterlogged=false]"
+                .into(),
+            flags: 11,
+        }]
+    );
+
+    // Air under the hand: nothing to light, nothing set; flint and steel on air's top face
+    // would make fire above, so use a face of stone instead: fire goes beside it.
+    let world = OneBlock("minecraft:stone".into());
+    let used = runtime
+        .use_block(&world, &flint_and_steel_on_top())
+        .expect("stone");
+    assert_eq!(used.set.len(), 1, "{used:?}");
+    assert_eq!(used.set[0].pos, [0, 65, 0]);
+    assert!(used.set[0].state.starts_with("minecraft:fire"), "{used:?}");
+
+    if delight.is_some() {
+        let world = OneBlock("farmersdelight:stove[facing=north,lit=false]".into());
+        let used = runtime
+            .use_block(&world, &flint_and_steel_on_top())
+            .expect("stove");
+        // Farmer's Delight's own StoveBlock.use: SUCCESS on both sides, unlike vanilla.
+        assert_eq!(used.result, 2, "{used:?}");
+        assert_eq!(used.damage, 1);
+        assert_eq!(used.set.len(), 1, "{used:?}");
+        assert_eq!(
+            used.set[0].state,
+            "farmersdelight:stove[facing=north,lit=true]"
+        );
+    } else {
+        eprintln!("no Farmer's Delight in HORIZON_120_MODS: the stove is skipped");
+    }
+    runtime.stop();
+}

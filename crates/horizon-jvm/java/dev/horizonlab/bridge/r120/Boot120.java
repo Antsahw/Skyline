@@ -97,6 +97,9 @@ public final class Boot120 implements RemoteRuntime {
                 // horizon-port-pack's carry-over reads; returns the mods' namespaces.
                 if (game == null) throw new IllegalStateException("not started");
                 return new Object[] {facts((String) args[0])};
+            case "useBlock":
+                // A right-click of Horizon's player on a block (platform120's Mirror120.useBlock).
+                return mirror("useBlock", args);
             case "ping":
                 return new Object[] {"pong"};
             default:
@@ -122,6 +125,58 @@ public final class Boot120 implements RemoteRuntime {
         } finally {
             thread.setContextClassLoader(before);
         }
+    }
+
+    private boolean mirrorHooked;
+
+    /**
+     * Calls platform120's Mirror120 (the 1.20.1 world as Horizon's) on the game's class loader,
+     * its hooks into Horizon set first: the arguments as Mirror120's method takes them, boxed.
+     */
+    Object[] mirror(String method, Object[] args) throws Exception {
+        Thread thread = Thread.currentThread();
+        ClassLoader before = thread.getContextClassLoader();
+        thread.setContextClassLoader(game);
+        try {
+            Class<?> mirror = Class.forName("dev.horizonlab.platform120.Mirror120", true, game);
+            if (!mirrorHooked) {
+                java.util.function.BiFunction<String, Object[], Object[]> call = Host::call;
+                java.util.function.BiConsumer<String, Object[]> event = Host::event;
+                mirror.getField("call").set(null, call);
+                mirror.getField("event").set(null, event);
+                mirrorHooked = true;
+            }
+            for (var m : mirror.getMethods()) {
+                if (m.getName().equals(method) && m.getParameterCount() == args.length) {
+                    Object[] converted = new Object[args.length];
+                    Class<?>[] types = m.getParameterTypes();
+                    for (int i = 0; i < args.length; i++) converted[i] = convert(args[i], types[i]);
+                    return (Object[]) m.invoke(null, converted);
+                }
+            }
+            throw new UnsupportedOperationException("Mirror120." + method + "/" + args.length);
+        } catch (ClassNotFoundException e) {
+            throw new IllegalStateException("the platform jar isn't loaded (tools/java_bridge/build120.sh, then --add-mods it)");
+        } catch (java.lang.reflect.InvocationTargetException e) {
+            // The mods' code failed in Horizon's world: where, for the log (the error itself
+            // goes back as the call's answer).
+            var trace = new java.io.StringWriter();
+            e.getCause().printStackTrace(new java.io.PrintWriter(trace));
+            trace.toString().lines().limit(25).forEach(l -> Host.log("Mirror120." + method + ": " + l));
+            throw e.getCause() instanceof Exception x ? x : e;
+        } finally {
+            thread.setContextClassLoader(before);
+        }
+    }
+
+    /** A wire value as a parameter: the wire's ints for booleans and doubles too. */
+    private static Object convert(Object v, Class<?> type) {
+        if (type == boolean.class) return v instanceof Boolean b ? b : ((Number) v).intValue() != 0;
+        if (type == double.class) return ((Number) v).doubleValue();
+        if (type == float.class) return ((Number) v).floatValue();
+        if (type == int.class) return ((Number) v).intValue();
+        if (type == long.class) return ((Number) v).longValue();
+        return v;
     }
 
     Options options() {

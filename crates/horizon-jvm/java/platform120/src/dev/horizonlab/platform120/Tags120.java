@@ -31,6 +31,15 @@ final class Tags120 {
     record Loaded(Map<ResourceLocation, Collection<ResourceLocation>> blocks, Map<ResourceLocation, Collection<ResourceLocation>> items) {}
 
     static Loaded load() {
+        try (MultiPackResourceManager resources = dataPacks()) {
+            return new Loaded(
+                    load(resources, BuiltInRegistries.BLOCK, TagManager.getTagDir(Registries.BLOCK)),
+                    load(resources, BuiltInRegistries.ITEM, TagManager.getTagDir(Registries.ITEM)));
+        }
+    }
+
+    /** Vanilla's and the mods' data packs, as a new world selects them. */
+    static MultiPackResourceManager dataPacks() {
         List<RepositorySource> sources = new ArrayList<>();
         sources.add(new ServerPacksSource());
         RepositorySource mods = fabricModPacks();
@@ -43,11 +52,7 @@ final class Tags120 {
         }
         repository.setSelected(selected);
         List<PackResources> packs = repository.openAllSelected();
-        try (MultiPackResourceManager resources = new MultiPackResourceManager(PackType.SERVER_DATA, packs)) {
-            return new Loaded(
-                    load(resources, BuiltInRegistries.BLOCK, TagManager.getTagDir(Registries.BLOCK)),
-                    load(resources, BuiltInRegistries.ITEM, TagManager.getTagDir(Registries.ITEM)));
-        }
+        return new MultiPackResourceManager(PackType.SERVER_DATA, packs);
     }
 
     private static <T> Map<ResourceLocation, Collection<ResourceLocation>> load(MultiPackResourceManager resources, Registry<T> registry, String dir) {

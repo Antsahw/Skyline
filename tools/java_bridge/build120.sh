@@ -29,6 +29,8 @@ REMAPPER=$(field build_tools)
 [ -f "$REMAPPER" ] || { echo "no remapper in launch.json: run tools/java_bridge/fetch120.py again"; exit 1; }
 # Mojang's libraries (not the game jar, not the loader): what Minecraft's code compiles against.
 LIBS=$(python3 -I -c "import json,sys;print(':'.join(p for p in json.load(open(sys.argv[1]))['class_path'] if '/libraries/' in p))" "$LAUNCH")
+# Mixin and ASM (the loader's): platform120's Mixins compile against their annotations.
+MIXIN=$(python3 -I -c "import json,sys;print(':'.join(p for p in json.load(open(sys.argv[1]))['class_path'] if 'sponge-mixin' in p.rsplit('/',1)[-1] or p.rsplit('/',1)[-1].startswith('asm')))" "$LAUNCH")
 TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
 JAVAC=("$JAVA_HOME/bin/javac" -proc:none -nowarn -encoding UTF-8 --release 17)
 "${JAVAC[@]}" -cp "$REMAPPER" -d "$TMP/tool" $(find "$SRC/build" -name '*.java')
@@ -43,8 +45,8 @@ if [ ! -f "$NAMED" ]; then
   [ -f "$NAMED" ] || { echo "the compile jar failed"; exit 1; }
 fi
 # 3. Compile.
-"${JAVAC[@]}" -cp "$NAMED:$LIBS" -d "$TMP/classes" $(find "$SRC/src" -name '*.java')
-cp "$SRC/src/fabric.mod.json" "$TMP/classes/"
+"${JAVAC[@]}" -cp "$NAMED:$LIBS:$MIXIN" -d "$TMP/classes" $(find "$SRC/src" -name '*.java')
+cp "$SRC/src/fabric.mod.json" "$SRC/src/horizon-platform120.mixins.json" "$TMP/classes/"
 mkdir -p "$TMP/classes/horizon"
 python3 -I - "$MAPPINGS" "$TMP/classes/horizon/classes-1.20.1.tsv" <<'PY'
 import sys
@@ -61,5 +63,5 @@ PY
 (cd "$TMP/classes" && "$JAVA_HOME/bin/jar" cf "$TMP/platform120-named.jar" .)
 # 4. Remap to intermediary.
 # shellcheck disable=SC2046
-"${REMAP[@]}" remap "$MAPPINGS" named intermediary "$TMP/platform120-named.jar" "$OUT/platform120.jar" "$NAMED" $(echo "$LIBS" | tr ':' ' ') 2>&1 | grep -v '^\[WARN\]'
+"${REMAP[@]}" remap "$MAPPINGS" named intermediary "$TMP/platform120-named.jar" "$OUT/platform120.jar" "$NAMED" $(echo "$MIXIN:$LIBS" | tr ':' ' ') 2>&1 | grep -v '^\[WARN\]'
 echo "$OUT/platform120.jar"

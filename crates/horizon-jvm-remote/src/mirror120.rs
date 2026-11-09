@@ -1,0 +1,173 @@
+//! Horizon's world for 1.20.1 mods' code (docs/java-bridge-120.md, phase 3): what Horizon asks
+//! the 1.20.1 runtime to do in its world (a right-click on a block), and what the runtime asks
+//! back while doing it. platform120's `Mirror120` is the other side: the mods' code runs on a
+//! 1.20.1 server level whose blocks are Horizon's ([`World120::block_state`]), and what it sets
+//! comes back as [`SetBlock`]s for Horizon to apply when the call returns.
+//!
+//! Block states cross as their names (`farmersdelight:stove[facing=north,lit=false]`): Horizon's
+//! names going in (26.3's), 1.20.1's coming back. A property one side lacks is dropped on the way.
+
+use crate::boot120::Runtime120;
+use crate::child::Log;
+use crate::peer::{Handler, Peer};
+use crate::wire::Value;
+
+/// What the 1.20.1 runtime reads of Horizon's world.
+pub trait World120 {
+    /// The block state at a position of `dimension` (`minecraft:overworld`), by name; `None`
+    /// where Horizon has no chunk loaded (read as air).
+    fn block_state(&self, dimension: &str, x: i32, y: i32, z: i32) -> Option<String>;
+}
+
+/// A block the mods' code set, for Horizon to apply.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SetBlock {
+    pub dimension: String,
+    pub pos: [i32; 3],
+    /// 1.20.1's name of the state.
+    pub state: String,
+    /// Level.setBlock's flags (1 neighbours, 2 clients, ...).
+    pub flags: i32,
+}
+
+/// A player's right-click on a block, as vanilla's ServerPlayerGameMode.useItemOn gets it.
+#[derive(Clone, Debug)]
+pub struct UseBlock {
+    pub uuid: String,
+    pub name: String,
+    pub dimension: String,
+    pub pos: [i32; 3],
+    /// The face hit, as Direction's 3D data value (0 down, 1 up, 2 north, 3 south, 4 west, 5 east).
+    pub face: u8,
+    /// Where the ray hit, in world coordinates. The mirror player's eyes are put there, so
+    /// vanilla's reach check passes (Horizon checked reach already).
+    pub hit: [f64; 3],
+    /// 0 main hand, 1 off hand.
+    pub hand: u8,
+    /// The held item's id (`minecraft:flint_and_steel`), "" for none.
+    pub item: String,
+    pub count: i32,
+    pub damage: i32,
+    pub creative: bool,
+}
+
+/// What a right-click did.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Used {
+    /// 0 passed (nothing used: Horizon may try the item's own use), 1 consumed, 2 consumed
+    /// with the arm swung.
+    pub result: i32,
+    /// The held item after: id, count, damage.
+    pub item: String,
+    pub count: i32,
+    pub damage: i32,
+    /// The blocks set, in order.
+    pub set: Vec<SetBlock>,
+}
+
+/// Horizon's side while the runtime runs a call in the world.
+struct InWorld<'a> {
+    world: &'a dyn World120,
+    set: Vec<SetBlock>,
+    log: Log,
+}
+
+fn int(args: &[Value], i: usize) -> Result<i32, String> {
+    match args.get(i) {
+        Some(Value::I32(v)) => Ok(*v),
+        other => Err(format!("argument {i}: an int expected, not {other:?}")),
+    }
+}
+
+fn text(args: &[Value], i: usize) -> Result<&str, String> {
+    args.get(i)
+        .and_then(Value::as_str)
+        .ok_or_else(|| format!("argument {i}: text expected"))
+}
+
+impl Handler for InWorld<'_> {
+    fn call(&mut self, _: &mut Peer, method: &str, args: Vec<Value>) -> Result<Vec<Value>, String> {
+        match method {
+            "blockState" => {
+                let dimension = text(&args, 0)?;
+                let (x, y, z) = (int(&args, 1)?, int(&args, 2)?, int(&args, 3)?);
+                Ok(vec![
+                    self.world
+                        .block_state(dimension, x, y, z)
+                        .map_or(Value::Null, Value::Str),
+                ])
+            }
+            _ => Err(format!("Horizon has no {method} for 1.20.1 mods yet")),
+        }
+    }
+
+    fn event(&mut self, _: &mut Peer, method: &str, args: Vec<Value>) {
+        match method {
+            "log" => {
+                if let Some(line) = args.first().and_then(Value::as_str) {
+                    (self.log)(&format!("[fabric-1.20.1] {line}"));
+                }
+            }
+            "setBlock" => {
+                let parsed = (|| -> Result<SetBlock, String> {
+                    Ok(SetBlock {
+                        dimension: text(&args, 0)?.to_owned(),
+                        pos: [int(&args, 1)?, int(&args, 2)?, int(&args, 3)?],
+                        state: text(&args, 4)?.to_owned(),
+                        flags: int(&args, 5)?,
+                    })
+                })();
+                match parsed {
+                    Ok(set) => self.set.push(set),
+                    Err(e) => (self.log)(&format!("[fabric-1.20.1] a setBlock unread: {e}")),
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+impl Runtime120 {
+    /// A player's right-click on a block, run by the mods' code in the 1.20.1 runtime with
+    /// `world` as its world.
+    pub fn use_block(&mut self, world: &dyn World120, used: &UseBlock) -> Result<Used, String> {
+        let args = [
+            Value::Str(used.uuid.clone()),
+            Value::Str(used.name.clone()),
+            Value::Str(used.dimension.clone()),
+            Value::I32(used.pos[0]),
+            Value::I32(used.pos[1]),
+            Value::I32(used.pos[2]),
+            Value::I32(used.face.into()),
+            Value::F64(used.hit[0]),
+            Value::F64(used.hit[1]),
+            Value::F64(used.hit[2]),
+            Value::I32(used.hand.into()),
+            Value::Str(used.item.clone()),
+            Value::I32(used.count),
+            Value::I32(used.damage),
+            Value::Bool(used.creative),
+        ];
+        let mut handler = InWorld {
+            world,
+            set: Vec::new(),
+            log: self.log.clone(),
+        };
+        let values = self.call_values("useBlock", &args, &mut handler)?;
+        let int_at = |i: usize| match values.get(i) {
+            Some(Value::I32(v)) => Ok(*v),
+            other => Err(format!("useBlock: answer {i} is {other:?}")),
+        };
+        Ok(Used {
+            result: int_at(0)?,
+            item: values
+                .get(1)
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned(),
+            count: int_at(2)?,
+            damage: int_at(3)?,
+            set: handler.set,
+        })
+    }
+}

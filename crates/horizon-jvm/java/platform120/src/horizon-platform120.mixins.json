@@ -1,0 +1,19 @@
+{
+  "required": true,
+  "package": "dev.horizonlab.platform120.mixin",
+  "compatibilityLevel": "JAVA_17",
+  "mixins": [
+    "LevelAccess",
+    "ServerLevelAccess",
+    "MinecraftServerAccess",
+    "PlayerListAccess",
+    "ServerChunkCacheAccess",
+    "GameModeAccess",
+    "LevelMixin",
+    "MinecraftServerMixin",
+    "ServerLevelMixin",
+    "PlayerListMixin",
+    "ServerPlayerMixin"
+  ],
+  "injectors": {"defaultRequire": 1}
+}
