@@ -17,6 +17,14 @@ pub trait World120 {
     /// The block state at a position of `dimension` (`minecraft:overworld`), by name; `None`
     /// where Horizon has no chunk loaded (read as air).
     fn block_state(&self, dimension: &str, x: i32, y: i32, z: i32) -> Option<String>;
+
+    /// The block entity at a position as vanilla saves it (`saveWithFullMetadata`: with `id`
+    /// and the position), in SNBT; `None` where there is none. A 1.20.1 mod's own block
+    /// entity is Horizon's opaque NBT (`BlockEntity::Mod`), so a cooking pot's items and
+    /// progress come back as the mod wrote them.
+    fn block_entity(&self, _dimension: &str, _x: i32, _y: i32, _z: i32) -> Option<String> {
+        None
+    }
 }
 
 /// A block the mods' code set, for Horizon to apply.
@@ -28,6 +36,15 @@ pub struct SetBlock {
     pub state: String,
     /// Level.setBlock's flags (1 neighbours, 2 clients, ...).
     pub flags: i32,
+}
+
+/// A block entity the mods' code changed, as it saved it, for Horizon to keep.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SetBlockEntity {
+    pub dimension: String,
+    pub pos: [i32; 3],
+    /// `saveWithFullMetadata` in SNBT, with `id` naming the type.
+    pub snbt: String,
 }
 
 /// A player's right-click on a block, as vanilla's ServerPlayerGameMode.useItemOn gets it.
@@ -63,12 +80,15 @@ pub struct Used {
     pub damage: i32,
     /// The blocks set, in order.
     pub set: Vec<SetBlock>,
+    /// The block entities the mods' code changed, in order.
+    pub block_entities: Vec<SetBlockEntity>,
 }
 
 /// Horizon's side while the runtime runs a call in the world.
 struct InWorld<'a> {
     world: &'a dyn World120,
     set: Vec<SetBlock>,
+    block_entities: Vec<SetBlockEntity>,
     log: Log,
 }
 
@@ -97,6 +117,15 @@ impl Handler for InWorld<'_> {
                         .map_or(Value::Null, Value::Str),
                 ])
             }
+            "blockEntity" => {
+                let dimension = text(&args, 0)?;
+                let (x, y, z) = (int(&args, 1)?, int(&args, 2)?, int(&args, 3)?);
+                Ok(vec![
+                    self.world
+                        .block_entity(dimension, x, y, z)
+                        .map_or(Value::Null, Value::Str),
+                ])
+            }
             _ => Err(format!("Horizon has no {method} for 1.20.1 mods yet")),
         }
     }
@@ -120,6 +149,21 @@ impl Handler for InWorld<'_> {
                 match parsed {
                     Ok(set) => self.set.push(set),
                     Err(e) => (self.log)(&format!("[fabric-1.20.1] a setBlock unread: {e}")),
+                }
+            }
+            "setBlockEntity" => {
+                let parsed = (|| -> Result<SetBlockEntity, String> {
+                    Ok(SetBlockEntity {
+                        dimension: text(&args, 0)?.to_owned(),
+                        pos: [int(&args, 1)?, int(&args, 2)?, int(&args, 3)?],
+                        snbt: text(&args, 4)?.to_owned(),
+                    })
+                })();
+                match parsed {
+                    Ok(set) => self.block_entities.push(set),
+                    Err(e) => {
+                        (self.log)(&format!("[fabric-1.20.1] a setBlockEntity unread: {e}"));
+                    }
                 }
             }
             _ => {}
@@ -151,6 +195,7 @@ impl Runtime120 {
         let mut handler = InWorld {
             world,
             set: Vec::new(),
+            block_entities: Vec::new(),
             log: self.log.clone(),
         };
         let values = self.call_values("useBlock", &args, &mut handler)?;
@@ -168,6 +213,7 @@ impl Runtime120 {
             count: int_at(2)?,
             damage: int_at(3)?,
             set: handler.set,
+            block_entities: handler.block_entities,
         })
     }
 }

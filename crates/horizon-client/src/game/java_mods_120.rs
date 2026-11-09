@@ -233,6 +233,21 @@ impl World120 for Level<'_, '_> {
             game.world.block(x, y, z),
         ))
     }
+
+    fn block_entity(&self, dimension: &str, x: i32, y: i32, z: i32) -> Option<String> {
+        let game = self.0;
+        if dimension != game.dim.id() || !game.world.loaded(x, z) {
+            return None;
+        }
+        // `saveWithFullMetadata`: with `id` and the position, without the chunk-only
+        // `keepPacked`. A 1.20.1 mod's own block entity is opaque NBT here
+        // (`BlockEntity::Mod`), so its items and progress cross as the mod wrote them.
+        let mut tag = game.block_entity_nbt([x, y, z])?;
+        if let horizon_world::nbt::Tag::Compound(c) = &mut tag {
+            c.remove(&"keepPacked".into());
+        }
+        Some(horizon_world::snbt_text::to_snbt(&tag))
+    }
 }
 
 impl super::Game<'_> {
@@ -324,6 +339,14 @@ impl super::Game<'_> {
                 Err(e) => log::warn!("1.20.1 mods: a mod set {}: {e}", set.state),
             }
         }
+        // The block entities the mods' code changed (a cooking pot's items and progress):
+        // kept as they saved them, after the blocks so one it placed is already there.
+        for set in &used.block_entities {
+            if set.dimension != self.dim.id() {
+                continue;
+            }
+            self.set_block_entity_120(set.pos, &set.snbt);
+        }
         // The held stack as the mods' code left it (worn, used up, turned into another).
         let after = (used.item.as_str(), used.count, used.damage);
         let before = held.as_ref().map_or(("minecraft:air", 0, 0), |h| {
@@ -353,5 +376,26 @@ impl super::Game<'_> {
         } else {
             None
         }
+    }
+
+    /// A 1.20.1 mod's block entity as its code saved it (`saveWithFullMetadata` in SNBT): what
+    /// is at `pos` from now on. A mod's own type is kept opaquely (`BlockEntity::Mod`), so it
+    /// saves and reloads with the world without Horizon knowing the mod.
+    fn set_block_entity_120(&mut self, [x, y, z]: [i32; 3], snbt: &str) {
+        let tag = match horizon_world::nbt::parse_snbt(snbt) {
+            Ok((tag, _)) => tag,
+            Err(e) => {
+                log::warn!("1.20.1 mods: a block entity at {x} {y} {z}: {e}");
+                return;
+            }
+        };
+        let Some((_, entity)) = horizon_client::save::decode_block_entity(&tag) else {
+            log::warn!("1.20.1 mods: a block entity at {x} {y} {z} was not read");
+            return;
+        };
+        self.world.block_entities.insert((x, y, z), entity);
+        // Redraw and resend what shows it.
+        let state = self.world.block(x, y, z);
+        let _ = self.world.set(x, y, z, state);
     }
 }
