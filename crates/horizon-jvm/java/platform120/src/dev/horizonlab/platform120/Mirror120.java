@@ -300,6 +300,46 @@ public final class Mirror120 {
         }
     }
 
+    /**
+     * Level.addFreshEntity on a mirror level. Horizon owns this world's entities and a mirror
+     * level has nowhere to put one, so an item a mod drops or ejects is sent for Horizon to
+     * spawn (a chest spilling its contents, a machine putting its output into the world), and
+     * anything else is turned away until entities are a phase of their own.
+     *
+     * <p>The stack crosses as its id, count and damage, as the held one does. What a mod put
+     * in its NBT (an enchantment, a mod's own tag) is lost on the way, and will keep being
+     * lost until the downgrade tables land.
+     *
+     * @return whether the entity was taken, which is what vanilla's caller reads.
+     */
+    public static boolean addEntity(Level level, net.minecraft.world.entity.Entity entity) {
+        if (!(entity instanceof net.minecraft.world.entity.item.ItemEntity dropped)) {
+            notEntities(entity);
+            return false;
+        }
+        ItemStack stack = dropped.getItem();
+        if (stack.isEmpty()) return false;
+        var motion = dropped.getDeltaMovement();
+        event.accept("spawnItem", new Object[] {
+            dimension(level), dropped.getX(), dropped.getY(), dropped.getZ(),
+            motion.x, motion.y, motion.z,
+            BuiltInRegistries.ITEM.getKey(stack.getItem()).toString(),
+            stack.getCount(), stack.getDamageValue(),
+        });
+        return true;
+    }
+
+    /** Said once per kind: the entities a mirror level turns away (phase 6 is their own). */
+    private static void notEntities(net.minecraft.world.entity.Entity entity) {
+        String kind = net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE
+                .getKey(entity.getType()).toString();
+        if (TURNED_AWAY.add(kind)) {
+            log("a mod put a " + kind + " into the world; only dropped items arrive so far");
+        }
+    }
+
+    private static final java.util.Set<String> TURNED_AWAY = new java.util.HashSet<>();
+
     /** Level.setBlockEntity: a mod's own, for this call and for Horizon when it ends. */
     public static void addBlockEntity(Level level, BlockEntity entity) {
         entity.setLevel(level);

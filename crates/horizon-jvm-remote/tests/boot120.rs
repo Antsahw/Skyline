@@ -398,8 +398,8 @@ fn right_clicking_a_block_runs_its_1_20_1_code_on_horizons_blocks() {
     // stay in hand) and sets the disc on it. The disc is used up, and the block entity comes
     // back holding it.
     //
-    // Taking a record back out is not tested yet: `JukeboxBlock.use` drops it with
-    // `Level.addFreshEntity`, which a mirror level has nowhere to put (the next step).
+    // Taking it back out drops it into the world: `JukeboxBlock.use` hands the record to
+    // `Level.addFreshEntity`, which the mirror sends on for Horizon to spawn.
     let world = WithEntity {
         block: OneBlock("minecraft:jukebox[has_record=false]".into()),
         entity: "{id:\"minecraft:jukebox\",x:0,y:64,z:0}".into(),
@@ -419,5 +419,29 @@ fn right_clicking_a_block_runs_its_1_20_1_code_on_horizons_blocks() {
         "it holds the record: {}",
         filled.snbt
     );
+
+    // Out again, with an empty hand: the block's own `use` clears the jukebox and drops the
+    // record, which reaches Horizon as an item to spawn rather than vanishing in the mirror.
+    let world = WithEntity {
+        block: OneBlock("minecraft:jukebox[has_record=true]".into()),
+        entity: "{id:\"minecraft:jukebox\",x:0,y:64,z:0,RecordItem:{id:\"minecraft:music_disc_13\",Count:1b}}"
+            .into(),
+    };
+    let mut empty_handed = flint_and_steel_on_top();
+    empty_handed.item = String::new();
+    empty_handed.count = 0;
+    let used = runtime
+        .use_block(&world, &empty_handed)
+        .expect("jukebox out");
+    assert_ne!(used.result, 0, "the record comes out: {used:?}");
+    assert_eq!(used.set.len(), 1, "{used:?}");
+    assert_eq!(used.set[0].state, "minecraft:jukebox[has_record=false]");
+    let dropped = used
+        .spawned
+        .iter()
+        .find(|s| s.item == "minecraft:music_disc_13")
+        .unwrap_or_else(|| panic!("the record is dropped into the world: {used:?}"));
+    assert_eq!(dropped.count, 1, "{dropped:?}");
+    assert_eq!(dropped.dimension, "minecraft:overworld");
     runtime.stop();
 }

@@ -38,6 +38,20 @@ pub struct SetBlock {
     pub flags: i32,
 }
 
+/// An item the mods' code dropped into the world, for Horizon to spawn.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SpawnItem {
+    pub dimension: String,
+    /// Where it was dropped, in world coordinates.
+    pub pos: [f64; 3],
+    /// Its motion when dropped (`Entity.getDeltaMovement`), blocks per tick.
+    pub motion: [f64; 3],
+    /// The item's id (`minecraft:music_disc_13`).
+    pub item: String,
+    pub count: i32,
+    pub damage: i32,
+}
+
 /// A block entity the mods' code changed, as it saved it, for Horizon to keep.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SetBlockEntity {
@@ -82,6 +96,8 @@ pub struct Used {
     pub set: Vec<SetBlock>,
     /// The block entities the mods' code changed, in order.
     pub block_entities: Vec<SetBlockEntity>,
+    /// The items the mods' code dropped, in order.
+    pub spawned: Vec<SpawnItem>,
 }
 
 /// Horizon's side while the runtime runs a call in the world.
@@ -89,6 +105,7 @@ struct InWorld<'a> {
     world: &'a dyn World120,
     set: Vec<SetBlock>,
     block_entities: Vec<SetBlockEntity>,
+    spawned: Vec<SpawnItem>,
     log: Log,
 }
 
@@ -96,6 +113,13 @@ fn int(args: &[Value], i: usize) -> Result<i32, String> {
     match args.get(i) {
         Some(Value::I32(v)) => Ok(*v),
         other => Err(format!("argument {i}: an int expected, not {other:?}")),
+    }
+}
+
+fn float(args: &[Value], i: usize) -> Result<f64, String> {
+    match args.get(i) {
+        Some(Value::F64(v)) => Ok(*v),
+        other => Err(format!("argument {i}: a double expected, not {other:?}")),
     }
 }
 
@@ -166,6 +190,22 @@ impl Handler for InWorld<'_> {
                     }
                 }
             }
+            "spawnItem" => {
+                let parsed = (|| -> Result<SpawnItem, String> {
+                    Ok(SpawnItem {
+                        dimension: text(&args, 0)?.to_owned(),
+                        pos: [float(&args, 1)?, float(&args, 2)?, float(&args, 3)?],
+                        motion: [float(&args, 4)?, float(&args, 5)?, float(&args, 6)?],
+                        item: text(&args, 7)?.to_owned(),
+                        count: int(&args, 8)?,
+                        damage: int(&args, 9)?,
+                    })
+                })();
+                match parsed {
+                    Ok(item) => self.spawned.push(item),
+                    Err(e) => (self.log)(&format!("[fabric-1.20.1] a spawnItem unread: {e}")),
+                }
+            }
             _ => {}
         }
     }
@@ -196,6 +236,7 @@ impl Runtime120 {
             world,
             set: Vec::new(),
             block_entities: Vec::new(),
+            spawned: Vec::new(),
             log: self.log.clone(),
         };
         let values = self.call_values("useBlock", &args, &mut handler)?;
@@ -214,6 +255,7 @@ impl Runtime120 {
             damage: int_at(3)?,
             set: handler.set,
             block_entities: handler.block_entities,
+            spawned: handler.spawned,
         })
     }
 }

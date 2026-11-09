@@ -61,6 +61,18 @@ public abstract class ServerLevelMixin {
     }
 
     /**
+     * What a mod drops or ejects into the world (a chest spilling its items, a machine putting
+     * its output out): Horizon spawns it, since it owns this world's entities and a mirror
+     * level has nowhere to put one. On ServerLevel and not Level, which has no such method.
+     */
+    @Inject(method = "addFreshEntity", at = @At("HEAD"), cancellable = true)
+    private void horizon$addEntity(net.minecraft.world.entity.Entity entity,
+            CallbackInfoReturnable<Boolean> cir) {
+        cir.setReturnValue(dev.horizonlab.platform120.Mirror120.addEntity(
+                (net.minecraft.world.level.Level) (Object) this, entity));
+    }
+
+    /**
      * The entities: none, rather than the entity manager a mirror level never made (which every
      * asker would throw on). Placing a block asks, through isUnobstructed.
      */

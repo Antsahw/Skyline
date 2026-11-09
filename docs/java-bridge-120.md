@@ -402,9 +402,18 @@ another call held it. That last one is gone: a click waits up to 50 ms for a bus
 says so if it gives up, because a click that quietly does nothing reads as a broken mod.
 `HORIZON_120_TRACE=1` says where each click went.
 
-Next: `Level.addFreshEntity`, which a mirror level has nowhere to put, so nothing a mod drops
-or ejects arrives yet (taking that record back out drops it: `JukeboxBlock.use` →
-`dropRecording` → `addFreshEntity`). Then ticking block entities, and menus.
+**What a mod drops or ejects** now arrives: `ServerLevel.addFreshEntity` on a mirror level
+sends an item back as a `spawnItem` event and Horizon spawns it, since Horizon owns this
+world's entities (a chest spilling its contents, a machine putting its output out). Anything
+that isn't an item is turned away, said once per kind, until entities are a phase of their own.
+The stack crosses as its id, count and damage, as the held one does: what a mod put in its NBT
+is lost until the downgrade tables land.
+
+Tested: the record goes back out of the jukebox (`JukeboxBlock.use` → `dropRecording` →
+`addFreshEntity`), and comes back as an item for Horizon to spawn.
+
+Next: ticking block entities (a cooking pot holds its items but never cooks), then the chunk
+mirror and batched deltas, then menus.
 
 ## How the bridge is laid out (Phase 0)
 
@@ -489,8 +498,8 @@ NeoForge could run beside Fabric 26.3 rather than in its place.
    reloaded; they drop themselves and their recipes craft. Next here: more mods through it
    (the top-150 list), and Horizon's recipe book showing content mods' recipes.
 3. **machine120.** 3a done: right-clicks run the mods' code on a mirror `ServerLevel`. 3b done:
-   block entities cross both ways, a mod's own kept as opaque NBT (both above). Next:
-   `addFreshEntity` (what a mod drops or ejects), ticking block entities, the chunk mirror and
+   block entities cross both ways, a mod's own kept as opaque NBT, and what a mod drops or
+   ejects reaches Horizon (all above). Next: ticking block entities, the chunk mirror and
    batched deltas ("Measured"), the downgrade tables, the Fabric Transfer API on Horizon's
    containers.
 4. **gui120.** `GuiGraphics` recorder → `screenFrame` JSON, menus, input, slot clicks (its own lane).

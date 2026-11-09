@@ -422,6 +422,21 @@ impl super::Game<'_> {
             }
             self.set_block_entity_120(set.pos, &set.snbt);
         }
+        // What the mods' code dropped or ejected into the world (a chest spilling its items,
+        // a machine putting its output out), spawned by Horizon, which owns the entities.
+        for item in &used.spawned {
+            if item.dimension != self.dim.id() || item.count <= 0 {
+                continue;
+            }
+            let stack = horizon_client::items::ItemStack {
+                item: item.item.as_str().into(),
+                count: item.count as u32,
+                damage: item.damage.max(0) as u32,
+                extra: None,
+            };
+            // `ItemEntity.setDefaultPickUpDelay`: 10 ticks before anyone can pick it up.
+            self.spawn_item(stack, item.pos, item.motion, 10);
+        }
         // The held stack as the mods' code left it (worn, used up, turned into another).
         let after = (used.item.as_str(), used.count, used.damage);
         let before = held.as_ref().map_or(("minecraft:air", 0, 0), |h| {
