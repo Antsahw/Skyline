@@ -8,6 +8,7 @@
     "MinecraftServerAccess",
     "PlayerListAccess",
     "ServerChunkCacheAccess",
+    "ServerChunkCacheMixin",
     "GameModeAccess",
     "LevelMixin",
     "MinecraftServerMixin",

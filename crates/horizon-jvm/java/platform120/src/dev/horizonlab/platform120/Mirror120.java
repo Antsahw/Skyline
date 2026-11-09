@@ -31,6 +31,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.dimension.BuiltinDimensionTypes;
 import net.minecraft.world.level.dimension.DimensionType;
@@ -74,6 +75,19 @@ public final class Mirror120 {
     private static final Map<String, BlockState> STATES = new HashMap<>();
     /** This call's writes, per level, by packed position. */
     private static final Map<Level, Map<Long, BlockState>> WRITES = new HashMap<>();
+    /**
+     * This call's block entities, per level, by packed position. One position gives one object
+     * for the whole call: mods keep what {@code getBlockEntity} gave them and change it in
+     * place, and some compare it by identity.
+     */
+    private static final Map<Level, Map<Long, BlockEntity>> ENTITIES = new HashMap<>();
+    /** Positions this call asked Horizon about and found nothing at (asked once). */
+    private static final Map<Level, java.util.Set<Long>> NO_ENTITY = new HashMap<>();
+    /**
+     * What each of this call's block entities held when it was made, as this side writes it:
+     * only one a mod changed goes back to Horizon. A new one gets "", so it always does.
+     */
+    private static final Map<BlockEntity, String> ENTITY_NBT = new java.util.IdentityHashMap<>();
 
     static synchronized void setUp() {
         if (server != null) return;
@@ -215,6 +229,99 @@ public final class Mirror120 {
     /** A new call from Horizon: what the last one wrote is Horizon's now. */
     static void begin() {
         WRITES.clear();
+        ENTITIES.clear();
+        NO_ENTITY.clear();
+        ENTITY_NBT.clear();
+    }
+
+    /**
+     * The call is over: every block entity a mod changed goes back to Horizon, which keeps it
+     * (a mod's own type as opaque NBT). Compared as this side writes them, so a difference is
+     * the mod's change and not another serializer's spelling.
+     */
+    static void finish() {
+        for (Map.Entry<Level, Map<Long, BlockEntity>> level : ENTITIES.entrySet()) {
+            String dimension = dimension(level.getKey());
+            for (Map.Entry<Long, BlockEntity> made : level.getValue().entrySet()) {
+                BlockEntity entity = made.getValue();
+                String now;
+                try {
+                    now = entity.saveWithFullMetadata().toString();
+                } catch (RuntimeException e) {
+                    log("a block entity didn't save: " + e);
+                    continue;
+                }
+                if (now.equals(ENTITY_NBT.get(entity))) continue;
+                BlockPos pos = BlockPos.of(made.getKey());
+                event.accept("setBlockEntity",
+                        new Object[] {dimension, pos.getX(), pos.getY(), pos.getZ(), now});
+            }
+        }
+    }
+
+    /**
+     * Level.getBlockEntity of a mirror level: the one this call already made there, else
+     * Horizon's, loaded as a chunk loads it (BlockEntity.loadStatic, so a mod's own type is
+     * made by its own code from its own NBT). Null where Horizon has none.
+     */
+    public static BlockEntity blockEntity(Level level, BlockPos pos) {
+        long key = pos.asLong();
+        Map<Long, BlockEntity> made = ENTITIES.get(level);
+        if (made != null) {
+            BlockEntity known = made.get(key);
+            if (known != null) return known;
+        }
+        java.util.Set<Long> none = NO_ENTITY.get(level);
+        if (none != null && none.contains(key)) return null;
+        if (level.isOutsideBuildHeight(pos)) return null;
+        Object[] answer = call.apply("blockEntity",
+                new Object[] {dimension(level), pos.getX(), pos.getY(), pos.getZ()});
+        String snbt = answer.length > 0 && answer[0] instanceof String s ? s : null;
+        BlockEntity entity = snbt == null ? null : load(level, pos, snbt);
+        if (entity == null) {
+            NO_ENTITY.computeIfAbsent(level, l -> new java.util.HashSet<>()).add(key);
+            return null;
+        }
+        keep(level, key, entity, entity.saveWithFullMetadata().toString());
+        return entity;
+    }
+
+    /** Horizon's block entity NBT as a 1.20.1 block entity; null when it can't be read. */
+    private static BlockEntity load(Level level, BlockPos pos, String snbt) {
+        try {
+            var tag = net.minecraft.nbt.TagParser.parseTag(snbt);
+            BlockEntity entity = BlockEntity.loadStatic(pos.immutable(), blockState(level, pos), tag);
+            if (entity != null) entity.setLevel(level);
+            return entity;
+        } catch (Exception e) {
+            // A type 1.20.1 hasn't got, or NBT it won't read: no block entity there.
+            log("the block entity at " + pos.toShortString() + " didn't load: " + e);
+            return null;
+        }
+    }
+
+    /** Level.setBlockEntity: a mod's own, for this call and for Horizon when it ends. */
+    public static void addBlockEntity(Level level, BlockEntity entity) {
+        entity.setLevel(level);
+        keep(level, entity.getBlockPos().asLong(), entity, "");
+    }
+
+    /** Level.removeBlockEntity: gone for the rest of this call. */
+    public static void removeBlockEntity(Level level, BlockPos pos) {
+        Map<Long, BlockEntity> made = ENTITIES.get(level);
+        if (made != null) {
+            BlockEntity gone = made.remove(pos.asLong());
+            if (gone != null) ENTITY_NBT.remove(gone);
+        }
+        NO_ENTITY.computeIfAbsent(level, l -> new java.util.HashSet<>()).add(pos.asLong());
+    }
+
+    /** A block entity of this call, and what it held when it was made. */
+    private static void keep(Level level, long key, BlockEntity entity, String nbt) {
+        ENTITIES.computeIfAbsent(level, l -> new HashMap<>()).put(key, entity);
+        ENTITY_NBT.put(entity, nbt);
+        java.util.Set<Long> none = NO_ENTITY.get(level);
+        if (none != null) none.remove(key);
     }
 
     /** Level.getBlockState of a mirror level: this call's own write, else Horizon's block. */
@@ -237,8 +344,33 @@ public final class Mirror120 {
         if (level.isOutsideBuildHeight(pos)) return false;
         BlockState before = blockState(level, pos);
         if (before == state) return false;
-        WRITES.computeIfAbsent(level, l -> new HashMap<>()).put(pos.asLong(), state);
+        long key = pos.asLong();
+        WRITES.computeIfAbsent(level, l -> new HashMap<>()).put(key, state);
         event.accept("setBlock", new Object[] {dimension(level), pos.getX(), pos.getY(), pos.getZ(), BlockStateParser.serialize(state), flags});
+        // The block entity the new block has: vanilla's LevelChunk.setBlockState makes it, and
+        // a mirror level has no chunks to do it. Made here, so the mod's own code reads it back
+        // in this call (a cooking pot it just placed) and Horizon gets it when the call ends.
+        if (state.getBlock() instanceof net.minecraft.world.level.block.EntityBlock block) {
+            // The one already there, when the new state is still its block: vanilla keeps it,
+            // and a mod sets a block on the way through its own block entity's code (a jukebox
+            // turns itself `has_record=true` while holding the record it was just given). A new
+            // one here would be the empty one, and the change would be lost.
+            BlockEntity had = ENTITIES.getOrDefault(level, Map.of()).get(key);
+            if (had != null && had.getType().isValid(state)) return true;
+            BlockEntity entity = block.newBlockEntity(pos.immutable(), state);
+            if (entity != null) {
+                entity.setLevel(level);
+                // "": never what it saves, so a new one always reaches Horizon.
+                keep(level, key, entity, "");
+                return true;
+            }
+        }
+        // The block there has none now: forget the one the old block had.
+        Map<Long, BlockEntity> made = ENTITIES.get(level);
+        if (made != null) {
+            BlockEntity gone = made.remove(key);
+            if (gone != null) ENTITY_NBT.remove(gone);
+        }
         return true;
     }
 
@@ -304,6 +436,7 @@ public final class Mirror120 {
         BlockHitResult hit = new BlockHitResult(new Vec3(hx, hy, hz), Direction.from3DDataValue(face), new BlockPos(x, y, z), false);
         InteractionResult result = player.gameMode.useItemOn(player, level, stack, h, hit);
         ItemStack after = player.getItemInHand(h);
+        finish();
         int code = !result.consumesAction() ? 0 : result.shouldSwing() ? 2 : 1;
         return new Object[] {code, BuiltInRegistries.ITEM.getKey(after.getItem()).toString(), after.getCount(), after.getDamageValue()};
     }

@@ -346,8 +346,40 @@ clicks pass until then). A click on a block of a 1.20.1 mod's namespace, or with
 their items, goes to it at `useItemOn`'s head (`java120_use_block`, beside the 26.3 bridge's
 hook in `lan_actions.rs`); what it set and what it did to the held stack land in Horizon.
 
-Next: block entities (the cooking pot, chests, machines' inventories), then their ticking
-and menus.
+## Phase 3b status: block entities cross the mirror (2026-11-09)
+
+A block entity a mod reads is Horizon's, and what it changes comes back:
+
+- **Reads** (`Level.getBlockEntity`) ask Horizon (`blockEntity`, answered by `World120`) for the
+  block entity as vanilla saves it (`saveWithFullMetadata`, SNBT) and load it as a chunk does
+  (`BlockEntity.loadStatic`), so a mod's own type is made by the mod's own code from its own
+  NBT. One position gives **one object for the whole call**: mods keep what `getBlockEntity`
+  gave them, change it in place, and some compare it by identity.
+- **Writes** go back as `setBlockEntity` events when the call ends, and only for one whose NBT
+  the call actually changed (compared as this side writes it, so a difference is the mod's
+  change and not another serializer's spelling). `Level.setBlockEntity` and `removeBlockEntity`
+  land in the same set.
+- A mod's block entity needs **no type in Horizon**: `decode_block_entity` keeps a non-vanilla
+  id as `BlockEntity::Mod` (the compound opaque, with `Items` decoded into real stacks), so a
+  cooking pot's contents save, reload and stay visible to Horizon's own hoppers.
+- `setBlock` makes the block entity the new block has (vanilla's `LevelChunk.setBlockState`
+  does, and a mirror has no chunks), and **keeps the one already there** when the new state is
+  still its block: a mod sets a block from inside its own block entity's code (a jukebox turns
+  itself `has_record=true` while holding the record it was just given), and a fresh one would
+  lose the change.
+- The mirror's **chunk source answers "no chunk"** rather than throwing
+  (`ServerChunkCacheMixin`). It is made without its constructor, so its chunk map is null, and
+  vanilla asks it questions on the way through code that has nothing to do with chunks:
+  `BlockEntity.setChanged` alone asks `hasChunkAt` twice. Callers then take their "not loaded"
+  path, which is the one that leaves the world to Horizon.
+
+Tested (`tests/boot120.rs`): a jukebox is Horizon's block entity read by 1.20.1's own code and
+changed by it, with no menu or mod in the way — `RecordItem.useOn` asks the level for it and
+sets the disc on it, the disc is used up, and the block entity comes back holding it.
+
+Next: `Level.addFreshEntity`, which a mirror level has nowhere to put, so nothing a mod drops
+or ejects arrives yet (taking that record back out drops it: `JukeboxBlock.use` →
+`dropRecording` → `addFreshEntity`). Then ticking block entities, and menus.
 
 ## How the bridge is laid out (Phase 0)
 
@@ -431,9 +463,10 @@ NeoForge could run beside Fabric 26.3 rather than in its place.
    recipes, loot and tags. **Milestone met:** 1.20.1 mod blocks placed, drawn, saved and
    reloaded; they drop themselves and their recipes craft. Next here: more mods through it
    (the top-150 list), and Horizon's recipe book showing content mods' recipes.
-3. **machine120.** 3a done: right-clicks run the mods' code on a mirror `ServerLevel`
-   (above). Next: block entities, ticks, the chunk mirror and batched deltas
-   ("Measured"), block entities, the downgrade tables, the Fabric Transfer API on Horizon's
+3. **machine120.** 3a done: right-clicks run the mods' code on a mirror `ServerLevel`. 3b done:
+   block entities cross both ways, a mod's own kept as opaque NBT (both above). Next:
+   `addFreshEntity` (what a mod drops or ejects), ticking block entities, the chunk mirror and
+   batched deltas ("Measured"), the downgrade tables, the Fabric Transfer API on Horizon's
    containers.
 4. **gui120.** `GuiGraphics` recorder → `screenFrame` JSON, menus, input, slot clicks (its own lane).
 5. **Events and networking.** Fabric API 1.20.1 events at the bridge's hook points, mod packets.

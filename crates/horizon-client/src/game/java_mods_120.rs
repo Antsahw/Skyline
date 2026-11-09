@@ -10,8 +10,9 @@
 //! Behaviour (phase 3): the runtime stays up after the content is made (or starts in the
 //! background when the content came from the cache), and a right-click on one of the mods'
 //! blocks, or with one of their items, runs the mods' own code there on this world's blocks
-//! (`java120_use_block`, at ServerPlayerGameMode.useItemOn's head). Block entities, menus and
-//! ticking machines are the next steps.
+//! (`java120_use_block`, at ServerPlayerGameMode.useItemOn's head), on Horizon's blocks and
+//! block entities (phase 3b: a mod's own block entity is kept as opaque NBT). What a mod drops
+//! or ejects, ticking machines and menus are the next steps.
 
 use horizon_jvm_remote::boot120::{self, Fabric120, Runtime120, Side};
 use horizon_jvm_remote::mirror120::{UseBlock, World120};

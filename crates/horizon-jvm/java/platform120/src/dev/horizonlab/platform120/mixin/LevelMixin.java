@@ -10,6 +10,7 @@ import net.minecraft.world.level.material.FluidState;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
@@ -38,10 +39,51 @@ public abstract class LevelMixin {
         if (horizon$mirror()) cir.setReturnValue(Mirror120.setBlock((Level) (Object) this, pos, state, flags));
     }
 
-    /** Block entities: phase 3's next step. */
+    /** Block entities are Horizon's too: loaded from its NBT, one object per call. */
     @Inject(method = "getBlockEntity", at = @At("HEAD"), cancellable = true)
     private void horizon$blockEntity(BlockPos pos, CallbackInfoReturnable<BlockEntity> cir) {
-        if (horizon$mirror()) cir.setReturnValue(null);
+        if (horizon$mirror()) cir.setReturnValue(Mirror120.blockEntity((Level) (Object) this, pos));
+    }
+
+    /**
+     * BlockEntity.setChanged: vanilla marks the chunk unsaved, and a mirror level's chunk
+     * source holds no chunks. What a mod changed goes to Horizon when the call ends
+     * (Mirror120.finish), so there is nothing to do here.
+     */
+    @Inject(method = "blockEntityChanged", at = @At("HEAD"), cancellable = true)
+    private void horizon$blockEntityChanged(BlockPos pos, CallbackInfo ci) {
+        if (horizon$mirror()) ci.cancel();
+    }
+
+    /**
+     * Level.setBlockEntity: a mod adding one straight to the level (rather than by placing its
+     * block). Kept for this call and sent to Horizon with the rest.
+     */
+    @Inject(method = "setBlockEntity", at = @At("HEAD"), cancellable = true)
+    private void horizon$setBlockEntity(BlockEntity entity, CallbackInfo ci) {
+        if (horizon$mirror()) {
+            Mirror120.addBlockEntity((Level) (Object) this, entity);
+            ci.cancel();
+        }
+    }
+
+    /**
+     * The comparators beside a block entity that changed: a neighbour update, which is
+     * Horizon's to run (as with the rest of them in ServerLevelMixin).
+     */
+    @Inject(method = "updateNeighbourForOutputSignal", at = @At("HEAD"), cancellable = true)
+    private void horizon$outputSignal(BlockPos pos, net.minecraft.world.level.block.Block block,
+            CallbackInfo ci) {
+        if (horizon$mirror()) ci.cancel();
+    }
+
+    /** Vanilla removes it from the chunk; here, from this call's own set. */
+    @Inject(method = "removeBlockEntity", at = @At("HEAD"), cancellable = true)
+    private void horizon$removeBlockEntity(BlockPos pos, CallbackInfo ci) {
+        if (horizon$mirror()) {
+            Mirror120.removeBlockEntity((Level) (Object) this, pos);
+            ci.cancel();
+        }
     }
 
     @Inject(method = "isLoaded", at = @At("HEAD"), cancellable = true)

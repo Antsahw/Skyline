@@ -266,6 +266,22 @@ impl horizon_jvm_remote::mirror120::World120 for OneBlock {
     }
 }
 
+/// [`OneBlock`] whose block has a block entity, as Horizon saves it (SNBT).
+struct WithEntity {
+    block: OneBlock,
+    entity: String,
+}
+
+impl horizon_jvm_remote::mirror120::World120 for WithEntity {
+    fn block_state(&self, dimension: &str, x: i32, y: i32, z: i32) -> Option<String> {
+        self.block.block_state(dimension, x, y, z)
+    }
+    fn block_entity(&self, dimension: &str, x: i32, y: i32, z: i32) -> Option<String> {
+        assert_eq!(dimension, "minecraft:overworld");
+        ((x, y, z) == (0, 64, 0)).then(|| self.entity.clone())
+    }
+}
+
 fn flint_and_steel_on_top() -> horizon_jvm_remote::mirror120::UseBlock {
     horizon_jvm_remote::mirror120::UseBlock {
         uuid: "6b1f0b8e-2a63-4a2a-9a0c-6c1d2f3e4a5b".into(),
@@ -375,5 +391,33 @@ fn right_clicking_a_block_runs_its_1_20_1_code_on_horizons_blocks() {
     } else {
         eprintln!("no Farmer's Delight in HORIZON_120_MODS: the stove is skipped");
     }
+
+    // Phase 3b: block entities. A jukebox is Horizon's block entity read by 1.20.1's own code
+    // and changed by it, with no menu or mod in the way: `RecordItem.useOn` asks the level for
+    // the jukebox's block entity (a mirror without them would pass instead, and the disc would
+    // stay in hand) and sets the disc on it. The disc is used up, and the block entity comes
+    // back holding it.
+    //
+    // Taking a record back out is not tested yet: `JukeboxBlock.use` drops it with
+    // `Level.addFreshEntity`, which a mirror level has nowhere to put (the next step).
+    let world = WithEntity {
+        block: OneBlock("minecraft:jukebox[has_record=false]".into()),
+        entity: "{id:\"minecraft:jukebox\",x:0,y:64,z:0}".into(),
+    };
+    let mut with_disc = flint_and_steel_on_top();
+    with_disc.item = "minecraft:music_disc_13".into();
+    let used = runtime.use_block(&world, &with_disc).expect("jukebox in");
+    assert!(used.result != 0, "the disc goes in: {used:?}");
+    assert_eq!(used.count, 0, "the disc is used up: {used:?}");
+    let filled = used
+        .block_entities
+        .iter()
+        .find(|e| e.pos == [0, 64, 0])
+        .unwrap_or_else(|| panic!("the jukebox's block entity comes back: {used:?}"));
+    assert!(
+        filled.snbt.contains("music_disc_13"),
+        "it holds the record: {}",
+        filled.snbt
+    );
     runtime.stop();
 }
