@@ -39,6 +39,13 @@ launcher, which has no switch, and not into a newer fork launcher either): downl
 the same page for a newer one. The game build with Fabric mods comes from that release too, by
 itself, when you turn the switch on.
 
+> **Had the launcher before 9 November 2026? Download it again, once.** The game now checks with
+> Mojang's services itself that you own Minecraft, and older launchers can't start it that way:
+> they refuse the new build ("This Fabric mods build needs a newer launcher") and keep playing the
+> old one. With the new launcher, get the new build once with
+> `horizon-launcher java-mods update` (in a terminal, in the launcher's folder; on Windows
+> `.\horizon-launcher.exe java-mods update`). After that, Play uses it.
+
 ### From source instead
 
 Install the tools:
@@ -72,7 +79,9 @@ After a `git pull`, build again and run `use-build` again.
 1. **Sign in:** in the launcher, add your Microsoft account (or `horizon-launcher account sign-in`).
 2. **Install a Horizon version** on Home and let the launcher prepare it from your Minecraft 26.3.
 3. **Turn on Fabric mods:** on Home, the **Fabric mods** switch next to **Play** (or Play's **⋯** menu)
-   (or `horizon-launcher java-mods on`). A **Java mods** tab appears on Home. "reads prepared files
+   (or `horizon-launcher java-mods on`). A warning comes first: mods are Java programs with full
+   access to your computer, files and Minecraft account, so only add mods you trust. Choose
+   **Turn on Fabric mods** (asked once per instance). A **Java mods** tab appears on Home. "reads prepared files
    of format N": the build and your Horizon version are too far apart; update the version (or
    wait for the next build).
 4. **Add mods:** the Java mods tab > **Add**, or drop jars on it (or `horizon-launcher java-mods add <jar>`).
@@ -81,9 +90,11 @@ After a `git pull`, build again and run `use-build` again.
 **The first start takes a few minutes.** The launcher downloads the Fabric mods build for your
 version (and Mojang's Java 25 if you have no Java 25 JDK), with its progress on Play and its lines
 in the game log; then the game builds the mods' content once. If a download fails, Play stops and
-says why. Before each Play the launcher checks for a newer build and takes it when it fits your
-launcher; a build that needs a newer launcher is left alone (yours keeps playing) and the game
-log says so: download the launcher again from the release page to get it.
+says why. The game checks with Mojang's services at each start that your account owns Minecraft,
+so Fabric mods need an internet connection to start (plain Horizon still plays offline). An
+installed build stays as it is: `horizon-launcher java-mods update` gets the newest one that fits
+your launcher. A build that needs a newer launcher is refused: download the launcher again from
+the release page to get it.
 
 **Check it worked:** make a Creative world, type `/give @s ` and press Tab: your mods' items
 should be in the list.
@@ -184,6 +195,8 @@ rebuilt on the next start.
 | `your mods couldn't start` | Remove the mod it names. Check your mods are for 26.3 and have their libraries |
 | `… is made for Minecraft 1.21…, not 26.3` | Get that mod's file for 26.3 |
 | `This Fabric mods build needs a newer launcher` | Download the launcher again from the [`java-mods` release](https://github.com/iaxivers/horizon-java-bridge/releases/tag/java-mods) |
+| `Fabric 26.3 mods run only when Horizon's launcher starts the game …` / `Java mods: not started` | Start the game from the launcher's Play, signed in, online (the game asks Mojang's services that you own Minecraft). A shortcut or script of your own runs no mods |
+| `need the Minecraft services to confirm …` | You're offline or the services are down: try again, or turn Fabric 26.3 mods off to play offline |
 | `Minecraft's own … is missing` | Play 26.3 once to the title screen in the official launcher, then prepare the version again on Home |
 
 More about how it all works: [java-bridge.md](java-bridge.md).

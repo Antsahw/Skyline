@@ -2062,6 +2062,24 @@ Naturalist (mobs with ModelPart models, Fabric API only). The repo's own critter
 
 ## Status
 
+**Release (2026-11-09): `java-mods` pre-release "Fabric mods build java-mods-2026-11-09-d2af71b" (run 42714261361; launcher contract 2, 7 files, SHA256SUMS checked).**
+`claude/bridge-create-1` fast-forwarded into `java-bridge`. Testers download the launcher again
+once: contract-1 launchers refuse this build ("needs a newer launcher"), and a contract-2 launcher
+with an older build installed keeps it until `horizon-launcher java-mods update`. In it:
+- Fabric mods need an owner record the game confirms with Mojang's services itself
+  (`gate::decision`); hand-set variables run nothing (regress `direct`, `forged_word`,
+  `forged_record`; `owner` passes with a real record). See "Ownership and licences".
+- A warning before Fabric mods turn on (once per instance); the release build is Fabric-only
+  (dev opt-in and NeoForge/1.12 prototypes behind features no release enables).
+- Windows paths and locked files, first-run fixes (Play stops on the real reason, one download at
+  a time, wrong-version and duplicate jars flagged, a player's Fabric API skipped).
+- Mods' key bindings in Controls and mods' FOV; Xaero's maps at full resolution; 3D Skin Layers
+  on the real skin; client-side mods on any server; P0 clean-up (hooks in both builds,
+  `java_server/` split); Create's pumps, pipes and fans.
+- Checked before the push: `cargo check` plain and `java-mods`, launcher clippy `-D warnings`,
+  regress `nomodcode` (cloud); `direct`, `owner`, `keys`, `fov`, `pot` (iaxivers' PC). `hud` not
+  run (no 26.3 files on the cloud machine).
+
 Create's pumps, pipes and fans (2026-11-06, `bridge-create-1`): a pump fills a tank from
 Horizon's water and the tank shows it (client copies load the update packets as a client does),
 pipes draw whole, in water too (block models' parts in a world), fans blow players (mods' block
@@ -3072,7 +3090,7 @@ A review of a first Play with Fabric mods on; what changed:
   the game log.
 - **One download at a time:** `java_variant::BUILD_LOCK` around `ensure_with`, `follow` and
   `use_build` (the switch and Play at once wrote the same `.java.partial`).
-- **Launcher contract:** `java_release::CONTRACT` (1), written as `contract` into
+- **Launcher contract:** `java_release::CONTRACT` (2 since bridge-gate-2's owner record; was 1), written as `contract` into
   `java-mods.json` by java-mods-release.yml (read from that line); a manifest without it is 1.
   `fits` refuses another contract ("needs a newer launcher: download it from <release page>").
   **Bump it** with any change to the game's opt-in/owner check that an older launcher can't
