@@ -377,6 +377,31 @@ Tested (`tests/boot120.rs`): a jukebox is Horizon's block entity read by 1.20.1'
 changed by it, with no menu or mod in the way — `RecordItem.useOn` asks the level for it and
 sets the disc on it, the disc is used up, and the block entity comes back holding it.
 
+Phase 3b also made the mirror survive what a constructor-less level lacks, each found by its
+own crash on the way to a block being placed:
+
+- Its **chunk source answers "no chunk"** rather than throwing (`ServerChunkCacheMixin`): its
+  chunk map is null, and vanilla asks it questions on paths that have nothing to do with
+  chunks (`BlockEntity.setChanged` asks `hasChunkAt` twice).
+- Its **profiler records nothing**, answered on `MinecraftServer` and not only on `Level`:
+  mods merge an override of `ServerLevel.getProfiler` that delegates to
+  `getServer().getProfiler()`, so a fix on `Level` is never consulted for a `ServerLevel`.
+  It matters outside profiling because `Level.getEntities` opens with
+  `getProfiler().incrementCounter("getEntities")`.
+- Its **entities are an empty getter** (`NoEntities`), since the entity manager is never made.
+  `ServerLevel.getEntities` needs its descriptor spelled out: the class has several overloads,
+  and an inject by bare name binds to another one.
+
+Both answers are ours rather than vanilla's `InactiveProfiler.INSTANCE`, which reads as null in
+the child even though the bytecode asks for the right field.
+
+**Why a click can miss the runtime**, which was invisible and cost a day of misreadings: it
+passes when this side is a client (the server's side takes it), when neither the block nor the
+held item is a 1.20.1 mod's, while the runtime is still starting, and — until now — whenever
+another call held it. That last one is gone: a click waits up to 50 ms for a busy runtime and
+says so if it gives up, because a click that quietly does nothing reads as a broken mod.
+`HORIZON_120_TRACE=1` says where each click went.
+
 Next: `Level.addFreshEntity`, which a mirror level has nowhere to put, so nothing a mod drops
 or ejects arrives yet (taking that record back out drops it: `JukeboxBlock.use` →
 `dropRecording` → `addFreshEntity`). Then ticking block entities, and menus.

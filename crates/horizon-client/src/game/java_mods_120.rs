@@ -188,6 +188,65 @@ fn make(
     Ok(folders)
 }
 
+/// Whether `HORIZON_120_TRACE` is set: why a click on one of the mods' blocks went where it
+/// did. Off by default (a click is frequent and this says something about every one), on for
+/// working out why a mod's block does nothing, which is otherwise invisible: most of the ways
+/// a click can miss the runtime leave no trace at all.
+fn tracing() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("HORIZON_120_TRACE").is_some())
+}
+
+/// A line for [`tracing`].
+macro_rules! trace120 {
+    ($($arg:tt)*) => {
+        if tracing() {
+            log::info!("1.20.1 mods (trace): {}", format_args!($($arg)*));
+        }
+    };
+}
+
+/// How long a click waits for a runtime that is busy with another call before giving up. Long
+/// enough for a call that is on its way out (a call costs tens of microseconds), short enough
+/// that a wedged runtime doesn't hold the server's tick.
+const BUSY_WAIT: Duration = Duration::from_millis(50);
+
+/// The runtime, waited for while another call has it. None when it stayed busy: the click
+/// passes, and that is said rather than left silent, because a click that quietly does nothing
+/// reads as a broken mod.
+fn wait_for_runtime() -> Option<std::sync::MutexGuard<'static, Option<Runtime120>>> {
+    let until = std::time::Instant::now() + BUSY_WAIT;
+    loop {
+        match RUNTIME.try_lock() {
+            Ok(guard) => return Some(guard),
+            // Another thread died holding it: its runtime is still the one to use.
+            Err(std::sync::TryLockError::Poisoned(e)) => return Some(e.into_inner()),
+            Err(std::sync::TryLockError::WouldBlock) => {
+                if std::time::Instant::now() >= until {
+                    log::warn!(
+                        "1.20.1 mods: their runtime was busy for {} ms; this click did nothing",
+                        BUSY_WAIT.as_millis()
+                    );
+                    return None;
+                }
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
+    }
+}
+
+/// Said once, the first time a click lands before the runtime is up (it boots in the
+/// background, which takes a while for a big pack): after that the clicks pass quietly.
+fn booting_once() {
+    static SAID: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if !SAID.swap(true, std::sync::atomic::Ordering::Relaxed) {
+        log::info!(
+            "1.20.1 mods: their code isn't running yet (it starts in the background); \
+             clicks on their blocks do nothing until it is"
+        );
+    }
+}
+
 /// `minecraft:oak_log[axis=y]`: a state's name as both versions write it.
 fn state_name(
     registry: &horizon_world::registry::BlockRegistry,
@@ -265,6 +324,9 @@ impl super::Game<'_> {
         off_hand: bool,
     ) -> Option<bool> {
         if self.remote.is_some() {
+            // This window is a client of a server (its own server thread included): the click
+            // reaches the runtime where that server runs it, not here.
+            trace120!("{pos:?}: this side is a client, the server's side takes it");
             return None;
         }
         let hand = if off_hand {
@@ -284,8 +346,13 @@ impl super::Game<'_> {
             };
             clicked_is_ours = ours(&clicked);
             if !clicked_is_ours && !held.as_ref().is_some_and(|h| ours(&h.item)) {
+                trace120!(
+                    "{pos:?}: neither {clicked} nor the held item is a 1.20.1 mod's ({} known)",
+                    namespaces.as_ref().map_or(0, HashSet::len)
+                );
                 return None;
             }
+            trace120!("{pos:?}: {clicked} goes to the mods' code");
         }
         let uuid = self.lan_acting_uuid.unwrap_or_else(|| {
             self.level.player_uuid.map_or_else(
@@ -315,11 +382,18 @@ impl super::Game<'_> {
             creative: self.mode == horizon_client::command::args::GameMode::Creative,
         };
         let used = {
-            // Clicks while the runtime boots (or another call runs) pass.
-            let mut guard = RUNTIME.try_lock().ok()?;
-            let runtime = guard.as_mut()?;
+            // A click is rare and a person is waiting on it, so a runtime that is busy with
+            // another call is worth waiting a moment for: passing the click on instead means
+            // the mods' block quietly does nothing, which looks like a broken mod and hides
+            // itself from a test run. Only a runtime that isn't up yet passes.
+            let mut guard = wait_for_runtime()?;
+            let Some(runtime) = guard.as_mut() else {
+                booting_once();
+                return None;
+            };
             runtime.use_block(&Level(self), &request)
         };
+        trace120!("{pos:?}: answered {used:?}");
         let used = match used {
             Ok(used) => used,
             Err(e) => {
