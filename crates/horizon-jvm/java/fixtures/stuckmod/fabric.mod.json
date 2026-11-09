@@ -4,6 +4,6 @@
   "version": "1.0.0",
   "name": "Stuck on 0.16.4",
   "environment": "*",
-  "entrypoints": {"main": ["horizon.stuck.StuckMod"]},
+  "entrypoints": {"main": ["dev.horizonlab.stuckmod.StuckMod"]},
   "depends": {"fabricloader": "<=0.16.4", "minecraft": "1.20.1"}
 }

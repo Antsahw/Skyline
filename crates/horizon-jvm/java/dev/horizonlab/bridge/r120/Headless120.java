@@ -38,6 +38,26 @@ final class Headless120 {
             Object user = userClass.getConstructor(String.class, String.class, String.class, java.util.Optional.class, java.util.Optional.class, typeClass)
                     .newInstance("Horizon", "00000000000000000000000000000000", "0", java.util.Optional.empty(), java.util.Optional.empty(), legacy);
             set(n, minecraftClass, minecraft, "user", user);
+            // The resource packs, as vanilla's constructor lists them: the built-in pack, the
+            // servers' downloaded packs, the resourcepacks/ folder. Mods add sources of their
+            // own at start (Simple Voice Chat, Moonlight), through Mixins on this object.
+            Path packs = gameDir.resolve("resourcepacks");
+            java.nio.file.Files.createDirectories(packs);
+            set(n, minecraftClass, minecraft, "resourcePackDirectory", packs);
+            Object clientSource = n.construct(n.cls("net.minecraft.client.resources.ClientPackSource", game), gameDir.resolve("assets"));
+            Object downloaded = n.construct(n.cls("net.minecraft.client.resources.DownloadedPackSource", game), dir.toPath().resolve("server-resource-packs").toFile());
+            set(n, minecraftClass, minecraft, "downloadedPackSource", downloaded);
+            Class<?> packType = n.cls("net.minecraft.server.packs.PackType", game);
+            Class<?> packSource = n.cls("net.minecraft.server.packs.repository.PackSource", game);
+            Object folder = n.construct(n.cls("net.minecraft.server.packs.repository.FolderRepositorySource", game), packs,
+                    n.getStatic(packType, "CLIENT_RESOURCES"), n.getStatic(packSource, "DEFAULT"));
+            Class<?> repositorySource = n.cls("net.minecraft.server.packs.repository.RepositorySource", game);
+            Object sources = java.lang.reflect.Array.newInstance(repositorySource, 3);
+            java.lang.reflect.Array.set(sources, 0, clientSource);
+            java.lang.reflect.Array.set(sources, 1, downloaded);
+            java.lang.reflect.Array.set(sources, 2, folder);
+            Object repository = n.construct(n.cls("net.minecraft.server.packs.repository.PackRepository", game), sources);
+            set(n, minecraftClass, minecraft, "resourcePackRepository", repository);
             return null;
         } catch (Throwable e) {
             return Boot120.root(e);

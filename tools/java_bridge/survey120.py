@@ -89,7 +89,54 @@ def resolve(project, jars, cache):
                 queue.append(d["project_id"])
     if first is None:
         return None, None, "Fabric API itself (always in the runtime)"
+    # Modrinth's dependency lists miss some of what fabric.mod.json requires (More Culling:
+    # Cloth Config): fetch those by mod id, which is usually the Modrinth slug.
+    for _ in range(5):
+        missing = undeclared(paths)
+        if not missing:
+            break
+        for mod_id in missing:
+            key = "id:" + mod_id
+            if key not in cache:
+                try:
+                    cache[key] = latest(mod_id)
+                except urllib.error.HTTPError:
+                    cache[key] = None
+            if cache[key] is None:
+                return None, None, f"requires {mod_id}, which isn't on Modrinth under that name"
+            paths.append(download(cache[key], jars))
     return first, paths, None
+
+
+BUILT_IN = {"minecraft", "java", "fabricloader", "fabric", "fabric-api"}
+
+
+def undeclared(paths):
+    """Mod ids the jars' fabric.mod.json files require that none of them provides."""
+    import zipfile
+    provided, required = set(BUILT_IN), set()
+
+    def read(z):
+        try:
+            meta = json.loads(z.read("fabric.mod.json").decode("utf-8-sig"), strict=False)
+        except (KeyError, ValueError):
+            return
+        provided.add(meta.get("id"))
+        provided.update(meta.get("provides", []) or [])
+        required.update((meta.get("depends") or {}).keys())
+        for n in z.namelist():
+            if n.startswith("META-INF/jars/") and n.endswith(".jar"):
+                import io
+                try:
+                    with zipfile.ZipFile(io.BytesIO(z.read(n))) as nested:
+                        read(nested)
+                except zipfile.BadZipFile:
+                    pass
+
+    for p in paths:
+        with zipfile.ZipFile(p) as z:
+            read(z)
+    return sorted(r for r in required - provided if not r.startswith("fabric-"))
 
 
 def build_bridge(java_home, out):
@@ -129,11 +176,15 @@ def boot(java, options, classes, launch, jars, timeout):
 
 def first_error(output):
     lines = output.splitlines()
-    # Fabric Loader's own refusal: "Incompatible mods found!" and its list.
+    # Fabric Loader's own refusal, in its words ("More details:" and the list under it).
     for i, l in enumerate(lines):
-        if "Incompatible mods found" in l or "Mod resolution failed" in l:
-            detail = [x.strip() for x in lines[i + 1: i + 8] if x.strip().startswith("-")]
-            return "refused", (detail[0] if detail else l.strip())[:300]
+        if "More details:" in l:
+            detail = [x.strip() for x in lines[i + 1: i + 6] if x.strip().startswith("-")]
+            if detail:
+                return "refused", detail[0][:300]
+    for l in lines:
+        if "Mod resolution failed" in l or "incompatible with the game or each other" in l:
+            return "refused", l.strip()[:300]
     for l in lines:
         if re.search(r"(Exception|Error)(:|$)", l) and "WARN" not in l:
             return "broken", l.strip()[:300]

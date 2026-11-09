@@ -171,3 +171,23 @@ fn a_runtime_that_cannot_start_fails_spawn_or_the_first_call() {
         }
     }
 }
+
+#[test]
+fn a_child_stuck_in_a_call_times_out_and_is_stopped() {
+    let Some((mut config, _)) = support::config("hang", &[]) else {
+        return;
+    };
+    config.read_timeout = Some(Duration::from_secs(2));
+    let mut child = support::spawn(&config).expect("child starts");
+    let started = std::time::Instant::now();
+    let result = child.call("hang", &[], &mut World::default());
+    assert!(matches!(result, Err(Error::TimedOut)), "{result:?}");
+    assert!(started.elapsed() < Duration::from_secs(10));
+    // The stream can't be trusted after a timeout: further calls fail at once.
+    assert!(matches!(
+        child.call("ping", &[], &mut World::default()),
+        Err(Error::Closed)
+    ));
+    child.stop(Duration::from_secs(1));
+    assert!(!child.running());
+}

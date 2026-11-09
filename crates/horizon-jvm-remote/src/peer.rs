@@ -25,6 +25,8 @@ pub enum Error {
     Closed,
     /// A frame that makes no sense here.
     Protocol(String),
+    /// No frame came within the connection's read timeout.
+    TimedOut,
 }
 
 impl std::fmt::Display for Error {
@@ -34,6 +36,7 @@ impl std::fmt::Display for Error {
             Error::Remote(m) => write!(f, "{m}"),
             Error::Closed => write!(f, "the Java runtime closed the connection"),
             Error::Protocol(m) => write!(f, "protocol: {m}"),
+            Error::TimedOut => write!(f, "the Java runtime didn't answer in time"),
         }
     }
 }
@@ -153,7 +156,21 @@ impl Peer {
     }
 
     fn read(&mut self) -> Result<Option<Frame>, Error> {
-        Ok(wire::read(&mut self.reader)?)
+        match wire::read(&mut self.reader) {
+            Ok(frame) => Ok(frame),
+            Err(e) => {
+                // A timeout may land inside a frame: the stream can't be trusted after it.
+                self.closed = true;
+                if matches!(
+                    e.kind(),
+                    io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+                ) {
+                    Err(Error::TimedOut)
+                } else {
+                    Err(Error::Io(e))
+                }
+            }
+        }
     }
 
     fn dispatch(&mut self, frame: Frame, handler: &mut dyn Handler) -> Result<(), Error> {

@@ -42,6 +42,9 @@ pub struct Fabric120 {
     pub max_heap: String,
     /// More JVM options.
     pub jvm_args: Vec<String>,
+    /// How long the boot (or any later call) may take before the runtime is given up and
+    /// stopped. A big pack boots in a minute or two; a mod stuck forever must not hang Horizon.
+    pub timeout: Duration,
     pub log: Log,
 }
 
@@ -227,6 +230,7 @@ pub fn start(config: &Fabric120) -> Result<(Runtime120, String), String> {
         dir: config.game_dir.clone(),
         tcp: false,
         connect_timeout: Duration::from_secs(60),
+        read_timeout: Some(config.timeout),
         log: config.log.clone(),
     };
     let child = child::spawn(&child_config)?;
@@ -293,6 +297,7 @@ mod tests {
             side: Side::Client,
             max_heap: "2G".into(),
             jvm_args: vec![],
+            timeout: Duration::from_secs(600),
             log: std::sync::Arc::new(|_| {}),
         }
     }

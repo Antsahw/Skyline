@@ -485,7 +485,7 @@ mod tests {
     #[test]
     fn the_bytes_are_the_documented_layout() {
         // An independent expectation, written out by hand from the module docs: the Java side
-        // is held to the same bytes by tests/java/WireCheck.java.
+        // is held to the same bytes by tests/child.rs, which echoes every value through Wire.java.
         let bytes = call(0x0102_0304, "ab", &[Value::I32(5), Value::Str("é".into())]).unwrap();
         let expected: Vec<u8> = vec![
             25, 0, 0, 0, // len: 1 + 4 + (4+2) + 2 + (1+4) + (1+4+2)

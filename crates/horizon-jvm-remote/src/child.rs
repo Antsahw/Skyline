@@ -50,6 +50,9 @@ pub struct Config {
     pub tcp: bool,
     /// How long the child may take to connect (a cold JVM: about a second).
     pub connect_timeout: Duration,
+    /// How long Horizon waits for any one frame from the child before giving up on it (a
+    /// child stuck in a mod's code: Cobblemon 1.5 on Java 22+ waits forever). `None`: no limit.
+    pub read_timeout: Option<Duration>,
     pub log: Log,
 }
 
@@ -138,15 +141,17 @@ impl Listener {
     }
 
     /// One connection, or `None` while nobody has connected yet.
-    fn accept(&self) -> std::io::Result<Option<Stream>> {
+    fn accept(&self, read_timeout: Option<Duration>) -> std::io::Result<Option<Stream>> {
         let result = match self {
             #[cfg(unix)]
             Listener::Unix(l, _) => l.accept().map(|(s, _)| {
                 s.set_nonblocking(false)?;
+                s.set_read_timeout(read_timeout)?;
                 Ok::<Stream, std::io::Error>((Box::new(s.try_clone()?), Box::new(s)))
             }),
             Listener::Tcp(l) => l.accept().map(|(s, _)| {
                 s.set_nonblocking(false)?;
+                s.set_read_timeout(read_timeout)?;
                 // Small frames go out at once: Nagle's delay would add ~40 ms to a call.
                 s.set_nodelay(true)?;
                 Ok::<Stream, std::io::Error>((Box::new(s.try_clone()?), Box::new(s)))
@@ -241,7 +246,7 @@ pub fn spawn(config: &Config) -> Result<Child, String> {
     };
     let started = Instant::now();
     let (reader, writer) = loop {
-        match listener.accept() {
+        match listener.accept(config.read_timeout) {
             Ok(Some(stream)) => break stream,
             Ok(None) => {}
             Err(e) => return Err(fail(&mut process, format!("accept: {e}"))),

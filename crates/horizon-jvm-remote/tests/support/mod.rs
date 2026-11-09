@@ -1,5 +1,6 @@
-//! Builds the child for the tests and the benchmark: the bridge's `remote` classes and
-//! `tests/java/TestRuntime.java`, compiled once into the target folder.
+//! Builds the child for the tests and the benchmark: the bridge's `remote` classes and the
+//! `remotetest` fixture (`crates/horizon-jvm/java/fixtures/remotetest`), compiled once into the
+//! target folder.
 
 #![allow(dead_code, unused_imports)]
 
@@ -42,7 +43,9 @@ pub fn classes() -> Option<PathBuf> {
             .filter_map(|e| e.ok().map(|e| e.path()))
             .filter(|p| p.extension().is_some_and(|e| e == "java"))
             .collect();
-        sources.push(manifest.join("tests/java/TestRuntime.java"));
+        sources.push(manifest.join(
+            "../horizon-jvm/java/fixtures/remotetest/dev/horizonlab/remotetest/TestRuntime.java",
+        ));
         let status = std::process::Command::new(home.join("bin/javac"))
             .args(["--release", "17", "-proc:none", "-d"])
             .arg(&out)
@@ -69,11 +72,12 @@ pub fn config(name: &str, args: &[&str]) -> Option<(Config, Lines)> {
             java: java_home()?.join("bin/java"),
             jvm_args: vec!["-Xshare:auto".into(), "-XX:TieredStopAtLevel=1".into()],
             class_path: vec![classes],
-            runtime: "TestRuntime".into(),
+            runtime: "dev.horizonlab.remotetest.TestRuntime".into(),
             runtime_args: args.iter().map(|s| s.to_string()).collect(),
             dir,
             tcp: false,
             connect_timeout: Duration::from_secs(30),
+            read_timeout: Some(Duration::from_secs(60)),
             log: Arc::new(move |line: &str| sink.lock().unwrap().push(line.to_string())),
         },
         lines,

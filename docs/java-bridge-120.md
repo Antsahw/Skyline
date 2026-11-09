@@ -130,6 +130,81 @@ HORIZON_120_MODS=~/mods-1.20.1 cargo test -p horizon-jvm-remote --test boot120 -
 | 1.20.1 boot (Java, JDK types only, Fabric by reflection) | `java/dev/horizonlab/bridge/r120/`: `Boot120`, `Headless120`, `Names120`, `Report120`, `Api`, `Json` |
 | Scripts, pins | `tools/java_bridge/fetch120.py` (+ `tests/test_fetch120.py`), `tools/java_bridge/run120.sh`; `research-lock.json` → `fabric120` |
 
+## Phase 1b status: older-loader mods, the scanner, the first tracker (2026-11-09)
+
+**Mods held back only by their loader range now run.** Before Fabric Loader resolves the mods,
+`Overrides120` reads every mod's `fabric.mod.json`, nested jars included, and tests its
+`fabricloader` range with Fabric's own public `VersionPredicate`, so a range means exactly what
+it means to Fabric. Each mod the running loader falls outside of gets an entry in Fabric's own
+dependency override file (`config/fabric_loader_dependencies.json`, `"-depends":
+{"fabricloader": "*"}`). Nothing else about the mod changes, and its jar stays as it is. The
+report lists each override (`dependency_overrides`), and `run120.sh` prints them.
+
+- The player's `horizon-dependency-overrides.json` in the game folder (Fabric's format) wins
+  for any mod it names. `{"modid": {}}` keeps a mod's range as declared, and Fabric then
+  refuses it in its own words.
+- An override file the bridge didn't write is kept as the player's file first.
+- `tests/boot120.rs` builds a mod declaring `fabricloader <=0.16.4`. The test checks that it
+  boots with the automatic override (its code runs on 0.20.1), and that it is refused, naming
+  the mod and the range, when the player keeps the range.
+
+**`scan120.py`** reads a mods folder (nested jars too) without running anything:
+- the declared loader, Minecraft and Java ranges, and whether the runtime's loader meets them
+  (reason 1);
+- every Fabric Loader class, method and field a mod references that the runtime's loader jar
+  lacks (reason 3). It walks superclasses and interfaces. Only `Object`'s methods count as
+  inherited from the JDK; another JDK supertype gets the benefit of the doubt.
+- Java methods newer Javas removed, which give the newest Java a mod can run on
+  (`java<=21`), plus APIs that newer Javas lock down.
+
+`tests/test_scan120.py` compiles a fake loader and mod to check these.
+
+**Reason 3, found for real: Rhino (KubeJS's script engine).** It references
+`MappingConfiguration.getMappings()` (the old `TinyTree`, removed in loader 0.15) and
+`FabricLauncher.getTargetNamespace()` (removed in 0.17). Scanning it against nine loader
+versions (0.14.21 → 0.20.1) shows exactly that: on 0.16.x one of the two still exists. That is
+the "stuck on 0.16" shape. In this case the code sits behind Rhino's dev-only
+`RemappingHelper.GENERATE` flag (normally it downloads ready-made mappings), so it never runs
+in play and KubeJS works. The scanner finds references; the boot and play decide whether they
+matter. A `loader-compat` shim for these two calls is the first candidate for reason 3.
+
+**Java version, found for real: Cobblemon 1.5.2** bundles GraalVM Truffle (it runs Pokémon
+Showdown), which calls `sun.misc.Unsafe.ensureClassInitialized`. Java 22 removed that method.
+On Java 25 its Showdown thread dies and the boot waits forever; on Java 21 it works (+169
+blocks, Showdown starts). The scanner flags it `java<=21`. So a pack with Cobblemon runs its
+1.20.1 child on Java 21 (Arch: `jdk21-openjdk`). A child that hangs can no longer hang
+Horizon: every call has a read timeout (`Fabric120::timeout`, 10 minutes by default), after
+which the child is stopped and the error carries its last log lines
+(`tests/child.rs: a_child_stuck_in_a_call_times_out_and_is_stopped`).
+
+**The headless client grew.** `Minecraft`'s resource pack repository is now built as vanilla's
+constructor builds it: the built-in pack, the servers' downloaded packs and `resourcepacks/`.
+Simple Voice Chat and KubeJS add pack sources through Mixins on it at start.
+
+### The first tracker: Modrinth's 150 most downloaded Fabric 1.20.1 mods
+
+`tools/java_bridge/survey120.py --top 150` boots each mod **alone**, with its required
+dependencies (from Modrinth and from its own `fabric.mod.json`, since Modrinth's lists miss
+some), on Java 25, and classifies the result. 149 mods (Fabric API itself is always in the
+runtime):
+
+| Verdict | Mods |
+|---|---:|
+| works on Java 25 | 148 |
+| works on Java 21 only (Cobblemon 1.5.2) | 1 |
+| partial / refused / broken | 0 |
+
+The first run had 5 failures: Simple Voice Chat and KubeJS (the headless client's resource
+packs, fixed), More Culling and Sodium Options API (dependencies missing from Modrinth's
+lists: the survey's own fault, fixed), and Cobblemon (Java). A boot of one mod takes 11–30 s
+on a 2-core box (median 13 s; Cobblemon's 150 s was its Java 25 timeout).
+
+"Boots" means each mod's entrypoints run and its content registers. Chipped alone adds 6981
+blocks, which matters for Horizon's block-state space in phase 2. It does **not** mean the
+mod works in a world yet; that's phases 2–7. 39 of the 149 use APIs that newer Javas warn
+about (mostly `sun.misc.Unsafe`, in bundled libraries). None of those is a blocker on Java 25
+today. The table: `survey120-top150.tsv` beside this plan.
+
 ## How the bridge is laid out (Phase 0)
 
 | Part | Size | What it is |
@@ -190,9 +265,8 @@ cheapest first:
    both versions share (Knot's constructor and `init`, `prepareModInit`, the public
    `FabricLoader` API), all by reflection, so this stays possible.
 
-**First step (phase 1b):** `scan120.py`, like `scan112.py`: per mod, its `fabricloader` /
-`fabric-api` ranges and every reference to loader internals in its class files. Together with
-the report, that sorts each stuck mod into reason 1–4 before any fix is written.
+**Status:** reason 1 is fixed automatically (Phase 1b status). `scan120.py` sorts each stuck
+mod into reasons 1–4 before any fix is written, and found a real reason-3 case (Rhino).
 
 ## Upstream
 
@@ -204,7 +278,9 @@ NeoForge could run beside Fabric 26.3 rather than in its place.
 
 0. **Study.** Done.
 1. **boot120 + transport.** Done (above).
-   - 1b: `scan120.py`, the dependency-override writer, a first loader-compat table.
+   - 1b: done: loader-range overrides, `scan120.py`, the first tracker (above). Left from it:
+     the `loader-compat` shim (start: Rhino's two calls), and the child's Java chosen by the
+     scan (`java<=21` → a Java 21 child) instead of by hand.
    - 1c: Horizon's game starts the child when `mods-java-1.20.1/` holds jars (the gate,
      `game/java_*.rs`), and the report feeds `horizon-port-pack`.
 2. **placed120.** Content conversion for blocks, items, models, sprites. **Milestone:** a 1.20.1
@@ -217,5 +293,5 @@ NeoForge could run beside Fabric 26.3 rather than in its place.
 6. **Entities and worldgen.** Data-driven registries from a real server load (mods' biomes
    through Fabric's biome API show up only there).
 7. **In-world rendering.** `VertexConsumer` capture, then a GL recorder if needed.
-8. **Tracker.** The top 60 Fabric 1.20.1 mods: works / partial / broken / needs Java 17 /
-   needs an older loader.
+8. **Tracker.** Started with phase 1b (boots: 149 of the top 150). It grows into "works in a
+   world" as the phases land: works / partial / broken / needs Java 21 / needs an older loader.

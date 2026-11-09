@@ -74,6 +74,7 @@ fn config(cache: PathBuf, bridge: PathBuf, game: PathBuf, lines: Lines) -> Fabri
         side: Side::Client,
         max_heap: "3G".into(),
         jvm_args: vec![],
+        timeout: std::time::Duration::from_secs(600),
         log: Arc::new(move |l: &str| {
             println!("{l}");
             lines.lock().unwrap().push(l.to_string());
@@ -81,7 +82,7 @@ fn config(cache: PathBuf, bridge: PathBuf, game: PathBuf, lines: Lines) -> Fabri
     }
 }
 
-/// `tests/java/stuckmod` (declares `fabricloader <=0.16.4`, like mods stuck on that loader),
+/// The `stuckmod` fixture (`crates/horizon-jvm/java/fixtures/stuckmod`: declares `fabricloader <=0.16.4`, like mods stuck on that loader),
 /// built into `dir` against the runtime's Fabric Loader.
 fn stuck_mod(cache: &Path, dir: &Path) {
     let home = support::java_home().unwrap();
@@ -94,7 +95,7 @@ fn stuck_mod(cache: &Path, dir: &Path) {
         .filter_map(|p| p.as_str())
         .filter(|p| p.contains("fabric-loader-"))
         .collect();
-    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/java/stuckmod");
+    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../horizon-jvm/java/fixtures/stuckmod");
     let classes = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("stuckmod-classes");
     let _ = std::fs::remove_dir_all(&classes);
     let ok = std::process::Command::new(home.join("bin/javac"))
@@ -107,7 +108,7 @@ fn stuck_mod(cache: &Path, dir: &Path) {
             "-d",
         ])
         .arg(&classes)
-        .arg(src.join("horizon/stuck/StuckMod.java"))
+        .arg(src.join("dev/horizonlab/stuckmod/StuckMod.java"))
         .status()
         .unwrap()
         .success();

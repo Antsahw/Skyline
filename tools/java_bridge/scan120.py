@@ -10,12 +10,23 @@ Per mod (and every jar it nests in META-INF/jars):
   missing   Fabric Loader classes, methods and fields it references that the runtime's loader
             jar doesn't have                                         -> reason 3: loader-compat
   internal  how many references go to net.fabricmc.loader.impl (works today; breaks easily)
-  jdk       APIs newer Javas removed or locked down (SecurityManager, Thread.stop, Unsafe)
+  jdk       APIs newer Javas removed or locked down (SecurityManager, Thread.stop, Unsafe);
+            a removed method gives the newest Java the mod can run on (java<=21: Cobblemon 1.5)
   java      the newest class file version (61 = Java 17)
 The loader jar comes from fetch120.py's launch.json (HORIZON_120_CACHE, default
 ~/.cache/horizon-120) unless --loader names one.
 """
 import argparse, io, json, os, re, struct, sys, zipfile
+
+# Java methods newer Javas removed: a mod (or a library it bundles) that calls one needs a Java
+# older than that. (owner, member) -> (the last Java that has it, what).
+JDK_REMOVED = {
+    ("sun/misc/Unsafe", "ensureClassInitialized"): (21, "Unsafe.ensureClassInitialized (gone in Java 22; old GraalVM Truffle calls it)"),
+    ("sun/misc/Unsafe", "shouldBeInitialized"): (21, "Unsafe.shouldBeInitialized (gone in Java 22)"),
+    ("sun/misc/Unsafe", "defineAnonymousClass"): (16, "Unsafe.defineAnonymousClass (gone in Java 17)"),
+    ("sun/misc/Unsafe", "defineClass"): (10, "Unsafe.defineClass (gone in Java 11)"),
+    ("java/lang/Thread", "countStackFrames"): (13, "Thread.countStackFrames (gone in Java 14)"),
+}
 
 # Java APIs newer Javas removed or restricted: (owner, member or None for any use).
 JDK_RISKS = {
@@ -272,6 +283,7 @@ def scan_jar(z, label, loader, out):
         "missing": set(),
         "internal": 0,
         "jdk": set(),
+        "java_max": None,
         "java_class": 0,
     }
     for n in z.namelist():
@@ -297,6 +309,10 @@ def scan_jar(z, label, loader, out):
                 why = JDK_RISKS.get((owner, name))
                 if why:
                     facts["jdk"].add(why)
+                removed = JDK_REMOVED.get((owner, name))
+                if removed:
+                    facts["jdk"].add(removed[1])
+                    facts["java_max"] = min(facts["java_max"] or 99, removed[0])
         elif n.startswith("META-INF/jars/") and n.endswith(".jar"):
             try:
                 with zipfile.ZipFile(io.BytesIO(z.read(n))) as nested:
@@ -319,7 +335,9 @@ def verdict(f):
         reasons.append("3:missing-loader-api")
     if not f["minecraft_ok"]:
         reasons.append("not-1.20.1")
-    if f["jdk"]:
+    if f.get("java_max"):
+        reasons.append(f"java<={f['java_max']}")
+    elif f["jdk"]:
         reasons.append("jdk")
     return reasons
 

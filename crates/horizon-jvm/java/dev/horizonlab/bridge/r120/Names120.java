@@ -260,6 +260,20 @@ public final class Names120 {
         return method(target.getClass(), name, args).invoke(target, args);
     }
 
+    /**
+     * Makes a {@code type} with the constructor that takes {@code args} (by count and types;
+     * a trailing array argument also fills a varargs constructor).
+     */
+    public Object construct(Class<?> type, Object... args) throws ReflectiveOperationException {
+        for (java.lang.reflect.Constructor<?> c : type.getDeclaredConstructors()) {
+            if (c.getParameterCount() == args.length && applicable(c.getParameterTypes(), args)) {
+                c.setAccessible(true);
+                return c.newInstance(args);
+            }
+        }
+        throw new NoSuchMethodException(type.getName() + " (" + mojangClass(type.getName()) + ") with " + args.length + " arguments");
+    }
+
     /** Calls a static method of {@code type}. */
     public Object callStatic(Class<?> type, String name, Object... args) throws ReflectiveOperationException {
         Method m = method(type, name, args);

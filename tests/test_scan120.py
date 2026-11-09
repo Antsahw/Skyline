@@ -49,7 +49,8 @@ class MissingLoaderApi(unittest.TestCase):
                     os.makedirs(os.path.dirname(path), exist_ok=True)
                     open(path, "w").write(text)
                     files.append(path)
-                cmd = ["javac", "-nowarn", "-d", out] + (["-cp", cp] if cp else []) + files
+                # Java 17's API: Unsafe.ensureClassInitialized is still in it, whatever this JDK is.
+                cmd = ["javac", "-nowarn", "--release", "17", "-d", out] + (["-cp", cp] if cp else []) + files
                 subprocess.run(cmd, check=True, capture_output=True)
 
             def jar(path, folder, extra=None):
@@ -69,7 +70,9 @@ class MissingLoaderApi(unittest.TestCase):
                 "net/fabricmc/loader/api/Thing.java": "package net.fabricmc.loader.api; public class Thing { public static void kept() {} }",
             }
             mod = {"m/Mod.java": "package m; public class Mod { void f() { net.fabricmc.loader.api.Thing.kept();"
-                                 " net.fabricmc.loader.api.Thing.dropped(); net.fabricmc.loader.impl.Gone.x(); } }"}
+                                 " net.fabricmc.loader.api.Thing.dropped(); net.fabricmc.loader.impl.Gone.x(); } }",
+                   # A bundled library calling a method Java 22 removed (as Cobblemon 1.5's Truffle does).
+                   "m/Lib.java": "package m; class Lib { void g(sun.misc.Unsafe u) { u.ensureClassInitialized(Lib.class); } }"}
             compile_to(os.path.join(tmp, "old"), old_api)
             compile_to(os.path.join(tmp, "new"), new_api)
             compile_to(os.path.join(tmp, "mod"), mod, os.path.join(tmp, "old"))
@@ -88,7 +91,8 @@ class MissingLoaderApi(unittest.TestCase):
             self.assertEqual(facts["missing"], ["net.fabricmc.loader.api.Thing.dropped()V", "net.fabricmc.loader.impl.Gone"])
             self.assertEqual(facts["internal"], 1)
             self.assertFalse(facts["loader_ok"])
-            self.assertEqual(scan120.verdict(facts), ["1:range", "3:missing-loader-api"])
+            self.assertEqual(facts["java_max"], 21)
+            self.assertEqual(scan120.verdict(facts), ["1:range", "3:missing-loader-api", "java<=21"])
         finally:
             shutil.rmtree(tmp)
 

@@ -1,10 +1,12 @@
+package dev.horizonlab.remotetest;
+
 import dev.horizonlab.bridge.remote.Host;
 import dev.horizonlab.bridge.remote.Peer;
 import dev.horizonlab.bridge.remote.RemoteRuntime;
 
 /**
- * The child for tests/child.rs and examples/remote_bench.rs: answers like a runtime whose
- * mods call back into Horizon. Not part of the bridge jar.
+ * The child for horizon-jvm-remote's tests (tests/child.rs, tests/bench.rs): answers like a
+ * runtime whose mods call back into Horizon. Not part of the bridge jar.
  */
 public final class TestRuntime implements RemoteRuntime {
     private String[] args = new String[0];
@@ -46,6 +48,10 @@ public final class TestRuntime implements RemoteRuntime {
                 for (int i = 0; i < n; i++) peer.event("line", i);
                 return new Object[] {n};
             }
+            case "hang":
+                // A mod stuck forever (Cobblemon 1.5's Showdown on Java 22+).
+                Thread.sleep(Long.MAX_VALUE);
+                return null;
             case "fail":
                 throw new IllegalStateException("a mod threw");
             case "crash":
