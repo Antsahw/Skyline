@@ -102,6 +102,21 @@ public abstract class LevelMixin {
         if (horizon$mirror()) cir.setReturnValue(0.0f);
     }
 
+    /**
+     * A mirror level has no profiler: its constructor never ran, so the supplier Level.getProfiler
+     * reads is null. Vanilla counts work through it on paths that have nothing to do with
+     * profiling -- Level.getEntities starts with {@code getProfiler().incrementCounter(...)} --
+     * so a block item placed through the mirror (BlockItem.place -> isUnobstructed ->
+     * getEntities) threw before it could place. Answered with the profiler that records nothing.
+     */
+    @Inject(method = "getProfiler", at = @At("HEAD"), cancellable = true)
+    private void horizon$profiler(
+            CallbackInfoReturnable<net.minecraft.util.profiling.ProfilerFiller> cir) {
+        if (horizon$mirror()) {
+            cir.setReturnValue(net.minecraft.util.profiling.InactiveProfiler.INSTANCE);
+        }
+    }
+
     /** Vanilla's built-in registries (the data-driven ones as 1.20.1's defaults). */
     @Inject(method = "registryAccess", at = @At("HEAD"), cancellable = true)
     private void horizon$registries(CallbackInfoReturnable<RegistryAccess> cir) {

@@ -367,16 +367,22 @@ impl super::Game<'_> {
             });
         }
         // result 2 = SUCCESS (swing), 1 = CONSUME (no swing), 0 = PASS.
-        // When the clicked block is a 1.20.1 mod's, consume even on PASS: vanilla must never
-        // run its own use-item logic on a mod block it knows nothing about (the off-hand
-        // interaction would revert the main hand's state change).
         if used.result != 0 {
-            Some(used.result == 2)
-        } else if clicked_is_ours {
-            Some(false)
-        } else {
-            None
+            return Some(used.result == 2);
         }
+        // Passed with an empty hand on one of their blocks: consumed all the same, so the game
+        // goes no further. A click sends both hands, and the off hand is usually empty: its
+        // pass used to reach the game's own use-item, which, on a block only the 1.20.1 mods
+        // know, undid what the main hand had just done (a lit stove went out again).
+        //
+        // Only with an empty hand. A pass with something held is the mods' code saying it has
+        // no use for it here, and the game goes on to place or use it as usual: that path is
+        // `BlockItem.place`, so consuming it here would mean nothing could be placed against a
+        // 1.20.1 mod's block at all.
+        if clicked_is_ours && held.is_none() {
+            return Some(false);
+        }
+        None
     }
 
     /// A 1.20.1 mod's block entity as its code saved it (`saveWithFullMetadata` in SNBT): what
