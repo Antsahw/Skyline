@@ -113,7 +113,7 @@ public abstract class LevelMixin {
     private void horizon$profiler(
             CallbackInfoReturnable<net.minecraft.util.profiling.ProfilerFiller> cir) {
         if (horizon$mirror()) {
-            cir.setReturnValue(net.minecraft.util.profiling.InactiveProfiler.INSTANCE);
+            cir.setReturnValue(dev.horizonlab.platform120.NoProfiler.INSTANCE);
         }
     }
 

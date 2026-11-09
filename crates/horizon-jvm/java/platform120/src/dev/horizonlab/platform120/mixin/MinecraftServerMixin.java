@@ -22,6 +22,22 @@ public abstract class MinecraftServerMixin {
         cir.setReturnValue(Mirror120.data().getRecipeManager());
     }
 
+    /**
+     * The mirror server records nothing. Its constructor never ran, so its own profiler is
+     * null, and the profiler is asked for well outside profiling: Level.getEntities opens with
+     * {@code getProfiler().incrementCounter("getEntities")}, which a block placed through the
+     * mirror reaches (BlockItem.place -> isUnobstructed -> getEntities).
+     *
+     * <p>Here rather than only on Level, because mods replace {@code ServerLevel.getProfiler}
+     * with one that delegates to the server (Lithium and friends merge such an override in), so
+     * a fix on Level alone never runs for a ServerLevel.
+     */
+    @Inject(method = "getProfiler", at = @At("HEAD"), cancellable = true)
+    private void horizon$profiler(
+            CallbackInfoReturnable<net.minecraft.util.profiling.ProfilerFiller> cir) {
+        cir.setReturnValue(dev.horizonlab.platform120.NoProfiler.INSTANCE);
+    }
+
     @Inject(method = "getLootData", at = @At("HEAD"), cancellable = true)
     private void horizon$loot(CallbackInfoReturnable<LootDataManager> cir) {
         cir.setReturnValue(Mirror120.data().getLootData());

@@ -64,7 +64,8 @@ public abstract class ServerLevelMixin {
      * The entities: none, rather than the entity manager a mirror level never made (which every
      * asker would throw on). Placing a block asks, through isUnobstructed.
      */
-    @Inject(method = "getEntities", at = @At("HEAD"), cancellable = true)
+    @Inject(method = "getEntities()Lnet/minecraft/world/level/entity/LevelEntityGetter;",
+            at = @At("HEAD"), cancellable = true)
     private void horizon$entities(
             CallbackInfoReturnable<net.minecraft.world.level.entity.LevelEntityGetter<
                     net.minecraft.world.entity.Entity>> cir) {
