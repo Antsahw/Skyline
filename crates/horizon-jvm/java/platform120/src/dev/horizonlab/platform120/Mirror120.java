@@ -226,12 +226,18 @@ public final class Mirror120 {
         else System.out.println("[horizon-platform120] " + line);
     }
 
-    /** A new call from Horizon: what the last one wrote is Horizon's now. */
+    /**
+     * A new call from Horizon: what the last one wrote is Horizon's now.
+     *
+     * <p>The block entities are not cleared. They stay alive between calls, as the 26.3
+     * bridge's do: a machine ticking twenty times a second would otherwise be read from
+     * Horizon and written back on each tick, and anything a mod keeps in a field it never
+     * saves would be lost between them. What is cleared is this call's own view: the writes,
+     * and the positions found empty (a block can gain a block entity between calls).
+     */
     static void begin() {
         WRITES.clear();
-        ENTITIES.clear();
         NO_ENTITY.clear();
-        ENTITY_NBT.clear();
     }
 
     /**
@@ -255,6 +261,8 @@ public final class Mirror120 {
                 BlockPos pos = BlockPos.of(made.getKey());
                 event.accept("setBlockEntity",
                         new Object[] {dimension, pos.getX(), pos.getY(), pos.getZ(), now});
+                // Horizon has this now: only a later change goes back.
+                ENTITY_NBT.put(entity, now);
             }
         }
     }
@@ -267,9 +275,18 @@ public final class Mirror120 {
     public static BlockEntity blockEntity(Level level, BlockPos pos) {
         long key = pos.asLong();
         Map<Long, BlockEntity> made = ENTITIES.get(level);
-        if (made != null) {
-            BlockEntity known = made.get(key);
-            if (known != null) return known;
+        BlockEntity known = made == null ? null : made.get(key);
+        if (known != null) {
+            // Still the block it belongs to: the same object, as a chunk would keep it. The
+            // state can still have moved on under it (a furnace lighting), so it is told.
+            BlockState now = blockState(level, pos);
+            if (known.getType().isValid(now)) {
+                if (known.getBlockState() != now) known.setBlockState(now);
+                return known;
+            }
+            // The block there is another one now: that block entity is gone with it.
+            made.remove(key);
+            ENTITY_NBT.remove(known);
         }
         java.util.Set<Long> none = NO_ENTITY.get(level);
         if (none != null && none.contains(key)) return null;

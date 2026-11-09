@@ -417,11 +417,19 @@ positions of the block entities it keeps as a mod's own (`BlockEntity::Mod`), an
 block ticker runs once on the mirror -- a cooking pot cooks, a machine runs. What the tick set,
 changed and dropped comes back the same way a right-click's does (`apply_java120`).
 
-Each is loaded from Horizon and saved back per tick rather than kept alive between them: a
-block entity's state is what it saves, so a tick reads what the last one wrote. A mod that
-keeps something only in a field and never in its NBT loses it between ticks, and every ticking
-machine costs a call and an event per tick. Keeping them live in the runtime, as the 26.3
-bridge does (`HorizonBlockEntities.LIVE`), is what makes this cheap and is the next step here.
+They **stay alive between calls**, as the 26.3 bridge's do (`HorizonBlockEntities.LIVE`): one
+position gives one object until the block there becomes something else
+(`BlockEntityType.isValid` against the state Horizon has now, and the state is passed on when
+it moves under it). Only a block entity whose NBT actually changed goes back, and the baseline
+moves with it, so an idle machine costs nothing after its first tick.
+
+What that settles, and what it costs. A machine ticking twenty times a second is no longer
+read from Horizon and written back on each tick, and whatever a mod keeps in a field it never
+saves survives between them. In exchange **the live object is the truth while it lives**:
+Horizon's NBT is read when there is no live one (a fresh start, or the block changed), so
+something else in Horizon editing a mod's block entity behind the runtime's back would be
+overwritten. Nothing does that today -- Horizon keeps that NBT but never writes it except
+from here -- and the 26.3 side holds the same shape.
 
 A tick that throws is said once and that block entity type is not ticked again: a tick runs
 twenty times a second, and a mod whose tick fails fails every one of them. A runtime busy with
@@ -429,7 +437,9 @@ another call skips the tick rather than waiting (nobody is waiting on a tick, un
 
 Tested: a lit furnace with fuel and something to smelt burns a tick of fuel and cooks for a
 tick -- 1.20.1's own ticking code, needing the block entity loaded from Horizon, the recipes
-bound, and the change sent back, with no mod in the way.
+bound, and the change sent back, with no mod in the way. Ticked again against the same
+untouched NBT, it reaches its second tick rather than its first again, which is what tells a
+live block entity from one read afresh each time.
 
 Next: the chunk mirror and batched deltas, then menus.
 
@@ -517,9 +527,9 @@ NeoForge could run beside Fabric 26.3 rather than in its place.
    (the top-150 list), and Horizon's recipe book showing content mods' recipes.
 3. **machine120.** 3a done: right-clicks run the mods' code on a mirror `ServerLevel`. 3b done:
    block entities cross both ways, a mod's own kept as opaque NBT, and what a mod drops or
-   ejects reaches Horizon, and their block entities tick (all above). Next: keeping those
-   block entities live between ticks, the chunk mirror and batched deltas ("Measured"), the
-   downgrade tables, the Fabric Transfer API on Horizon's containers.
+   ejects reaches Horizon, and their block entities tick and stay alive between ticks (all
+   above). Next: the chunk mirror and batched deltas ("Measured"), the downgrade tables, the
+   Fabric Transfer API on Horizon's containers.
 4. **gui120.** `GuiGraphics` recorder → `screenFrame` JSON, menus, input, slot clicks (its own lane).
 5. **Events and networking.** Fabric API 1.20.1 events at the bridge's hook points, mod packets.
 6. **Entities and worldgen.** Data-driven registries from a real server load (mods' biomes

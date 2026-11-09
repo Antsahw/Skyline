@@ -474,5 +474,22 @@ fn right_clicking_a_block_runs_its_1_20_1_code_on_horizons_blocks() {
         "it cooked for a tick: {}",
         after.snbt
     );
+
+    // And it stays alive between ticks. `world` hands out the same untouched NBT every time,
+    // so a furnace read from Horizon on each tick would cook its first tick for ever; one kept
+    // alive carries on from where it got to.
+    let ticked = runtime
+        .tick_block_entities(&world, "minecraft:overworld", &[0, 64, 0])
+        .expect("the furnace ticks again");
+    let after = ticked
+        .block_entities
+        .iter()
+        .find(|e| e.pos == [0, 64, 0])
+        .unwrap_or_else(|| panic!("the furnace changed again: {ticked:?}"));
+    assert!(
+        after.snbt.contains("CookTime:2s"),
+        "the second tick carried on from the first: {}",
+        after.snbt
+    );
     runtime.stop();
 }
