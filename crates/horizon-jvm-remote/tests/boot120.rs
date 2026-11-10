@@ -549,5 +549,25 @@ fn right_clicking_a_block_runs_its_1_20_1_code_on_horizons_blocks() {
         "the second tick carried on from the first: {}",
         after.snbt
     );
+
+    // Reads are batched and kept for the length of a call. A block's own code reads the same
+    // position more than once and its neighbours besides, and each read used to be its own
+    // round trip; now the first one fetches the 3x3x3 around it and the rest are free.
+    //
+    // Counted rather than asserted to be fast: `calls_in` is what the runtime asked Horizon
+    // for, so a stove's click reading a dozen positions one at a time could not come in under
+    // the bound below.
+    let world = OneBlock::at("farmersdelight:stove[facing=north,lit=false]", [12, 64, 0]);
+    let before = runtime.child.peer.stats.calls_in;
+    let used = runtime
+        .use_block(&world, &on_top_of([12, 64, 0]))
+        .expect("the stove lights");
+    let asked = runtime.child.peer.stats.calls_in - before;
+    assert_eq!(used.result, 2, "it still lights: {used:?}");
+    assert!(
+        asked <= 6,
+        "a click asks Horizon a handful of times, not once per block read: {asked}"
+    );
+    eprintln!("a stove's click asked Horizon {asked} time(s)");
     runtime.stop();
 }

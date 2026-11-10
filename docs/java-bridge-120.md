@@ -450,7 +450,24 @@ bound, and the change sent back, with no mod in the way. Ticked again against th
 untouched NBT, it reaches its second tick rather than its first again, which is what tells a
 live block entity from one read afresh each time.
 
-Next: the chunk mirror and batched deltas, then menus.
+**Reads are batched and kept for a call** (the chunk mirror's first half): a read costs a round
+trip whatever it carries, and the code on the other side reads the same position more than once
+and its neighbours besides -- a block's `use` asks for its state, `setBlock` asks again to see
+whether it changed, and a pipe or a crop asks what is around it. The first read of a position
+now fetches the 3x3x3 around it in one call (`blockStates`, many positions at once) and keeps
+what came back for the length of the call, which is as long as it is good for: within one call
+Horizon's world changes only where this side writes, and a write is read from `WRITES` first.
+
+Measured on one stove click, with `Peer`'s own `calls_in`: **17 calls before, 7 with the cache
+alone, 4 with the prefetch as well.** The test asserts the bound, so a future change that goes
+back to a round trip per read fails it rather than quietly costing four times as much.
+
+What it does not do yet: whole sections. A mod walking a large area still pays a call per 3x3x3
+it touches, and the deltas that would let Horizon push changes instead of answering questions
+are still to come.
+
+Next: menus (phase 4), which need the `GuiGraphics` recorder for a mod's own screen -- the 26.3
+bridge's `java_open_menu` shows vanilla's menus only, and says so.
 
 ## How the bridge is laid out (Phase 0)
 

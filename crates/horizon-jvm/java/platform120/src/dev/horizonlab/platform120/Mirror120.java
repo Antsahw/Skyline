@@ -76,6 +76,16 @@ public final class Mirror120 {
     /** This call's writes, per level, by packed position. */
     private static final Map<Level, Map<Long, BlockState>> WRITES = new HashMap<>();
     /**
+     * What this call has read of Horizon's blocks, per level, by packed position.
+     *
+     * <p>A read costs a round trip (tens of microseconds) whatever it carries, and the code on
+     * this side reads the same position again and again -- a block's own `use` asks for its
+     * state, then `setBlock` asks again to see whether it changed. Kept for the length of a
+     * call only, which is as long as the answer is good for: within one call Horizon's world
+     * changes only where this side writes, and a write is read from WRITES before this.
+     */
+    private static final Map<Level, Map<Long, BlockState>> READS = new HashMap<>();
+    /**
      * This call's block entities, per level, by packed position. One position gives one object
      * for the whole call: mods keep what {@code getBlockEntity} gave them and change it in
      * place, and some compare it by identity.
@@ -237,6 +247,7 @@ public final class Mirror120 {
      */
     static void begin() {
         WRITES.clear();
+        READS.clear();
         NO_ENTITY.clear();
     }
 
@@ -391,11 +402,49 @@ public final class Mirror120 {
             if (written != null) return written;
         }
         if (level.isOutsideBuildHeight(pos)) return Blocks.VOID_AIR.defaultBlockState();
-        Object[] answer = call.apply("blockState", new Object[] {dimension(level), pos.getX(), pos.getY(), pos.getZ()});
-        String name = answer.length > 0 && answer[0] instanceof String s ? s : null;
+        Map<Long, BlockState> read = READS.computeIfAbsent(level, l -> new HashMap<>());
+        BlockState known = read.get(pos.asLong());
+        if (known != null) return known;
+        // Not read yet: this position and the ones around it, in one call. Code that looks at a
+        // block almost always looks at its neighbours too (what a pipe connects to, whether a
+        // crop has soil under it), and one round trip for the lot beats one each.
+        fill(level, pos, read);
+        known = read.get(pos.asLong());
         // Where Horizon has no chunk loaded: air, as vanilla reads an unloaded position.
-        if (name == null) return Blocks.AIR.defaultBlockState();
-        return state(name);
+        return known == null ? Blocks.AIR.defaultBlockState() : known;
+    }
+
+    /** The 3x3x3 around `pos` into `read`, in one call. */
+    private static void fill(Level level, BlockPos pos, Map<Long, BlockState> read) {
+        int[] wanted = new int[3 * 27];
+        long[] keys = new long[27];
+        int n = 0;
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dy = -1; dy <= 1; dy++) {
+                for (int dz = -1; dz <= 1; dz++) {
+                    int x = pos.getX() + dx;
+                    int y = pos.getY() + dy;
+                    int z = pos.getZ() + dz;
+                    // Already known, or not a position Horizon has: left out of the ask.
+                    if (y < level.getMinBuildHeight() || y >= level.getMaxBuildHeight()) continue;
+                    long key = BlockPos.asLong(x, y, z);
+                    if (read.containsKey(key)) continue;
+                    wanted[n * 3] = x;
+                    wanted[n * 3 + 1] = y;
+                    wanted[n * 3 + 2] = z;
+                    keys[n] = key;
+                    n++;
+                }
+            }
+        }
+        if (n == 0) return;
+        int[] ask = n * 3 == wanted.length ? wanted : java.util.Arrays.copyOf(wanted, n * 3);
+        Object[] answer = call.apply("blockStates", new Object[] {dimension(level), ask});
+        if (answer.length == 0 || !(answer[0] instanceof String[] names)) return;
+        for (int i = 0; i < n && i < names.length; i++) {
+            // "" is Horizon saying it has no chunk there, which reads as air.
+            read.put(keys[i], names[i].isEmpty() ? Blocks.AIR.defaultBlockState() : state(names[i]));
+        }
     }
 
     /** Level.setBlock of a mirror level: kept for this call and sent to Horizon. */

@@ -129,6 +129,15 @@ fn int(args: &[Value], i: usize) -> Result<i32, String> {
     }
 }
 
+fn ints(args: &[Value], i: usize) -> Result<&[i32], String> {
+    match args.get(i) {
+        Some(Value::I32s(v)) => Ok(v),
+        other => Err(format!(
+            "argument {i}: an int array expected, not {other:?}"
+        )),
+    }
+}
+
 fn float(args: &[Value], i: usize) -> Result<f64, String> {
     match args.get(i) {
         Some(Value::F64(v)) => Ok(*v),
@@ -153,6 +162,22 @@ impl Handler for InWorld<'_> {
                         .block_state(dimension, x, y, z)
                         .map_or(Value::Null, Value::Str),
                 ])
+            }
+            // Many positions in one call. A read costs a round trip whatever it carries, so a
+            // mod looking at what is around it pays one instead of one each.
+            "blockStates" => {
+                let dimension = text(&args, 0)?;
+                let positions = ints(&args, 1)?;
+                let mut states = Vec::with_capacity(positions.len() / 3);
+                for p in positions.chunks_exact(3) {
+                    // "" where Horizon has no chunk there, which the other side reads as air.
+                    states.push(
+                        self.world
+                            .block_state(dimension, p[0], p[1], p[2])
+                            .unwrap_or_default(),
+                    );
+                }
+                Ok(vec![Value::Strs(states)])
             }
             "blockEntity" => {
                 let dimension = text(&args, 0)?;
