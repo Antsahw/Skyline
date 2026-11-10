@@ -306,6 +306,16 @@ Found and fixed on the way:
 - Horizon's recipe book index, which `/recipe` reads, lists vanilla's and the data packs'
   recipes only, not content mods'. Crafting reads both. That's Horizon's, the same for every
   content mod: content mods' recipes don't show in the recipe book yet.
+- A nested mod was only written out as a mod of its own when it shipped textures, and the check
+  ran before looking inside it. Fabric also lets a jar name its nested jars anywhere, not only
+  under `META-INF/jars/`. Both together lost LibMultiPart: Wired Redstone carries a *dependency
+  container* (no textures, its four jars at the root), so the mod that registers
+  `libmultipart:container` -- in code, with no assets at all -- was never inventoried, and the
+  game refused the block every cable is a part of (`a mod set libmultipart:container[...]:
+  unknown block`). `content120` now reads the `jars` list from each `fabric.mod.json`, writes
+  out every nested jar that names itself a mod, and looks inside every one of them either way.
+  A carried folder with nothing in it but its manifest (Kotlin's standard library) is not
+  loaded as a content mod.
 
 Not yet: what the mods' code does (the cooking pot cooks, the stove lights, machines run,
 screens open). That is phase 3 on.

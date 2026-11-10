@@ -14,7 +14,9 @@ use crate::wire::Value;
 use std::path::{Path, PathBuf};
 
 /// The version of what this module writes: bump it when the facts or the carry-over change.
-const FORMAT: u32 = 2;
+/// 3: nested mods are inventoried whether or not they ship textures ([`nested_jars`]), so a
+/// cache built before this holds none of a library mod's blocks.
+const FORMAT: u32 = 3;
 
 /// The stamp of a set of jars: their names, sizes and modification times, and [`FORMAT`].
 pub fn stamp(jars: &[PathBuf]) -> String {
@@ -45,58 +47,105 @@ pub fn cached(jars: &[PathBuf], cache: &Path) -> Option<Vec<PathBuf>> {
     Some(carried(&cache.join("work")))
 }
 
-/// The folder content mods under a work folder (`mods/<key>/carry`), in key order.
+/// The folder content mods under a work folder (`mods/<key>/carry`), in key order. One with
+/// nothing in it but its manifest is left out: every nested jar is inventoried now, and Kotlin's
+/// standard library carries no blocks, items or textures to give the game.
 fn carried(work: &Path) -> Vec<PathBuf> {
     let mut out: Vec<PathBuf> = std::fs::read_dir(work.join("mods"))
         .into_iter()
         .flatten()
         .flatten()
         .map(|e| e.path().join("carry"))
-        .filter(|p| p.join("horizon-mod.toml").is_file())
+        .filter(|p| p.join("horizon-mod.toml").is_file() && has_content(p))
         .collect();
     out.sort();
     out
 }
 
-/// The mods a jar carries inside it (Fabric's jar-in-jar, `META-INF/jars/`) that have textures,
-/// written into `mods` as mods of their own so their assets are carried too. Libraries and
-/// Fabric API's modules (no textures) stay inside. (horizon-jvm's `content.rs` does the same
-/// for 26.3's mods.)
-fn nested_jars(jar: &Path, mods: &Path, depth: u32) {
-    use std::io::Read;
-    let Ok(file) = std::fs::File::open(jar) else {
-        return;
-    };
-    let Ok(mut zip) = zip::ZipArchive::new(file) else {
-        return;
-    };
-    let inner: Vec<String> = zip
-        .file_names()
-        .filter(|n| n.starts_with("META-INF/jars/") && n.ends_with(".jar"))
-        .map(str::to_owned)
+/// Whether a carried folder holds anything beside its manifest.
+fn has_content(carry: &Path) -> bool {
+    for dir in ["assets", "data"] {
+        let mut stack = vec![carry.join(dir)];
+        while let Some(at) = stack.pop() {
+            for entry in std::fs::read_dir(&at).into_iter().flatten().flatten() {
+                if entry.path().is_dir() {
+                    stack.push(entry.path());
+                } else {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+/// The jars a mod's `fabric.mod.json` carries inside it (`"jars": [{"file": ...}]`), and any under
+/// `META-INF/jars/` it does not name. Fabric puts them where it likes: LibMultiPart ships a
+/// dependency container whose four jars sit at the jar's root, not under `META-INF/jars/`.
+fn carried_jars(zip: &mut zip::ZipArchive<std::io::Cursor<&[u8]>>) -> Vec<String> {
+    let mut names: Vec<String> = mod_json(zip)
+        .and_then(|j| j["jars"].as_array().cloned())
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|j| j["file"].as_str().map(str::to_owned))
         .collect();
-    for name in inner {
-        let mut bytes = Vec::new();
+    for name in zip.file_names() {
+        if name.starts_with("META-INF/jars/") && name.ends_with(".jar") {
+            names.push(name.to_owned());
+        }
+    }
+    names.sort();
+    names.dedup();
+    names
+}
+
+/// A jar's `fabric.mod.json`, when it has one that reads.
+fn mod_json(zip: &mut zip::ZipArchive<std::io::Cursor<&[u8]>>) -> Option<serde_json::Value> {
+    use std::io::Read;
+    let mut text = String::new();
+    zip.by_name("fabric.mod.json")
+        .ok()?
+        .read_to_string(&mut text)
+        .ok()?;
+    serde_json::from_str(&text).ok()
+}
+
+/// The mods a jar carries inside it (Fabric's jar-in-jar), written into `mods` as mods of their
+/// own so the porter inventories them: a nested mod's blocks are only carried over when it has a
+/// record there, and a mod that registers blocks in code alone (LibMultiPart's `container`, which
+/// every Wired Redstone cable is a part of) has no assets to recognise it by. So every nested jar
+/// that names itself a mod is written out, and every one is looked inside whether or not it is --
+/// a dependency container is not a mod with content, but it holds four that are.
+/// (horizon-jvm's `content.rs` does the same for 26.3's mods.)
+fn nested_jars(bytes: &[u8], mods: &Path, depth: u32) {
+    use std::io::Read;
+    if depth == 0 {
+        return;
+    }
+    let Ok(mut zip) = zip::ZipArchive::new(std::io::Cursor::new(bytes)) else {
+        return;
+    };
+    for name in carried_jars(&mut zip) {
+        let mut inner = Vec::new();
         let Ok(mut entry) = zip.by_name(&name) else {
             continue;
         };
-        if entry.read_to_end(&mut bytes).is_err() {
+        if entry.read_to_end(&mut inner).is_err() {
             continue;
         }
-        let Ok(nested) = zip::ZipArchive::new(std::io::Cursor::new(&bytes)) else {
-            continue;
+        drop(entry);
+        let mut nested = match zip::ZipArchive::new(std::io::Cursor::new(&inner[..])) {
+            Ok(nested) => nested,
+            Err(_) => continue,
         };
-        let textures = nested
-            .file_names()
-            .any(|n| n.starts_with("assets/") && n.contains("/textures/") && n.ends_with(".png"));
+        let named = mod_json(&mut nested)
+            .is_some_and(|j| j["id"].as_str().is_some_and(|id| !id.is_empty()));
         let file_name = name.rsplit('/').next().unwrap_or(&name);
         let out = mods.join(file_name);
-        if !textures || out.exists() {
-            continue;
+        if named && !out.exists() {
+            let _ = std::fs::write(&out, &inner);
         }
-        if std::fs::write(&out, &bytes).is_ok() && depth > 1 {
-            nested_jars(&out, mods, depth - 1);
-        }
+        nested_jars(&inner, mods, depth - 1);
     }
 }
 
@@ -188,7 +237,8 @@ pub fn build(
     for jar in jars {
         let name = jar.file_name().ok_or("a jar without a name")?;
         std::fs::copy(jar, mods.join(name)).map_err(|e| format!("{}: {e}", jar.display()))?;
-        nested_jars(jar, &mods, 2);
+        let bytes = std::fs::read(jar).map_err(|e| format!("{}: {e}", jar.display()))?;
+        nested_jars(&bytes, &mods, 4);
     }
     let pack = serde_json::json!({
         "components": [
@@ -264,6 +314,105 @@ mod tests {
             .keys()
             .collect();
         assert_eq!(slab, ["waterlogged=false,type=top"]);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A jar with the given entries.
+    fn jar(entries: &[(&str, &[u8])]) -> Vec<u8> {
+        use std::io::Write;
+        let mut out = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        let options: zip::write::FileOptions<'_, ()> =
+            zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Stored);
+        for (name, body) in entries {
+            out.start_file(*name, options).unwrap();
+            out.write_all(body).unwrap();
+        }
+        out.finish().unwrap().into_inner()
+    }
+
+    /// LibMultiPart's shape: Wired Redstone carries a dependency container, which is not a mod
+    /// with content of its own, and the four mods it holds sit at its root rather than under
+    /// `META-INF/jars/`. One of them registers `libmultipart:container` in code and ships no
+    /// assets at all, so it has to be written out for the porter to inventory it.
+    #[test]
+    fn a_dependency_container_does_not_hide_the_mods_inside_it() {
+        let base = jar(&[(
+            "fabric.mod.json",
+            br#"{"schemaVersion":1,"id":"libmultipart","version":"0.11.0"}"#,
+        )]);
+        let container = jar(&[
+            (
+                "fabric.mod.json",
+                br#"{"schemaVersion":1,"id":"libmultipart_deps_container","version":"0.11.0",
+                     "jars":[{"file":"libmultipart-base-0.11.0.jar"}]}"#,
+            ),
+            ("libmultipart-base-0.11.0.jar", &base),
+            ("assets/libmultipart/icon.png", b"not a png"),
+        ]);
+        let top = jar(&[
+            (
+                "fabric.mod.json",
+                br#"{"schemaVersion":1,"id":"wiredredstone","version":"0.7.8"}"#,
+            ),
+            ("META-INF/jars/libmultipart-all-0.11.0.jar", &container),
+        ]);
+
+        let dir = std::env::temp_dir().join(format!("content120-nested-{}", std::process::id()));
+        let mods = dir.join("mods");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&mods).unwrap();
+        nested_jars(&top, &mods, 4);
+        let mut found: Vec<String> = std::fs::read_dir(&mods)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        found.sort();
+        assert_eq!(
+            found,
+            [
+                "libmultipart-all-0.11.0.jar",
+                "libmultipart-base-0.11.0.jar"
+            ]
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Every nested jar is inventoried, so the ones that carry nothing (Kotlin's standard
+    /// library) must not reach the game as content mods of their own.
+    #[test]
+    fn a_carried_folder_with_nothing_in_it_is_not_a_content_mod() {
+        let dir = std::env::temp_dir().join(format!("content120-carried-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mods = dir.join("mods");
+        for (key, files) in [
+            (
+                "libmultipart",
+                &["data/libmultipart/horizon/block/container.json"][..],
+            ),
+            ("kotlin-stdlib", &[][..]),
+        ] {
+            let carry = mods.join(key).join("carry");
+            std::fs::create_dir_all(&carry).unwrap();
+            std::fs::write(carry.join("horizon-mod.toml"), "id = \"x\"\n").unwrap();
+            for f in files {
+                let at = carry.join(f);
+                std::fs::create_dir_all(at.parent().unwrap()).unwrap();
+                std::fs::write(at, "{}").unwrap();
+            }
+        }
+        let got: Vec<String> = carried(&dir)
+            .iter()
+            .map(|p| {
+                p.parent()
+                    .unwrap()
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect();
+        assert_eq!(got, ["libmultipart"]);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }
