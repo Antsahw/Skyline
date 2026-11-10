@@ -208,6 +208,7 @@ mod mob_index;
 mod mob_looting;
 mod mob_sounds;
 mod mod_api_host;
+mod mod_block_shape;
 mod mods;
 mod mount_menu;
 mod mounts;
@@ -3619,6 +3620,15 @@ impl Game<'_> {
     /// A block's outline boxes in world space (`getShape` plus the random offset).
     fn outline_boxes(&self, pos: [i32; 3]) -> Vec<[f64; 6]> {
         let state = self.world.block(pos[0], pos[1], pos[2]);
+        // A block whose shape only its mod knows says so itself, rather than through the
+        // registry (`mod_block_shape`): a Wired Redstone cable is a thin plate on the face it
+        // was put on, and the registry has every LibMultiPart container as shapeless.
+        if let Some(boxes) = self.mod_block_shape(pos) {
+            return boxes
+                .iter()
+                .map(|b| std::array::from_fn(|i| f64::from(pos[i % 3]) + b[i]))
+                .collect();
+        }
         if let Some(b) = self.context_outline(pos, state) {
             return vec![std::array::from_fn(|i| f64::from(pos[i % 3]) + b[i])];
         }

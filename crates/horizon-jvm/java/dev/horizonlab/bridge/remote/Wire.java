@@ -14,7 +14,7 @@ import java.nio.charset.StandardCharsets;
  * wire.rs, whose module docs describe the layout; little endian throughout.
  *
  * <p>Values are Java objects: {@code null}, Boolean, Integer, Long, Float, Double, String,
- * byte[], int[], String[] — the types Natives passes over JNI. JDK types only: this class runs
+ * byte[], int[], double[], String[] — the types Natives passes over JNI. JDK types only: this class runs
  * on the system class path, before and beside any Minecraft.
  */
 public final class Wire {
@@ -99,6 +99,11 @@ public final class Wire {
                 room(4 + 4 * a.length);
                 buf.putInt(a.length);
                 for (int x : a) buf.putInt(x);
+            } else if (v instanceof double[] a) {
+                buf.put((byte) 10);
+                room(4 + 8 * a.length);
+                buf.putInt(a.length);
+                for (double x : a) buf.putDouble(x);
             } else if (v instanceof String[] a) {
                 buf.put((byte) 9);
                 room(4);
@@ -217,6 +222,11 @@ public final class Wire {
             case 9: {
                 String[] out = new String[length(b, 4)];
                 for (int i = 0; i < out.length; i++) out[i] = str(b);
+                return out;
+            }
+            case 10: {
+                double[] out = new double[length(b, 8)];
+                for (int i = 0; i < out.length; i++) out[i] = b.getDouble();
                 return out;
             }
             default: throw new IOException("value tag " + tag);

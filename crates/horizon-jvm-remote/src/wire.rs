@@ -61,6 +61,7 @@ pub enum Value {
     Str(String),
     Bytes(Vec<u8>),
     I32s(Vec<i32>),
+    F64s(Vec<f64>),
     Strs(Vec<String>),
 }
 
@@ -77,6 +78,7 @@ impl Value {
             Value::Bytes(_) => 7,
             Value::I32s(_) => 8,
             Value::Strs(_) => 9,
+            Value::F64s(_) => 10,
         }
     }
 
@@ -215,6 +217,12 @@ impl Encoder {
                 self.u32(a.len() as u32);
                 for s in a {
                     self.str(s);
+                }
+            }
+            Value::F64s(a) => {
+                self.u32(a.len() as u32);
+                for v in a {
+                    self.buf.extend_from_slice(&v.to_le_bytes());
                 }
             }
         }
@@ -409,6 +417,18 @@ impl Decoder<'_> {
                 }
                 Value::Strs(out)
             }
+            10 => {
+                let len = self.u32()? as usize;
+                let bytes = self.take(len.checked_mul(8).ok_or_else(|| bad("double array"))?)?;
+                Value::F64s(
+                    bytes
+                        .chunks_exact(8)
+                        .map(|c| {
+                            f64::from_le_bytes([c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7]])
+                        })
+                        .collect(),
+                )
+            }
             t => return Err(bad(format!("value tag {t}"))),
         })
     }
@@ -429,6 +449,7 @@ mod tests {
             Value::Str("minecraft:stone[ä]".into()),
             Value::Bytes(vec![0, 255, 3]),
             Value::I32s(vec![1, -1, i32::MAX]),
+            Value::F64s(vec![0.0, -0.5, f64::MAX]),
             Value::Strs(vec!["a".into(), String::new()]),
         ]
     }

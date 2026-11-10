@@ -651,6 +651,33 @@ fn right_clicking_a_block_runs_its_1_20_1_code_on_horizons_blocks() {
             .collect();
         assert!(failed.is_empty(), "the cable's tick failed: {failed:#?}");
         eprintln!("a bundled cable ticked: {ticked:?}");
+
+        // And it has a shape, which only the mod knows: a container's is the union of the
+        // parts in it, so the registry's -- exported with no world and no block entity -- is
+        // empty for every one of its states. A cable is a thin plate on the face it was put
+        // on, so the boxes are inside the block and none of them fills it.
+        let shapes = runtime
+            .block_shapes(&world, "minecraft:overworld", &placed.pos)
+            .expect("the cable's shape comes back");
+        let boxes = shapes.first().expect("one position asked, one answered");
+        eprintln!("a bundled cable's shape: {boxes:?}");
+        assert!(!boxes.is_empty(), "the cable has a shape of its own");
+        for b in boxes {
+            for a in 0..3 {
+                assert!(
+                    b[a] >= 0.0 && b[a + 3] <= 1.0 && b[a] < b[a + 3],
+                    "a box inside the block: {b:?}"
+                );
+            }
+            let thin = (0..3).any(|a| b[a + 3] - b[a] < 0.5);
+            assert!(thin, "a cable is a plate, not a cube: {b:?}");
+        }
+        // And the same question about a block with nothing there answers nothing, rather
+        // than a box the player could aim at.
+        let empty = runtime
+            .block_shapes(&world, "minecraft:overworld", &[50, 70, 50])
+            .expect("an empty position answers");
+        assert_eq!(empty.first().map(Vec::len), Some(0), "{empty:?}");
     } else {
         eprintln!("no Wired Redstone in HORIZON_120_MODS: the cable is skipped");
     }

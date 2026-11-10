@@ -356,6 +356,39 @@ clicks pass until then). A click on a block of a 1.20.1 mod's namespace, or with
 their items, goes to it at `useItemOn`'s head (`java120_use_block`, beside the 26.3 bridge's
 hook in `lan_actions.rs`); what it set and what it did to the held stack land in Horizon.
 
+## Phase 3d status: the shape only the mod knows (2026-11-10)
+
+A block's shape is one per state in Horizon's registry, exported by asking each state with no
+world and no block entity around it. That is the whole truth for a vanilla block and none of it
+for a block whose shape is its block entity's: **LibMultiPart's container answers with no shape
+at all** until there are parts inside it, so all 3072 of its states were recorded as shapeless.
+A Wired Redstone cable placed in the world could not be looked at, aimed at or mined -- the ray
+went straight through it -- while the block itself was drawn as its template, `minecraft:stone`.
+An indestructible ghost stone cube.
+
+So the shape travels from where it is known:
+
+- `Mirror120.blockShapes(dimension, positions)` asks the mods, at the position, with the block
+  entity in place: `state.getShape(level, pos)`. A bundled cable answers
+  `[0.125, 0, 0.125, 0.875, 0.25, 0.875]` -- the plate it is. Batched like `blockStates`, and a
+  mod that throws leaves the registry's shape in place (said once per position).
+- The answer comes back over the wire as a flat `double[]` (a count, then that many boxes of
+  six), which `Value::F64s` carries: the wire's first new value kind since it was written.
+- Horizon keeps it on the block entity as the synced attachment `horizon:block_shape`
+  (`game/mod_block_shape.rs`), set whenever a call of the mods' leaves a block entity changed
+  (`refresh_java120_shapes`). Attachments already go to every client that can see the holder
+  and are saved with the chunk, so a reloaded world has the shape before the mod has ticked.
+- The aiming reads it first (`Game::outline_boxes`): a window reads what the server synced, a
+  server its own block entities. No attachment means no mod has spoken for that block and the
+  registry's shape is the whole answer, as for every vanilla block. An empty list is an answer:
+  the mod says there is nothing to aim at.
+
+**Not done here:** collision still comes from the registry. For a cable that is right (you walk
+through one in vanilla too) and for a mod's machine the registry already has its real shape,
+since those do not depend on a block entity -- but a mod block that *is* solid only when its
+block entity says so will be walked through. And the block is still drawn as its template's
+model: drawing a mod's own geometry is phase 7.
+
 ## Phase 3b status: block entities cross the mirror (2026-11-09)
 
 A block entity a mod reads is Horizon's, and what it changes comes back:

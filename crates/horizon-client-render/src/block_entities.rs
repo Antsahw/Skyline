@@ -245,6 +245,11 @@ impl BlockEntities {
         }
         Some(self.attachments.entry(pos).or_default())
     }
+    /// A live block entity's attachment map, to read: the aiming reads a mod block's shape
+    /// from one, in the frame, and has only `&self` to do it with.
+    pub fn attachments(&self, pos: Pos) -> Option<&horizon_world::attachments::Attachments> {
+        self.attachments.get(&pos)
+    }
     /// Attachment maps in a loaded chunk, for a save snapshot.
     pub fn chunk_attachments(
         &self,

@@ -280,6 +280,58 @@ impl Runtime120 {
         })
     }
 
+    /// The shape of each block at `positions` (x, y, z each), as the mod gives it at that
+    /// position: one box list per position, inside the block. Empty where the mod answered
+    /// with no shape at all, which is also what a block with nothing there answers.
+    ///
+    /// A block whose shape is its block entity's (every LibMultiPart container, so every Wired
+    /// Redstone cable) has no shape in the registry: the exporter asks each state with no world
+    /// and no block entity, and the answer there is nothing. This is how Horizon gets the real
+    /// one.
+    pub fn block_shapes(
+        &mut self,
+        world: &dyn World120,
+        dimension: &str,
+        positions: &[i32],
+    ) -> Result<Vec<Vec<[f64; 6]>>, String> {
+        let args = [
+            Value::Str(dimension.to_owned()),
+            Value::I32s(positions.to_vec()),
+        ];
+        let mut handler = InWorld {
+            world,
+            set: Vec::new(),
+            block_entities: Vec::new(),
+            spawned: Vec::new(),
+            log: self.log.clone(),
+        };
+        let values = self.call_values("blockShapes", &args, &mut handler)?;
+        let flat = match values.first() {
+            Some(Value::F64s(v)) => v,
+            other => return Err(format!("blockShapes: answer 0 is {other:?}")),
+        };
+        let mut out = Vec::with_capacity(positions.len() / 3);
+        let mut at = 0usize;
+        while at < flat.len() {
+            let boxes = flat[at] as usize;
+            at += 1;
+            let end = at
+                .checked_add(boxes.checked_mul(6).ok_or("blockShapes: too many boxes")?)
+                .ok_or("blockShapes: too many boxes")?;
+            if end > flat.len() {
+                return Err("blockShapes: a box list runs past the answer".into());
+            }
+            out.push(
+                flat[at..end]
+                    .chunks_exact(6)
+                    .map(|b| [b[0], b[1], b[2], b[3], b[4], b[5]])
+                    .collect(),
+            );
+            at = end;
+        }
+        Ok(out)
+    }
+
     /// A player's right-click on a block, run by the mods' code in the 1.20.1 runtime with
     /// `world` as its world.
     pub fn use_block(&mut self, world: &dyn World120, used: &UseBlock) -> Result<Used, String> {

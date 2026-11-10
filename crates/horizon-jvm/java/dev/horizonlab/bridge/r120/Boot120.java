@@ -103,6 +103,9 @@ public final class Boot120 implements RemoteRuntime {
             case "tickBlockEntities":
                 // One tick of the mods' block entities Horizon knows of (Mirror120).
                 return mirror("tickBlockEntities", args);
+            case "blockShapes":
+                // What shape the mods' blocks are at these positions (Mirror120).
+                return mirror("blockShapes", args);
             case "ping":
                 return new Object[] {"pong"};
             default:

@@ -613,6 +613,60 @@ public final class Mirror120 {
         return new Object[] {ticked};
     }
 
+    /**
+     * The shapes of the blocks at `positions` (x, y, z each), as the mods give them *here*: a
+     * block whose shape is its block entity's has none worth exporting (LibMultiPart's container
+     * answers an empty shape with no parts in it, which is every one of its states in the
+     * registry), so Horizon asks per position instead.
+     *
+     * <p>Flat, one position after another: a count of boxes, then that many boxes of six
+     * doubles (x0 y0 z0 x1 y1 z1, inside the block). The outline shape, the one a click is
+     * aimed at; a block whose outline is empty cannot be looked at or mined.
+     */
+    public static Object[] blockShapes(String dimension, int[] positions) {
+        begin();
+        ServerLevel level = level(dimension);
+        java.util.List<Double> out = new java.util.ArrayList<>();
+        for (int i = 0; i + 2 < positions.length; i += 3) {
+            BlockPos pos = new BlockPos(positions[i], positions[i + 1], positions[i + 2]);
+            int at = out.size();
+            out.add(0.0);
+            int boxes = 0;
+            try {
+                BlockState state = blockState(level, pos);
+                var shape = state.getShape(level, pos);
+                for (net.minecraft.world.phys.AABB box : shape.toAabbs()) {
+                    out.add(box.minX);
+                    out.add(box.minY);
+                    out.add(box.minZ);
+                    out.add(box.maxX);
+                    out.add(box.maxY);
+                    out.add(box.maxZ);
+                    boxes++;
+                }
+            } catch (RuntimeException | LinkageError e) {
+                // A mod that cannot say what shape it is keeps the one the registry has.
+                shapeFailed(pos, e);
+                while (out.size() > at + 1) out.remove(out.size() - 1);
+                boxes = 0;
+            }
+            out.set(at, (double) boxes);
+        }
+        finish();
+        double[] flat = new double[out.size()];
+        for (int i = 0; i < flat.length; i++) flat[i] = out.get(i);
+        return new Object[] {flat};
+    }
+
+    /** A shape that threw: said once, with where it was. */
+    private static void shapeFailed(BlockPos pos, Throwable e) {
+        if (SHAPE_FAILED.add(pos.toShortString())) {
+            log("the shape of the block at " + pos.toShortString() + " could not be asked for: " + e);
+        }
+    }
+
+    private static final java.util.Set<String> SHAPE_FAILED = new java.util.HashSet<>();
+
     /** One block entity's tick; false when there is nothing there to tick. */
     @SuppressWarnings({"unchecked", "rawtypes"})
     private static boolean tickOne(ServerLevel level, BlockPos pos) {

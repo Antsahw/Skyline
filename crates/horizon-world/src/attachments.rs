@@ -345,6 +345,39 @@ impl Attachments {
         self.insert_decoded(ty, value.clone())?;
         Ok(Some(value))
     }
+    /// [`Attachments::get_existing`] for a reader that only has `&self`: the value is decoded
+    /// and not kept, so a caller that asks often is better off with `get_existing`. (The
+    /// client's aiming reads a block's shape this way, in the frame, through `&Game`.)
+    pub fn peek<T: Clone + Send + Sync + 'static>(
+        &self,
+        ty: &AttachmentType<T>,
+    ) -> Result<Option<T>, AttachmentError> {
+        ty.validate_policy()?;
+        if self
+            .raw
+            .get(&ty.namespace.into())
+            .is_some_and(|tag| !matches!(tag, Tag::Compound(_)))
+        {
+            return Err(AttachmentError::InvalidNamespace);
+        }
+        match self.entries.get(&(ty.namespace.into(), ty.name.into())) {
+            Some(Entry::Raw(raw)) => {
+                let value = raw_value(raw).ok_or(AttachmentError::Decode)?;
+                Ok(Some((ty
+                    .codec
+                    .as_ref()
+                    .ok_or(AttachmentError::Decode)?
+                    .decode)(value)?))
+            }
+            Some(Entry::Decoded(value)) => value
+                .as_any()
+                .downcast_ref::<T>()
+                .cloned()
+                .map(Some)
+                .ok_or(AttachmentError::TypeMismatch),
+            None => Ok(None),
+        }
+    }
     /// Get an existing value or insert its default; saved values decode lazily.
     pub fn get<T: Clone + Send + Sync + 'static>(
         &mut self,

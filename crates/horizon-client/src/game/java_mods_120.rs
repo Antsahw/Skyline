@@ -565,6 +565,69 @@ impl super::Game<'_> {
             // `ItemEntity.setDefaultPickUpDelay`: 10 ticks before anyone can pick it up.
             self.spawn_item(stack, item.pos, item.motion, 10);
         }
+        // Where a mod's block is now, ask it what shape it is: a block whose shape is its
+        // block entity's has none in the registry.
+        let mut touched: Vec<[i32; 3]> = set
+            .iter()
+            .filter(|s| s.dimension == dimension)
+            .map(|s| s.pos)
+            .chain(
+                block_entities
+                    .iter()
+                    .filter(|e| e.dimension == dimension)
+                    .map(|e| e.pos),
+            )
+            .collect();
+        touched.sort_unstable();
+        touched.dedup();
+        self.refresh_java120_shapes(dimension, &touched);
+    }
+
+    /// The shape each of `positions` has, asked of the mods at the position and kept on the
+    /// block entity as a synced attachment, which is how it reaches the client that aims at it
+    /// (`mod_block_shape`). Positions without a mod's block entity are left alone: their shape
+    /// is the registry's, like every vanilla block's.
+    fn refresh_java120_shapes(&mut self, dimension: &str, positions: &[[i32; 3]]) {
+        let asked: Vec<[i32; 3]> = positions
+            .iter()
+            .copied()
+            .filter(|[x, y, z]| {
+                matches!(
+                    self.world.block_entities.get(&(*x, *y, *z)),
+                    Some(horizon_client::containers::BlockEntity::Mod(_))
+                )
+            })
+            .collect();
+        if asked.is_empty() {
+            return;
+        }
+        let flat: Vec<i32> = asked.iter().flatten().copied().collect();
+        let shapes = {
+            let Ok(mut guard) = RUNTIME.try_lock() else {
+                return;
+            };
+            let Some(runtime) = guard.as_mut() else {
+                return;
+            };
+            runtime.block_shapes(&Level(self), dimension, &flat)
+        };
+        let shapes = match shapes {
+            Ok(shapes) => shapes,
+            Err(e) => {
+                log::warn!("1.20.1 mods: asking what shape their blocks are: {e}");
+                return;
+            }
+        };
+        for ([x, y, z], boxes) in asked.iter().copied().zip(shapes) {
+            let Some(attachments) = self.world.block_entities.attachments_mut((x, y, z)) else {
+                continue;
+            };
+            if let Err(e) = attachments.set(&super::mod_block_shape::BLOCK_SHAPE, boxes) {
+                log::warn!("1.20.1 mods: keeping a block's shape at {x} {y} {z}: {e:?}");
+                continue;
+            }
+            self.world.modified.insert((x >> 4, z >> 4));
+        }
     }
 
     /// A 1.20.1 mod's block entity as its code saved it (`saveWithFullMetadata` in SNBT): what
