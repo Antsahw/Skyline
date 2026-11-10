@@ -569,5 +569,31 @@ fn right_clicking_a_block_runs_its_1_20_1_code_on_horizons_blocks() {
         "a click asks Horizon a handful of times, not once per block read: {asked}"
     );
     eprintln!("a stove's click asked Horizon {asked} time(s)");
+
+    // A mod telling the player about something must not break the mod. Vanilla's chest is the
+    // same shape with no mod needed: its `use` opens a menu, which sends a packet through the
+    // player's listener, and asks the piglins nearby to take offence, which asks the level for
+    // its entities. A mirror player has no connection behind that listener and the level has no
+    // entity manager, so both were a NullPointerException thrown inside the block's own code.
+    //
+    // This is what Wired Redstone hit the long way round: placing a cable told the players
+    // watching the chunk, through LibNetworkStack, which asks the chunk storage who they are.
+    let world = WithEntity {
+        block: OneBlock::at(
+            "minecraft:chest[facing=north,type=single,waterlogged=false]",
+            [16, 64, 0],
+        ),
+        entity: "{id:\"minecraft:chest\",x:16,y:64,z:0,Items:[]}".into(),
+    };
+    let mut empty_at_chest = on_top_of([16, 64, 0]);
+    empty_at_chest.item = String::new();
+    empty_at_chest.count = 0;
+    let used = runtime
+        .use_block(&world, &empty_at_chest)
+        .expect("the chest's own code runs to the end");
+    assert_ne!(
+        used.result, 0,
+        "the chest took the click rather than throwing: {used:?}"
+    );
     runtime.stop();
 }

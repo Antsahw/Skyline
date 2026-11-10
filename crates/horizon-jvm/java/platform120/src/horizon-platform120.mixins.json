@@ -8,13 +8,15 @@
     "MinecraftServerAccess",
     "PlayerListAccess",
     "ServerChunkCacheAccess",
+    "ChunkMapAccess",
     "ServerChunkCacheMixin",
     "GameModeAccess",
     "LevelMixin",
     "MinecraftServerMixin",
     "ServerLevelMixin",
     "PlayerListMixin",
-    "ServerPlayerMixin"
+    "ServerPlayerMixin",
+    "ServerGamePacketListenerMixin"
   ],
   "injectors": {"defaultRequire": 1}
 }

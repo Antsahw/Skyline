@@ -17,4 +17,14 @@ public interface ServerChunkCacheAccess {
     @Mutable
     @Accessor("dataStorage")
     void horizon$setDataStorage(DimensionDataStorage storage);
+
+    /**
+     * The chunk storage. A mirror holds no chunks, but mods reach this field through their own
+     * mixins to ask who is watching a chunk (LibNetworkStack, for a block entity's network
+     * update), and a null one is a NullPointerException inside the mod rather than anywhere we
+     * could answer. Mirror120 puts an empty one here.
+     */
+    @Mutable
+    @Accessor("chunkMap")
+    void horizon$setChunkMap(net.minecraft.server.level.ChunkMap map);
 }

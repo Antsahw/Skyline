@@ -466,6 +466,25 @@ What it does not do yet: whole sections. A mod walking a large area still pays a
 it touches, and the deltas that would let Horizon push changes instead of answering questions
 are still to come.
 
+**Telling the player, and telling the players watching**, both of which a mod does as a matter
+of course and neither of which a mirror could survive:
+
+- A mirror player now has a **packet listener that swallows** what is sent to it
+  (`ServerGamePacketListenerMixin`). A mod telling "the player" about something sends through
+  there, and vanilla's send threw on the connection a mirror player has not got. Horizon owns
+  the real players and tells them about the world itself; mod packets reaching a player are
+  phase 5.
+- The mirror's chunk source now holds an **empty chunk storage** (`ChunkMapAccess`). Mods reach
+  that field through their own mixins to ask who is watching a chunk before sending a block
+  entity's network update -- LibNetworkStack does, so Wired Redstone does when it places a
+  cable -- and a null one threw inside the mod, where nothing here could answer. Empty maps
+  make the lookup find nobody, which is the truth.
+
+Found by placing a Wired Redstone cable, which needs both. Tested with vanilla's chest, which
+is the same shape with no mod in the way: its `use` opens a menu (a packet through the
+listener) and angers nearby piglins (the level's entities), and both threw before. Checked by
+taking the fix out again and watching the test reproduce the reported crash.
+
 Next: menus (phase 4), which need the `GuiGraphics` recorder for a mod's own screen -- the 26.3
 bridge's `java_open_menu` shows vanilla's menus only, and says so.
 

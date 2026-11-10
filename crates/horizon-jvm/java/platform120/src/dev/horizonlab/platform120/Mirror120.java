@@ -203,6 +203,19 @@ public final class Mirror120 {
             java.io.File data = new java.io.File("horizon-mirror/" + d.replace(':', '/') + "/data");
             data.mkdirs();
             chunkAccess.horizon$setDataStorage(new net.minecraft.world.level.storage.DimensionDataStorage(data, net.minecraft.util.datafix.DataFixers.getDataFixer()));
+            // An empty chunk storage behind it. Nothing here holds chunks, but mods reach this
+            // field through their own mixins to ask who is watching a chunk before sending a
+            // block entity's network update (LibNetworkStack does, so Wired Redstone does when
+            // it places a cable), and a null one throws inside the mod where nothing can answer.
+            // Empty maps make every such lookup find nobody, which is the truth: Horizon has
+            // the players, not this runtime.
+            var chunkMap = Allocate.make(net.minecraft.server.level.ChunkMap.class);
+            var mapAccess = (dev.horizonlab.platform120.mixin.ChunkMapAccess) chunkMap;
+            mapAccess.horizon$setVisibleChunkMap(
+                    new it.unimi.dsi.fastutil.longs.Long2ObjectLinkedOpenHashMap<>());
+            mapAccess.horizon$setUpdatingChunkMap(
+                    new it.unimi.dsi.fastutil.longs.Long2ObjectLinkedOpenHashMap<>());
+            chunkAccess.horizon$setChunkMap(chunkMap);
             sl.horizon$setChunkSource(chunks);
             // What mods do at the end of Level's and ServerLevel's constructors, with the
             // arguments a server gives them (Lithium's height cache, ...).
@@ -218,6 +231,11 @@ public final class Mirror120 {
         ServerPlayer player = PLAYERS.get(id);
         if (player == null) {
             player = new ServerPlayer(server, level, new GameProfile(id, name));
+            // A packet listener that swallows what is sent to it. A mod telling "the player"
+            // about something sends through here, and vanilla's send would throw on the
+            // connection a mirror player has not got (ServerGamePacketListenerMixin).
+            player.connection = Allocate.make(
+                    net.minecraft.server.network.ServerGamePacketListenerImpl.class);
             PLAYERS.put(id, player);
         }
         if (player.level() != level) player.setServerLevel(level);
