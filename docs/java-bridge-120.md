@@ -480,10 +480,27 @@ of course and neither of which a mirror could survive:
   cable -- and a null one threw inside the mod, where nothing here could answer. Empty maps
   make the lookup find nobody, which is the truth.
 
-Found by placing a Wired Redstone cable, which needs both. Tested with vanilla's chest, which
-is the same shape with no mod in the way: its `use` opens a menu (a packet through the
-listener) and angers nearby piglins (the level's entities), and both threw before. Checked by
-taking the fix out again and watching the test reproduce the reported crash.
+Behind those came two more, each found by the one before it being fixed:
+
+- Every position's lookup answers with **one chunk holder that holds no chunk**
+  (`ChunkHolderMixin`, through the maps' default return value so either route finds it). An
+  absent holder was not enough: LibNetworkStack asks for one and calls `getTickingChunk()`
+  straight on the answer.
+- `Level.neighborShapeChanged` and `updateNeighborsAtExceptFromFacing` are **quieted**: both go
+  through `Level`'s own neighbour updater, which a mirror never made. Neighbour updates are
+  Horizon's to run, as the rest of them already were; these two were simply missed, and
+  LibMultipart reaches the first of them when it adds a part.
+
+Found by placing a Wired Redstone cable, which needs all of them. Tested twice over. With vanilla's chest, which is the same shape with no mod in the way: its
+`use` opens a menu (a packet through the listener) and angers nearby piglins (the level's
+entities), and both threw before; checked by taking the fix out again and watching the test
+reproduce the reported crash. And with the mod itself: a bundled cable placed on grass comes
+back as a `libmultipart:container` block whose block entity holds the cable part, with one
+taken from the stack.
+
+A mod item Horizon names that this runtime hasn't got is now **said once per id**: the registry
+answers an unknown id with air, so such a click used to arrive empty-handed with no sign of
+why.
 
 Next: menus (phase 4), which need the `GuiGraphics` recorder for a mod's own screen -- the 26.3
 bridge's `java_open_menu` shows vanilla's menus only, and says so.

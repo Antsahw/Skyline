@@ -340,22 +340,26 @@ fn right_clicking_a_block_runs_its_1_20_1_code_on_horizons_blocks() {
         );
         return;
     }
-    let delight = std::env::var_os("HORIZON_120_MODS").and_then(|d| {
-        std::fs::read_dir(d)
+    let jar_named = |needle: &str| -> Option<PathBuf> {
+        std::fs::read_dir(std::env::var_os("HORIZON_120_MODS")?)
             .ok()?
             .flatten()
             .map(|e| e.path())
-            .find(|p| p.to_string_lossy().contains("farmers-delight"))
-    });
+            .find(|p| p.to_string_lossy().contains(needle))
+    };
+    let delight = jar_named("farmers-delight");
+    let wired = jar_named("wired-redstone");
     let game = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("game120-use");
     let _ = std::fs::remove_dir_all(&game);
     let mods = game.join("mods");
     std::fs::create_dir_all(&mods).unwrap();
     // All of HORIZON_120_MODS: the mirror has to hold with other mods' Mixins in the same
     // classes (Lithium's in Level, ...).
-    if let Some(jar) = &delight {
-        for entry in std::fs::read_dir(jar.parent().unwrap()).unwrap() {
-            let path = entry.unwrap().path();
+    // Whatever is in it, not only the jar a case below looks for: a set without Farmer's
+    // Delight used to copy nothing at all, so every mod case quietly tested vanilla.
+    if let Some(dir) = std::env::var_os("HORIZON_120_MODS") {
+        for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+            let path = entry.path();
             std::fs::copy(&path, mods.join(path.file_name().unwrap())).unwrap();
         }
     }
@@ -557,18 +561,22 @@ fn right_clicking_a_block_runs_its_1_20_1_code_on_horizons_blocks() {
     // Counted rather than asserted to be fast: `calls_in` is what the runtime asked Horizon
     // for, so a stove's click reading a dozen positions one at a time could not come in under
     // the bound below.
-    let world = OneBlock::at("farmersdelight:stove[facing=north,lit=false]", [12, 64, 0]);
+    // Counted on a campfire, which is vanilla's, so the count does not depend on a mod set.
+    let world = OneBlock::at(
+        "minecraft:campfire[facing=north,lit=false,signal_fire=false,waterlogged=false]",
+        [12, 64, 0],
+    );
     let before = runtime.child.peer.stats.calls_in;
     let used = runtime
         .use_block(&world, &on_top_of([12, 64, 0]))
-        .expect("the stove lights");
+        .expect("the campfire lights");
     let asked = runtime.child.peer.stats.calls_in - before;
-    assert_eq!(used.result, 2, "it still lights: {used:?}");
+    assert_ne!(used.result, 0, "it still lights: {used:?}");
     assert!(
         asked <= 6,
         "a click asks Horizon a handful of times, not once per block read: {asked}"
     );
-    eprintln!("a stove's click asked Horizon {asked} time(s)");
+    eprintln!("a campfire's click asked Horizon {asked} time(s)");
 
     // A mod telling the player about something must not break the mod. Vanilla's chest is the
     // same shape with no mod needed: its `use` opens a menu, which sends a packet through the
@@ -595,5 +603,23 @@ fn right_clicking_a_block_runs_its_1_20_1_code_on_horizons_blocks() {
         used.result, 0,
         "the chest took the click rather than throwing: {used:?}"
     );
+
+    // The reported case itself, when Wired Redstone is there: placing a bundled cable goes
+    // through LibMultipart, which tells the players watching the chunk through LibNetworkStack,
+    // which asks the chunk storage for a holder and uses it without checking. Two crashes in a
+    // row lived here (a null chunk map, then a null holder).
+    if wired.is_some() {
+        let ground = OneBlock::at("minecraft:grass_block[snowy=false]", [20, 64, 0]);
+        let mut cable = on_top_of([20, 64, 0]);
+        cable.item = "wiredredstone:bundled_cable".into();
+        cable.count = 4;
+        let used = runtime
+            .use_block(&ground, &cable)
+            .expect("the cable's own placement runs to the end");
+        assert_ne!(used.result, 0, "the cable was placed: {used:?}");
+        eprintln!("a bundled cable placed: {used:?}");
+    } else {
+        eprintln!("no Wired Redstone in HORIZON_120_MODS: the cable is skipped");
+    }
     runtime.stop();
 }

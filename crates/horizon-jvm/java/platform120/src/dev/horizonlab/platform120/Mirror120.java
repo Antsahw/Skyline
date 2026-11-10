@@ -211,10 +211,21 @@ public final class Mirror120 {
             // the players, not this runtime.
             var chunkMap = Allocate.make(net.minecraft.server.level.ChunkMap.class);
             var mapAccess = (dev.horizonlab.platform120.mixin.ChunkMapAccess) chunkMap;
-            mapAccess.horizon$setVisibleChunkMap(
-                    new it.unimi.dsi.fastutil.longs.Long2ObjectLinkedOpenHashMap<>());
-            mapAccess.horizon$setUpdatingChunkMap(
-                    new it.unimi.dsi.fastutil.longs.Long2ObjectLinkedOpenHashMap<>());
+            // Every position answers with one holder that holds no chunk, rather than with
+            // nothing: a mod asks for a holder and uses what comes back without checking
+            // (LibNetworkStack calls getTickingChunk straight on it), so an absent one throws
+            // inside the mod. A holder with no chunk sends it down its own empty path instead.
+            // The default return value covers a lookup by either route -- the map directly, or
+            // getVisibleChunkIfPresent -- since a mod's mixin may use either.
+            var holder = Allocate.make(net.minecraft.server.level.ChunkHolder.class);
+            var visible = new it.unimi.dsi.fastutil.longs.Long2ObjectLinkedOpenHashMap<
+                    net.minecraft.server.level.ChunkHolder>();
+            visible.defaultReturnValue(holder);
+            var updating = new it.unimi.dsi.fastutil.longs.Long2ObjectLinkedOpenHashMap<
+                    net.minecraft.server.level.ChunkHolder>();
+            updating.defaultReturnValue(holder);
+            mapAccess.horizon$setVisibleChunkMap(visible);
+            mapAccess.horizon$setUpdatingChunkMap(updating);
             chunkAccess.horizon$setChunkMap(chunkMap);
             sl.horizon$setChunkSource(chunks);
             // What mods do at the end of Level's and ServerLevel's constructors, with the
@@ -634,8 +645,20 @@ public final class Mirror120 {
         ResourceLocation id = ResourceLocation.tryParse(item);
         if (id == null || count <= 0) return ItemStack.EMPTY;
         Item it = BuiltInRegistries.ITEM.get(id);
+        // The registry answers an id it hasn't got with air rather than nothing, so an item
+        // 1.20.1 doesn't know would quietly become an empty hand and the click would pass with
+        // no sign of why. Said once per id instead.
+        if (it == net.minecraft.world.item.Items.AIR && !"minecraft:air".equals(item)) {
+            if (UNKNOWN_ITEMS.add(item)) {
+                log("this runtime has no item " + item + "; a click holding it is empty-handed");
+            }
+            return ItemStack.EMPTY;
+        }
         ItemStack stack = new ItemStack(it, count);
         if (damage > 0) stack.setDamageValue(damage);
         return stack;
     }
+
+    /** Item ids Horizon sent that 1.20.1 hasn't got, said once each. */
+    private static final java.util.Set<String> UNKNOWN_ITEMS = new java.util.HashSet<>();
 }

@@ -68,6 +68,30 @@ public abstract class LevelMixin {
     }
 
     /**
+     * The shape update a neighbour gets when a block changes, and the updates around a block
+     * bar one side: both go through Level's own neighbour updater, which a mirror level never
+     * made. Neighbour updates are Horizon's to run, as the rest of them are.
+     *
+     * <p>Wired Redstone placing a cable reaches the first of these through LibMultipart, so
+     * without it a cable could not be placed at all.
+     */
+    @Inject(method = "neighborShapeChanged(Lnet/minecraft/core/Direction;Lnet/minecraft/world/level/block/state/BlockState;Lnet/minecraft/core/BlockPos;Lnet/minecraft/core/BlockPos;II)V",
+            at = @At("HEAD"), cancellable = true)
+    private void horizon$shapeChanged(net.minecraft.core.Direction side,
+            net.minecraft.world.level.block.state.BlockState state, BlockPos pos, BlockPos from,
+            int flags, int depth, CallbackInfo ci) {
+        if (horizon$mirror()) ci.cancel();
+    }
+
+    @Inject(method = "updateNeighborsAtExceptFromFacing(Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/block/Block;Lnet/minecraft/core/Direction;)V",
+            at = @At("HEAD"), cancellable = true)
+    private void horizon$neighboursExcept(BlockPos pos,
+            net.minecraft.world.level.block.Block block, net.minecraft.core.Direction side,
+            CallbackInfo ci) {
+        if (horizon$mirror()) ci.cancel();
+    }
+
+    /**
      * The comparators beside a block entity that changed: a neighbour update, which is
      * Horizon's to run (as with the rest of them in ServerLevelMixin).
      */
