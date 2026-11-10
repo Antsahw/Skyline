@@ -406,8 +406,17 @@ says so if it gives up, because a click that quietly does nothing reads as a bro
 sends an item back as a `spawnItem` event and Horizon spawns it, since Horizon owns this
 world's entities (a chest spilling its contents, a machine putting its output out). Anything
 that isn't an item is turned away, said once per kind, until entities are a phase of their own.
-The stack crosses as its id, count and damage, as the held one does: what a mod put in its NBT
-is lost until the downgrade tables land.
+The stack crosses **as the runtime saved it** (`ItemStack.save`, in SNBT), not as a name and a
+count, and Horizon reads it with vanilla's own fixes from 1.20.1's data version (3465, the
+`world_version` of Mojang's jar) to its own: `datafix::update(Ty::ItemStack, ...)`. The step
+that does the work is 1.20.5's `ItemStackComponentizationFix`, which is exactly the 1.20.1
+`tag` → components conversion the downgrade direction calls for, and the chain already carries
+every item fix after it. So an enchanted, renamed tool a machine ejects arrives enchanted and
+renamed, with nothing hand-written: this direction was already in the tree.
+
+The other direction -- Horizon's 26.3 items shown *to* 1.20.1 code -- still is not, so a held
+stack crosses as its id, count and damage, and Horizon's own `extra` is kept across a call
+rather than shown to the mods.
 
 Tested: the record goes back out of the jukebox (`JukeboxBlock.use` → `dropRecording` →
 `addFreshEntity`), and comes back as an item for Horizon to spawn.
