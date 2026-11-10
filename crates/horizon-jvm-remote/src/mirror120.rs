@@ -46,10 +46,10 @@ pub struct SpawnItem {
     pub pos: [f64; 3],
     /// Its motion when dropped (`Entity.getDeltaMovement`), blocks per tick.
     pub motion: [f64; 3],
-    /// The item's id (`minecraft:music_disc_13`).
-    pub item: String,
-    pub count: i32,
-    pub damage: i32,
+    /// The stack as 1.20.1 saves it (`ItemStack.save`), in SNBT: `{id,Count,tag}`. Horizon
+    /// reads it with vanilla's own fixes from 1.20.1's data version to its own, so what a mod
+    /// put on the stack (an enchantment, a name) arrives with it.
+    pub snbt: String,
 }
 
 /// A block entity the mods' code changed, as it saved it, for Horizon to keep.
@@ -209,9 +209,7 @@ impl Handler for InWorld<'_> {
                         dimension: text(&args, 0)?.to_owned(),
                         pos: [float(&args, 1)?, float(&args, 2)?, float(&args, 3)?],
                         motion: [float(&args, 4)?, float(&args, 5)?, float(&args, 6)?],
-                        item: text(&args, 7)?.to_owned(),
-                        count: int(&args, 8)?,
-                        damage: int(&args, 9)?,
+                        snbt: text(&args, 7)?.to_owned(),
                     })
                 })();
                 match parsed {

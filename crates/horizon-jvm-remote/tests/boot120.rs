@@ -252,15 +252,24 @@ fn fabric_1_20_1_boots_in_its_own_jvm_and_reports() {
     runtime.stop();
 }
 
-/// A world of one block (at 0 64 0), stone below it, air elsewhere.
-struct OneBlock(String);
+/// A world of one block, stone below it, air elsewhere. At 0 64 0 unless `at` says otherwise:
+/// a block entity of the runtime stays alive per position (as a chunk's would), so a case that
+/// wants a fresh one takes a position of its own.
+struct OneBlock(String, [i32; 3]);
+
+impl OneBlock {
+    fn at(state: &str, pos: [i32; 3]) -> Self {
+        Self(state.into(), pos)
+    }
+}
 
 impl horizon_jvm_remote::mirror120::World120 for OneBlock {
     fn block_state(&self, dimension: &str, x: i32, y: i32, z: i32) -> Option<String> {
         assert_eq!(dimension, "minecraft:overworld");
+        let [bx, by, bz] = self.1;
         Some(match (x, y, z) {
-            (0, 64, 0) => self.0.clone(),
-            (0, 63, 0) => "minecraft:stone".into(),
+            p if p == (bx, by, bz) => self.0.clone(),
+            p if p == (bx, by - 1, bz) => "minecraft:stone".into(),
             _ => "minecraft:air".into(),
         })
     }
@@ -278,8 +287,21 @@ impl horizon_jvm_remote::mirror120::World120 for WithEntity {
     }
     fn block_entity(&self, dimension: &str, x: i32, y: i32, z: i32) -> Option<String> {
         assert_eq!(dimension, "minecraft:overworld");
-        ((x, y, z) == (0, 64, 0)).then(|| self.entity.clone())
+        let [bx, by, bz] = self.block.1;
+        ((x, y, z) == (bx, by, bz)).then(|| self.entity.clone())
     }
+}
+
+/// [`flint_and_steel_on_top`] aimed at another block.
+fn on_top_of(pos: [i32; 3]) -> horizon_jvm_remote::mirror120::UseBlock {
+    let mut request = flint_and_steel_on_top();
+    request.pos = pos;
+    request.hit = [
+        f64::from(pos[0]) + 0.5,
+        f64::from(pos[1]) + 1.0,
+        f64::from(pos[2]) + 0.5,
+    ];
+    request
 }
 
 fn flint_and_steel_on_top() -> horizon_jvm_remote::mirror120::UseBlock {
@@ -344,6 +366,7 @@ fn right_clicking_a_block_runs_its_1_20_1_code_on_horizons_blocks() {
 
     let world = OneBlock(
         "minecraft:campfire[facing=north,lit=false,signal_fire=false,waterlogged=false]".into(),
+        [0, 64, 0],
     );
     let used = runtime
         .use_block(&world, &flint_and_steel_on_top())
@@ -367,7 +390,7 @@ fn right_clicking_a_block_runs_its_1_20_1_code_on_horizons_blocks() {
 
     // Air under the hand: nothing to light, nothing set; flint and steel on air's top face
     // would make fire above, so use a face of stone instead: fire goes beside it.
-    let world = OneBlock("minecraft:stone".into());
+    let world = OneBlock("minecraft:stone".into(), [0, 64, 0]);
     let used = runtime
         .use_block(&world, &flint_and_steel_on_top())
         .expect("stone");
@@ -376,7 +399,10 @@ fn right_clicking_a_block_runs_its_1_20_1_code_on_horizons_blocks() {
     assert!(used.set[0].state.starts_with("minecraft:fire"), "{used:?}");
 
     if delight.is_some() {
-        let world = OneBlock("farmersdelight:stove[facing=north,lit=false]".into());
+        let world = OneBlock(
+            "farmersdelight:stove[facing=north,lit=false]".into(),
+            [0, 64, 0],
+        );
         let used = runtime
             .use_block(&world, &flint_and_steel_on_top())
             .expect("stove");
@@ -401,7 +427,7 @@ fn right_clicking_a_block_runs_its_1_20_1_code_on_horizons_blocks() {
     // Taking it back out drops it into the world: `JukeboxBlock.use` hands the record to
     // `Level.addFreshEntity`, which the mirror sends on for Horizon to spawn.
     let world = WithEntity {
-        block: OneBlock("minecraft:jukebox[has_record=false]".into()),
+        block: OneBlock("minecraft:jukebox[has_record=false]".into(), [0, 64, 0]),
         entity: "{id:\"minecraft:jukebox\",x:0,y:64,z:0}".into(),
     };
     let mut with_disc = flint_and_steel_on_top();
@@ -423,7 +449,7 @@ fn right_clicking_a_block_runs_its_1_20_1_code_on_horizons_blocks() {
     // Out again, with an empty hand: the block's own `use` clears the jukebox and drops the
     // record, which reaches Horizon as an item to spawn rather than vanishing in the mirror.
     let world = WithEntity {
-        block: OneBlock("minecraft:jukebox[has_record=true]".into()),
+        block: OneBlock("minecraft:jukebox[has_record=true]".into(), [0, 64, 0]),
         entity: "{id:\"minecraft:jukebox\",x:0,y:64,z:0,RecordItem:{id:\"minecraft:music_disc_13\",Count:1b}}"
             .into(),
     };
@@ -439,29 +465,61 @@ fn right_clicking_a_block_runs_its_1_20_1_code_on_horizons_blocks() {
     let dropped = used
         .spawned
         .iter()
-        .find(|s| s.item == "minecraft:music_disc_13")
+        .find(|s| s.snbt.contains("music_disc_13"))
         .unwrap_or_else(|| panic!("the record is dropped into the world: {used:?}"));
-    assert_eq!(dropped.count, 1, "{dropped:?}");
     assert_eq!(dropped.dimension, "minecraft:overworld");
+
+    // The whole stack crosses, not just its name: a jukebox holding an enchanted, renamed
+    // record hands both back, for Horizon to read with vanilla's own fixes. Anything a mod
+    // leaves on a stack it ejects (an enchantment, a name, its own tag) rides along with it.
+    let world = WithEntity {
+        block: OneBlock::at("minecraft:jukebox[has_record=true]", [4, 64, 0]),
+        entity:
+            "{id:\"minecraft:jukebox\",x:4,y:64,z:0,RecordItem:{id:\"minecraft:music_disc_13\",\
+                 Count:1b,tag:{display:{Name:'{\"text\":\"a good mixtape\"}'},\
+                 Enchantments:[{id:\"minecraft:unbreaking\",lvl:3s}]}}}"
+                .into(),
+    };
+    let mut empty_elsewhere = on_top_of([4, 64, 0]);
+    empty_elsewhere.item = String::new();
+    empty_elsewhere.count = 0;
+    let used = runtime
+        .use_block(&world, &empty_elsewhere)
+        .expect("jukebox out");
+    let dropped = used
+        .spawned
+        .iter()
+        .find(|s| s.snbt.contains("music_disc_13"))
+        .unwrap_or_else(|| panic!("the record is dropped: {used:?}"));
+    assert!(
+        dropped.snbt.contains("unbreaking"),
+        "its enchantment rides along: {}",
+        dropped.snbt
+    );
+    assert!(
+        dropped.snbt.contains("mixtape"),
+        "its name rides along: {}",
+        dropped.snbt
+    );
 
     // Phase 3c: their block entities tick. A lit furnace with fuel and something to smelt is
     // 1.20.1's own ticking code end to end -- it needs the block entity loaded from Horizon,
     // the recipes bound, and what it changes sent back -- with no mod in the way.
     let world = WithEntity {
-        block: OneBlock("minecraft:furnace[facing=north,lit=true]".into()),
-        entity: "{id:\"minecraft:furnace\",x:0,y:64,z:0,BurnTime:200s,CookTime:0s,\
+        block: OneBlock::at("minecraft:furnace[facing=north,lit=true]", [8, 64, 0]),
+        entity: "{id:\"minecraft:furnace\",x:8,y:64,z:0,BurnTime:200s,CookTime:0s,\
                  CookTimeTotal:200s,Items:[{Slot:0b,id:\"minecraft:raw_iron\",Count:1b},\
                  {Slot:1b,id:\"minecraft:coal\",Count:1b}]}"
             .into(),
     };
     let ticked = runtime
-        .tick_block_entities(&world, "minecraft:overworld", &[0, 64, 0])
+        .tick_block_entities(&world, "minecraft:overworld", &[8, 64, 0])
         .expect("the furnace ticks");
     assert_eq!(ticked.ticked, 1, "the furnace has a ticker: {ticked:?}");
     let after = ticked
         .block_entities
         .iter()
-        .find(|e| e.pos == [0, 64, 0])
+        .find(|e| e.pos == [8, 64, 0])
         .unwrap_or_else(|| panic!("the furnace changed and came back: {ticked:?}"));
     // One tick of smelting: it burned a tick of fuel and cooked for a tick.
     assert!(
@@ -479,12 +537,12 @@ fn right_clicking_a_block_runs_its_1_20_1_code_on_horizons_blocks() {
     // so a furnace read from Horizon on each tick would cook its first tick for ever; one kept
     // alive carries on from where it got to.
     let ticked = runtime
-        .tick_block_entities(&world, "minecraft:overworld", &[0, 64, 0])
+        .tick_block_entities(&world, "minecraft:overworld", &[8, 64, 0])
         .expect("the furnace ticks again");
     let after = ticked
         .block_entities
         .iter()
-        .find(|e| e.pos == [0, 64, 0])
+        .find(|e| e.pos == [8, 64, 0])
         .unwrap_or_else(|| panic!("the furnace changed again: {ticked:?}"));
     assert!(
         after.snbt.contains("CookTime:2s"),

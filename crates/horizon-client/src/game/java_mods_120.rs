@@ -256,6 +256,38 @@ fn booting_once() {
     }
 }
 
+/// 1.20.1's data version (`world_version` of Mojang's 1.20.1 jar): where a stack the runtime
+/// saved comes from, for the fixes that bring it here.
+const DATA_VERSION_120: i32 = 3465;
+
+/// A stack as the 1.20.1 runtime saved it (`{id,Count,tag}` in SNBT), as one of Horizon's.
+///
+/// Through vanilla's own fixes from 1.20.1 to this version rather than by hand: the step that
+/// matters is 1.20.5's `ItemStackComponentizationFix`, which is what turns `tag` into
+/// components, and the chain already has every item fix since. So an enchanted tool a machine
+/// spat out keeps its enchantments, and a renamed one its name.
+fn stack_from_120(snbt: &str) -> Option<horizon_client::items::ItemStack> {
+    use horizon_world::datafix::{self, schema::Ty};
+    let (mut tag, _) = match horizon_world::nbt::parse_snbt(snbt) {
+        Ok(parsed) => parsed,
+        Err(e) => {
+            log::warn!("1.20.1 mods: a dropped item was not read: {e}");
+            return None;
+        }
+    };
+    datafix::update(
+        Ty::ItemStack,
+        &mut tag,
+        DATA_VERSION_120,
+        horizon_core::version::DATA_VERSION,
+    );
+    let stack = horizon_client::save::item_from_nbt(&tag);
+    if stack.is_none() {
+        log::warn!("1.20.1 mods: a dropped item was not understood: {snbt}");
+    }
+    stack
+}
+
 /// `minecraft:oak_log[axis=y]`: a state's name as both versions write it.
 fn state_name(
     registry: &horizon_world::registry::BlockRegistry,
@@ -524,14 +556,11 @@ impl super::Game<'_> {
             }
         }
         for item in spawned {
-            if item.dimension != dimension || item.count <= 0 {
+            if item.dimension != dimension {
                 continue;
             }
-            let stack = horizon_client::items::ItemStack {
-                item: item.item.as_str().into(),
-                count: item.count as u32,
-                damage: item.damage.max(0) as u32,
-                extra: None,
+            let Some(stack) = stack_from_120(&item.snbt) else {
+                continue;
             };
             // `ItemEntity.setDefaultPickUpDelay`: 10 ticks before anyone can pick it up.
             self.spawn_item(stack, item.pos, item.motion, 10);
@@ -557,5 +586,47 @@ impl super::Game<'_> {
         // Redraw and resend what shows it.
         let state = self.world.block(x, y, z);
         let _ = self.world.set(x, y, z, state);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::stack_from_120;
+
+    /// A stack the 1.20.1 runtime saved arrives with what is on it, not just its name: the
+    /// chain from 1.20.1's data version runs 1.20.5's componentization, so `tag.Enchantments`
+    /// becomes the enchantments Horizon reads and `tag.display.Name` its custom name.
+    #[test]
+    fn a_dropped_stack_keeps_its_enchantments_and_name() {
+        let stack = stack_from_120(
+            "{id:\"minecraft:diamond_pickaxe\",Count:1b,tag:{Damage:7,RepairCost:3,\
+             display:{Name:'{\"text\":\"a good pickaxe\"}'},\
+             Enchantments:[{id:\"minecraft:efficiency\",lvl:5s},\
+             {id:\"minecraft:unbreaking\",lvl:3s}]}}",
+        )
+        .expect("a 1.20.1 stack reads");
+        assert_eq!(&*stack.item, "minecraft:diamond_pickaxe");
+        assert_eq!(stack.count, 1);
+        assert_eq!(stack.damage, 7, "Damage becomes the damage component");
+        let extra = stack.extra.as_ref().expect("it has components");
+        assert_eq!(
+            extra.enchantments.as_slice(),
+            [
+                ("minecraft:efficiency".into(), 5),
+                ("minecraft:unbreaking".into(), 3)
+            ],
+            "the 1.20.1 Enchantments list becomes the enchantments component",
+        );
+        assert_eq!(extra.repair_cost, 3);
+        assert!(
+            extra.custom_name.is_some(),
+            "display.Name becomes custom_name"
+        );
+    }
+
+    /// Something the runtime could not have saved is refused rather than spawned as air.
+    #[test]
+    fn a_stack_that_does_not_read_is_left_alone() {
+        assert!(stack_from_120("not nbt at all").is_none());
     }
 }

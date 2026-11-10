@@ -337,11 +337,13 @@ public final class Mirror120 {
         ItemStack stack = dropped.getItem();
         if (stack.isEmpty()) return false;
         var motion = dropped.getDeltaMovement();
+        // The whole stack as 1.20.1 saves it, not just its name and count: an enchanted tool a
+        // machine spat out keeps its enchantments, a renamed one its name. Horizon runs it
+        // through vanilla's own 1.20.1 -> 26.3 fixes on the other side.
         event.accept("spawnItem", new Object[] {
             dimension(level), dropped.getX(), dropped.getY(), dropped.getZ(),
             motion.x, motion.y, motion.z,
-            BuiltInRegistries.ITEM.getKey(stack.getItem()).toString(),
-            stack.getCount(), stack.getDamageValue(),
+            stack.save(new net.minecraft.nbt.CompoundTag()).toString(),
         });
         return true;
     }
