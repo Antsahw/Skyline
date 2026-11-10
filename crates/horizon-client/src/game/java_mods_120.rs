@@ -619,6 +619,7 @@ impl super::Game<'_> {
             }
         };
         for ([x, y, z], boxes) in asked.iter().copied().zip(shapes) {
+            trace120!("{x} {y} {z}: the mods say its shape is {boxes:?}");
             let Some(attachments) = self.world.block_entities.attachments_mut((x, y, z)) else {
                 continue;
             };
@@ -626,6 +627,12 @@ impl super::Game<'_> {
                 log::warn!("1.20.1 mods: keeping a block's shape at {x} {y} {z}: {e:?}");
                 continue;
             }
+            // Setting a value marks it for sending; the holder has to be queued too, or the
+            // next pass never looks at it and the shape stays on the server, where nothing
+            // aims at anything.
+            self.world
+                .attachment_syncs
+                .insert(horizon_world::attachments::Holder::BlockEntity([x, y, z]));
             self.world.modified.insert((x >> 4, z >> 4));
         }
     }
