@@ -364,6 +364,7 @@ fn right_clicking_a_block_runs_its_1_20_1_code_on_horizons_blocks() {
         }
     }
     let lines: Lines = Arc::default();
+    let seen = Arc::clone(&lines);
     let mut cfg = config(cache, bridge, game, lines);
     cfg.platform = Some(platform);
     let (mut runtime, _) = boot120::start(&cfg).expect("boots");
@@ -618,6 +619,38 @@ fn right_clicking_a_block_runs_its_1_20_1_code_on_horizons_blocks() {
             .expect("the cable's own placement runs to the end");
         assert_ne!(used.result, 0, "the cable was placed: {used:?}");
         eprintln!("a bundled cable placed: {used:?}");
+
+        // And it ticks. A cable is a node of GraphLib's graph world, which GraphLib builds at
+        // the end of ChunkMap's constructor -- the mirror skips constructors, so the cable's
+        // first tick used to throw inside the mod (a null graph storage) and the block was
+        // left out of every tick after it.
+        let placed = used
+            .set
+            .iter()
+            .find(|s| s.state.starts_with("libmultipart:container"))
+            .expect("the cable set its container block");
+        let entity = used
+            .block_entities
+            .first()
+            .expect("the cable kept its parts in a block entity")
+            .snbt
+            .clone();
+        let world = WithEntity {
+            block: OneBlock(placed.state.clone(), placed.pos),
+            entity,
+        };
+        let ticked = runtime
+            .tick_block_entities(&world, "minecraft:overworld", &placed.pos)
+            .expect("the cable's tick runs to the end");
+        let failed: Vec<String> = seen
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|l| l.contains("the tick of"))
+            .cloned()
+            .collect();
+        assert!(failed.is_empty(), "the cable's tick failed: {failed:#?}");
+        eprintln!("a bundled cable ticked: {ticked:?}");
     } else {
         eprintln!("no Wired Redstone in HORIZON_120_MODS: the cable is skipped");
     }

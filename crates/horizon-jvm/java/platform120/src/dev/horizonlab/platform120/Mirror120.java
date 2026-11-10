@@ -228,6 +228,18 @@ public final class Mirror120 {
             mapAccess.horizon$setUpdatingChunkMap(updating);
             chunkAccess.horizon$setChunkMap(chunkMap);
             sl.horizon$setChunkSource(chunks);
+            // Per-level state mods hang off the chunk storage rather than the level: GraphLib
+            // builds the graph world every Wired Redstone cable is a node in at the end of
+            // ChunkMap's constructor, and without it the cable's first tick throws before it
+            // can run. The save access is what those handlers ask for the folder to keep their
+            // own files in; the mirror's is beside the level's.
+            var storage = Allocate.make(
+                    net.minecraft.world.level.storage.LevelStorageSource.LevelStorageAccess.class);
+            ((dev.horizonlab.platform120.mixin.LevelStorageAccessAccess) storage)
+                    .horizon$setLevelDirectory(
+                            new net.minecraft.world.level.storage.LevelStorageSource.LevelDirectory(
+                                    java.nio.file.Path.of("horizon-mirror")));
+            Constructed120.run(chunkMap, level, storage, net.minecraft.util.datafix.DataFixers.getDataFixer());
             // What mods do at the end of Level's and ServerLevel's constructors, with the
             // arguments a server gives them (Lithium's height cache, ...).
             java.util.function.Supplier<net.minecraft.util.profiling.ProfilerFiller> profiler = () -> net.minecraft.util.profiling.InactiveProfiler.INSTANCE;
