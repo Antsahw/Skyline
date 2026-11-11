@@ -14,6 +14,7 @@
   <a href="#run-it-from-source"><b>Run it</b></a> ·
   <a href="#what-works"><b>What works</b></a> ·
   <a href="#how-it-works"><b>How it works</b></a> ·
+  <a href="docs/skyline-dev.md"><b>Build &amp; test</b></a> ·
   <a href="docs/skyline.md"><b>Architecture &amp; goals</b></a> ·
   <a href="NOTICE.md"><b>Credits &amp; licences</b></a>
 </p>
@@ -118,6 +119,10 @@ runtime then boots in the background, and the game says so:
 ```
 
 Clicks on a 1.20.1 mod's blocks do nothing until that second line appears.
+
+The long version of all of this — building the launcher, running both bridges' tests, and what
+to do when a fix seems to do nothing — is in **[docs/skyline-dev.md](docs/skyline-dev.md)**.
+Note the launcher is 26.3 only: 1.20.1 mods are run from source, as above.
 
 **When something goes wrong.** `HORIZON_120_TRACE=1` turns on the 1.20.1 bridge's tracing: what
 it routed, what the mods answered, what shape they gave a block. Delete

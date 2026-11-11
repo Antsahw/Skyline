@@ -94,6 +94,8 @@ directions as they do on one JNI thread.
 | Change how mod jars become content | `crates/horizon-jvm-remote/src/content120.rs`, `crates/horizon-port-pack/` |
 | Fix Horizon itself (not the bridge) | [../AGENTS.md](../AGENTS.md) and the upstream docs |
 
+Building, running with both mod sets, and the tests: [skyline-dev.md](skyline-dev.md).
+
 Tests for the 1.20.1 bridge are in `crates/horizon-jvm-remote/tests/boot120.rs`: they boot a real
 runtime with real mod jars. Point `HORIZON_120_MODS` at a folder of jars to run them against your
 own mods. `HORIZON_120_TRACE=1` turns on the bridge's tracing in a running game.
