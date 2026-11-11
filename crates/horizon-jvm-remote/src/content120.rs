@@ -352,7 +352,7 @@ mod tests {
             "title": "itemGroup.farmersdelight", "icon": "farmersdelight:stove",
             "items": ["farmersdelight:stove", "farmersdelight:cooking_pot"]}]});
         std::fs::write(&facts, tab.to_string()).unwrap();
-        assert_eq!(creative_tabs(&facts, &[carry.clone()]), 1);
+        assert_eq!(creative_tabs(&facts, std::slice::from_ref(&carry)), 1);
         let written: serde_json::Value = serde_json::from_slice(
             &std::fs::read(
                 carry.join("data/farmersdelight/horizon/creative_tab/farmersdelight.json"),
