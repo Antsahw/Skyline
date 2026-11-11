@@ -1,5 +1,10 @@
 # CI runners
 
+> **This page describes Horizon's own project process, not Skyline's.** This fork has no CI,
+> no release train and no issue tracker of its own; it is kept because it explains how upstream
+> works and why the code is shaped this way. For building and testing here, see
+> [skyline-dev.md](skyline-dev.md).
+
 GitHub gives the organisation 20 hosted jobs at a time, shared by every pull request, every push to main and the
 bots. On 2026-11-03 that pool had 283–351 jobs waiting (median wait 43–55 minutes) for jobs that work 1–18
 minutes, and the bots' two small runners had 327–371 waiting. Since then (the maintainer's decision: "use everything

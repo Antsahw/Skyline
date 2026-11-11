@@ -1,5 +1,10 @@
 # Parity workflow
 
+> **This page describes Horizon's own project process, not Skyline's.** This fork has no CI,
+> no release train and no issue tracker of its own; it is kept because it explains how upstream
+> works and why the code is shaped this way. For building and testing here, see
+> [skyline-dev.md](skyline-dev.md).
+
 How parity work is run, checked and merged. The harnesses themselves are described in [Rust rewrite status](rust-parity.md).
 
 ## Running the vanilla harnesses

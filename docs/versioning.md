@@ -1,5 +1,10 @@
 # Versioning
 
+> **This page describes Horizon's own project process, not Skyline's.** This fork has no CI,
+> no release train and no issue tracker of its own; it is kept because it explains how upstream
+> works and why the code is shaped this way. For building and testing here, see
+> [skyline-dev.md](skyline-dev.md).
+
 How Horizon's releases are numbered from 0.2 on, how that maps onto the release workflows, and how every install
 made before 0.2 gets there. The workflows themselves are in [release-flow.md](release-flow.md).
 

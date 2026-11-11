@@ -1,5 +1,10 @@
 # Contributing to Horizon
 
+> **This page describes Horizon's own project process, not Skyline's.** This fork has no CI,
+> no release train and no issue tracker of its own; it is kept because it explains how upstream
+> works and why the code is shaped this way. For building and testing here, see
+> [docs/skyline-dev.md](docs/skyline-dev.md).
+
 Thanks for helping. Horizon is Minecraft: Java Edition 26.3 rewritten in Rust, and the one rule that shapes
 everything is that **it plays exactly like vanilla**. This page is the short version of how we work; questions are
 welcome on [Discord](https://discord.gg/playhorizon).

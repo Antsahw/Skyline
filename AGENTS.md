@@ -27,8 +27,8 @@ that cost time, and `tools/java_bridge/` to test headless with screenshots.
 - **Mark what an agent posts.** A PR body starts with a line naming the person whose agent opened it and
   the tool: `> 🤖 Opened by <login>'s AI agent (<tool, model>), not by <login> personally.`, where `<login>`
   is the GitHub account the PR is opened from (`gh api user --jq .login`). Issues say "Filed by", reviews
-  "Review by". Every comment starts with `🤖 Agent:`. Write only as the person you work for: the lines on
-  this page that name Ludovic are for his own agents (account `ludovic111`), never for anyone else's.
+  "Review by". Every comment starts with `🤖 Agent:`. **Write only as the person you work for**: never as
+  Ludovic (`ludovic111`) or iaxivers, whose names appear on this page and throughout the history.
 - **Attribution.** Commits end with a `Co-Authored-By:` line for the agent that wrote them, and PR bodies
   with that agent's own "Generated with" line. Example, Ludovic's agents (Claude Code on `ludovic111`):
   first line `> 🤖 Opened by Ludovic's AI agent (Claude), not by Ludovic himself.`, commits
@@ -37,13 +37,16 @@ that cost time, and `tools/java_bridge/` to test headless with screenshots.
 - Everything players run is Rust. Python/Java only for dev tools and harness drivers in `tools/`.
 - Horizon-only features follow [docs/design-system.md](docs/design-system.md) and are off by default where
   they would change the vanilla look.
-- Small PRs (< ~500 lines). Labels: `feature` (players get something new), `skip-release` (they see no
-  change), none for a fix. Agents never add `release-now`: the maintainer decides it. Merges ship in batches of 5, or after
-  6 hours ([docs/release-flow.md](docs/release-flow.md)).
-- Contributors first: `gh pr list --state open --search <area>` before you start; never duplicate theirs.
+- Small PRs (< ~500 lines).
 - **No hardcoded user-facing strings.** Keep UI translation-ready from the start. In the launcher (`launcher/`), wrap visible text with `tr("...")` or `trf("... {arg} ...", &[("arg", &val)])` from `crate::i18n` instead of raw string literals or `format!`. In the game, use translation keys (`Text::tr`, `lang::get`), never hardcoded English strings.
-- **Claim before you start**: comment `/claim` on the issue (no issue yet: open one, then claim it). An assigned
-  issue is taken: pick another. `/unclaim` when you stop; a claim with no open PR linking it is released after 5 days.
+- **Horizon's own process does not run here.** This fork has no CI, no release train, no issue
+  claiming (`/claim`), no label bots and no trusted reviewers: those workflows were Horizon's and
+  are gone. Pages under `docs/` that describe them -- [release-flow.md](docs/release-flow.md),
+  [ci-runners.md](docs/ci-runners.md), [parity-workflow.md](docs/parity-workflow.md),
+  [security.md](docs/security.md), [versioning.md](docs/versioning.md), and
+  [CONTRIBUTING.md](CONTRIBUTING.md) -- are kept because they explain how upstream works and why
+  the code is shaped as it is. Read them as Horizon's, not as instructions for this repository.
+  Testing here is local: [docs/skyline-dev.md](docs/skyline-dev.md).
 
 ## Crates
 

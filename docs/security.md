@@ -1,5 +1,10 @@
 # Security
 
+> **This page describes Horizon's own project process, not Skyline's.** This fork has no CI,
+> no release train and no issue tracker of its own; it is kept because it explains how upstream
+> works and why the code is shaped this way. For building and testing here, see
+> [skyline-dev.md](skyline-dev.md).
+
 How Horizon keeps its code and its downloads safe while most of the work is done by AI agents and releases go out
 by themselves, including when Ludovic isn't at his computer. In plain words: what someone could have done before,
 what stops them now, and what still needs Ludovic.
