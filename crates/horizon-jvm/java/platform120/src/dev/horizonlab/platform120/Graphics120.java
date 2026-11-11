@@ -39,7 +39,7 @@ public final class Graphics120 {
     }
 
     /** The recorder a mixin writes to, or null when nothing is being recorded. */
-    static Graphics120 current() {
+    public static Graphics120 current() {
         return current;
     }
 
@@ -58,14 +58,14 @@ public final class Graphics120 {
     }
 
     /** A filled rectangle. `GuiGraphics.fill`. */
-    void fill(int x0, int y0, int x1, int y1, int color) {
+    public void fill(int x0, int y0, int x1, int y1, int color) {
         JsonObject o = op("fill");
         rect(o, Math.min(x0, x1), Math.min(y0, y1), Math.abs(x1 - x0), Math.abs(y1 - y0));
         o.addProperty("color", color);
     }
 
     /** A rectangle shading from one colour to another. `GuiGraphics.fillGradient`. */
-    void gradient(int x0, int y0, int x1, int y1, int top, int bottom) {
+    public void gradient(int x0, int y0, int x1, int y1, int top, int bottom) {
         JsonObject o = op("gradient");
         rect(o, Math.min(x0, x1), Math.min(y0, y1), Math.abs(x1 - x0), Math.abs(y1 - y0));
         o.addProperty("top", top);
@@ -73,25 +73,25 @@ public final class Graphics120 {
     }
 
     /**
-     * A part of a texture. `GuiGraphics.blit`: 1.20.1 gives the source in pixels of a sheet
-     * whose size the caller knows, so the corners are made the fractions Horizon draws with.
+     * A part of a texture, the corners already fractions of it: 1.20.1 works the pixels out
+     * before it reaches the drawing, and gives the horizontal pair before the vertical.
      */
-    void blit(ResourceLocation texture, int x, int y, int width, int height,
-            float u, float v, int regionWidth, int regionHeight, int sheetWidth, int sheetHeight) {
-        if (texture == null || sheetWidth <= 0 || sheetHeight <= 0) {
+    public void blitUv(ResourceLocation texture, int x, int y, int width, int height,
+            float u0, float v0, float u1, float v1) {
+        if (texture == null) {
             return;
         }
         JsonObject o = op("blit");
         o.addProperty("texture", texture.toString());
         rect(o, x, y, width, height);
-        o.addProperty("u0", u / sheetWidth);
-        o.addProperty("v0", v / sheetHeight);
-        o.addProperty("u1", (u + regionWidth) / sheetWidth);
-        o.addProperty("v1", (v + regionHeight) / sheetHeight);
+        o.addProperty("u0", u0);
+        o.addProperty("v0", v0);
+        o.addProperty("u1", u1);
+        o.addProperty("v1", v1);
     }
 
     /** A line of text. Styled text keeps its styling, as Horizon reads the component's JSON. */
-    void text(Component text, int x, int y, int color, boolean shadow) {
+    public void text(Component text, int x, int y, int color, boolean shadow) {
         if (text == null) {
             return;
         }
@@ -104,7 +104,7 @@ public final class Graphics120 {
     }
 
     /** A line of already-shaped text: its styling is gone, so it goes as plain characters. */
-    void text(FormattedCharSequence text, int x, int y, int color, boolean shadow) {
+    public void text(FormattedCharSequence text, int x, int y, int color, boolean shadow) {
         if (text == null) {
             return;
         }
@@ -117,7 +117,7 @@ public final class Graphics120 {
     }
 
     /** A line of plain text. */
-    void text(String text, int x, int y, int color, boolean shadow) {
+    public void text(String text, int x, int y, int color, boolean shadow) {
         if (text == null) {
             return;
         }
@@ -130,7 +130,7 @@ public final class Graphics120 {
     }
 
     /** An item in a slot, as its NBT: Horizon draws it with its own model. */
-    void item(ItemStack stack, int x, int y) {
+    public void item(ItemStack stack, int x, int y) {
         if (stack == null || stack.isEmpty()) {
             return;
         }
@@ -141,13 +141,13 @@ public final class Graphics120 {
     }
 
     /** Drawing kept inside a rectangle until {@link #unscissor}. */
-    void scissor(int x0, int y0, int x1, int y1) {
+    public void scissor(int x0, int y0, int x1, int y1) {
         JsonObject o = op("scissor");
         rect(o, Math.min(x0, x1), Math.min(y0, y1), Math.abs(x1 - x0), Math.abs(y1 - y0));
     }
 
     /** The end of a {@link #scissor}. */
-    void unscissor() {
+    public void unscissor() {
         op("unscissor");
     }
 }

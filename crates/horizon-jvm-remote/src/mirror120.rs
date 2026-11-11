@@ -280,6 +280,13 @@ impl Runtime120 {
         })
     }
 
+    /// What a screen's drawing records, as the frame JSON Horizon's screen drawing reads.
+    /// Proves the recording works: the mixins on `GuiGraphics` bound, and the operations carry
+    /// what the drawing needs. No mod, screen or window is involved.
+    pub fn screen_probe(&mut self) -> Result<String, String> {
+        self.call_with("screenProbe", &[])
+    }
+
     /// The shape of each block at `positions` (x, y, z each), as the mod gives it at that
     /// position: one box list per position, inside the block. Empty where the mod answered
     /// with no shape at all, which is also what a block with nothing there answers.

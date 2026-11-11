@@ -369,6 +369,33 @@ fn right_clicking_a_block_runs_its_1_20_1_code_on_horizons_blocks() {
     cfg.platform = Some(platform);
     let (mut runtime, _) = boot120::start(&cfg).expect("boots");
 
+    // A mod's screen draws through `GuiGraphics`, whose calls the recorder takes and Horizon
+    // then draws (`game/java_screen.rs`, shared with the 26.3 bridge). This is that recording
+    // end to end: the mixins bound to the right methods of 1.20.1's `GuiGraphics`, and each
+    // operation carries what Horizon reads. Without them the call reaches vanilla's drawing
+    // and fails on an allocated object's null state instead of answering.
+    {
+        let json = runtime.screen_probe().expect("the recording answers");
+        let ops: serde_json::Value = serde_json::from_str(&json).expect("operations as JSON");
+        let ops = ops.as_array().expect("an array of operations");
+        let kinds: Vec<&str> = ops
+            .iter()
+            .filter_map(|o| o.get("op").and_then(serde_json::Value::as_str))
+            .collect();
+        assert_eq!(
+            kinds,
+            ["fill", "gradient", "scissor", "text", "unscissor"],
+            "every call recorded, in drawing order: {json}"
+        );
+        // The rectangle as Horizon wants it: a corner and a size, not two corners.
+        assert_eq!(
+            (&ops[0]["x"], &ops[0]["y"], &ops[0]["w"], &ops[0]["h"]),
+            (&10.into(), &20.into(), &100.into(), &50.into()),
+            "{json}"
+        );
+        assert_eq!(ops[3]["text"], "Cooking Pot", "{json}");
+    }
+
     let world = OneBlock(
         "minecraft:campfire[facing=north,lit=false,signal_fire=false,waterlogged=false]".into(),
         [0, 64, 0],

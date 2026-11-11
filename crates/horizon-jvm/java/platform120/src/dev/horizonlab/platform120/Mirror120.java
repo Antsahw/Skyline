@@ -613,6 +613,11 @@ public final class Mirror120 {
         return new Object[] {ticked};
     }
 
+    /** What a screen's drawing records: {@link Screens120#probe}. */
+    public static Object[] screenProbe() {
+        return Screens120.probe();
+    }
+
     /**
      * The shapes of the blocks at `positions` (x, y, z each), as the mods give them *here*: a
      * block whose shape is its block entity's has none worth exporting (LibMultiPart's container

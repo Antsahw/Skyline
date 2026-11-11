@@ -20,5 +20,8 @@
     "ServerPlayerMixin",
     "ServerGamePacketListenerMixin"
   ],
+  "client": [
+    "GuiGraphicsMixin"
+  ],
   "injectors": {"defaultRequire": 1}
 }
