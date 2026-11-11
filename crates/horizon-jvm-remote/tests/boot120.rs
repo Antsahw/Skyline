@@ -318,6 +318,7 @@ fn flint_and_steel_on_top() -> horizon_jvm_remote::mirror120::UseBlock {
         count: 1,
         damage: 0,
         creative: false,
+        stance: None,
     }
 }
 
@@ -487,6 +488,38 @@ fn right_clicking_a_block_runs_its_1_20_1_code_on_horizons_blocks() {
                 .any(|s| s.pos == [30, 65, 0] && s.state.starts_with("farmersdelight:stove")),
             "the held stove is placed on top: {stacked:?}"
         );
+        // A block placed faces the way the player looks: a stove faces the player who places
+        // it (the opposite of where they look). The same click from the north and from the
+        // south: two stoves facing opposite ways. (The mirror player used to always look
+        // south, so every mod's block faced north whoever placed it.)
+        let grass = |at: [i32; 3]| OneBlock("minecraft:grass_block[snowy=false]".into(), at);
+        let facing_from = |runtime: &mut horizon_jvm_remote::boot120::Runtime120,
+                           at: [i32; 3],
+                           feet_z: f64,
+                           yaw: f32| {
+            let mut request = on_top_of(at);
+            request.item = "farmersdelight:stove".into();
+            request.stance = Some(horizon_jvm_remote::mirror120::Stance {
+                feet: [f64::from(at[0]) + 0.5, f64::from(at[1]) + 1.0, feet_z],
+                yaw,
+                pitch: 45.0,
+            });
+            let placed = runtime
+                .use_block(&grass(at), &request)
+                .expect("a stove placed");
+            placed
+                .set
+                .iter()
+                .find(|s| s.pos == [at[0], at[1] + 1, at[2]])
+                .map(|s| s.state.clone())
+                .unwrap_or_else(|| panic!("a stove is placed: {placed:?}"))
+        };
+        // Standing south of it (z + 3) looking north (yaw 180), then north of it looking south.
+        let from_south = facing_from(&mut runtime, [50, 64, 0], 3.5, 180.0);
+        let from_north = facing_from(&mut runtime, [52, 64, 0], -2.5, 0.0);
+        assert!(from_south.contains("facing=south"), "{from_south}");
+        assert!(from_north.contains("facing=north"), "{from_north}");
+
         // A hopper over a basket pushes into it, and one under it pulls out: Fabric Transfer
         // API's ItemStorage.SIDED on the face it touches, as its patch of vanilla's hopper
         // asks. The basket's block entity is the mod's own, kept by Horizon as opaque NBT,
@@ -741,6 +774,12 @@ fn right_clicking_a_block_runs_its_1_20_1_code_on_horizons_blocks() {
                 .any(|b| b.snbt.contains("carrot") && b.snbt.contains("5")),
             "and are in the pot: {moved:?}"
         );
+        let pot_with_carrots = moved
+            .block_entities
+            .iter()
+            .find(|b| b.snbt.contains("carrot"))
+            .map(|b| b.snbt.clone())
+            .expect("the pot's NBT");
         slots[0] = None;
         let inventory = inventory_json(&slots);
         runtime
@@ -854,6 +893,51 @@ fn right_clicking_a_block_runs_its_1_20_1_code_on_horizons_blocks() {
                 .expect("asking"),
             None,
             "closed once out of reach"
+        );
+
+        // Phase 5: breaking the pot runs 1.20.1's own break (ServerPlayerGameMode.destroyBlock):
+        // the carrots it holds come out with it, and the pot drops itself by its own loot
+        // table. Horizon keeps the block entity as the mod's opaque NBT, so before this the
+        // carrots were simply gone with the block.
+        let full_pot = WithEntity {
+            block: OneBlock(
+                "farmersdelight:cooking_pot[facing=north,support=none,waterlogged=false]".into(),
+                [0, 64, 0],
+            ),
+            entity: pot_with_carrots,
+        };
+        let broke = runtime
+            .break_block(
+                &full_pot,
+                &horizon_jvm_remote::mirror120::BreakBlock {
+                    uuid: empty_hand.uuid.clone(),
+                    name: empty_hand.name.clone(),
+                    dimension: "minecraft:overworld".into(),
+                    pos: [0, 64, 0],
+                    state: String::new(),
+                    held: String::new(),
+                    creative: false,
+                    stance: None,
+                    how: horizon_jvm_remote::mirror120::BreakHow::Theirs,
+                },
+            )
+            .expect("breaking the pot");
+        assert!(broke.goes, "{broke:?}");
+        assert!(
+            broke
+                .set
+                .iter()
+                .any(|s| s.pos == [0, 64, 0] && s.state.starts_with("minecraft:air")),
+            "the pot is gone: {broke:?}"
+        );
+        let dropped: Vec<&str> = broke.spawned.iter().map(|d| d.snbt.as_str()).collect();
+        assert!(
+            dropped.iter().any(|d| d.contains("carrot")),
+            "its carrots drop: {dropped:?}"
+        );
+        assert!(
+            dropped.iter().any(|d| d.contains("cooking_pot")),
+            "and the pot itself: {dropped:?}"
         );
     } else {
         eprintln!("no Farmer's Delight in HORIZON_120_MODS: the stove is skipped");

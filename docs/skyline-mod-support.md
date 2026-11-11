@@ -20,13 +20,13 @@ from the mod's side rather than the bridge's.
 | What the mod does | Status | Where |
 |---|---|---|
 | Register blocks, items, recipes, tags, creative tabs, translations | **done** | phase 2, `content120.rs` |
-| Its blocks place, break and drop themselves | **done** | phase 2 |
+| Its blocks place, break and drop themselves | **done** | phase 2; phase 5a: broken by their own code, contents and all, facing the placer |
 | Right-click behaviour runs the mod's own code | **done** | phase 3a |
 | Block entities: state kept, saved, reloaded, ticked | **done** | phase 3b |
 | Block shape for aiming, where the block entity decides it | **done** | phase 3d |
 | Its blocks drawn from the models in its jar | **done** | phase 2 |
 | Its blocks drawn by code (no blockstate file) | **not yet** | phase 7 |
-| **Screens: machines, backpacks, anything you right-click into** | **partial** | phase 4: the mod's own screen opens on the player's game and takes clicks, shift-clicks, drags and keys, with counts and tooltips; screens with vanilla's recipe book work (it shows no recipes yet); tested in the runtime on both Farmer's Delights, not yet in a real game; tooltip images and shader tints missing |
+| **Screens: machines, backpacks, anything you right-click into** | **partial** | phase 4: the mod's own screen opens on the player's game and takes clicks, shift-clicks, drags and keys, with counts and tooltips; screens with vanilla's recipe book work (it shows no recipes yet); checked in a real game (Farmer's Delight's cooking pot); tooltip images and shader tints missing |
 | Items with their own use behaviour (tools, food, wands) | **unverified** | — |
 | Sounds the mod ships | **unverified** | — |
 | Particles the mod spawns | **not yet** | phase 5 |
@@ -39,7 +39,7 @@ not a working machine, and almost every content mod has at least one screen.
 | What the mod does | Status | Where |
 |---|---|---|
 | Mod packets between server and client | **not yet** | phase 5 |
-| Fabric API events (block break, player tick, server start…) | **not yet** | phase 5 |
+| Fabric API events (block break, player tick, server start…) | **partial** | phase 5a: block breaks (a mod's block broken by its own code, break events on every block); tick and lifecycle events next |
 | Items moving between mod blocks and Horizon's (hoppers, pipes) | **partial** | phase 3e: Horizon's hoppers and droppers feed and empty mods' blocks (Transfer API), checked in a real game; mods' own pipes into Horizon's containers unverified |
 | Energy (Team Reborn Energy) and fluids | **not yet** | phase 3 |
 | Mod mobs and their AI | **not yet** | phase 6 |
@@ -70,7 +70,7 @@ A 1.20.1 mod is **fully supported** when all of this is true of it:
 2. Its content is in the game: blocks, items, recipes, tags, creative tabs, names. *(done)*
 3. Its blocks behave: placing, breaking, clicking, ticking, keeping state. *(done)*
 4. Its blocks look right, including ones drawn by code. *(phase 7)*
-5. Its screens open, draw, and respond to clicks and keys. *(phase 4: done in the runtime; the in-game check is next)*
+5. Its screens open, draw, and respond to clicks and keys. *(phase 4: done, checked in a real game)*
 6. Its messages reach the player and back. *(phase 5)*
 7. Its items and fluids move through other mods' and Horizon's containers. *(phase 3: items through Horizon's hoppers done; fluids, energy and mods' pipes next)*
 8. Its mobs spawn, move, fight and are fought. *(phase 6)*
@@ -78,9 +78,8 @@ A 1.20.1 mod is **fully supported** when all of this is true of it:
 10. Its client bits work: keys, HUD, config. *(phase 4 + 5)*
 11. None of the above costs more than a few frames a second. *(measured per phase)*
 
-Points 1–3 are done. Point 5 works in the runtime test -- a screen opens, draws, and takes
-the player's clicks and keys -- and needs its first check in a real game. Points 4 and 6–10
-are the rest of the roadmap.
+Points 1–3 and 5 are done. Point 7 is partly done (items through Horizon's hoppers). Points 4,
+6 and 8–10 are the rest of the roadmap.
 
 ## How to find out where a mod stands
 

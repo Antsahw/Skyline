@@ -356,6 +356,29 @@ clicks pass until then). A click on a block of a 1.20.1 mod's namespace, or with
 their items, goes to it at `useItemOn`'s head (`java120_use_block`, beside the 26.3 bridge's
 hook in `lan_actions.rs`); what it set and what it did to the held stack land in Horizon.
 
+## Phase 5a status: breaking blocks, and where the player stands (2026-11-11)
+
+- **A 1.20.1 mod's block is broken by 1.20.1's own code**: `ServerPlayerGameMode.destroyBlock`
+  on the mirror (`Mirror120.breakBlock`, `game/java_mods_120/breaking.rs`), from the same point
+  in Horizon's break as the 26.3 bridge's hook. The block's `playerWillDestroy`, its own loot
+  table with the real tool (enchantments go down: `stack_to_120`), the tool's wear and Fabric's
+  `PlayerBlockBreakEvents` (fired by Fabric itself) all run as in 1.20.1.
+- **Any other block** is still Horizon's to break, with `PlayerBlockBreakEvents.BEFORE` (a
+  listener may stop it, and then hears `CANCELED`) and `AFTER` around it, so a 1.20.1 mod that
+  listens for breaks hears vanilla blocks too.
+- **A mod's block hears it is going.** The mirror's `setBlock` now runs the old block's
+  `onRemove`, as vanilla's chunk does, for mods' blocks (Horizon runs vanilla blocks' removal
+  itself). That is where a container block drops what it holds: breaking a cooking pot with
+  five carrots in it drops the carrots and the pot, where before the carrots vanished.
+- **The player stands where they stand.** A click put the mirror player's eyes at the point
+  clicked, always looking south, so every 1.20.1 block placed faced the same way (all of
+  Farmer's Delight's stoves faced north). Clicks and breaks now carry the player's feet, yaw
+  and pitch (`Stance`): a stove faces whoever places it.
+
+The runtime test covers both facings, and the pot broken with carrots in it, on both
+Farmer's Delights. Not done: a block's `onPlace` on the mirror; the player's hunger from
+breaking a mod's block (1.20.1's exhaustion lands on the mirror player).
+
 ## Phase 3e status: hoppers feed and empty mods' blocks (2026-11-11)
 
 Horizon's hoppers and droppers move items into and out of a 1.20.1 mod's block the way Fabric
@@ -761,7 +784,8 @@ NeoForge could run beside Fabric 26.3 rather than in its place.
 4. **gui120.** Started (Phase 4 status): menus open, a mod's own screen is shown in the game and
    takes clicks and keys, with counts and tooltips. Next: the first check in a real game,
    tooltip images, `setColor` tints, real text widths, a stack's components into the runtime.
-5. **Events and networking.** Fabric API 1.20.1 events at the bridge's hook points, mod packets.
+5. **Events and networking.** 5a done: block breaks (above). Next: tick and lifecycle events,
+   players joining, mod packets.
 6. **Entities and worldgen.** Data-driven registries from a real server load (mods' biomes
    through Fabric's biome API show up only there).
 7. **In-world rendering.** `VertexConsumer` capture, then a GL recorder if needed.

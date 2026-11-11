@@ -80,6 +80,77 @@ pub struct UseBlock {
     pub count: i32,
     pub damage: i32,
     pub creative: bool,
+    /// Where the player's feet are, and which way they look (yaw, pitch, in degrees as
+    /// Minecraft counts them). A block placed faces the way they look, and is placed only
+    /// where they don't stand. `None`: the mirror player's eyes go to `hit`, looking south.
+    pub stance: Option<Stance>,
+}
+
+/// Where a player stands and looks.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Stance {
+    pub feet: [f64; 3],
+    pub yaw: f32,
+    pub pitch: f32,
+}
+
+fn stance_values(stance: Option<Stance>) -> [Value; 5] {
+    match stance {
+        Some(s) => [
+            Value::F64(s.feet[0]),
+            Value::F64(s.feet[1]),
+            Value::F64(s.feet[2]),
+            Value::F64(f64::from(s.yaw)),
+            Value::F64(f64::from(s.pitch)),
+        ],
+        None => [
+            Value::F64(f64::NAN),
+            Value::F64(f64::NAN),
+            Value::F64(f64::NAN),
+            Value::F64(f64::NAN),
+            Value::F64(f64::NAN),
+        ],
+    }
+}
+
+/// A player's break of a block ([`Runtime120::break_block`]).
+#[derive(Clone, Debug)]
+pub struct BreakBlock {
+    pub uuid: String,
+    pub name: String,
+    pub dimension: String,
+    pub pos: [i32; 3],
+    /// The block that was there, for [`BreakHow::After`] (the block is gone by then).
+    pub state: String,
+    /// The held item as 1.20.1 item NBT, "" for nothing: a tool's enchantments decide the
+    /// drops (silk touch, fortune).
+    pub held: String,
+    pub creative: bool,
+    pub stance: Option<Stance>,
+    pub how: BreakHow,
+}
+
+/// What a [`BreakBlock`] asks of the mods.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BreakHow {
+    /// A 1.20.1 mod's block: 1.20.1's own `ServerPlayerGameMode.destroyBlock` breaks it.
+    Theirs,
+    /// Another block Horizon is about to break: Fabric's `PlayerBlockBreakEvents.BEFORE`.
+    Before,
+    /// Another block Horizon just broke: `PlayerBlockBreakEvents.AFTER`.
+    After,
+}
+
+/// What a break did.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Broke {
+    /// The break goes ahead (or went); false when a mod stopped it.
+    pub goes: bool,
+    /// The held item after, as 1.20.1 item NBT ("" for nothing): worn by the break.
+    pub held: String,
+    pub set: Vec<SetBlock>,
+    pub block_entities: Vec<SetBlockEntity>,
+    pub spawned: Vec<SpawnItem>,
 }
 
 /// What a tick of the mods' block entities did.
@@ -446,6 +517,54 @@ impl Runtime120 {
         })
     }
 
+    /// A player breaks a block ([`BreakBlock`]): a 1.20.1 mod's, by 1.20.1's own code, or
+    /// another, with Fabric's break events around Horizon's own break.
+    pub fn break_block(&mut self, world: &dyn World120, b: &BreakBlock) -> Result<Broke, String> {
+        let how = match b.how {
+            BreakHow::Theirs => 0,
+            BreakHow::Before => 1,
+            BreakHow::After => 2,
+        };
+        let args: Vec<Value> = [
+            Value::Str(b.uuid.clone()),
+            Value::Str(b.name.clone()),
+            Value::Str(b.dimension.clone()),
+            Value::I32(b.pos[0]),
+            Value::I32(b.pos[1]),
+            Value::I32(b.pos[2]),
+            Value::Str(b.state.clone()),
+            Value::Str(b.held.clone()),
+            Value::Bool(b.creative),
+        ]
+        .into_iter()
+        .chain(stance_values(b.stance))
+        .chain([Value::I32(how)])
+        .collect();
+        let mut handler = InWorld {
+            world,
+            set: Vec::new(),
+            block_entities: Vec::new(),
+            spawned: Vec::new(),
+            log: self.log.clone(),
+        };
+        let values = self.call_values("breakBlock", &args, &mut handler)?;
+        let goes = match values.first() {
+            Some(Value::I32(code)) => *code != 0,
+            other => return Err(format!("breakBlock: answer 0 is {other:?}")),
+        };
+        Ok(Broke {
+            goes,
+            held: values
+                .get(1)
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned(),
+            set: handler.set,
+            block_entities: handler.block_entities,
+            spawned: handler.spawned,
+        })
+    }
+
     /// A Horizon hopper (or dropper) pushes one item into the mods' block at `pos` through
     /// `face` (`Direction.get3DDataValue`: the side of the block the hopper touches), by the
     /// block's item storage (Fabric Transfer API's `ItemStorage.SIDED`, as its patch of
@@ -611,7 +730,10 @@ impl Runtime120 {
             Value::I32(used.count),
             Value::I32(used.damage),
             Value::Bool(used.creative),
-        ];
+        ]
+        .into_iter()
+        .chain(stance_values(used.stance))
+        .collect::<Vec<_>>();
         let mut handler = InWorld {
             world,
             set: Vec::new(),

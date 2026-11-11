@@ -328,6 +328,7 @@ public final class Mirror120 {
         long key = pos.asLong();
         Map<Long, BlockEntity> made = ENTITIES.get(level);
         BlockEntity known = made == null ? null : made.get(key);
+        if (known != null && key == removing) return known;
         if (known != null) {
             // Still the block it belongs to: the same object, as a chunk would keep it. The
             // state can still have moved on under it (a furnace lighting), so it is told.
@@ -488,6 +489,13 @@ public final class Mirror120 {
         }
     }
 
+    /**
+     * The position whose old block is being told it goes (setBlock's onRemove): its block
+     * entity is still there for it, whatever block the position holds now, as a chunk keeps it
+     * until the block's own onRemove takes it away.
+     */
+    private static long removing = Long.MIN_VALUE;
+
     /** Level.setBlock of a mirror level: kept for this call and sent to Horizon. */
     public static boolean setBlock(Level level, BlockPos pos, BlockState state, int flags) {
         if (level.isOutsideBuildHeight(pos)) return false;
@@ -496,6 +504,21 @@ public final class Mirror120 {
         long key = pos.asLong();
         WRITES.computeIfAbsent(level, l -> new HashMap<>()).put(key, state);
         event.accept("setBlock", new Object[] {dimension(level), pos.getX(), pos.getY(), pos.getZ(), BlockStateParser.serialize(state), flags});
+        // The old block hears it is going, as vanilla's LevelChunk.setBlockState tells it
+        // (BlockState.onRemove, after the new state is in): a mod's container block drops what
+        // it holds there (a cooking pot's ingredients) and its block entity goes. Only a mod's
+        // block: Horizon runs a vanilla block's removal itself, and a chest told twice would
+        // drop its contents twice.
+        if (!before.isAir() && !"minecraft".equals(BuiltInRegistries.BLOCK.getKey(before.getBlock()).getNamespace())) {
+            removing = key;
+            try {
+                before.onRemove(level, pos, state, (flags & 64) != 0);
+            } catch (RuntimeException | LinkageError e) {
+                log("the block at " + pos.toShortString() + " (" + before + ") failed as it went: " + e);
+            } finally {
+                removing = Long.MIN_VALUE;
+            }
+        }
         // The block entity the new block has: vanilla's LevelChunk.setBlockState makes it, and
         // a mirror level has no chunks to do it. Made here, so the mod's own code reads it back
         // in this call (a cooking pot it just placed) and Horizon gets it when the call ends.
@@ -570,15 +593,13 @@ public final class Mirror120 {
      * consumed with a swing) and the held item after: id, count, damage.
      */
     public static Object[] useBlock(String uuid, String name, String dimension, int x, int y, int z, int face,
-            double hx, double hy, double hz, int hand, String item, int count, int damage, boolean creative) {
+            double hx, double hy, double hz, int hand, String item, int count, int damage, boolean creative,
+            double px, double py, double pz, double yaw, double pitch) {
         begin();
         ServerLevel level = level(dimension);
         ServerPlayer player = player(uuid, name, level);
-        player.setPos(hx, hy - 1.62, hz);
-        GameType mode = creative ? GameType.CREATIVE : GameType.SURVIVAL;
-        if (player.gameMode.getGameModeForPlayer() != mode) {
-            ((dev.horizonlab.platform120.mixin.GameModeAccess) player.gameMode).horizon$setGameMode(mode, player.gameMode.getGameModeForPlayer());
-        }
+        stand(player, px, py, pz, yaw, pitch, hx, hy, hz);
+        mode(player, creative);
         InteractionHand h = hand == 1 ? InteractionHand.OFF_HAND : InteractionHand.MAIN_HAND;
         ItemStack stack = stack(item, count, damage);
         player.setItemInHand(h, stack);
@@ -600,6 +621,110 @@ public final class Mirror120 {
         String[] menu = Screens120.openedSince(player, menuBefore, clicked);
         return new Object[] {code, BuiltInRegistries.ITEM.getKey(after.getItem()).toString(), after.getCount(), after.getDamageValue(),
                 menu == null ? "" : menu[0], menu == null ? "" : menu[1]};
+    }
+
+    /**
+     * The mirror player where Horizon's player is: feet at (px, py, pz), looking (yaw, pitch)
+     * in degrees as Minecraft counts them. A block placed faces the way they look
+     * (BlockPlaceContext.getHorizontalDirection), and a block is placed only where they don't
+     * stand. NaN for a position Horizon didn't give: the eyes at (hx, hy, hz), the old answer.
+     */
+    private static void stand(ServerPlayer player, double px, double py, double pz, double yaw, double pitch,
+            double hx, double hy, double hz) {
+        if (Double.isNaN(px) || Double.isNaN(py) || Double.isNaN(pz)) {
+            player.setPos(hx, hy - 1.62, hz);
+        } else {
+            player.setPos(px, py, pz);
+        }
+        if (!Double.isNaN(yaw) && !Double.isNaN(pitch)) {
+            player.setYRot((float) yaw);
+            player.setXRot((float) pitch);
+            player.setYHeadRot((float) yaw);
+            player.yRotO = (float) yaw;
+            player.xRotO = (float) pitch;
+        }
+    }
+
+    private static void mode(ServerPlayer player, boolean creative) {
+        GameType mode = creative ? GameType.CREATIVE : GameType.SURVIVAL;
+        if (player.gameMode.getGameModeForPlayer() != mode) {
+            ((dev.horizonlab.platform120.mixin.GameModeAccess) player.gameMode).horizon$setGameMode(mode, player.gameMode.getGameModeForPlayer());
+        }
+    }
+
+    /** {@link #breakBlock}: the mods' block, broken by 1.20.1's own code. */
+    static final int BREAK_THEIRS = 0;
+    /** {@link #breakBlock}: another block, about to be broken by Horizon. */
+    static final int BREAK_BEFORE = 1;
+    /** {@link #breakBlock}: another block, just broken by Horizon. */
+    static final int BREAK_AFTER = 2;
+
+    /**
+     * A player of Horizon's breaks the block at (x, y, z), holding `held` (1.20.1 item NBT, ""
+     * for nothing), standing and looking as {@link #stand} says. `how`:
+     *
+     * <ul>
+     *   <li>{@link #BREAK_THEIRS}: a 1.20.1 mod's block, broken by vanilla's
+     *       ServerPlayerGameMode.destroyBlock, so the mod's own code runs as in 1.20.1: Fabric's
+     *       PlayerBlockBreakEvents (BEFORE, AFTER, CANCELED, fired by Fabric itself), the block's
+     *       playerWillDestroy, its block entity's contents dropped as it goes (a cooking pot's
+     *       ingredients), its own loot table with the real tool, the tool's wear. What it set
+     *       and dropped goes back as every call's changes do.
+     *   <li>{@link #BREAK_BEFORE}: any other block, which Horizon breaks: only Fabric's
+     *       PlayerBlockBreakEvents.BEFORE, so a 1.20.1 mod's listener may stop it (and then
+     *       hears CANCELED, as Fabric does).
+     *   <li>{@link #BREAK_AFTER}: the same block once Horizon broke it (`state` is what it was):
+     *       PlayerBlockBreakEvents.AFTER.
+     * </ul>
+     *
+     * Gives 1 when the break goes ahead (or went), 0 when a mod stopped it; and the held item
+     * after, as 1.20.1 item NBT ("" for nothing).
+     */
+    public static Object[] breakBlock(String uuid, String name, String dimension, int x, int y, int z, String state,
+            String held, boolean creative, double px, double py, double pz, double yaw, double pitch, int how) {
+        begin();
+        try {
+            ServerLevel level = level(dimension);
+            ServerPlayer player = player(uuid, name, level);
+            stand(player, px, py, pz, yaw, pitch, x + 0.5, y + 0.5, z + 0.5);
+            mode(player, creative);
+            player.setItemInHand(InteractionHand.MAIN_HAND, heldStack(held));
+            BlockPos pos = new BlockPos(x, y, z);
+            boolean goes;
+            switch (how) {
+                case BREAK_THEIRS -> goes = player.gameMode.destroyBlock(pos);
+                case BREAK_BEFORE -> {
+                    BlockState was = level.getBlockState(pos);
+                    var entity = level.getBlockEntity(pos);
+                    goes = net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents.BEFORE.invoker()
+                            .beforeBlockBreak(level, player, pos, was, entity);
+                    if (!goes) {
+                        net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents.CANCELED.invoker()
+                                .onBlockBreakCanceled(level, player, pos, was, entity);
+                    }
+                }
+                default -> {
+                    net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents.AFTER.invoker()
+                            .afterBlockBreak(level, player, pos, state(state), null);
+                    goes = true;
+                }
+            }
+            ItemStack after = player.getMainHandItem();
+            return new Object[] {goes ? 1 : 0, after.isEmpty() ? "" : after.save(new net.minecraft.nbt.CompoundTag()).toString()};
+        } finally {
+            finish();
+        }
+    }
+
+    /** A held item from 1.20.1 item NBT; empty for "" or one that doesn't read. */
+    private static ItemStack heldStack(String snbt) {
+        if (snbt == null || snbt.isEmpty()) return ItemStack.EMPTY;
+        try {
+            return ItemStack.of(net.minecraft.nbt.TagParser.parseTag(snbt));
+        } catch (com.mojang.brigadier.exceptions.CommandSyntaxException | RuntimeException e) {
+            log("a held item didn't read (" + e.getMessage() + "): " + snbt);
+            return ItemStack.EMPTY;
+        }
     }
 
     /**

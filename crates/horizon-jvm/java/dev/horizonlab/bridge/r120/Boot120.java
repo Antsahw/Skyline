@@ -106,6 +106,9 @@ public final class Boot120 implements RemoteRuntime {
             case "screenFrame":
                 // A frame of the screen of a player's open menu (Mirror120, Screens120).
                 return mirror("screenFrame", args);
+            case "breakBlock":
+                // A player of Horizon's breaks a block (Mirror120.breakBlock).
+                return mirror("breakBlock", args);
             case "hopperInsert":
             case "hopperExtract":
                 // Horizon's hoppers and droppers at a mod's block (Mirror120, Hoppers120).

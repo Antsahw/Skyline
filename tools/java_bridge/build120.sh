@@ -44,19 +44,19 @@ if [ ! -f "$NAMED" ]; then
   "${REMAP[@]}" remap "$MAPPINGS" official named "$(field game_jar)" "$NAMED" $(echo "$LIBS" | tr ':' ' ') 2>&1 | grep -v '^\[WARN\]' || true
   [ -f "$NAMED" ] || { echo "the compile jar failed"; exit 1; }
 fi
-# The Fabric API modules platform120 calls (the Transfer API, for Horizon's hoppers), remapped
+# The Fabric API modules platform120 calls (the Transfer API for Horizon's hoppers, the events
+# it fires), remapped
 # to Mojang's names to compile against, as Loom remaps a mod's dependencies; once, like the
 # compile jar. Compile-only: at run time the loader's own Fabric API is there.
 API_NAMED=$DEV/fabric-api-named
-API_MODULES="fabric-api-base fabric-api-lookup-api-v1 fabric-transfer-api-v1"
-if [ ! -f "$API_NAMED/fabric-transfer-api-v1.jar" ]; then
-  mkdir -p "$API_NAMED"
-  for m in $API_MODULES; do
-    unzip -p "$(field fabric_api)" "META-INF/jars/$m-*.jar" > "$TMP/$m.jar"
-    "${REMAP[@]}" remap "$MAPPINGS" intermediary named "$TMP/$m.jar" "$API_NAMED/$m.jar" "$NAMED" 2>&1 | grep -v '^\[WARN\]' || true
-    [ -s "$API_NAMED/$m.jar" ] || { echo "remapping Fabric API's $m failed"; exit 1; }
-  done
-fi
+API_MODULES="fabric-api-base fabric-api-lookup-api-v1 fabric-transfer-api-v1 fabric-events-interaction-v0 fabric-lifecycle-events-v1"
+mkdir -p "$API_NAMED"
+for m in $API_MODULES; do
+  [ -s "$API_NAMED/$m.jar" ] && continue
+  unzip -p "$(field fabric_api)" "META-INF/jars/$m-*.jar" > "$TMP/$m.jar"
+  "${REMAP[@]}" remap "$MAPPINGS" intermediary named "$TMP/$m.jar" "$API_NAMED/$m.jar" "$NAMED" 2>&1 | grep -v '^\[WARN\]' || true
+  [ -s "$API_NAMED/$m.jar" ] || { echo "remapping Fabric API's $m failed"; exit 1; }
+done
 API=$(for m in $API_MODULES; do printf '%s:' "$API_NAMED/$m.jar"; done)
 # 3. Compile.
 "${JAVAC[@]}" -cp "$NAMED:$LIBS:$MIXIN:$API" -d "$TMP/classes" $(find "$SRC/src" -name '*.java')

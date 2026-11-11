@@ -352,6 +352,32 @@ impl World120 for Level<'_, '_> {
 }
 
 impl super::Game<'_> {
+    /// The player acting now, as the runtime knows them (`UUID.toString()`).
+    fn java120_actor(&self) -> String {
+        let uuid = self.lan_acting_uuid.unwrap_or_else(|| {
+            self.level.player_uuid.map_or_else(
+                || horizon_protocol::crypto::offline_uuid(super::chat::PLAYER_NAME),
+                |[a, b, c, d]| {
+                    (u128::from(a as u32) << 96)
+                        | (u128::from(b as u32) << 64)
+                        | (u128::from(c as u32) << 32)
+                        | u128::from(d as u32)
+                },
+            )
+        });
+        uuid_string(uuid)
+    }
+
+    /// Where the player acting now stands and looks.
+    fn java120_stance(&self) -> Option<horizon_jvm_remote::mirror120::Stance> {
+        let p = self.player.as_ref()?;
+        Some(horizon_jvm_remote::mirror120::Stance {
+            feet: [p.position.x, p.position.y, p.position.z],
+            yaw: self.yaw,
+            pitch: self.pitch,
+        })
+    }
+
     /// The player acting now right-clicks the block at `pos` (face `face`, vanilla's
     /// `Direction` id, hit at `point`): when the block or the held item is a 1.20.1 mod's, the
     /// mods' code runs it (vanilla 1.20.1's useItemOn), and what it set and did to the held
@@ -395,19 +421,8 @@ impl super::Game<'_> {
             }
             trace120!("{pos:?}: {clicked} goes to the mods' code");
         }
-        let uuid = self.lan_acting_uuid.unwrap_or_else(|| {
-            self.level.player_uuid.map_or_else(
-                || horizon_protocol::crypto::offline_uuid(super::chat::PLAYER_NAME),
-                |[a, b, c, d]| {
-                    (u128::from(a as u32) << 96)
-                        | (u128::from(b as u32) << 64)
-                        | (u128::from(c as u32) << 32)
-                        | u128::from(d as u32)
-                },
-            )
-        });
         let request = UseBlock {
-            uuid: uuid_string(uuid),
+            uuid: self.java120_actor(),
             name: self.acting_player_name().to_owned(),
             dimension: self.dim.id().to_owned(),
             pos,
@@ -421,6 +436,7 @@ impl super::Game<'_> {
             count: held.as_ref().map_or(0, |h| h.count as i32),
             damage: held.as_ref().map_or(0, |h| h.damage as i32),
             creative: self.mode == horizon_client::command::args::GameMode::Creative,
+            stance: self.java120_stance(),
         };
         let used = {
             // A click is rare and a person is waiting on it, so a runtime that is busy with
@@ -705,5 +721,7 @@ mod tests {
     }
 }
 
+mod breaking;
+pub(in crate::game) use breaking::Break120;
 mod hoppers;
 mod screens;

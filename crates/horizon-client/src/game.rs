@@ -6378,6 +6378,13 @@ impl Game<'_> {
         let Some(after_java) = self.java_break(pos, state).horizon() else {
             return Ok(());
         };
+        // The same for the 1.20.1 mods: their own block is broken by their code; another is
+        // Horizon's to break, with their break events around it.
+        #[cfg(feature = "java-mods-120")]
+        let after_120 = match self.java120_break(pos, state) {
+            java_mods_120::Break120::Stopped | java_mods_120::Break120::Done => return Ok(()),
+            java_mods_120::Break120::Horizon { after } => after,
+        };
         if !self.can_use_game_master_blocks()
             && is_game_master_block(&self.res.facts().get(state).name)
         {
@@ -6551,6 +6558,10 @@ impl Game<'_> {
         self.process_level_events()?;
         if after_java && removed {
             self.java_after_break(pos, broken);
+        }
+        #[cfg(feature = "java-mods-120")]
+        if after_120 && removed {
+            self.java120_after_break(pos, broken);
         }
         Ok(())
     }
