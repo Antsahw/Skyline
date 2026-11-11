@@ -725,3 +725,4 @@ mod breaking;
 pub(in crate::game) use breaking::Break120;
 mod hoppers;
 mod screens;
+mod ticks;

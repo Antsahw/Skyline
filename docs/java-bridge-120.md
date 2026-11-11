@@ -356,6 +356,27 @@ clicks pass until then). A click on a block of a 1.20.1 mod's namespace, or with
 their items, goes to it at `useItemOn`'s head (`java120_use_block`, beside the 26.3 bridge's
 hook in `lan_actions.rs`); what it set and what it did to the held stack land in Horizon.
 
+## Phase 5b status: the server starts and ticks for the mods (2026-11-11)
+
+- **Fabric API's server events** fire in the runtime as a real server fires them
+  (`Events120`): `ServerLifecycleEvents.SERVER_STARTING`, each level's
+  `ServerWorldEvents.LOAD`, `SERVER_STARTED` (once, on the first tick), then every tick
+  `ServerTickEvents` START/END of the server tick and of each level's, paced by Horizon's
+  server (`game/java_mods_120/ticks.rs`). Wired Redstone's GraphLib ticks its graphs this way.
+- **Each mod's listener on its own.** Not through the event's invoker: a listener that throws
+  here is said once and skipped in that place, and the next mod's still runs.
+- **A quiet mod set costs nothing**: when no mod listens to ticks, Horizon asks again only
+  every 5 seconds, to notice a listener registered later.
+- **More of a server for the listeners to find**: the server's level list (overworld(),
+  getLevel, getAllLevels), its tick count (Horizon's game time: a mod doing something every
+  20 ticks does it every second), its player list (Horizon's players, as they act), its folder
+  (`getWorldPath`: the runtime's own, where Porting Lib keeps its server configs) and
+  server.properties at vanilla's defaults (nothing written).
+
+Checked on three mod sets: no listener fails on Anthony's (Farmer's Delight Refabricated,
+Wired Redstone). On the 15-mod set, Supplementaries' server-started listener still fails: it
+asks the level's world generator, which is phase 6.
+
 ## Phase 5a status: breaking blocks, and where the player stands (2026-11-11)
 
 - **A 1.20.1 mod's block is broken by 1.20.1's own code**: `ServerPlayerGameMode.destroyBlock`
@@ -784,8 +805,8 @@ NeoForge could run beside Fabric 26.3 rather than in its place.
 4. **gui120.** Started (Phase 4 status): menus open, a mod's own screen is shown in the game and
    takes clicks and keys, with counts and tooltips. Next: the first check in a real game,
    tooltip images, `setColor` tints, real text widths, a stack's components into the runtime.
-5. **Events and networking.** 5a done: block breaks (above). Next: tick and lifecycle events,
-   players joining, mod packets.
+5. **Events and networking.** 5a done: block breaks. 5b done: lifecycle and tick events
+   (above). Next: players joining, mod packets.
 6. **Entities and worldgen.** Data-driven registries from a real server load (mods' biomes
    through Fabric's biome API show up only there).
 7. **In-world rendering.** `VertexConsumer` capture, then a GL recorder if needed.

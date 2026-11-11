@@ -16,4 +16,9 @@ public interface LevelStorageAccessAccess {
     @Mutable
     @Accessor("levelDirectory")
     void horizon$setLevelDirectory(LevelStorageSource.LevelDirectory directory);
+
+    /** The paths it has worked out (getLevelPath's cache): empty to begin with, as a new one's. */
+    @Mutable
+    @Accessor("resources")
+    void horizon$setResources(java.util.Map<net.minecraft.world.level.storage.LevelResource, java.nio.file.Path> resources);
 }

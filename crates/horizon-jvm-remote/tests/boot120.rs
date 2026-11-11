@@ -1120,6 +1120,18 @@ fn right_clicking_a_block_runs_its_1_20_1_code_on_horizons_blocks() {
         "the stone is placed on top: {placed:?}"
     );
 
+    // Phase 5b: a server tick. The mods hear the server start (once) and each tick through
+    // Fabric API's ServerTickEvents, each listener on its own; a mod that listens says so.
+    // GraphLib (inside Wired Redstone) ticks its graphs at the end of each level tick.
+    for time in 100..103 {
+        let ticked = runtime
+            .server_tick(&world, "minecraft:overworld", time)
+            .expect("a server tick");
+        if wired.is_some() {
+            assert!(ticked.listening, "GraphLib listens to ticks: {ticked:?}");
+        }
+    }
+
     // A mod telling the player about something must not break the mod. Vanilla's chest is the
     // same shape with no mod needed: its `use` opens a menu, which sends a packet through the
     // player's listener, and asks the piglins nearby to take offence, which asks the level for

@@ -39,7 +39,7 @@ not a working machine, and almost every content mod has at least one screen.
 | What the mod does | Status | Where |
 |---|---|---|
 | Mod packets between server and client | **not yet** | phase 5 |
-| Fabric API events (block break, player tick, server start…) | **partial** | phase 5a: block breaks (a mod's block broken by its own code, break events on every block); tick and lifecycle events next |
+| Fabric API events (block break, player tick, server start…) | **partial** | phase 5a/5b: block breaks (a mod's block broken by its own code, break events on every block), server start and level load, server and level ticks; players joining and mod packets next |
 | Items moving between mod blocks and Horizon's (hoppers, pipes) | **partial** | phase 3e: Horizon's hoppers and droppers feed and empty mods' blocks (Transfer API), checked in a real game; mods' own pipes into Horizon's containers unverified |
 | Energy (Team Reborn Energy) and fluids | **not yet** | phase 3 |
 | Mod mobs and their AI | **not yet** | phase 6 |

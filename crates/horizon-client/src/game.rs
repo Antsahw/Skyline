@@ -7976,6 +7976,8 @@ impl Game<'_> {
         self.tick_java120_block_entities();
         #[cfg(feature = "java-mods-120")]
         self.tick_java120_screens();
+        #[cfg(feature = "java-mods-120")]
+        self.tick_java120_events();
         self.tick_world(running)
     }
     /// What the tick runs after the local player's own update: effects, the

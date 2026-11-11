@@ -113,6 +113,16 @@ fn stance_values(stance: Option<Stance>) -> [Value; 5] {
     }
 }
 
+/// What a server tick's events did ([`Runtime120::server_tick`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ServerTicked {
+    /// Some mod listens to ticks (Fabric's `ServerTickEvents`).
+    pub listening: bool,
+    pub set: Vec<SetBlock>,
+    pub block_entities: Vec<SetBlockEntity>,
+    pub spawned: Vec<SpawnItem>,
+}
+
 /// A player's break of a block ([`Runtime120::break_block`]).
 #[derive(Clone, Debug)]
 pub struct BreakBlock {
@@ -511,6 +521,37 @@ impl Runtime120 {
         Ok(ScreenInput {
             open,
             slots,
+            set: handler.set,
+            block_entities: handler.block_entities,
+            spawned: handler.spawned,
+        })
+    }
+
+    /// One server tick of `dimension` at Horizon's game time: the mods hear it through Fabric
+    /// API's tick events (the server's start and level loads first, once). [`ServerTicked`]
+    /// says whether any mod listens to ticks at all: when none does, a caller can ask less
+    /// often.
+    pub fn server_tick(
+        &mut self,
+        world: &dyn World120,
+        dimension: &str,
+        game_time: i64,
+    ) -> Result<ServerTicked, String> {
+        let args = [Value::Str(dimension.to_owned()), Value::I64(game_time)];
+        let mut handler = InWorld {
+            world,
+            set: Vec::new(),
+            block_entities: Vec::new(),
+            spawned: Vec::new(),
+            log: self.log.clone(),
+        };
+        let values = self.call_values("serverTick", &args, &mut handler)?;
+        let listening = match values.first() {
+            Some(Value::Bool(b)) => *b,
+            other => return Err(format!("serverTick: answer 0 is {other:?}")),
+        };
+        Ok(ServerTicked {
+            listening,
             set: handler.set,
             block_entities: handler.block_entities,
             spawned: handler.spawned,

@@ -105,6 +105,13 @@ public final class Mirror120 {
         playerList = Allocate.make(DedicatedPlayerList.class);
         ((dev.horizonlab.platform120.mixin.MinecraftServerAccess) server).horizon$setPlayerList(playerList);
         ((dev.horizonlab.platform120.mixin.PlayerListAccess) playerList).horizon$setServer(server);
+        ((dev.horizonlab.platform120.mixin.PlayerListAccess) playerList).horizon$setPlayers(new java.util.concurrent.CopyOnWriteArrayList<>());
+        ((dev.horizonlab.platform120.mixin.PlayerListAccess) playerList).horizon$setPlayersByUUID(new java.util.concurrent.ConcurrentHashMap<>());
+        ((dev.horizonlab.platform120.mixin.MinecraftServerAccess) server).horizon$setLevels(SERVER_LEVELS);
+        ((dev.horizonlab.platform120.mixin.MinecraftServerAccess) server).horizon$setStorageSource(storage());
+        ((dev.horizonlab.platform120.mixin.DedicatedServerAccess) server).horizon$setSettings(
+                new net.minecraft.server.dedicated.DedicatedServerSettings(
+                        java.nio.file.Path.of("horizon-mirror", "server.properties")));
         // The registries as vanilla's WorldLoader makes them: the built-in ones, then the data
         // packs' worldgen and dimensions (vanilla's and the mods'), then the reloadable data:
         // recipes, loot, tags (bound into the registries: mods ask `state.is(BlockTags.CAMPFIRES)`),
@@ -168,7 +175,7 @@ public final class Mirror120 {
     }
 
     /** A level of Horizon's (`minecraft:overworld`), made once. */
-    static synchronized ServerLevel level(String dimension) {
+    private static synchronized ServerLevel makeLevel(String dimension) {
         setUp();
         return LEVELS.computeIfAbsent(dimension, d -> {
             ServerLevel level = Allocate.make(ServerLevel.class);
@@ -233,19 +240,55 @@ public final class Mirror120 {
             // ChunkMap's constructor, and without it the cable's first tick throws before it
             // can run. The save access is what those handlers ask for the folder to keep their
             // own files in; the mirror's is beside the level's.
-            var storage = Allocate.make(
-                    net.minecraft.world.level.storage.LevelStorageSource.LevelStorageAccess.class);
-            ((dev.horizonlab.platform120.mixin.LevelStorageAccessAccess) storage)
-                    .horizon$setLevelDirectory(
-                            new net.minecraft.world.level.storage.LevelStorageSource.LevelDirectory(
-                                    java.nio.file.Path.of("horizon-mirror")));
-            Constructed120.run(chunkMap, level, storage, net.minecraft.util.datafix.DataFixers.getDataFixer());
+            Constructed120.run(chunkMap, level, storage(), net.minecraft.util.datafix.DataFixers.getDataFixer());
             // What mods do at the end of Level's and ServerLevel's constructors, with the
             // arguments a server gives them (Lithium's height cache, ...).
             java.util.function.Supplier<net.minecraft.util.profiling.ProfilerFiller> profiler = () -> net.minecraft.util.profiling.InactiveProfiler.INSTANCE;
             Constructed120.run(level, worldData, key, registries, overworldType, profiler, server, java.util.List.of());
             return level;
         });
+    }
+
+    /**
+     * {@link #level(String)} with the level on the server's own list (overworld(), getLevel,
+     * getAllLevels find it) and, once the server has started, loaded as a server loads one
+     * (Fabric's ServerWorldEvents.LOAD).
+     */
+    static synchronized ServerLevel level(String dimension) {
+        boolean known = LEVELS.containsKey(dimension);
+        ServerLevel level = makeLevel(dimension);
+        if (!known) {
+            serverLevels().put(level.dimension(), level);
+            if (Events120.started()) Events120.loaded(server, level);
+        }
+        return level;
+    }
+
+    private static net.minecraft.world.level.storage.LevelStorageSource.LevelStorageAccess storage;
+
+    /**
+     * The save access a level's handlers, and the server's (getWorldPath: Porting Lib's
+     * server configs), ask for the folder to keep their own files in: the runtime's own
+     * `horizon-mirror`, never Horizon's world.
+     */
+    static synchronized net.minecraft.world.level.storage.LevelStorageSource.LevelStorageAccess storage() {
+        if (storage == null) {
+            storage = Allocate.make(net.minecraft.world.level.storage.LevelStorageSource.LevelStorageAccess.class);
+            ((dev.horizonlab.platform120.mixin.LevelStorageAccessAccess) storage)
+                    .horizon$setLevelDirectory(
+                            new net.minecraft.world.level.storage.LevelStorageSource.LevelDirectory(
+                                    java.nio.file.Path.of("horizon-mirror")));
+            ((dev.horizonlab.platform120.mixin.LevelStorageAccessAccess) storage)
+                    .horizon$setResources(new java.util.concurrent.ConcurrentHashMap<>());
+        }
+        return storage;
+    }
+
+    /** The server's own list of its levels (MinecraftServer.levels), the same map. */
+    private static final Map<ResourceKey<Level>, ServerLevel> SERVER_LEVELS = new java.util.LinkedHashMap<>();
+
+    private static Map<ResourceKey<Level>, ServerLevel> serverLevels() {
+        return SERVER_LEVELS;
     }
 
     /** Horizon's player as a ServerPlayer of `level`, made once (vanilla's constructor). */
@@ -260,9 +303,41 @@ public final class Mirror120 {
             player.connection = Allocate.make(
                     net.minecraft.server.network.ServerGamePacketListenerImpl.class);
             PLAYERS.put(id, player);
+            // On the server's player list, as a player who joined is: a mod's tick looking for
+            // the players (getPlayers, getPlayer by UUID) finds Horizon's.
+            playerList.getPlayers().add(player);
+            ((dev.horizonlab.platform120.mixin.PlayerListAccess) playerList).horizon$setPlayersByUUID(
+                    playersByUuid());
         }
         if (player.level() != level) player.setServerLevel(level);
         return player;
+    }
+
+    private static Map<UUID, ServerPlayer> playersByUuid() {
+        var map = new java.util.concurrent.ConcurrentHashMap<UUID, ServerPlayer>(PLAYERS);
+        return map;
+    }
+
+    /**
+     * One server tick of `dimension` at Horizon's game time `gameTime` (phase 5): the 1.20.1
+     * mods hear it through Fabric API's tick events (Events120), the server started first if it
+     * hasn't. The server's tick count is Horizon's, so a mod doing something every 20 ticks
+     * does it every second. Gives whether any mod listens to ticks: when none does, Horizon
+     * asks less often. What the mods' listeners set and dropped goes back as every call's does.
+     */
+    public static Object[] serverTick(String dimension, long gameTime) {
+        begin();
+        try {
+            ServerLevel level = level(dimension);
+            worldData.setGameTime(gameTime);
+            ((dev.horizonlab.platform120.mixin.MinecraftServerAccess) server).horizon$setTickCount((int) gameTime);
+            Events120.start(server, LEVELS.values());
+            if (!Events120.anyTickListeners()) return new Object[] {false};
+            Events120.tick(server, level, gameTime);
+            return new Object[] {true};
+        } finally {
+            finish();
+        }
     }
 
     /** The dimension a mirror level stands for. */

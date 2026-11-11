@@ -9,6 +9,7 @@
     "PlayerListAccess",
     "ServerChunkCacheAccess",
     "ChunkMapAccess",
+    "DedicatedServerAccess",
     "LevelStorageAccessAccess",
     "PlayerAccess",
     "ChunkHolderMixin",
