@@ -44,8 +44,22 @@ if [ ! -f "$NAMED" ]; then
   "${REMAP[@]}" remap "$MAPPINGS" official named "$(field game_jar)" "$NAMED" $(echo "$LIBS" | tr ':' ' ') 2>&1 | grep -v '^\[WARN\]' || true
   [ -f "$NAMED" ] || { echo "the compile jar failed"; exit 1; }
 fi
+# The Fabric API modules platform120 calls (the Transfer API, for Horizon's hoppers), remapped
+# to Mojang's names to compile against, as Loom remaps a mod's dependencies; once, like the
+# compile jar. Compile-only: at run time the loader's own Fabric API is there.
+API_NAMED=$DEV/fabric-api-named
+API_MODULES="fabric-api-base fabric-api-lookup-api-v1 fabric-transfer-api-v1"
+if [ ! -f "$API_NAMED/fabric-transfer-api-v1.jar" ]; then
+  mkdir -p "$API_NAMED"
+  for m in $API_MODULES; do
+    unzip -p "$(field fabric_api)" "META-INF/jars/$m-*.jar" > "$TMP/$m.jar"
+    "${REMAP[@]}" remap "$MAPPINGS" intermediary named "$TMP/$m.jar" "$API_NAMED/$m.jar" "$NAMED" 2>&1 | grep -v '^\[WARN\]' || true
+    [ -s "$API_NAMED/$m.jar" ] || { echo "remapping Fabric API's $m failed"; exit 1; }
+  done
+fi
+API=$(for m in $API_MODULES; do printf '%s:' "$API_NAMED/$m.jar"; done)
 # 3. Compile.
-"${JAVAC[@]}" -cp "$NAMED:$LIBS:$MIXIN" -d "$TMP/classes" $(find "$SRC/src" -name '*.java')
+"${JAVAC[@]}" -cp "$NAMED:$LIBS:$MIXIN:$API" -d "$TMP/classes" $(find "$SRC/src" -name '*.java')
 cp "$SRC/src/fabric.mod.json" "$SRC/src/horizon-platform120.mixins.json" "$TMP/classes/"
 mkdir -p "$TMP/classes/horizon"
 python3 -I - "$MAPPINGS" "$TMP/classes/horizon/classes-1.20.1.tsv" <<'PY'
@@ -63,5 +77,5 @@ PY
 (cd "$TMP/classes" && "$JAVA_HOME/bin/jar" cf "$TMP/platform120-named.jar" .)
 # 4. Remap to intermediary.
 # shellcheck disable=SC2046
-"${REMAP[@]}" remap "$MAPPINGS" named intermediary "$TMP/platform120-named.jar" "$OUT/platform120.jar" "$NAMED" $(echo "$MIXIN:$LIBS" | tr ':' ' ') 2>&1 | grep -v '^\[WARN\]'
+"${REMAP[@]}" remap "$MAPPINGS" named intermediary "$TMP/platform120-named.jar" "$OUT/platform120.jar" "$NAMED" $(echo "$MIXIN:$LIBS:$API" | tr ':' ' ') 2>&1 | grep -v '^\[WARN\]'
 echo "$OUT/platform120.jar"

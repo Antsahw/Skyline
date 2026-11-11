@@ -26,7 +26,7 @@ from the mod's side rather than the bridge's.
 | Block shape for aiming, where the block entity decides it | **done** | phase 3d |
 | Its blocks drawn from the models in its jar | **done** | phase 2 |
 | Its blocks drawn by code (no blockstate file) | **not yet** | phase 7 |
-| **Screens: machines, backpacks, anything you right-click into** | **partial** | phase 4: the mod's own screen opens on the player's game and takes clicks, shift-clicks, drags and keys, with counts and tooltips; tested in the runtime, not yet in a real game; tooltip images and shader tints missing |
+| **Screens: machines, backpacks, anything you right-click into** | **partial** | phase 4: the mod's own screen opens on the player's game and takes clicks, shift-clicks, drags and keys, with counts and tooltips; screens with vanilla's recipe book work (it shows no recipes yet); tested in the runtime on both Farmer's Delights, not yet in a real game; tooltip images and shader tints missing |
 | Items with their own use behaviour (tools, food, wands) | **unverified** | — |
 | Sounds the mod ships | **unverified** | — |
 | Particles the mod spawns | **not yet** | phase 5 |
@@ -40,7 +40,7 @@ not a working machine, and almost every content mod has at least one screen.
 |---|---|---|
 | Mod packets between server and client | **not yet** | phase 5 |
 | Fabric API events (block break, player tick, server start…) | **not yet** | phase 5 |
-| Items moving between mod blocks and Horizon's (hoppers, pipes) | **partial** | phase 3; Fabric Transfer API not yet |
+| Items moving between mod blocks and Horizon's (hoppers, pipes) | **partial** | phase 3e: Horizon's hoppers and droppers feed and empty mods' blocks (Transfer API), checked in a real game; mods' own pipes into Horizon's containers unverified |
 | Energy (Team Reborn Energy) and fluids | **not yet** | phase 3 |
 | Mod mobs and their AI | **not yet** | phase 6 |
 | Worldgen: ores, biomes, structures | **not yet** | phase 6 |
@@ -72,7 +72,7 @@ A 1.20.1 mod is **fully supported** when all of this is true of it:
 4. Its blocks look right, including ones drawn by code. *(phase 7)*
 5. Its screens open, draw, and respond to clicks and keys. *(phase 4: done in the runtime; the in-game check is next)*
 6. Its messages reach the player and back. *(phase 5)*
-7. Its items and fluids move through other mods' and Horizon's containers. *(phase 3 + 5)*
+7. Its items and fluids move through other mods' and Horizon's containers. *(phase 3: items through Horizon's hoppers done; fluids, energy and mods' pipes next)*
 8. Its mobs spawn, move, fight and are fought. *(phase 6)*
 9. Its worldgen appears in new chunks. *(phase 6)*
 10. Its client bits work: keys, HUD, config. *(phase 4 + 5)*

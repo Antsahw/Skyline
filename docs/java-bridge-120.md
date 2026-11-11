@@ -356,6 +356,30 @@ clicks pass until then). A click on a block of a 1.20.1 mod's namespace, or with
 their items, goes to it at `useItemOn`'s head (`java120_use_block`, beside the 26.3 bridge's
 hook in `lan_actions.rs`); what it set and what it did to the held stack land in Horizon.
 
+## Phase 3e status: hoppers feed and empty mods' blocks (2026-11-11)
+
+Horizon's hoppers and droppers move items into and out of a 1.20.1 mod's block the way Fabric
+Transfer API's patch of vanilla's hopper does: the block's `ItemStorage.SIDED` on the face the
+hopper touches, one item a move (platform120's `Hoppers120`, the 26.3 bridge's
+`HorizonHoppers` on 1.20.1's names). The block entity is the mod's own, kept by Horizon as
+opaque NBT; the item goes in or out through the mods' code and the NBT comes back changed, as
+every call's changes do.
+
+- Horizon's hopper code asks the 26.3 bridge first and then this one
+  (`machines/java.rs`, `mod_hopper_insert`/`mod_hopper_extract`), only where a 1.20.1 mod's
+  block is (`game/java_mods_120/hoppers.rs`). A face with no item storage (a stove's) is left
+  alone for 40 ticks rather than asked every hopper cooldown.
+- platform120 compiles against Fabric API's Transfer API now: `build120.sh` remaps the three
+  modules it calls (api-base, lookup, transfer) from intermediary to Mojang's names into the
+  cache, as Loom remaps a mod's dependencies. Compile-only; nothing of Fabric's is committed.
+- Checked in a real game with Farmer's Delight Refabricated: five carrots in a hopper over a
+  wooden basket go through the basket into the hopper under it. The runtime test pushes into
+  and pulls out of a basket on both Farmer's Delights, and checks a stove takes nothing.
+
+Not done here: the mods' own pipes and machines pushing into Horizon's containers are the
+mirror's world view of vanilla block entities, which already crosses; it has not been checked
+with a mod that does it. Fluids and energy (Team Reborn Energy) are the next transfer APIs.
+
 ## Phase 4 status: a mod's screen draws, shows and is used (2026-11-11)
 
 Right-clicking a Farmer's Delight cooking pot opens its menu, and its own `CookingPotScreen`
@@ -429,8 +453,19 @@ in a real game is pending.)
   hasn't got -- shows the item's name instead of losing the frame.
 - **Empty-slot outlines** (`textures/item/empty_*.png`, drawn by 1.20.1 from the blocks atlas)
   are packed into Horizon's screen atlas, so the pot's bowl outline can be drawn.
+- **A client player, for the recipe book.** Farmer's Delight Refabricated's pot screen (and
+  every furnace-like machine screen) lays out vanilla's recipe book, which reads the client's
+  own player: its recipe book, inventory and open menu. The headless client now has one,
+  allocated once with an empty recipe book of its own and the server player's inventory and
+  menus (`Screens120.clientPlayer`). The book shows no recipes: the player's unlocked recipes
+  don't cross yet.
+- **A title without `openMenu`.** Porting Lib's ports open their menus with their own extended
+  openMenu, which never passes vanilla's, so the title comes from the block entity clicked
+  when it names its menu (`MenuProvider.getDisplayName`).
 
-The test, on real Farmer's Delight jars (1.4.3 and Refabricated 2.5.7): the hotbar's carrots
+The test, on real Farmer's Delight jars (1.4.3 and Refabricated 2.5.7; the test's jar lookup
+missed Refabricated's file name at first and skipped it, so it ran on 1.4.3 only until the
+lookup was fixed): the hotbar's carrots
 and potatoes drawn in their slots 18 pixels apart, the count over the five carrots and their
 tooltip with the mouse on them; a shift-click moves the carrots into the pot (the block entity comes
 back holding them, the hotbar slot empty); a click picks the potatoes up and the next frame
@@ -720,8 +755,9 @@ NeoForge could run beside Fabric 26.3 rather than in its place.
 3. **machine120.** 3a done: right-clicks run the mods' code on a mirror `ServerLevel`. 3b done:
    block entities cross both ways, a mod's own kept as opaque NBT, and what a mod drops or
    ejects reaches Horizon, and their block entities tick and stay alive between ticks (all
-   above). Next: the chunk mirror and batched deltas ("Measured"), the downgrade tables, the
-   Fabric Transfer API on Horizon's containers.
+   above). 3e done: Horizon's hoppers and droppers feed and empty mods' blocks through the
+   Transfer API (above). Next: the chunk mirror and batched deltas ("Measured"), the
+   downgrade tables, fluids and energy.
 4. **gui120.** Started (Phase 4 status): menus open, a mod's own screen is shown in the game and
    takes clicks and keys, with counts and tooltips. Next: the first check in a real game,
    tooltip images, `setColor` tints, real text widths, a stack's components into the runtime.

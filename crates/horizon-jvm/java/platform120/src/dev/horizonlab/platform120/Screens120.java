@@ -18,6 +18,11 @@ public final class Screens120 {
             new java.util.HashMap<>();
 
     /** A menu opened for `player` with this title (ServerPlayerMenuMixin). */
+    /** Before a click: a title from an earlier menu is not this one's. */
+    public static void forgetTitle(net.minecraft.server.level.ServerPlayer player) {
+        TITLES.remove(player.getUUID());
+    }
+
     public static void opened(net.minecraft.server.level.ServerPlayer player,
             net.minecraft.network.chat.Component title) {
         TITLES.put(player.getUUID(), title);
@@ -30,7 +35,27 @@ public final class Screens120 {
      */
     public static String[] openedSince(net.minecraft.server.level.ServerPlayer player,
             net.minecraft.world.inventory.AbstractContainerMenu before) {
+        return openedSince(player, before, null);
+    }
+
+    /**
+     * {@link #openedSince(ServerPlayer, AbstractContainerMenu)}, with where the title comes
+     * from when the menu was opened without {@code ServerPlayer.openMenu}: `clicked`, the block
+     * entity clicked, when it names its menu ({@code MenuProvider.getDisplayName}). Porting
+     * Lib's ports (Farmer's Delight Refabricated) open theirs with their own extended
+     * openMenu, which never passes vanilla's.
+     */
+    public static String[] openedSince(net.minecraft.server.level.ServerPlayer player,
+            net.minecraft.world.inventory.AbstractContainerMenu before, Object clicked) {
         var menu = player.containerMenu;
+        if (menu != null && menu != before && menu != player.inventoryMenu
+                && !TITLES.containsKey(player.getUUID()) && clicked instanceof net.minecraft.world.MenuProvider provider) {
+            try {
+                TITLES.put(player.getUUID(), provider.getDisplayName());
+            } catch (RuntimeException e) {
+                // No title, then: the screen draws without one.
+            }
+        }
         if (menu == null || menu == before || menu == player.inventoryMenu) {
             return null;
         }
@@ -138,6 +163,7 @@ public final class Screens120 {
                     .invoke(constructor, menu, player.getInventory(), title);
             font();
             options();
+            clientPlayer(player);
             try {
                 screen.init(net.minecraft.client.Minecraft.getInstance(), width, height);
             } catch (RuntimeException | LinkageError e) {
@@ -194,6 +220,7 @@ public final class Screens120 {
             return null;
         }
         var screen = SCREENS.get(player.getUUID());
+        clientPlayer(player);
         Graphics120 recording = Graphics120.begin();
         try {
             screen.render(recorder(), mouseX, mouseY, 0f);
@@ -268,6 +295,31 @@ public final class Screens120 {
         }
     }
 
+    /** The headless client's player (see {@link #clientPlayer}). */
+    private static net.minecraft.client.player.LocalPlayer local;
+
+    /**
+     * The headless client's own player, standing in for `player` while their screen is laid
+     * out, drawn or used: a screen with vanilla's recipe book (every furnace-like machine, and
+     * Farmer's Delight Refabricated's cooking pot) reads the client's player for its recipe
+     * book, its inventory and its open menu. Allocated once, never constructed, with an empty
+     * recipe book of its own (the book's contents are the player's unlocked recipes, which
+     * Horizon doesn't send yet: the book shows none), and the server player's inventory and
+     * menus, so it sees what the menu moves.
+     */
+    private static synchronized void clientPlayer(net.minecraft.server.level.ServerPlayer player) {
+        var minecraft = net.minecraft.client.Minecraft.getInstance();
+        if (local == null) {
+            local = Allocate.make(net.minecraft.client.player.LocalPlayer.class);
+            ((dev.horizonlab.platform120.mixin.LocalPlayerAccess) local)
+                    .horizon$setRecipeBook(new net.minecraft.client.ClientRecipeBook());
+        }
+        ((dev.horizonlab.platform120.mixin.PlayerAccess) local).horizon$setInventory(player.getInventory());
+        ((dev.horizonlab.platform120.mixin.PlayerAccess) local).horizon$setInventoryMenu(player.inventoryMenu);
+        local.containerMenu = player.containerMenu;
+        minecraft.player = local;
+    }
+
     /**
      * The window a screen asks for, to ask GLFW which keys are held: allocated, never opened.
      * Its handle is 0, and the one question asked with it is answered by {@link #keyDown}.
@@ -305,6 +357,7 @@ public final class Screens120 {
         double x = num(o, "x"), y = num(o, "y");
         int button = (int) num(o, "button");
         acting = player;
+        clientPlayer(player);
         heldMods = (int) num(o, "mods");
         closeAsked = false;
         options();

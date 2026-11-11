@@ -1,8 +1,45 @@
 //! Hoppers, droppers and Java mods' blocks: their block entities live in Java, and Fabric's
-//! Transfer API moves items in and out of them (game/java_server.rs, `java_hopper_insert`).
+//! Transfer API moves items in and out of them (game/java_server.rs, `java_hopper_insert`, for
+//! the 26.3 mods; game/java_mods_120/hoppers.rs for the 1.20.1 mods).
 use super::*;
 
 impl Game<'_> {
+    /// One item of `stacks` into the Java mod's block at `pos`: the 26.3 bridge's if the block
+    /// is one of its mods', else the 1.20.1 bridge's. None when neither holds items there.
+    fn mod_hopper_insert(
+        &mut self,
+        pos: [i32; 3],
+        face: Direction,
+        stacks: &[Option<&ItemStack>],
+    ) -> Option<Option<usize>> {
+        if let Some(moved) = self.java_hopper_insert(pos, face, stacks) {
+            return Some(moved);
+        }
+        #[cfg(feature = "java-mods-120")]
+        if let Some(moved) = self.java120_hopper_insert(pos, face, stacks) {
+            return Some(moved);
+        }
+        None
+    }
+
+    /// One item out of the Java mod's block at `pos`, by whichever bridge's mod it is.
+    fn mod_hopper_extract(
+        &mut self,
+        pos: [i32; 3],
+        face: Direction,
+        any_room: bool,
+        partial: &[&ItemStack],
+    ) -> Option<Option<ItemStack>> {
+        if let Some(moved) = self.java_hopper_extract(pos, face, any_room, partial) {
+            return Some(moved);
+        }
+        #[cfg(feature = "java-mods-120")]
+        if let Some(moved) = self.java120_hopper_extract(pos, face, any_room, partial) {
+            return Some(moved);
+        }
+        None
+    }
+
     /// `ejectItems` into a Java mod's block in front: one item of the first slot it takes.
     /// None when that block holds no items (not a Java mod's, or no storage on `face`).
     pub(super) fn java_eject(
@@ -19,7 +56,7 @@ impl Game<'_> {
             return None;
         }
         let refs: Vec<Option<&ItemStack>> = stacks.iter().map(Option::as_ref).collect();
-        let slot = self.java_hopper_insert([front.0, front.1, front.2], face, &refs)?;
+        let slot = self.mod_hopper_insert([front.0, front.1, front.2], face, &refs)?;
         let Some(slot) = slot else {
             return Some(false);
         };
@@ -42,7 +79,7 @@ impl Game<'_> {
         if !any_room && partial.is_empty() {
             return Some(false);
         }
-        let one = self.java_hopper_extract(
+        let one = self.mod_hopper_extract(
             [above.0, above.1, above.2],
             Direction::Down,
             any_room,
@@ -53,7 +90,7 @@ impl Game<'_> {
         };
         if let Some(rest) = self.add_item(None, hopper, one, None) {
             // Room was checked first; should the hopper still refuse it, it goes back.
-            let back = self.java_hopper_insert(
+            let back = self.mod_hopper_insert(
                 [above.0, above.1, above.2],
                 Direction::Down,
                 &[Some(&rest)],
@@ -98,7 +135,7 @@ impl Game<'_> {
         let Some(stack) = self.containers().get(view, slot).cloned() else {
             return Ok(());
         };
-        let moved = self.java_hopper_insert([front.0, front.1, front.2], face, &[Some(&stack)]);
+        let moved = self.mod_hopper_insert([front.0, front.1, front.2], face, &[Some(&stack)]);
         if moved == Some(Some(0)) {
             if let Some(entry) = self.slot_mut_at(view, slot) {
                 *entry = Some(ItemStack {

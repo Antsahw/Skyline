@@ -705,4 +705,5 @@ mod tests {
     }
 }
 
+mod hoppers;
 mod screens;

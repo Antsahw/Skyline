@@ -584,13 +584,20 @@ public final class Mirror120 {
         player.setItemInHand(h, stack);
         BlockHitResult hit = new BlockHitResult(new Vec3(hx, hy, hz), Direction.from3DDataValue(face), new BlockPos(x, y, z), false);
         var menuBefore = player.containerMenu;
+        Screens120.forgetTitle(player);
         InteractionResult result = player.gameMode.useItemOn(player, level, stack, h, hit);
         ItemStack after = player.getItemInHand(h);
         finish();
         int code = !result.consumesAction() ? 0 : result.shouldSwing() ? 2 : 1;
         // A menu the click opened (a cooking pot, a chest): its type and title, for Horizon to
         // show its screen. Empty when none did.
-        String[] menu = Screens120.openedSince(player, menuBefore);
+        Object clicked;
+        try {
+            clicked = level.getBlockEntity(hit.getBlockPos());
+        } catch (RuntimeException e) {
+            clicked = null;
+        }
+        String[] menu = Screens120.openedSince(player, menuBefore, clicked);
         return new Object[] {code, BuiltInRegistries.ITEM.getKey(after.getItem()).toString(), after.getCount(), after.getDamageValue(),
                 menu == null ? "" : menu[0], menu == null ? "" : menu[1]};
     }
@@ -748,6 +755,69 @@ public final class Mirror120 {
         double[] flat = new double[out.size()];
         for (int i = 0; i < flat.length; i++) flat[i] = out.get(i);
         return new Object[] {flat};
+    }
+
+    /**
+     * A Horizon hopper (or dropper) pushes one item into the 1.20.1 mod's block at (x, y, z)
+     * through `face` (Direction.get3DDataValue): `stacks` is its slots in order, as
+     * {@code [[id, count, damage] | null, ...]}. Gives the index of the slot whose item went in,
+     * -1 when none fitted, -2 when the block has no item storage on that face (Hoppers120).
+     */
+    public static Object[] hopperInsert(String dimension, int x, int y, int z, int face, String stacks) {
+        begin();
+        try {
+            return new Object[] {Hoppers120.insert(level(dimension), new BlockPos(x, y, z), face, stacks(stacks))};
+        } catch (RuntimeException | LinkageError e) {
+            hopperFailed(x, y, z, e);
+            return new Object[] {Hoppers120.NO_STORAGE};
+        } finally {
+            finish();
+        }
+    }
+
+    /**
+     * A Horizon hopper pulls one item out of the 1.20.1 mod's block at (x, y, z) through
+     * `face`: the first it offers that the hopper has room for (`anyRoom`: an empty slot; else
+     * one of `partial`, as in {@link #hopperInsert}). Gives a code (0 moved, -1 nothing, -2 no
+     * storage) and the item as 1.20.1 NBT.
+     */
+    public static Object[] hopperExtract(String dimension, int x, int y, int z, int face, boolean anyRoom, String partial) {
+        begin();
+        try {
+            ItemStack one = Hoppers120.extract(level(dimension), new BlockPos(x, y, z), face, anyRoom, stacks(partial));
+            if (one == null) return new Object[] {Hoppers120.NO_STORAGE, ""};
+            if (one.isEmpty()) return new Object[] {Hoppers120.NOTHING, ""};
+            return new Object[] {0, one.save(new net.minecraft.nbt.CompoundTag()).toString()};
+        } catch (RuntimeException | LinkageError e) {
+            hopperFailed(x, y, z, e);
+            return new Object[] {Hoppers120.NO_STORAGE, ""};
+        } finally {
+            finish();
+        }
+    }
+
+    private static final java.util.Set<String> HOPPER_FAILED = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    /** A block whose storage threw: said once per position; to Horizon it holds no items. */
+    private static void hopperFailed(int x, int y, int z, Throwable e) {
+        if (HOPPER_FAILED.add(x + " " + y + " " + z)) {
+            log("a hopper at the block at " + x + " " + y + " " + z + " could not move items: " + e);
+        }
+    }
+
+    /** Stacks as {@code [[id, count, damage] | null, ...]}, an empty one for each null. */
+    private static java.util.List<ItemStack> stacks(String json) {
+        var out = new java.util.ArrayList<ItemStack>();
+        var slots = com.google.gson.JsonParser.parseString(json == null || json.isEmpty() ? "[]" : json).getAsJsonArray();
+        for (var slot : slots) {
+            if (slot != null && slot.isJsonArray()) {
+                var a = slot.getAsJsonArray();
+                out.add(stack(a.get(0).getAsString(), a.get(1).getAsInt(), a.get(2).getAsInt()));
+            } else {
+                out.add(ItemStack.EMPTY);
+            }
+        }
+        return out;
     }
 
     /** A shape that threw: said once, with where it was. */

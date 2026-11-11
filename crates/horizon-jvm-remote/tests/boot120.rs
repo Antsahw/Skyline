@@ -7,7 +7,7 @@
 mod support;
 
 use horizon_jvm_remote::boot120::{self, Fabric120, Side};
-use horizon_jvm_remote::mirror120::inventory_json;
+use horizon_jvm_remote::mirror120::{Hopper, inventory_json};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -341,12 +341,19 @@ fn right_clicking_a_block_runs_its_1_20_1_code_on_horizons_blocks() {
         );
         return;
     }
+    // By the file's name with case, dashes and underscores ignored: Farmer's Delight ships as
+    // `farmers-delight-fabric-1.4.3.jar` and as `FarmersDelight-1.20.1-2.5.7+refabricated.jar`,
+    // and matching only the first quietly skipped every case below on the second.
     let jar_named = |needle: &str| -> Option<PathBuf> {
+        let plain = |s: &str| s.to_lowercase().replace(['-', '_'], "");
         std::fs::read_dir(std::env::var_os("HORIZON_120_MODS")?)
             .ok()?
             .flatten()
             .map(|e| e.path())
-            .find(|p| p.to_string_lossy().contains(needle))
+            .find(|p| {
+                p.file_name()
+                    .is_some_and(|n| plain(&n.to_string_lossy()).contains(&plain(needle)))
+            })
     };
     let delight = jar_named("farmers-delight");
     let wired = jar_named("wired-redstone");
@@ -480,6 +487,72 @@ fn right_clicking_a_block_runs_its_1_20_1_code_on_horizons_blocks() {
                 .any(|s| s.pos == [30, 65, 0] && s.state.starts_with("farmersdelight:stove")),
             "the held stove is placed on top: {stacked:?}"
         );
+        // A hopper over a basket pushes into it, and one under it pulls out: Fabric Transfer
+        // API's ItemStorage.SIDED on the face it touches, as its patch of vanilla's hopper
+        // asks. The basket's block entity is the mod's own, kept by Horizon as opaque NBT,
+        // so the item goes in and out through the mods' code and the NBT comes back changed.
+        // `basket` in Farmer's Delight 1.4.3; Refabricated renamed it `wooden_basket` and keeps
+        // the old name as an alias, so the one id reaches the basket in both.
+        let basket = WithEntity {
+            block: OneBlock("farmersdelight:basket".into(), [44, 64, 0]),
+            entity: "{id:\"farmersdelight:basket\",x:44,y:64,z:0,Items:[]}".into(),
+        };
+        // An empty first slot and three carrots in the second: one carrot of the second.
+        let pushed = runtime
+            .hopper_insert(
+                &basket,
+                "minecraft:overworld",
+                [44, 64, 0],
+                1,
+                &[None, Some(("minecraft:carrot", 3, 0))],
+            )
+            .expect("a hopper's push");
+        assert_eq!(pushed.hopper, Hopper::Moved(1), "{pushed:?}");
+        let holding = pushed
+            .block_entities
+            .iter()
+            .find(|b| b.pos == [44, 64, 0])
+            .unwrap_or_else(|| panic!("the basket's NBT comes back: {pushed:?}"));
+        assert!(holding.snbt.contains("carrot"), "{holding:?}");
+        let basket = WithEntity {
+            block: OneBlock("farmersdelight:basket".into(), [44, 64, 0]),
+            entity: holding.snbt.clone(),
+        };
+        // A full hopper with no carrots in it takes nothing.
+        let full = runtime
+            .hopper_extract(
+                &basket,
+                "minecraft:overworld",
+                [44, 64, 0],
+                0,
+                false,
+                &[("minecraft:potato", 1, 0)],
+            )
+            .expect("a full hopper's pull");
+        assert_eq!(full.hopper, Hopper::Nothing, "{full:?}");
+        let pulled = runtime
+            .hopper_extract(&basket, "minecraft:overworld", [44, 64, 0], 0, true, &[])
+            .expect("a hopper's pull");
+        match &pulled.hopper {
+            Hopper::Moved(item) => assert!(item.contains("carrot"), "{pulled:?}"),
+            other => panic!("the carrot comes out: {other:?}"),
+        }
+        // A block with no storage says so, and Horizon stops asking for a while.
+        let stove_storage = runtime
+            .hopper_insert(
+                &stove,
+                "minecraft:overworld",
+                [30, 64, 0],
+                1,
+                &[Some(("minecraft:carrot", 1, 0))],
+            )
+            .expect("a push into a stove");
+        assert_ne!(
+            stove_storage.hopper,
+            Hopper::Moved(0),
+            "a stove takes no carrots from a hopper: {stove_storage:?}"
+        );
+
         // Phase 4: a cooking pot opened with an empty hand opens its menu. Vanilla's own
         // openMenu runs on the mirror player -- the menu made, its slots listened to -- and only
         // the packet telling a client to show it goes nowhere; the click reports the menu

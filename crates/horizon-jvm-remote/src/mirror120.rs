@@ -116,7 +116,42 @@ pub struct Used {
     pub opened: Option<OpenedMenu>,
 }
 
-/// What an input on a screen did.
+/// What a hopper's ask of a mod's block found ([`Runtime120::hopper_insert`],
+/// [`Runtime120::hopper_extract`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Hopper<T> {
+    /// The block holds no items on that face (Fabric's `ItemStorage.SIDED` found none), or
+    /// its storage threw.
+    NoStorage,
+    /// It does, and nothing moved.
+    Nothing,
+    Moved(T),
+}
+
+/// A hopper's move, and what it changed besides (the block entity it took from or gave to).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Moved<T> {
+    pub hopper: Hopper<T>,
+    pub set: Vec<SetBlock>,
+    pub block_entities: Vec<SetBlockEntity>,
+    pub spawned: Vec<SpawnItem>,
+}
+
+/// Stacks as the runtime takes them: `[[id, count, damage] | null, ...]`.
+fn stacks_json(stacks: &[Option<(&str, i32, i32)>]) -> String {
+    serde_json::Value::Array(
+        stacks
+            .iter()
+            .map(|slot| match slot {
+                Some((item, count, damage)) => serde_json::json!([item, count, damage]),
+                None => serde_json::Value::Null,
+            })
+            .collect(),
+    )
+    .to_string()
+}
+
+/// What an input on a screen did./// What an input on a screen did.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ScreenInput {
     /// Whether the screen is still open (Escape, the inventory key, or a `close` shut it).
@@ -135,17 +170,7 @@ pub struct ScreenInput {
 /// A player's 36 main inventory slots (hotbar first) as [`Runtime120::screen_frame`] and
 /// [`Runtime120::screen_input`] take them: each stack's item, count and damage, or nothing.
 pub fn inventory_json(slots: &[Option<(&str, i32, i32)>]) -> String {
-    serde_json::Value::Array(
-        slots
-            .iter()
-            .take(36)
-            .map(|slot| match slot {
-                Some((item, count, damage)) => serde_json::json!([item, count, damage]),
-                None => serde_json::Value::Null,
-            })
-            .collect(),
-    )
-    .to_string()
+    stacks_json(&slots[..slots.len().min(36)])
 }
 
 /// A menu a mod opened for a player.
@@ -415,6 +440,93 @@ impl Runtime120 {
         Ok(ScreenInput {
             open,
             slots,
+            set: handler.set,
+            block_entities: handler.block_entities,
+            spawned: handler.spawned,
+        })
+    }
+
+    /// A Horizon hopper (or dropper) pushes one item into the mods' block at `pos` through
+    /// `face` (`Direction.get3DDataValue`: the side of the block the hopper touches), by the
+    /// block's item storage (Fabric Transfer API's `ItemStorage.SIDED`, as its patch of
+    /// vanilla's `ejectItems` asks). `stacks` are the hopper's slots in order, each item,
+    /// count and damage; [`Hopper::Moved`] carries the index of the slot whose item went in.
+    pub fn hopper_insert(
+        &mut self,
+        world: &dyn World120,
+        dimension: &str,
+        pos: [i32; 3],
+        face: u8,
+        stacks: &[Option<(&str, i32, i32)>],
+    ) -> Result<Moved<usize>, String> {
+        let args = [
+            Value::Str(dimension.to_owned()),
+            Value::I32(pos[0]),
+            Value::I32(pos[1]),
+            Value::I32(pos[2]),
+            Value::I32(i32::from(face)),
+            Value::Str(stacks_json(stacks)),
+        ];
+        let mut handler = InWorld {
+            world,
+            set: Vec::new(),
+            block_entities: Vec::new(),
+            spawned: Vec::new(),
+            log: self.log.clone(),
+        };
+        let values = self.call_values("hopperInsert", &args, &mut handler)?;
+        let hopper = match values.first() {
+            Some(Value::I32(i)) if *i >= 0 => Hopper::Moved(*i as usize),
+            Some(Value::I32(-1)) => Hopper::Nothing,
+            Some(Value::I32(_)) => Hopper::NoStorage,
+            other => return Err(format!("hopperInsert: answer 0 is {other:?}")),
+        };
+        Ok(Moved {
+            hopper,
+            set: handler.set,
+            block_entities: handler.block_entities,
+            spawned: handler.spawned,
+        })
+    }
+
+    /// A Horizon hopper pulls one item out of the mods' block at `pos` through `face`: the
+    /// first it offers that the hopper has room for (`any_room`: an empty slot; else one of
+    /// `partial`, its stacks not full yet). [`Hopper::Moved`] carries the item as 1.20.1 NBT.
+    pub fn hopper_extract(
+        &mut self,
+        world: &dyn World120,
+        dimension: &str,
+        pos: [i32; 3],
+        face: u8,
+        any_room: bool,
+        partial: &[(&str, i32, i32)],
+    ) -> Result<Moved<String>, String> {
+        let partial: Vec<Option<(&str, i32, i32)>> = partial.iter().copied().map(Some).collect();
+        let args = [
+            Value::Str(dimension.to_owned()),
+            Value::I32(pos[0]),
+            Value::I32(pos[1]),
+            Value::I32(pos[2]),
+            Value::I32(i32::from(face)),
+            Value::Bool(any_room),
+            Value::Str(stacks_json(&partial)),
+        ];
+        let mut handler = InWorld {
+            world,
+            set: Vec::new(),
+            block_entities: Vec::new(),
+            spawned: Vec::new(),
+            log: self.log.clone(),
+        };
+        let values = self.call_values("hopperExtract", &args, &mut handler)?;
+        let hopper = match (values.first(), values.get(1).and_then(Value::as_str)) {
+            (Some(Value::I32(0)), Some(item)) if !item.is_empty() => Hopper::Moved(item.to_owned()),
+            (Some(Value::I32(-1)), _) => Hopper::Nothing,
+            (Some(Value::I32(_)), _) => Hopper::NoStorage,
+            (other, _) => return Err(format!("hopperExtract: answer 0 is {other:?}")),
+        };
+        Ok(Moved {
+            hopper,
             set: handler.set,
             block_entities: handler.block_entities,
             spawned: handler.spawned,
