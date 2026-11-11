@@ -19,7 +19,7 @@ from the mod's side rather than the bridge's.
 
 | What the mod does | Status | Where |
 |---|---|---|
-| Register blocks, items, recipes, tags, creative tabs, translations | **done** | phase 2, `content120.rs` |
+| Register blocks, items, recipes, tags, creative tabs, translations | **done** | phase 2, `content120.rs`; each mod's own creative tab, beside the 26.3 mods' |
 | Its blocks place, break and drop themselves | **done** | phase 2; phase 5a: broken by their own code, contents and all, facing the placer |
 | Right-click behaviour runs the mod's own code | **done** | phase 3a |
 | Block entities: state kept, saved, reloaded, ticked | **done** | phase 3b |

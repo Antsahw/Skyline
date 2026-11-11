@@ -99,6 +99,7 @@ public final class Content120 {
             }
             json.endArray();
             items();
+            creativeTabs();
             json.name("tags");
             json.beginObject();
             Tags120.Loaded tags = Tags120.load();
@@ -106,6 +107,52 @@ public final class Content120 {
             tags(json, "item", tags.items());
             json.endObject();
             json.endObject();
+        }
+
+        /**
+         * The mods' own creative tabs (Farmer's Delight's): their id, title (its translation
+         * key, or the text of a literal one), icon and items, as the tab's own code fills it
+         * (CreativeModeTabs.tryRebuildTabContents, with the server's registries). A tab whose
+         * contents can't be made here is left out: its items are still in the search tab.
+         */
+        void creativeTabs() throws IOException {
+            json.name("creative_tabs");
+            json.beginArray();
+            try {
+                net.minecraft.world.item.CreativeModeTabs.tryRebuildTabContents(
+                        net.minecraft.world.flag.FeatureFlags.DEFAULT_FLAGS, false, Mirror120.registries());
+            } catch (RuntimeException | LinkageError e) {
+                System.out.println("[horizon-platform120] the creative tabs' contents weren't made: " + e);
+            }
+            for (var tab : BuiltInRegistries.CREATIVE_MODE_TAB) {
+                ResourceLocation id = BuiltInRegistries.CREATIVE_MODE_TAB.getKey(tab);
+                if (id == null || !ours(id) || tab.getType() != net.minecraft.world.item.CreativeModeTab.Type.CATEGORY) continue;
+                java.util.Collection<net.minecraft.world.item.ItemStack> items;
+                String icon;
+                try {
+                    items = tab.getDisplayItems();
+                    icon = BuiltInRegistries.ITEM.getKey(tab.getIconItem().getItem()).toString();
+                } catch (RuntimeException | LinkageError e) {
+                    System.out.println("[horizon-platform120] the creative tab " + id + " couldn't be read: " + e);
+                    continue;
+                }
+                json.beginObject();
+                json.name("id").value(id.toString());
+                var title = tab.getDisplayName();
+                if (title.getContents() instanceof net.minecraft.network.chat.contents.TranslatableContents t) {
+                    json.name("title_key").value(t.getKey());
+                }
+                json.name("title").value(title.getString());
+                json.name("icon").value(icon);
+                json.name("items");
+                json.beginArray();
+                java.util.Set<String> seen = new java.util.LinkedHashSet<>();
+                for (var stack : items) seen.add(BuiltInRegistries.ITEM.getKey(stack.getItem()).toString());
+                for (String item : seen) json.value(item);
+                json.endArray();
+                json.endObject();
+            }
+            json.endArray();
         }
 
         void blocks() throws IOException {

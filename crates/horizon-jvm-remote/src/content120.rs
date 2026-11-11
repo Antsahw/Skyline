@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 /// The version of what this module writes: bump it when the facts or the carry-over change.
 /// 3: nested mods are inventoried whether or not they ship textures ([`nested_jars`]), so a
 /// cache built before this holds none of a library mod's blocks.
-const FORMAT: u32 = 3;
+const FORMAT: u32 = 4;
 
 /// The stamp of a set of jars: their names, sizes and modification times, and [`FORMAT`].
 pub fn stamp(jars: &[PathBuf]) -> String {
@@ -149,6 +149,62 @@ fn nested_jars(bytes: &[u8], mods: &Path, depth: u32) {
     }
 }
 
+/// The mods' own creative tabs (the facts' `creative_tabs`, as their own code fills them) as
+/// content tabs (`data/<ns>/horizon/creative_tab/<path>.json`: a title, an icon, the items),
+/// each in the carried mod that owns its namespace, so the creative menu has a tab per mod
+/// beside the 26.3 mods' and vanilla's. The title in English, from the mod's own language file
+/// when it is a translation key. How many were written.
+fn creative_tabs(facts: &Path, carried: &[PathBuf]) -> usize {
+    let Ok(text) = std::fs::read_to_string(facts) else {
+        return 0;
+    };
+    let Ok(facts) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return 0;
+    };
+    let mut written = 0;
+    for tab in facts["creative_tabs"].as_array().into_iter().flatten() {
+        let Some((ns, path)) = tab["id"].as_str().and_then(|id| id.split_once(':')) else {
+            continue;
+        };
+        let items: Vec<&str> = tab["items"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|i| i.as_str())
+            .collect();
+        let (Some(icon), false) = (tab["icon"].as_str(), items.is_empty()) else {
+            continue;
+        };
+        // The carried mod with that namespace's files.
+        let Some(carry) = carried
+            .iter()
+            .find(|c| c.join("assets").join(ns).is_dir() || c.join("data").join(ns).is_dir())
+        else {
+            continue;
+        };
+        let english = tab["title_key"].as_str().and_then(|key| {
+            let lang = std::fs::read(carry.join("assets").join(ns).join("lang/en_us.json")).ok()?;
+            let lang: serde_json::Value = serde_json::from_slice(&lang).ok()?;
+            lang[key].as_str().map(str::to_owned)
+        });
+        let title = english
+            .or_else(|| tab["title"].as_str().map(str::to_owned))
+            .unwrap_or_else(|| path.to_owned());
+        let dir = carry.join("data").join(ns).join("horizon/creative_tab");
+        let file = serde_json::json!({ "title": title, "icon": icon, "items": items });
+        if std::fs::create_dir_all(&dir).is_ok()
+            && std::fs::write(
+                dir.join(format!("{}.json", path.replace('/', "_"))),
+                file.to_string(),
+            )
+            .is_ok()
+        {
+            written += 1;
+        }
+    }
+    written
+}
+
 /// Vanilla's blocks in the facts as 26.3 has them. The facts are 1.20.1's, and the carry-over
 /// borrows vanilla states for mods' shapes (`"shape": "minecraft:piglin_head[rotation=0]"`): a
 /// state 26.3 doesn't have (its heads gained `powered`) makes the game refuse every content mod.
@@ -266,6 +322,12 @@ pub fn build(
     // Every jar is carried: its assets and data under its own namespaces.
     let all: Vec<String> = records.iter().map(|r| r.key.clone()).collect();
     horizon_port_pack::pipeline::carry(&work, Some(resources), &all, &log_line)?;
+    let tabs = creative_tabs(&facts, &carried(&work));
+    if tabs > 0 {
+        log(format!(
+            "1.20.1 mods' content: {tabs} creative tab(s) of their own"
+        ));
+    }
     let _ = std::fs::remove_dir_all(&instance);
     std::fs::write(cache.join("stamp"), stamp(jars)).map_err(|e| format!("stamp: {e}"))?;
     Ok(carried(&work))
@@ -273,6 +335,40 @@ pub fn build(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_mods_own_creative_tab_becomes_its_content_tab_in_english() {
+        let dir = std::env::temp_dir().join(format!("content120-tabs-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let carry = dir.join("mods/fd/carry");
+        std::fs::create_dir_all(carry.join("assets/farmersdelight/lang")).unwrap();
+        std::fs::write(
+            carry.join("assets/farmersdelight/lang/en_us.json"),
+            r#"{"itemGroup.farmersdelight": "Farmer's Delight"}"#,
+        )
+        .unwrap();
+        let facts = dir.join("facts.json");
+        let tab = serde_json::json!({"creative_tabs": [{
+            "id": "farmersdelight:farmersdelight", "title_key": "itemGroup.farmersdelight",
+            "title": "itemGroup.farmersdelight", "icon": "farmersdelight:stove",
+            "items": ["farmersdelight:stove", "farmersdelight:cooking_pot"]}]});
+        std::fs::write(&facts, tab.to_string()).unwrap();
+        assert_eq!(creative_tabs(&facts, &[carry.clone()]), 1);
+        let written: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(
+                carry.join("data/farmersdelight/horizon/creative_tab/farmersdelight.json"),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            written["title"], "Farmer's Delight",
+            "its English name, not the key"
+        );
+        assert_eq!(written["icon"], "farmersdelight:stove");
+        assert_eq!(written["items"].as_array().unwrap().len(), 2);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     use super::*;
 
     #[test]

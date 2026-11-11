@@ -374,7 +374,7 @@ fn right_clicking_a_block_runs_its_1_20_1_code_on_horizons_blocks() {
     }
     let lines: Lines = Arc::default();
     let seen = Arc::clone(&lines);
-    let mut cfg = config(cache, bridge, game, lines);
+    let mut cfg = config(cache, bridge, game.clone(), lines);
     cfg.platform = Some(platform);
     let (mut runtime, _) = boot120::start(&cfg).expect("boots");
 
@@ -488,6 +488,38 @@ fn right_clicking_a_block_runs_its_1_20_1_code_on_horizons_blocks() {
                 .any(|s| s.pos == [30, 65, 0] && s.state.starts_with("farmersdelight:stove")),
             "the held stove is placed on top: {stacked:?}"
         );
+        // The mods' own creative tabs, as their own code fills them, go into the content
+        // build's facts: Farmer's Delight's tab, with its cooking pot in it.
+        let facts = game.join("facts-tabs.json");
+        runtime
+            .call_with(
+                "facts",
+                &[horizon_jvm_remote::wire::Value::Str(
+                    facts.to_string_lossy().into_owned(),
+                )],
+            )
+            .expect("the facts");
+        let facts: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&facts).expect("facts written"))
+                .expect("facts as JSON");
+        let tabs = facts["creative_tabs"]
+            .as_array()
+            .expect("creative tabs in the facts");
+        let delight_tab = tabs
+            .iter()
+            .find(|t| {
+                t["id"]
+                    .as_str()
+                    .is_some_and(|id| id.starts_with("farmersdelight:"))
+            })
+            .unwrap_or_else(|| panic!("Farmer's Delight's own tab: {tabs:?}"));
+        assert!(
+            delight_tab["items"]
+                .as_array()
+                .is_some_and(|i| i.iter().any(|i| i == "farmersdelight:cooking_pot")),
+            "with the cooking pot in it: {delight_tab}"
+        );
+
         // A block placed faces the way the player looks: a stove faces the player who places
         // it (the opposite of where they look). The same click from the north and from the
         // south: two stoves facing opposite ways. (The mirror player used to always look
