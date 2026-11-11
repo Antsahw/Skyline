@@ -46,6 +46,9 @@ Found a bug? Post it with a screenshot or video, your mod list and `logs/latest.
 <details>
 <summary>Build from source instead</summary>
 
+This builds the 26.3 bridge against the launcher, from iaxivers' repository. For Skyline with
+both versions, see [Run it from source](#run-it-from-source) below.
+
 ```sh
 git clone -b java-bridge https://github.com/iaxivers/horizon-java-bridge && cd horizon-java-bridge
 cargo build --profile fast -p horizon-client --features horizon-client/java-mods

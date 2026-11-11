@@ -10,10 +10,12 @@ Minecraft: Java Edition 26.3 rewritten in Rust (wgpu). Vanilla is the specificat
 feature. Read [CONTRIBUTING.md](CONTRIBUTING.md) once; this page tells you where things are.
 Feature → files → harness for the most-changed areas: [docs/architecture.md](docs/architecture.md).
 
-**This fork's branch `java-bridge`: Fabric Java mods running inside Horizon.** Working on the
-bridge (crates `horizon-jvm`, `game/java_*.rs`, `game/java_server.rs`)? Read
+**Skyline's branch `multiversion` carries both bridges**: the 26.3 one (crates `horizon-jvm`,
+`game/java_*.rs`, `game/java_server.rs`) and the 1.20.1 one (`horizon-jvm-remote`,
+`game/java_mods_120.rs`). Working on the 26.3 side? Read
 [docs/java-bridge.md](docs/java-bridge.md) first: where everything is, the tick flow, 26.3 facts
-that cost time, and `tools/java_bridge/` to test headless with screenshots.
+that cost time, and `tools/java_bridge/` to test headless with screenshots. The 1.20.1 side:
+[docs/java-bridge-120.md](docs/java-bridge-120.md).
 
 ## Rules that bite
 
@@ -83,7 +85,7 @@ Game workspace (root `Cargo.toml`); `launcher/` and `crates/horizon-telemetry-se
 
 Other top-level folders: `tools/` (harnesses and dev scripts), `tests/` (Python unit tests: `python3 -m
 unittest discover -s tests`), `mods/horizon/src/test/java/dev/horizonlab/parity/` (Java oracles),
-`docs/`, `.github/workflows/`. The website (playhorizon.dev) is the private horizon-rust/horizon-site: its build
+`docs/`. The website (playhorizon.dev) is the private horizon-rust/horizon-site: its build
 reads `README.md`, `launcher/links.json`, `docs/api/`, `roadmap/roadmap.json` and `crates/horizon-theme/tokens.css` from main.
 
 ## Write tests with signal
