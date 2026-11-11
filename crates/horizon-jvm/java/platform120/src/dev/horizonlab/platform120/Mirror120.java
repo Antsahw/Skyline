@@ -583,11 +583,16 @@ public final class Mirror120 {
         ItemStack stack = stack(item, count, damage);
         player.setItemInHand(h, stack);
         BlockHitResult hit = new BlockHitResult(new Vec3(hx, hy, hz), Direction.from3DDataValue(face), new BlockPos(x, y, z), false);
+        var menuBefore = player.containerMenu;
         InteractionResult result = player.gameMode.useItemOn(player, level, stack, h, hit);
         ItemStack after = player.getItemInHand(h);
         finish();
         int code = !result.consumesAction() ? 0 : result.shouldSwing() ? 2 : 1;
-        return new Object[] {code, BuiltInRegistries.ITEM.getKey(after.getItem()).toString(), after.getCount(), after.getDamageValue()};
+        // A menu the click opened (a cooking pot, a chest): its type and title, for Horizon to
+        // show its screen. Empty when none did.
+        String[] menu = Screens120.openedSince(player, menuBefore);
+        return new Object[] {code, BuiltInRegistries.ITEM.getKey(after.getItem()).toString(), after.getCount(), after.getDamageValue(),
+                menu == null ? "" : menu[0], menu == null ? "" : menu[1]};
     }
 
     /**

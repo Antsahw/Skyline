@@ -111,6 +111,19 @@ pub struct Used {
     pub block_entities: Vec<SetBlockEntity>,
     /// The items the mods' code dropped, in order.
     pub spawned: Vec<SpawnItem>,
+    /// The menu the click opened, if it opened one (a cooking pot, a chest): Horizon shows
+    /// its screen.
+    pub opened: Option<OpenedMenu>,
+}
+
+/// A menu a mod opened for a player.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpenedMenu {
+    /// The menu's type, as registered: `farmersdelight:cooking_pot`.
+    pub kind: String,
+    /// Its title as a text component's JSON, as the open-screen packet would carry it. Empty
+    /// when the mod gave none.
+    pub title: String,
 }
 
 /// Horizon's side while the runtime runs a call in the world.
@@ -383,6 +396,18 @@ impl Runtime120 {
             set: handler.set,
             block_entities: handler.block_entities,
             spawned: handler.spawned,
+            opened: values
+                .get(4)
+                .and_then(Value::as_str)
+                .filter(|kind| !kind.is_empty())
+                .map(|kind| OpenedMenu {
+                    kind: kind.to_owned(),
+                    title: values
+                        .get(5)
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_owned(),
+                }),
         })
     }
 }

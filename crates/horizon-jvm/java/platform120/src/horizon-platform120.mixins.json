@@ -18,6 +18,7 @@
     "ServerLevelMixin",
     "PlayerListMixin",
     "ServerPlayerMixin",
+    "ServerPlayerMenuMixin",
     "ServerGamePacketListenerMixin"
   ],
   "client": [

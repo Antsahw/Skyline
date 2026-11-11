@@ -13,6 +13,40 @@ import net.minecraft.client.gui.GuiGraphics;
 public final class Screens120 {
     private Screens120() {}
 
+    /** The title of the menu each player last opened: the menu does not keep it. */
+    private static final java.util.Map<java.util.UUID, net.minecraft.network.chat.Component> TITLES =
+            new java.util.HashMap<>();
+
+    /** A menu opened for `player` with this title (ServerPlayerMenuMixin). */
+    public static void opened(net.minecraft.server.level.ServerPlayer player,
+            net.minecraft.network.chat.Component title) {
+        TITLES.put(player.getUUID(), title);
+    }
+
+    /**
+     * The menu `player` has open that `before` was not, as its type and its title's JSON, or
+     * null when the call left them where they were. A menu is open when the player's container
+     * menu is not their own inventory's.
+     */
+    public static String[] openedSince(net.minecraft.server.level.ServerPlayer player,
+            net.minecraft.world.inventory.AbstractContainerMenu before) {
+        var menu = player.containerMenu;
+        if (menu == null || menu == before || menu == player.inventoryMenu) {
+            return null;
+        }
+        String type;
+        try {
+            var key = net.minecraft.core.registries.BuiltInRegistries.MENU.getKey(menu.getType());
+            type = key == null ? "" : key.toString();
+        } catch (UnsupportedOperationException e) {
+            // A menu with no type (the player's own inventory has none): not one a screen opens.
+            return null;
+        }
+        var title = TITLES.get(player.getUUID());
+        String json = title == null ? "" : net.minecraft.network.chat.Component.Serializer.toJson(title);
+        return new String[] {type, json};
+    }
+
     /** A {@code GuiGraphics} that records instead of drawing. */
     public static GuiGraphics recorder() {
         return Allocate.make(GuiGraphics.class);

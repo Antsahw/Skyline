@@ -446,6 +446,32 @@ fn right_clicking_a_block_runs_its_1_20_1_code_on_horizons_blocks() {
             used.set[0].state,
             "farmersdelight:stove[facing=north,lit=true]"
         );
+        // Phase 4: a cooking pot opened with an empty hand opens its menu. Vanilla's own
+        // openMenu runs on the mirror player -- the menu made, its slots listened to -- and only
+        // the packet telling a client to show it goes nowhere; the click reports the menu
+        // instead, for Horizon to show its screen. An empty hand, so nothing is taken out.
+        let pot = WithEntity {
+            block: OneBlock(
+                "farmersdelight:cooking_pot[facing=north,support=none,waterlogged=false]".into(),
+                [0, 64, 0],
+            ),
+            entity: "{id:\"farmersdelight:cooking_pot\",x:0,y:64,z:0}".into(),
+        };
+        let mut empty_hand = flint_and_steel_on_top();
+        empty_hand.item = "minecraft:air".into();
+        empty_hand.count = 0;
+        empty_hand.damage = 0;
+        let used = runtime.use_block(&pot, &empty_hand).expect("cooking pot");
+        let opened = used
+            .opened
+            .as_ref()
+            .unwrap_or_else(|| panic!("the pot opens its menu: {used:?}"));
+        assert_eq!(opened.kind, "farmersdelight:cooking_pot", "{used:?}");
+        assert!(
+            opened.title.contains("cooking_pot") || opened.title.contains("Cooking Pot"),
+            "the menu has the pot's title: {}",
+            opened.title
+        );
     } else {
         eprintln!("no Farmer's Delight in HORIZON_120_MODS: the stove is skipped");
     }
