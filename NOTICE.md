@@ -73,6 +73,21 @@ source declaring one of their packages. **If you ever do vendor one of these, it
 and notices must ship with it** — Apache-2.0 in particular requires the NOTICE file and a record
 of changes. Keeping them out of the tree is the simpler path, which is why it is the one taken.
 
+## Vendored third-party code
+
+`third_party/` holds forks of three crates, each with its own licence files beside it, which
+must stay:
+
+| Part | Licence |
+|---|---|
+| `third_party/naga` | MIT or Apache-2.0 (`LICENSE.MIT`, `LICENSE.APACHE`) |
+| `third_party/wgpu-hal` | MIT or Apache-2.0 (`LICENSE.MIT`, `LICENSE.APACHE`) |
+| `third_party/libmimalloc-sys` | MIT (`LICENSE.txt`) |
+
+Apache-2.0 asks that modifications be marked; these are forks, so note what you changed in the
+commit that changes them. The rest of the dependency tree comes from crates.io at build time
+and is not redistributed here.
+
 ## Mods
 
 Mod jars belong to their authors, under their own licences, and this project neither ships nor
