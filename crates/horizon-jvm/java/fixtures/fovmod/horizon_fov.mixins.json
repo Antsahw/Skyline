@@ -1,0 +1,9 @@
+{
+  "required": true,
+  "package": "dev.horizonlab.fovmod.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "client": ["CameraMixin"],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

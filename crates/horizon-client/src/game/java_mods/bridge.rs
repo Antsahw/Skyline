@@ -9,24 +9,37 @@ const PROBE_CLASSES: &[&str] = &[
     "net/fabricmc/fabric/api/event/lifecycle/v1/ServerTickEvents",
 ];
 
-/// Whether Fabric mods run in this game (`horizon_jvm::gate`): started by the launcher past its
-/// owner gate (`--java-mods` and `HORIZON_JAVA_MODS_OWNER`), or a developer's harness
+/// Whether Fabric mods run in this game (`horizon_jvm::gate`): started by the launcher for an
+/// owner (`--java-mods` and its owner record in `HORIZON_JAVA_MODS_OWNER`, confirmed with the
+/// Minecraft services), or, in a developer's build (`java-mods-dev`), a harness
 /// (`HORIZON_JAVA_MODS=1`). Otherwise a game built with Java mods plays as the plain one: no Java
 /// started, nothing downloaded (no Fabric, no Java), whatever `mods-java/` holds. `--java-mods`
-/// alone (the game started by hand) says the launcher is needed, once.
+/// without an owner the game confirms says the launcher is needed, once; with jars in
+/// `mods-java/` the game then stops ([`mod_jars`]): a modded world opened without its mods loses
+/// their blocks and items.
 pub(in crate::game) fn opted_in() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| {
-        let opt_in = horizon_jvm::gate::this_process();
+        use horizon_jvm::gate::{self, OptIn};
+        // Read at the process's start already (`entry.rs`): the record is fresh there.
+        let opt_in = gate::decision();
         match opt_in {
-            horizon_jvm::gate::OptIn::NoOwner => {
-                log::warn!("Java mods: off: {}", horizon_jvm::gate::NEEDS_LAUNCHER);
-                eprintln!("{}", horizon_jvm::gate::NEEDS_LAUNCHER);
+            OptIn::NoOwner(why) => {
+                log::warn!(
+                    "Java mods: off: {} ({})",
+                    gate::NEEDS_LAUNCHER,
+                    why.detail()
+                );
             }
-            horizon_jvm::gate::OptIn::Developer => log::info!(
-                "Java mods: on for a developer's run ({}=1)",
-                horizon_jvm::gate::DEV_VAR
-            ),
+            OptIn::Launcher => {
+                log::info!(
+                    "Java mods: on (the launcher's owner, confirmed by the Minecraft services)"
+                )
+            }
+            #[cfg(feature = "java-mods-dev")]
+            OptIn::Developer => {
+                log::info!("Java mods: on for a developer's run ({}=1)", gate::DEV_VAR)
+            }
             _ => {}
         }
         opt_in.runs()
@@ -44,6 +57,19 @@ pub(in crate::game) fn mod_jars() -> (PathBuf, Vec<PathBuf>) {
     static SAID: std::sync::Once = std::sync::Once::new();
     SAID.call_once(|| {
         let held = horizon_jvm::jars(&dir).len();
+        // Asked for (`--java-mods`) but refused: stop rather than open the world without them.
+        if let horizon_jvm::gate::OptIn::NoOwner(why) = horizon_jvm::gate::decision() {
+            if held > 0 {
+                not_started(&format!(
+                    "{} ({})",
+                    horizon_jvm::gate::NEEDS_LAUNCHER,
+                    why.detail()
+                ));
+            } else {
+                eprintln!("{} ({})", horizon_jvm::gate::NEEDS_LAUNCHER, why.detail());
+            }
+            return;
+        }
         if held > 0 {
             log::info!(
                 "Java mods: off ({held} jars in {}): the launcher runs them, with Fabric 26.3 mods on",
@@ -66,6 +92,22 @@ impl Game<'_> {
         // Started already while the resources loaded (`java_content`), as a rule.
         spawn_start(dir, jars);
     }
+}
+
+/// The process's start (entry.rs): Fabric mods' owner record (`horizon_jvm::gate`) is read
+/// now, while it is fresh, beside the start; the bridge waits for the answer when it needs it.
+pub(crate) fn owner_record_early() {
+    if std::env::args().any(|a| a == horizon_jvm::gate::ARG) {
+        let _ = std::thread::Builder::new()
+            .name("Java mods owner".into())
+            .spawn(horizon_jvm::gate::decision);
+    }
+}
+
+/// The process's end (entry.rs): with Java mods it ends through Java's exit (its class
+/// archive is written).
+pub(crate) fn exit_through_java() {
+    horizon_jvm::exit(0, std::time::Duration::from_secs(90), crate::logging::flush);
 }
 
 /// Starts Java and Fabric now, beside the rest of the resources' load, once the content root
@@ -165,8 +207,28 @@ fn run_jars(dir: &Path) -> Vec<PathBuf> {
         return kept.clone();
     }
     let (kept, left) = horizon_jvm::renderers::split(&jars);
+    // Horizon's pinned Fabric API, always: a player's own (another version) is skipped.
+    let (theirs, kept): (Vec<PathBuf>, Vec<PathBuf>) =
+        kept.into_iter().partition(|j| own_fabric_api(j));
+    for jar in &theirs {
+        log::info!(
+            "Java mods: {} skipped: Horizon brings its own Fabric API (the file is left as it is)",
+            jar.file_name().unwrap_or_default().to_string_lossy()
+        );
+    }
     *last = Some((jars, kept.clone(), left));
     kept
+}
+
+/// Whether `jar` is Fabric API (its id `fabric-api`, or a file named `fabric-api…`), which
+/// Horizon brings pinned ([`horizon_jvm::libs::ensure_fabric_api`]).
+fn own_fabric_api(jar: &Path) -> bool {
+    let named = jar.file_name().is_some_and(|n| {
+        n.to_string_lossy()
+            .to_ascii_lowercase()
+            .starts_with("fabric-api")
+    });
+    named || horizon_jvm::renderers::mod_id(jar).as_deref() == Some("fabric-api")
 }
 
 /// The last [`run_jars`]: all jars, the ones Fabric loads, the ones left out.
@@ -434,6 +496,7 @@ fn start_once(root: &Path, dir: &Path, jars: Vec<PathBuf>, side: horizon_jvm::Si
     }
     let started = std::time::Instant::now();
     let work = root.join(".local/bridge");
+    #[cfg(feature = "java-mods-prototypes")]
     if let Some(install) = neoforge_install() {
         return start_neoforge(&work, &install, &jars, started);
     }
@@ -526,7 +589,13 @@ fn start_once(root: &Path, dir: &Path, jars: Vec<PathBuf>, side: horizon_jvm::Si
 /// `HORIZON_NEOFORGE`: a folder NeoForge's installer ran in (`--installServer`), set up by
 /// `tools/java_bridge/neoforge/run_proto.sh`. The mods in `mods-java/` then load with
 /// NeoForge instead of Fabric: a prototype (docs/java-bridge-neoforge.md) that loads them and
-/// stops there, with no mirror, content or screens yet.
+/// stops there, with no mirror, content or screens yet. Only in builds with the prototypes
+/// (`java-mods-prototypes`): release builds run Fabric only.
+#[cfg(not(feature = "java-mods-prototypes"))]
+fn neoforge_install() -> Option<PathBuf> {
+    None
+}
+#[cfg(feature = "java-mods-prototypes")]
 fn neoforge_install() -> Option<PathBuf> {
     std::env::var_os("HORIZON_NEOFORGE")
         .filter(|v| !v.is_empty())
@@ -535,6 +604,7 @@ fn neoforge_install() -> Option<PathBuf> {
 
 /// NeoForge's start (prototype): FML's game folder is `.local/bridge/neoforge-game`, whose
 /// `mods/` holds copies of the jars in `mods-java/` and of the platform mod the setup built.
+#[cfg(feature = "java-mods-prototypes")]
 fn start_neoforge(
     work: &Path,
     install: &Path,
@@ -582,8 +652,8 @@ fn start_neoforge(
     true
 }
 
-/// Fabric's part of the config: the prepared game jar and libraries, and Fabric API unless
-/// `mods-java/` holds its own.
+/// Fabric's part of the config: the prepared game jar and libraries, and Horizon's pinned Fabric
+/// API (a player's own is skipped, [`run_jars`]).
 fn fabric(
     root: &Path,
     dir: &Path,
@@ -591,23 +661,13 @@ fn fabric(
     jars: &[PathBuf],
     side: horizon_jvm::Side,
 ) -> Result<horizon_jvm::Fabric, String> {
-    let own_fabric_api = jars.iter().any(|j| {
-        j.file_name().is_some_and(|n| {
-            n.to_string_lossy()
-                .to_ascii_lowercase()
-                .starts_with("fabric-api")
-        })
-    });
-    let add_mods = if own_fabric_api {
-        Vec::new()
-    } else {
-        vec![horizon_jvm::libs::ensure_fabric_api(
-            &work.join("fabric-api"),
-        )?]
-    };
-    // With mods left out (`run_jars`), Fabric reads no folder: the jars it loads are listed.
-    let (mut add_mods, mods) = (add_mods, dir.to_path_buf());
-    let mods = if left_out().is_empty() {
+    let mut add_mods = vec![horizon_jvm::libs::ensure_fabric_api(
+        &work.join("fabric-api"),
+    )?];
+    // With jars left out (`run_jars`: renderers, a player's own Fabric API), Fabric reads no
+    // folder: the jars it loads are listed.
+    let mods = dir.to_path_buf();
+    let mods = if horizon_jvm::jars(dir).len() == jars.len() {
         mods
     } else {
         let none = work.join("no-mods");

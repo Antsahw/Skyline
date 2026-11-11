@@ -497,6 +497,8 @@ impl Game<'_> {
                 "sneaking": self.keys.contains(&KeyCode::ShiftLeft),
                 "sprinting": p.sprinting,
                 "fov_modifier": self.view.fov_modifier,
+                // The camera's field of view now (degrees), mods' changes and zooms in it.
+                "fov": self.eye_position().map(|eye| self.fov_degrees(1.0, eye)),
                 "health": p.health.health(),
                 "absorption": p.health.absorption(),
                 // The hurt animation's ticks left (the camera's hurt tilt).
@@ -746,7 +748,6 @@ impl Game<'_> {
             );
         }
         // Java mods' entities (game/java_entities.rs), as the server last sent them.
-        #[cfg(feature = "java-mods")]
         for (id, ty, pos) in self.java_entity_list() {
             push(pos, ty, json!({ "id": id, "kind": "java" }));
         }

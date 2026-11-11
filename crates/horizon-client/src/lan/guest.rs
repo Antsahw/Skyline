@@ -20,8 +20,8 @@ use std::{
     collections::VecDeque,
     sync::{Arc, atomic::AtomicI32},
 };
-mod java;
-pub use java::ModAbilities;
+mod mod_abilities;
+pub use mod_abilities::ModAbilities;
 
 /// GameType ids.
 pub const SURVIVAL: i32 = 0;

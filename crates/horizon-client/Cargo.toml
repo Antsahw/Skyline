@@ -120,6 +120,13 @@ controllers = ["horizon-client-lib/controllers", "dep:gilrs", "dep:horizon-duals
 # Runs Java mods from mods-java/ in an embedded JVM (the Java mod bridge, crates/horizon-jvm).
 # Off by default; with it on and no jars, the game starts no JVM.
 java-mods = ["dep:horizon-jvm"]
+# Developers' builds of the bridge (tools/java_bridge/*, regress, lan_e2e --java-mods): adds the
+# `HORIZON_JAVA_MODS=1` opt-in, which runs the mods without the launcher's owner record
+# (horizon-jvm's gate.rs). Release builds use `java-mods` alone.
+java-mods-dev = ["java-mods", "horizon-jvm/dev"]
+# The NeoForge and Forge 1.12 prototypes (`HORIZON_NEOFORGE`, docs/java-bridge-neoforge.md): never
+# in a release build.
+java-mods-prototypes = ["java-mods-dev", "horizon-jvm/prototypes"]
 # Fabric 1.20.1 mods from mods-java-1.20.1/, unmodified, in a JVM of their own (no JNI:
 # crates/horizon-jvm-remote, docs/java-bridge-120.md). Off by default; with it on and no jars,
 # nothing starts.

@@ -489,6 +489,9 @@ pub struct OptionsFile {
     values: Vec<V>,
     /// `fullscreenResolution`, kept verbatim.
     pub fullscreen_resolution: Option<String>,
+    /// Mods' key mappings (`key_<name>:<key>` of mappings vanilla doesn't have), by name:
+    /// written after vanilla's, as `Options.keyMappings` holds the mods' after them.
+    pub mod_keys: std::collections::BTreeMap<String, String>,
 }
 
 impl Default for OptionsFile {
@@ -496,6 +499,7 @@ impl Default for OptionsFile {
         Self {
             values: TABLE.iter().map(|d| d.default.clone()).collect(),
             fullscreen_resolution: None,
+            mod_keys: std::collections::BTreeMap::new(),
         }
     }
 }
@@ -620,6 +624,14 @@ impl OptionsFile {
         &mut self,
         raw: &std::collections::HashMap<String, String>,
     ) -> Result<(), java_text::SyntaxError> {
+        for (k, text) in raw {
+            if let Some(name) = k.strip_prefix("key_")
+                && Self::index(k).is_none()
+                && let Ok(key) = canonical_key(text)
+            {
+                self.mod_keys.insert(name.to_owned(), key);
+            }
+        }
         for (i, d) in TABLE.iter().enumerate() {
             let Some(text) = raw.get(&d.key) else {
                 continue;
@@ -661,7 +673,13 @@ impl OptionsFile {
     /// `Options.save`.
     pub fn serialize(&self) -> String {
         let mut out = format!("version:{}\n", horizon_world::DATA_VERSION);
-        for (d, v) in TABLE.iter().zip(&self.values) {
+        for (i, (d, v)) in TABLE.iter().zip(&self.values).enumerate() {
+            // The mods' mappings after vanilla's last.
+            if i > 0 && matches!(TABLE[i - 1].kind, Kind::Key) && !matches!(d.kind, Kind::Key) {
+                for (name, key) in &self.mod_keys {
+                    out.push_str(&format!("key_{name}:{key}\n"));
+                }
+            }
             let rendered = match (d.kind, v) {
                 (Kind::Option(spec), v) => match spec.encode(v) {
                     Some(s) => s,
@@ -853,6 +871,28 @@ mod control_tests {
         for key in keys() {
             assert!(f.describe(key).is_some(), "{key}");
         }
+    }
+
+    #[test]
+    fn keeps_mods_key_mappings_after_vanillas() {
+        let f = OptionsFile::parse(
+            "version:4000\nkey_key.zoomy.zoom:key.keyboard.v\nkey_key.jump:key.keyboard.j\nkey_key.bad:nope\n",
+        );
+        assert_eq!(
+            f.mod_keys.get("key.zoomy.zoom").map(String::as_str),
+            Some("key.keyboard.v")
+        );
+        // InputConstants.getKey: a name it doesn't know is unbound.
+        assert_eq!(
+            f.mod_keys.get("key.bad").map(String::as_str),
+            Some("key.keyboard.unknown")
+        );
+        assert!(!f.mod_keys.contains_key("key.jump"), "vanilla's own");
+        let text = f.serialize();
+        let at = |s: &str| text.find(s).unwrap_or_else(|| panic!("{s} in {text}"));
+        assert!(at("key_key.hotbar.9:") < at("key_key.zoomy.zoom:key.keyboard.v\n"));
+        assert!(at("key_key.zoomy.zoom:") < at("soundCategory_master:"));
+        assert_eq!(OptionsFile::parse(&text), f);
     }
 
     #[test]

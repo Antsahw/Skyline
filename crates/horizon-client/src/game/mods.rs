@@ -18,7 +18,6 @@ pub(super) struct ModsState {
     /// The WebAssembly mods found that no longer run, for the one-time notice.
     stopped: Vec<String>,
     /// The Java mods' server side (`java_server.rs`).
-    #[cfg_attr(not(feature = "java-mods"), allow(dead_code))]
     pub(super) java: super::java_server::JavaServerState,
 }
 
@@ -83,7 +82,6 @@ pub(super) fn content_root(
     let here = std::env::current_dir().unwrap_or_default();
     // The Java mods' content mods are always on, as dev mods are (the jars in mods-java/ are
     // what turns them on and off).
-    #[cfg(feature = "java-mods")]
     let dev = &[dev, super::java_mods::java_content(root).as_slice()].concat();
     // So are the 1.20.1 mods' (mods-java-1.20.1/, docs/java-bridge-120.md).
     #[cfg(feature = "java-mods-120")]
@@ -163,11 +161,9 @@ pub(super) fn content_root(
         }
     }
     let built = mod_content::resource_root(root, &mods, &horizon_cache());
-    #[cfg(feature = "java-mods")]
     super::java_mods::start_early();
     match built {
         Ok(out) => {
-            #[cfg(feature = "java-mods")]
             if out != root {
                 super::java_mods::java_creative(&out);
             }

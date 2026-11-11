@@ -33,7 +33,7 @@ use std::{
     },
     time::{Duration, Instant},
 };
-mod java;
+mod tap;
 
 /// ServerCommonPacketListenerImpl.keepConnectionAlive: a keep-alive every 15 s,
 /// and a client that has not answered the last one by the next is dropped.
@@ -874,7 +874,7 @@ fn login_and_configure(
             .map_err(e)?;
         c.set_compression(threshold);
     }
-    java::send_login_finished(
+    tap::send_login_finished(
         c,
         uuid,
         &login::Clientbound::LoginFinished(login::LoginFinished {
@@ -903,7 +903,7 @@ fn login_and_configure(
     let sync: &SyncData = &sync_data;
     let memory = c.is_memory();
     let send = |c: &mut Connection, p: cfg::Clientbound| {
-        java::send_tapped(c, memory, &p.encode()).map_err(e)
+        tap::send_tapped(c, memory, &p.encode()).map_err(e)
     };
     send(
         c,
@@ -1598,7 +1598,7 @@ pub(super) fn frame_body(
     out: &mut Vec<u8>,
 ) -> horizon_protocol::Result<()> {
     if writer.wide {
-        return java::wide_frame(writer, body, out);
+        return tap::wide_frame(writer, body, out);
     }
     match writer.threshold {
         Some(t) if body.len() >= t.max(SHARED_FRAME_MIN) => {

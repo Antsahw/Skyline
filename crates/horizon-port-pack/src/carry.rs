@@ -837,6 +837,29 @@ fn variant_models(overrides: &BTreeMap<String, BTreeSet<String>>) -> BTreeSet<St
 /// and items are the ones the mod registers, with the templates and numbers
 /// the facts give; `allowed` says which vanilla blocks the game has;
 /// `pack` which mods the pack holds and ports along.
+/// Whether a carried mod changes what the world holds: blocks or items it declares, or any
+/// data (recipes, loot, tags, worldgen, advancements) in its folder.
+fn changes_world(inside: &Path, report: &Report) -> bool {
+    let data = inside.join("data");
+    let has_data = data.is_dir() && walkdir_any(&data);
+    !report.blocks.is_empty() || report.items > 0 || has_data
+}
+
+/// Whether a folder holds any file, at any depth.
+fn walkdir_any(dir: &Path) -> bool {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return false;
+    };
+    entries.flatten().any(|e| {
+        let path = e.path();
+        if path.is_dir() {
+            walkdir_any(&path)
+        } else {
+            true
+        }
+    })
+}
+
 pub fn carry(
     jar: &Path,
     info: &JarInfo,
@@ -1252,8 +1275,16 @@ pub fn carry(
     unregistered_recipes(&inside, &outside, id, &owned, &mut report)?;
     let q = |s: &str| toml::Value::String(s.to_owned()).to_string();
     let name = if info.name.is_empty() { id } else { &info.name };
+    // A mod that adds nothing to the world (no block, no item, no data: a minimap, a HUD) is
+    // the player's own business, as a client-side mod: any server accepts the player with it
+    // (its client half then runs in the player's game; docs/java-bridge.md).
+    let side = if changes_world(&inside, &report) {
+        "both"
+    } else {
+        "client"
+    };
     let mut manifest = format!(
-        "# Carried over from {jar} by horizon-port-pack, for local use only.\n# Licence: {license}\nid = {}\nname = {}\nversion = {}\napi = \"0.2\"\nside = \"both\"\ncapabilities = [\"registries\"]\n",
+        "# Carried over from {jar} by horizon-port-pack, for local use only.\n# Licence: {license}\nid = {}\nname = {}\nversion = {}\napi = \"0.2\"\nside = \"{side}\"\ncapabilities = [\"registries\"]\n",
         q(&content_id),
         q(name),
         q(&info.version),
@@ -2068,6 +2099,8 @@ mod tests {
         let carried = out.join("carry");
         let package = horizon_mods::Package::read(&carried).unwrap();
         assert_eq!(package.manifest.namespaces, ["kaisyn", "towers_wg"]);
+        // Its structures change the world: every player joining needs it.
+        assert_eq!(package.manifest.side, horizon_mods::Side::Both);
         let content = horizon_mods::Content::read(&carried, &package.manifest).unwrap();
         assert!(
             content
@@ -2081,6 +2114,46 @@ mod tests {
         )
         .unwrap();
         assert_eq!(tag, json!({"values": ["minecraft:plains"]}));
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A mod with no block, item or data (a minimap: textures and translations) is carried as a
+    /// client-side mod, which any server accepts the player with.
+    #[test]
+    fn a_mod_without_world_content_is_client_side() {
+        let dir =
+            std::env::temp_dir().join(format!("horizon-port-pack-hud-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let jar = dir.join("minimap-1.0.jar");
+        let mut zip = zip::ZipWriter::new(fs::File::create(&jar).unwrap());
+        let files: &[(&str, &str)] = &[
+            (
+                "META-INF/neoforge.mods.toml",
+                "license = \"MIT\"\n[[mods]]\nmodId = \"minimap\"\nversion = \"1.0\"\n",
+            ),
+            ("com/example/minimap/Minimap.class", "not real bytecode"),
+            ("assets/minimap/textures/gui/frame.png", "png"),
+            (
+                "assets/minimap/lang/en_us.json",
+                r#"{"key.minimap.zoom": "Zoom"}"#,
+            ),
+        ];
+        for (name, text) in files {
+            zip.start_file(*name, zip::write::SimpleFileOptions::default())
+                .unwrap();
+            zip.write_all(text.as_bytes()).unwrap();
+        }
+        zip.finish().unwrap();
+        let info = crate::jar::read(&jar).unwrap();
+        let out = dir.join("work/mods/minimap");
+        let pack = Pack {
+            loaded: &|_| true,
+            mods: &|_| false,
+        };
+        carry(&jar, &info, &out, None, &|_| true, &pack, &BTreeMap::new()).unwrap();
+        let package = horizon_mods::Package::read(&out.join("carry")).unwrap();
+        assert_eq!(package.manifest.side, horizon_mods::Side::Client);
         fs::remove_dir_all(&dir).unwrap();
     }
 

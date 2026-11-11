@@ -12,6 +12,8 @@ pub(super) struct JavaGame {
     pub(super) screen: Option<super::java_screen::JavaScreen>,
     /// The keys the server's Java mods bind (game/java_screen.rs).
     pub(super) binds: super::java_screen::JavaBinds,
+    /// The field-of-view scale the Java mods make (game/java_screen.rs's VIEW).
+    pub(super) view: super::java_screen::JavaView,
     /// What Java mods last drew on the HUD (game/java_screen.rs).
     pub(super) hud: Option<super::java_screen::JavaHud>,
     pub(super) overlay: super::java_screen::JavaOverlay,
@@ -25,12 +27,16 @@ pub(super) struct JavaGame {
     /// Players who joined while the Java mods' data-pack load functions hadn't run, with the
     /// ticks they have waited, and the ticks since the functions ran (`hold_join`).
     pub(super) held_joins: Vec<(u32, u32, u32)>,
+    /// The launcher's offline skin went to this server's Java mods (`remote/java.rs`).
+    pub(super) own_skin_sent: bool,
 }
 
 #[cfg(feature = "java-mods")]
 mod bridge;
 #[cfg(feature = "java-mods")]
-pub(super) use bridge::*;
+pub(crate) use bridge::*;
 
 #[cfg(not(feature = "java-mods"))]
 mod off;
+#[cfg(not(feature = "java-mods"))]
+pub(crate) use off::*;

@@ -6,6 +6,8 @@ All fixes generic (no mod-specific code). 26.3 facts checked with javap on the c
 
 ## 1. Mods' key bindings missing from Controls (Zoomify, Spell Engine)
 
+**Done** (bridge-modkeys-fov): see java-bridge.md "Mods' key bindings in Controls"; regress `keys-rebind`, `keys-server`.
+
 **Today:** Java collects mod keys only from Fabric's `KeyMappingRegistryImpl.MODDED_KEY_BINDINGS` (HC:2771
 `modKeys`); `boundKeys` (HC:2786) sends scancodes only (-1 all, -200 wheel, -100-n mouse) on `horizon:java_keys`
 (`java_server.rs:1850`); the game keeps a `Vec<i32>` (`java_screen.rs:174`); `java_bind_key` (`java_screen.rs:212`,
@@ -35,6 +37,8 @@ Spell Engine + deps.
 
 ## 2. Zoomify's zoom does nothing (mods' FOV not applied)
 
+**Done** (bridge-modkeys-fov), tested with the `fovmod` fixture (Zoomify's way); Zoomify itself not tried (no jar here).
+
 **Today:** in 26.3 FOV lives in `Camera` (`tickFov()`, private `calculateFov(float)`, `modifyFovBasedOnDeathOrFluid`,
 `update(DeltaTracker)` writing `fov`/`hudFov`, public `getFov()`). The headless camera is `Natives.allocate(Camera.class)`
 (HC:263-265): no constructor, `minecraft` null, `fovModifier` 0, never ticked. `CameraMixin` answers only
@@ -61,11 +65,15 @@ Note Zoomify's default C collides with Horizon's `saveToolbarActivator`.
 
 ## 3. Xaero's Minimap / World Map low-res
 
+**Done** (2026-11-06, `bridge-hud-res`): per-player window with scale and framebuffer, fractional shrink
+to 2048 locally (512 remote), own wgpu textures for images over 512; regress `maps-hires`. See
+java-bridge.md, Status.
+
 **Today:** headless window has fixed GUI scale 3 (`windowSize()` HC:681 → 1280x720 for everyone); `width/height` are
 global statics (HC:678) set by any player's size input (HC:3895-3901); the game sends only the GUI-scaled size
 (`java_screen.rs:514-520`). PIPs prepared at that scale (`HorizonGraphics.java:145`, `guiScale()` :371), redrawn ≤
 every 100 ms. GPU images capped at 512 px with integer shrink (`readPending` :480-515, `MAX_IMAGE` :519,
-`shrink` :523). Rust: 16 HUD atlas slots of 512 (`horizon-client-render/src/hud/java.rs:18-19`), nearest-neighbour.
+`shrink` :523). Rust: 16 HUD atlas slots of 512 (`horizon-client-render/src/hud/mod_textures.rs:18-19`), nearest-neighbour.
 
 **Cause:** World Map (certain): 1281x720 → shrink 3 → **427x240** stretched (regress `maps-server` even pins
 427x240). Minimap: rendered for a 720p scale-3 window, upscaled 2–3× at 1440p/4K. Anything 513–1024 px halved.
@@ -83,6 +91,9 @@ Check with `HORIZON_JAVA_DEBUG=gpu` (`gpu: <name> WxH`).
 before/after. Jars: Xaero's Minimap 26.6.2, World Map 1.47.2 (+ XaeroPlus 2.37.2), fabric-api.
 
 ## 4. 3D Skin Layers draws wrong (white boxes at the arms)
+
+**Done (bridge-skin-layers, 2026-11-06):** see java-bridge.md "Players' real skins in the headless client";
+regress `skinlayers-skin`.
 
 **Today:** mirrored players are `new GameProfile(uuid, name)` with no properties (`HorizonServer.java:1180`);
 `SkinManagerMixin` always answers `DefaultPlayerSkin.get(profile)`; downloads blocked (`SkinDownloaderMixin`);
@@ -111,7 +122,7 @@ defaults (:1814).
 texture is the player's skin id; F5 front screenshot sleeves in fixture colours on slim arms. Jar:
 `skinlayers3d-fabric-1.11.4-mc26.3.jar`, fabric-api.
 
-## 5. Client-side mods work in single player, not on a multiplayer server
+## 5. Client-side mods work in single player, not on a multiplayer server (done: bridge-own-client)
 
 **Today:** mods' client halves run in the **server's** process (its headless client, `as(player)`). A game joined to
 another server runs only "device mods" in its own JVM (`HorizonDeviceClient.join` :121-127 returns "" unless
@@ -132,6 +143,13 @@ server software.
 **Test:** `server_test.sh` gains `SERVER_MODS`/`PLAYER_MODS` and optional `VANILLA_SERVER=1` (`java -jar
 .local/…/server.jar nogui`, offline; never committed); regress `maps-client-only` (server empty, player Xaero): player
 log line + `gpu: a blit of horizon:dynamic/gpu`, minimap screenshot; then against a vanilla server.
+
+**Done (2026-11-06, `bridge-own-client`):** as planned, plus two causes found on the way: a Horizon
+server with *any* Java mods refused a player with Xaero ("Not on this server: xaerominimap": carried
+mods were all `side = "both"`; now mods with no world content are `client`), and Xaero's own client
+failed at its join (a single-player server and no spawn in the own client's mirror). Regress
+`maps-client-only`, `maps-client-vanilla`, `maps-client-some`; docs/java-bridge.md "Each game runs
+its own mods' client".
 
 ## Plumbing already there
 

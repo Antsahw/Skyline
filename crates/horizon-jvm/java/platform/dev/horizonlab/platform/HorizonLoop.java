@@ -113,14 +113,15 @@ public final class HorizonLoop {
         if (DEBUG) Natives.log("loop: server to client " + payload.type().id() + " for " + player.getName().getString());
         // A device mod's message for a player whose client half isn't here: to their own game,
         // which runs it (HorizonDeviceMods); none for a game that doesn't.
-        if (HorizonDeviceMods.deviceChannel(payload.type().id()) && !player.getUUID().equals(HorizonDeviceMods.own)) {
+        if (HorizonDeviceMods.deviceChannel(payload.type().id(), player.getUUID()) && !player.getUUID().equals(HorizonDeviceMods.own)) {
             byte[] body = null;
-            if (HorizonDeviceMods.RUN_THEIR_OWN.contains(player.getUUID()) || HorizonDeviceMods.OWN_CLIENT) {
+            boolean theirs = HorizonDeviceMods.RUN_THEIR_OWN.containsKey(player.getUUID());
+            if (theirs || HorizonDeviceMods.OWN_CLIENT) {
                 body = write(payload, net.fabricmc.fabric.impl.networking.PayloadTypeRegistryImpl.CLIENTBOUND_PLAY,
                         HorizonServer.server().registryAccess());
             }
             if (body == null) return true;
-            if (HorizonDeviceMods.RUN_THEIR_OWN.contains(player.getUUID())) {
+            if (theirs) {
                 HorizonPackets.customPayload(player, payload.type().id().toString(), body);
             } else {
                 // Every mod's client half in each game (OWN_CLIENT): the player's game starts its
@@ -203,17 +204,28 @@ public final class HorizonLoop {
     public static void fromGame(String uuid, String channel, byte[] body) {
         ServerPlayer player = HorizonServer.player(java.util.UUID.fromString(uuid));
         var server = HorizonServer.server();
-        if (player == null || server == null || !HorizonDeviceMods.deviceChannel(Identifier.parse(channel))) return;
+        if (player == null || server == null || !HorizonDeviceMods.deviceChannel(Identifier.parse(channel), player.getUUID())) return;
         CustomPacketPayload payload = read(channel, body, net.fabricmc.fabric.impl.networking.PayloadTypeRegistryImpl.SERVERBOUND_PLAY,
                 server.registryAccess());
         if (DEBUG) Natives.log("loop: " + player.getName().getString() + "'s game to server " + channel);
         if (payload != null) receive(player, payload);
     }
 
-    /** A player's own game runs the device mods' client half (it said so as it joined). */
-    public static void runsTheirOwn(String uuid) {
+    /**
+     * A player's own game runs some mods' client half (it said so as it joined): {@code mods}
+     * as it listed them ("*" first: every mod's; "+" first: the mods this server lacked; else
+     * the device mods).
+     */
+    public static void runsTheirOwn(String uuid, String mods) {
         var id = java.util.UUID.fromString(uuid);
-        HorizonDeviceMods.RUN_THEIR_OWN.add(id);
+        Set<String> theirs = java.util.concurrent.ConcurrentHashMap.newKeySet();
+        for (String mod : mods.split(",")) {
+            if (!mod.isEmpty() && !mod.equals("+")) theirs.add(mod);
+        }
+        HorizonDeviceMods.RUN_THEIR_OWN.put(id, theirs);
+        ServerPlayer who = HorizonServer.player(id);
+        Natives.log("Java mods: " + (who == null ? uuid : who.getName().getString()) + "'s own game runs "
+                + (theirs.contains("*") ? "every mod's" : String.join(", ", new java.util.TreeSet<>(theirs)) + "'s") + " client half");
         // What waited for its client, in order.
         var waiting = WAITING.remove(id);
         ServerPlayer player = HorizonServer.player(id);

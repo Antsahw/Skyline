@@ -26,11 +26,11 @@ use horizon_world::{
     },
 };
 use std::{path::Path, sync::Arc};
-mod java;
 mod lod;
+mod oracle;
 mod structure_mobs;
-pub use java::{BiomeOracle, NoiseFill};
 use lod::VanillaLodSampler;
+pub use oracle::{BiomeOracle, NoiseFill};
 use structure_mobs::StructureMobFinalizer;
 
 /// The references a saved chunk keeps for its structure start: `(structure, chunk x, chunk z)`.
@@ -66,7 +66,7 @@ pub struct VanillaTerrain {
     last_proto: std::sync::atomic::AtomicU64,
     created: std::time::Instant,
     /// Another generator's say in this dimension (the Java mod bridge).
-    oracle: java::Oracle,
+    oracle: oracle::Oracle,
     /// A superflat generator (`FlatLevelSource`).
     flat: bool,
 }
@@ -276,7 +276,7 @@ impl VanillaTerrain {
                 kept.min_y + kept.height
             );
         }
-        java::warn_unsupported_structures(dimension, &generator.unsupported_structures());
+        oracle::warn_unsupported_structures(dimension, &generator.unsupported_structures());
         let unsupported = generator.unsupported_features();
         if !unsupported.is_empty() {
             log::warn!(
@@ -335,7 +335,7 @@ impl VanillaTerrain {
             dimension: dimension.to_owned(),
             last_proto: std::sync::atomic::AtomicU64::new(0),
             created: std::time::Instant::now(),
-            oracle: java::Oracle::default(),
+            oracle: oracle::Oracle::default(),
             flat: false,
         })
     }

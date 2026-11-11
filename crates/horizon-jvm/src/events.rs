@@ -111,6 +111,9 @@ pub enum Action {
         yaw: f32,
         pitch: f32,
     },
+    /// A mod's block entity set a player's motion (Create's fan blowing, its belt carrying):
+    /// the player's client is to move at `velocity` (vanilla's ClientboundSetEntityMotionPacket).
+    PlayerMotion { uuid: String, velocity: [f64; 3] },
     /// `ServerPlayer.teleport` and the connection's: the player is to be moved there.
     Teleport {
         uuid: String,
@@ -170,6 +173,9 @@ pub enum Action {
     /// What mods draw on a player's HUD (Jade, AppleSkin), drawn by their client code in the
     /// headless client each tick: operations as a screen frame's, sent when they change.
     HudFrame { uuid: String, frame: String },
+    /// A player's field of view as mods make it (`Camera.calculateFov`'s hooks: a zoom mod),
+    /// over vanilla's: the scale their game's camera takes (1: none), sent when it changes.
+    View { uuid: String, scale: f32 },
     /// What mods draw over a player's inventory (REI's item list), drawn in the headless
     /// client's inventory screen while the player's is open: sent when it changes.
     OverlayFrame { uuid: String, frame: String },
@@ -368,7 +374,7 @@ fn call_tick(
     players: &[Player],
     events: &[Event],
 ) -> jni::errors::Result<()> {
-    let world = env.new_string(world.to_string_lossy())?;
+    let world = env.new_string(crate::plain_path(world).to_string_lossy())?;
     let ids: Vec<&str> = players.iter().map(|p| p.uuid.as_str()).collect();
     let names: Vec<&str> = players.iter().map(|p| p.name.as_str()).collect();
     let dims: Vec<&str> = players.iter().map(|p| p.dimension.as_str()).collect();
@@ -1693,6 +1699,27 @@ pub fn bound_keys() -> Result<Vec<i32>, String> {
     serde_json::from_str(&json).map_err(|e| e.to_string())
 }
 
+/// The Java mods' key bindings (HorizonClient.keyMappings): `[{name, category, key, default,
+/// label, categoryLabel}]` as JSON, for players' Controls pages. "[]" without a headless client.
+pub fn key_mappings() -> Result<String, String> {
+    let Some(class) = client_class() else {
+        return Ok("[]".into());
+    };
+    let bridge = crate::get().ok_or("Java isn't running")?;
+    let mut env = bridge
+        .vm()
+        .attach_current_thread_permanently()
+        .map_err(|e| e.to_string())?;
+    env.with_local_frame(8, |env| -> jni::errors::Result<String> {
+        let class = <&JClass>::from(class.as_obj());
+        let value = env
+            .call_static_method(class, "keyMappings", "()Ljava/lang/String;", &[])?
+            .l()?;
+        Ok(env.get_string(&JString::from(value))?.into())
+    })
+    .map_err(|e| crate::describe(&mut env, e))
+}
+
 /// The Java mods with a settings screen (HorizonClient.configMods): `[id, name]` pairs, for
 /// players' Mods pages.
 pub fn config_mods() -> Result<Vec<(String, String)>, String> {
@@ -1736,6 +1763,75 @@ pub fn screen_input(uuid: &str, input: &str) -> Result<(), String> {
         Ok(())
     })
     .map_err(|e| crate::describe(&mut env, e))
+}
+
+/// A game's own skin (an offline name's, from its launcher: `horizon:java_own_skin`) for a
+/// player: 64x64 RGBA rows and whether its arms are slim. Mods that build from a player's skin
+/// (3D skin layers) use it (`HorizonSkins.ownSkin`).
+pub fn own_skin(uuid: &str, slim: bool, rgba: &[u8]) -> Result<(), String> {
+    call_skins(|env, class| {
+        let uuid = env.new_string(uuid)?;
+        let rgba = env.byte_array_from_slice(rgba)?;
+        env.call_static_method(
+            class,
+            "ownSkin",
+            "(Ljava/lang/String;Z[B)V",
+            &[
+                JValue::Object(&uuid),
+                JValue::Bool(slim as u8),
+                JValue::Object(&rgba),
+            ],
+        )?;
+        Ok(())
+    })
+}
+
+/// A player's `textures` profile property as Horizon's server has it (`HorizonSkins.textures`):
+/// the mirrored player's profile carries it, and its skin is fetched for mods that read it.
+pub fn profile_textures(uuid: &str, value: &str, signature: Option<&str>) -> Result<(), String> {
+    call_skins(|env, class| {
+        let uuid = env.new_string(uuid)?;
+        let value = env.new_string(value)?;
+        let signature = env.new_string(signature.unwrap_or(""))?;
+        env.call_static_method(
+            class,
+            "textures",
+            "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V",
+            &[
+                JValue::Object(&uuid),
+                JValue::Object(&value),
+                JValue::Object(&signature),
+            ],
+        )?;
+        Ok(())
+    })
+}
+
+fn call_skins(
+    f: impl FnOnce(&mut JNIEnv, &JClass) -> jni::errors::Result<()>,
+) -> Result<(), String> {
+    static SKINS_CLASS: std::sync::OnceLock<Option<GlobalRef>> = std::sync::OnceLock::new();
+    let class = SKINS_CLASS
+        .get_or_init(|| {
+            let bridge = crate::get()?;
+            let mut env = bridge.vm().attach_current_thread_permanently().ok()?;
+            match bridge.find_class(&mut env, "dev/horizonlab/platform/HorizonSkins") {
+                Ok(class) => env.new_global_ref(class).ok(),
+                Err(_) => {
+                    let _ = env.exception_clear();
+                    None
+                }
+            }
+        })
+        .as_ref()
+        .ok_or("no platform mod")?;
+    let bridge = crate::get().ok_or("Java isn't running")?;
+    let mut env = bridge
+        .vm()
+        .attach_current_thread_permanently()
+        .map_err(|e| e.to_string())?;
+    env.with_local_frame(8, |env| f(env, <&JClass>::from(class.as_obj())))
+        .map_err(|e| crate::describe(&mut env, e))
 }
 
 /// The platform's `HorizonClient` (the headless client), when Fabric runs its client side.
@@ -2113,7 +2209,7 @@ pub fn worldgen_start(
 ) -> Result<bool, String> {
     let modded = with_server(|env, class| {
         let dimension = env.new_string(dimension)?;
-        let world = env.new_string(world.to_string_lossy())?;
+        let world = env.new_string(crate::plain_path(world).to_string_lossy())?;
         // "structure type" for each structure Horizon's generator can't make there.
         let cannot = env.new_object_array(
             horizon_cannot.len() as i32,

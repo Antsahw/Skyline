@@ -12,8 +12,8 @@ use std::{
 use wgpu::util::DeviceExt;
 
 pub mod cit_glint;
-mod java;
-pub use java::{
+mod mod_textures;
+pub use mod_textures::{
     JAVA_BIG_IMAGE_SIZE, JAVA_BIG_IMAGE_SLOTS, JAVA_IMAGE_SIZE, JAVA_IMAGE_SLOTS, java_image_slot,
 };
 mod pack_text;
@@ -850,7 +850,7 @@ impl HudAtlas {
             let name = map_slot_sprite(i).unwrap_or_default();
             images.push((name.into(), 128, 128, vec![0; 128 * 128 * 4]));
         }
-        java::java_slots(images);
+        mod_textures::java_slots(images);
         // The minimap extra's image (game/extras.rs).
         images.push((
             MINIMAP_SPRITE.into(),
@@ -1128,7 +1128,7 @@ impl HudAtlas {
             for ns in namespaces.flatten() {
                 if ns.file_name() != "minecraft" {
                     walk(&ns.path().join("textures/gui"), &mut files);
-                    java::walk_java_textures(&ns.path(), folders, &mut files);
+                    mod_textures::walk_java_textures(&ns.path(), folders, &mut files);
                 }
             }
         }
@@ -1543,6 +1543,20 @@ pub struct HudBatch {
     pub blur_at: u32,
     /// Player object profiles encountered while painting text this frame.
     pub inline_profiles: Vec<serde_json::Value>,
+    /// Images too big for the atlas, each drawn from its own texture (`Blend::Image` runs):
+    /// every one that lives, each frame (the renderer uploads those whose version changed and
+    /// drops those gone).
+    pub images: Vec<HudImage>,
+}
+/// An image with a texture of its own ([`HudBatch::images`]): a Java mod's full-screen map.
+#[derive(Clone, Debug)]
+pub struct HudImage {
+    pub id: u32,
+    /// Changes when the pixels do.
+    pub version: u64,
+    pub width: u32,
+    pub height: u32,
+    pub rgba: Arc<Vec<u8>>,
 }
 /// How a run of HUD vertices blends and tests depth.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -1564,6 +1578,9 @@ pub enum Blend {
     /// An OptiFine CIT glint layer (`cit_glint`), blended as entry `n` of
     /// `GlintTextures::blends` says.
     CitGlint(u8),
+    /// Alpha blending from [`HudBatch::images`]' image `id` instead of the atlas (UVs 0..1 over
+    /// the image), filtered linearly when `linear`, else nearest.
+    Image(u32, bool),
 }
 /// What a `Blend::EndPortal` fill samples: the atlas rects (u0, v0, width,
 /// height) of `end_sky.png` and `end_portal.png`, and the `GameTime` uniform.
@@ -1600,6 +1617,7 @@ impl HudBatch {
             game_time: 0.0,
             blur_at: 0,
             inline_profiles: Vec::new(),
+            images: Vec::new(),
         }
     }
     /// Draw the vertices added since `start` with the inverting blend.
@@ -2362,6 +2380,19 @@ pub struct HudRenderer {
     /// Target pixels per window pixel: above 1 for a screenshot drawn larger than the
     /// window (`Renderer::screenshot_quality`).
     pub zoom: f32,
+    /// What `group` binds besides the atlas, for the images' own groups.
+    glint_view: wgpu::TextureView,
+    glint_sampler: wgpu::Sampler,
+    nearest_sampler: wgpu::Sampler,
+    linear_sampler: wgpu::Sampler,
+    /// [`HudBatch::images`] as uploaded: by id, its version, texture and groups (nearest, linear).
+    images: HashMap<u32, OwnImage>,
+}
+/// An image's texture and its bind groups ([`HudRenderer::images`]).
+struct OwnImage {
+    version: u64,
+    texture: wgpu::Texture,
+    groups: [wgpu::BindGroup; 2],
 }
 impl HudRenderer {
     pub fn new(
@@ -2610,6 +2641,11 @@ impl HudRenderer {
             atlas_view: view.clone(),
             pack_text: None,
             zoom: 1.0,
+            glint_view: glint_view.clone(),
+            glint_sampler: glint_sampler.clone(),
+            nearest_sampler: sampler,
+            linear_sampler,
+            images: HashMap::new(),
         })
     }
     /// Draw the CIT glint layers of `textures` (the pack's enchantment rules); `None` or no
@@ -2719,6 +2755,109 @@ impl HudRenderer {
             }
         }
     }
+    /// The batch's own-texture images: those new or changed uploaded (a texture made when
+    /// the size changes), those gone dropped.
+    fn upload_images(
+        &mut self,
+        device: &wgpu::Device,
+        uploads: &mut crate::gfx::upload::Uploads,
+        encoder: &mut wgpu::CommandEncoder,
+        images: &[HudImage],
+    ) {
+        self.images
+            .retain(|id, _| images.iter().any(|i| i.id == *id));
+        let max = device.limits().max_texture_dimension_2d;
+        for image in images {
+            let (w, h) = (image.width, image.height);
+            if w == 0 || h == 0 || w > max || h > max || image.rgba.len() < (w * h * 4) as usize {
+                continue;
+            }
+            if self
+                .images
+                .get(&image.id)
+                .is_some_and(|o| o.version == image.version)
+            {
+                continue;
+            }
+            let fits = self
+                .images
+                .get(&image.id)
+                .is_some_and(|o| o.texture.width() == w && o.texture.height() == h);
+            if !fits {
+                let texture = device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("HUD image"),
+                    size: wgpu::Extent3d {
+                        width: w,
+                        height: h,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    // As the atlas: the pixels as they are (no sRGB decode).
+                    format: wgpu::TextureFormat::Rgba8Unorm,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                    view_formats: &[],
+                });
+                let view = texture.create_view(&Default::default());
+                let group = |sampler: &wgpu::Sampler| {
+                    device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("HUD image"),
+                        layout: &self.layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: self.uniform.as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: wgpu::BindingResource::TextureView(&view),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: wgpu::BindingResource::Sampler(sampler),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 3,
+                                resource: wgpu::BindingResource::TextureView(&self.glint_view),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 4,
+                                resource: wgpu::BindingResource::Sampler(&self.glint_sampler),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 5,
+                                resource: wgpu::BindingResource::Sampler(&self.linear_sampler),
+                            },
+                        ],
+                    })
+                };
+                let groups = [group(&self.nearest_sampler), group(&self.linear_sampler)];
+                self.images.insert(
+                    image.id,
+                    OwnImage {
+                        version: image.version,
+                        texture,
+                        groups,
+                    },
+                );
+            }
+            let own = self.images.get_mut(&image.id).expect("made above");
+            own.version = image.version;
+            uploads.texture(
+                encoder,
+                wgpu::TexelCopyTextureInfo {
+                    texture: &own.texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                w,
+                h,
+                &image.rgba[..(w * h * 4) as usize],
+            );
+        }
+    }
     /// Stage the batch's atlas patches, vertices and uniform: before the
     /// frame's first pass, so the copies share one command buffer.
     pub fn prepare(
@@ -2730,6 +2869,7 @@ impl HudRenderer {
         size: [u32; 2],
     ) {
         self.upload_patches(uploads, encoder, &batch.patches);
+        self.upload_images(device, uploads, encoder, &batch.images);
         if batch.vertices.is_empty() || size.contains(&0) {
             return;
         }
@@ -2863,6 +3003,15 @@ impl HudRenderer {
                     Blend::CitGlint(blend) => {
                         if let Some(cit) = &self.cit_glint {
                             cit.draw(&mut pass, *blend, range.clone());
+                        }
+                        continue;
+                    }
+                    Blend::Image(id, linear) => {
+                        if let Some(image) = self.images.get(id) {
+                            pass.set_bind_group(0, &image.groups[usize::from(*linear)], &[]);
+                            pass.set_pipeline(&self.pipeline);
+                            pass.draw(range.clone(), 0..1);
+                            pass.set_bind_group(0, &self.group, &[]);
                         }
                         continue;
                     }
@@ -4319,6 +4468,7 @@ texture=wide",
                 game_time: 0.0,
                 blur_at: 0,
                 inline_profiles: Vec::new(),
+                images: Vec::new(),
             };
             for (image_width, image_height) in [(195, 136), (176, 166), (176, 222)] {
                 assert_eq!(

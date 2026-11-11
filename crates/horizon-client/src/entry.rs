@@ -15,6 +15,8 @@ pub fn main_with(mods: crate::mod_api::Mods) {
     horizon_threads::configure_allocator();
     horizon_client::telemetry::mark_start();
     horizon_client::spans::startup::init(std::time::Instant::now());
+    // Fabric mods' owner record: read now, while it is fresh, beside the start.
+    game::java_mods::owner_record_early();
     let args: Vec<String> = std::env::args().skip(1).collect();
     let game_args = args.iter().take_while(|a| *a != "--dedicated");
     let help = game_args
@@ -200,8 +202,7 @@ pub fn main_with(mods: crate::mod_api::Mods) {
     }
     logging::flush();
     // With Java mods, the process ends through Java's exit (its class archive is written).
-    #[cfg(feature = "java-mods")]
-    horizon_jvm::exit(0, std::time::Duration::from_secs(90), logging::flush);
+    game::java_mods::exit_through_java();
 }
 
 /// The JVM raises its open-file limit to the hard limit as it starts

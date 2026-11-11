@@ -95,6 +95,7 @@ fn a_modded_pack_fills_the_instance_it_is_imported_into() {
             launch: Default::default(),
             java: Some(Default::default()),
             java_mods: false,
+            java_mods_warned: false,
         })
     };
     assert!(import::import_into(&file, &|_, _| {}, &make).is_err());

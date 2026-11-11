@@ -926,7 +926,6 @@ impl Game<'_> {
             self.world.chunks.remove_fresh(&key);
             self.spawn_generation_creatures(key.0, key.1);
             // The mods' creatures of its biome spawn too (creatures/java.rs).
-            #[cfg(feature = "java-mods")]
             self.java_fresh_chunk(key);
         }
     }
@@ -994,7 +993,6 @@ impl Game<'_> {
         let uuid = self.level.player_uuid;
         let mut snapshot: Vec<Seen> = self.mobs.iter().map(|m| seen(m, uuid)).collect();
         // The Java mods' living entities, as the vanilla types they are taken for.
-        #[cfg(feature = "java-mods")]
         snapshot.extend(self.java_neighbours_seen());
         let mut events = Vec::new();
         let mut mobs = std::mem::take(&mut self.mobs);
@@ -1750,7 +1748,6 @@ impl Game<'_> {
             source.attacker_species = self.mobs.iter().find(|m| m.id == id).map(|m| m.species());
         }
         // One of the Java mods' entities: the mirror takes the hit.
-        #[cfg(feature = "java-mods")]
         if let Some(hurt) = self.java_mob_hits_entity(target, amount, source) {
             return hurt;
         }
@@ -3953,10 +3950,8 @@ impl Game<'_> {
         let hear = self.native_hears_impacts();
         let mut impacts: Vec<Impact> = Vec::new();
         {
-            #[cfg_attr(not(feature = "java-mods"), allow(unused_mut))]
             let mut targets = self.projectile_targets();
             // The mods' living entities: Horizon's arrows and snowballs meet them too.
-            #[cfg(feature = "java-mods")]
             targets.extend(self.java_projectile_targets());
             let breezes: Vec<u32> = self
                 .mobs
@@ -4676,7 +4671,6 @@ impl Game<'_> {
             return self.wind_charge_hit(p, hit);
         }
         // Projectile.onHitEntity on one of the mods' entities (creatures/java.rs).
-        #[cfg(feature = "java-mods")]
         if self.java_projectile_hit(p, &hit) {
             return Ok(());
         }

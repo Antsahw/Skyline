@@ -154,18 +154,15 @@ mod item_areas;
 mod item_draw;
 mod item_particles;
 mod item_use;
-#[cfg(feature = "java-mods")]
 mod java_device;
-#[cfg(feature = "java-mods")]
 mod java_entities;
-mod java_mods;
+mod java_hooks;
+pub(crate) mod java_mods;
 #[cfg(feature = "java-mods-120")]
 mod java_mods_120;
-#[cfg(feature = "java-mods")]
 mod java_profile;
 mod java_screen;
 mod java_server;
-#[cfg(feature = "java-mods")]
 mod java_worldgen;
 mod jigsaw_blocks;
 mod jigsaw_edit;
@@ -1196,16 +1193,16 @@ impl GameLevel<'_> {
 }
 impl LevelAccess for GameLevel<'_> {
     fn foreign_fluid(&self, state: BlockStateId) -> bool {
-        java_server::java_fluid(state)
+        Game::java_fluid(state)
     }
     fn foreign_fluid_changed(&mut self, pos: BlockPos) {
-        java_server::java_fluid_changed(pos);
+        Game::java_fluid_changed(pos);
     }
     fn liquid_interaction(&mut self, pos: BlockPos) -> bool {
-        java_server::java_liquid_interaction(pos)
+        Game::java_liquid_interaction(pos)
     }
     fn observe_neighbours_updated(&self, source: BlockPos) {
-        java_server::java_neighbours_updated(source, |p| self.block_state(p));
+        Game::java_neighbours_updated(source, |p| self.block_state(p));
     }
     fn redstone_experiments(&self) -> bool {
         self.redstone_experiments
@@ -1434,7 +1431,7 @@ impl LevelAccess for GameLevel<'_> {
         handled: &mut bool,
     ) {
         // Java mods' blocks, and vanilla blocks whose random tick a mod patches (java_server.rs).
-        if java_server::java_random_tick(pos, *state) {
+        if Game::java_random_tick(pos, *state) {
             *handled = true;
             return;
         }
@@ -1552,7 +1549,7 @@ impl LevelAccess for GameLevel<'_> {
     fn precipitation(&self, pos: BlockPos) -> Option<horizon_world::level::Precipitation> {
         self.behaviours
             .precipitation_info(self, pos)
-            .filter(|info| !java_server::java_precipitation(info.top))
+            .filter(|info| !Game::java_precipitation(info.top))
     }
     fn is_raining_at(&self, pos: BlockPos) -> bool {
         self.behaviours.is_raining_at(self, pos)
@@ -4452,7 +4449,7 @@ impl Game<'_> {
             }
             // Held by a Java mod's block (crushing wheels pulling it in): the mods' mirror
             // ticks it, with their blocks' shapes for it.
-            if merging && java_server::java_holds_item(item.id) {
+            if merging && Game::java_holds_item(item.id) {
                 continue;
             }
             // ItemEntity.tick's noPhysics (servers only): out of a block
@@ -8363,7 +8360,9 @@ impl Game<'_> {
     /// controller alike.
     fn look_turn(&mut self, x: f64, y: f64) {
         self.tutorial.mouse(x, y);
-        let zoom = self.zoom_turn_scale();
+        // A Java mod's zoom slows turning as much as it narrows the view (its own
+        // MouseHandler.turnPlayer hooks don't run headless).
+        let zoom = self.zoom_turn_scale() * f64::from(self.java.view.scale(1.0).min(1.0));
         self.turn_player(x * zoom, y * zoom);
     }
     /// `Minecraft.pause`: a single-player game with a pausing screen open.
@@ -16575,6 +16574,8 @@ impl Game<'_> {
         // geometry (game/maps.rs, world text) upload with this batch; draining
         // map_patches any earlier leaves them a frame behind.
         hud.patches.append(&mut self.map_patches);
+        // Java mods' images too big for the atlas, each from its own texture.
+        hud.images = self.java.images.own_images();
         let entity_spans = std::mem::take(self.entity_spans.get_mut());
         let entity_motion = std::mem::take(self.entity_motion.get_mut());
         let glowing = std::mem::take(self.glowing_vertices.get_mut());
@@ -21566,7 +21567,6 @@ fn start_game<'a>(
     if game.options.benchmark.is_none() {
         game.mods.dev = game.options.dev_mods.clone();
         game.start_mods();
-        #[cfg(feature = "java-mods")]
         game.start_java_mods();
     }
     // After the mods: their templates are among the ids it lists.

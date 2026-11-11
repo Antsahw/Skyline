@@ -245,7 +245,6 @@ impl Game<'_> {
     /// false when it rides nothing.
     pub(super) fn remote_ride(&mut self, keys: Keys) -> bool {
         // A Java mod's mob (mounts/java.rs).
-        #[cfg(feature = "java-mods")]
         if self.java_remote_ride(keys.jump) {
             return true;
         }

@@ -17,31 +17,32 @@ saying something works.
 | JVM, JNI natives, Rust→Java calls | `crates/horizon-jvm/src/lib.rs` (natives: `native_*`), `events.rs` (every call into Java: `server_tick`, `use_block`, `menu_click`, `screen_input`, `random_ticks`, `block_entities`, `game_time`, `export_*`), `content.rs` (content build + cache, `FORMAT`), `libs.rs` (Fabric's libraries) |
 | Boot | `java/dev/horizonlab/bridge/Boot.java`, `fabric/FabricBoot.java` (Knot, entrypoints, headless client boot), `Natives.java` (Java→Rust) |
 | Server mirror | `java/platform/.../HorizonServer.java`: set-up (`setUp`, `level`), the tick (`tick`: players, events, hooks, menus, block entities, frames), menus shown in Horizon's window (`syncMenus`, `SHOWN`), payloads (`payload`), `syncInventories` (end of every call) |
-| Horizon's items for mods' blocks | `HorizonItems.java` (shadows, block callbacks, held items, changes back); Rust `java_server.rs` (`java_items_json`, `java_items_changed`, `JAVA_HELD_ITEMS`) |
+| Horizon's items for mods' blocks | `HorizonItems.java` (shadows, block callbacks, held items, changes back); Rust `java_server/items.rs` (`java_items_json`, `java_items_changed`, `JAVA_HELD_ITEMS`, hoppers) |
 | Mod block entities | `HorizonBlockEntities.java`: `LIVE` (mods' own, ticked, saved in `horizon-java/block_entities/`), `COPIES` (Horizon's vanilla ones as lasting copies, refreshed each tick, written back on change), Fabric load/unload events |
 | Ticks, light, data, hooks | `HorizonTicks.java`, `HorizonLight.java`, `HorizonData.java` (data packs, recipes), `HorizonHooks.java` (mods' injections fired by name), `HorizonMixinTable.java` (every patch of every kind, where it runs, which actions go to the mirror), `HorizonTickets.java` (mods' chunk tickets → Horizon's kept chunks), `HorizonChunkLoads.java` (chunks loaded through vanilla's chunk system: pregenerators) |
 | Headless client | `HorizonClient.java`: an allocated `Minecraft` (options, font, gui, window, language with mods' translations, sound/text-input managers, game mode), a `LocalPlayer` per player, screens (`openScreen`, client menus, `frame`, `input`, `tickScreen`), client-only screens (`setScreen` via `GuiMixin`, `CLIENT_ONLY`), the client half of item use (`useItem`), the client's tick (`clientTick`), `/modconfig`, `as(player, …)` swaps `minecraft.player` and `gui.screen` |
 | Screen drawing | `HorizonGraphics.java` records `GuiGraphicsExtractor` calls as JSON ops (blit, sprite, fill, gradient, text, item, decorations, tooltips, pose, `typing`) |
 | Mods' messages | `HorizonLoop.java`: server→client payloads queued and delivered after `syncMenus` (`flush`); client→server run at once. Mixins: `PlayNetworkingMixin` (server side), `ClientPlayNetworkingMixin` |
 | Mixins | `java/platform/horizon-platform.mixins.json` (`client` list: headless-client only) |
-| Mods' entities | `HorizonEntities.java` (live per level, ticked as `tickNonPassenger`, saved in `horizon-java/entities/`, attack/interact), `HorizonEntityRender.java` (the mod's renderer submits into a recording collector: part trees once, poses + matrix + texture per tick), `HorizonSpawner.java` (natural spawning, the levels' biomes), `HorizonPackets.java` (sounds and particles to Horizon's players), mixins `ServerChunkCacheMixin` (a chunk source holding nothing), `PathNavigationRegionMixin`, `BlockScanMixin`, `ItemModelResolverMixin` + `ItemStackRenderStateMixin` (held items), `EntitySelectorMixin`; Rust: `game/java_entities.rs` (draw, aim), `java_server.rs` (`send_java_entities`, `java_entity_attack`/`interact`, `/summon`) |
+| Mods' entities | `HorizonEntities.java` (live per level, ticked as `tickNonPassenger`, saved in `horizon-java/entities/`, attack/interact), `HorizonEntityRender.java` (the mod's renderer submits into a recording collector: part trees once, poses + matrix + texture per tick), `HorizonSpawner.java` (natural spawning, the levels' biomes), `HorizonPackets.java` (sounds and particles to Horizon's players), mixins `ServerChunkCacheMixin` (a chunk source holding nothing), `PathNavigationRegionMixin`, `BlockScanMixin`, `ItemModelResolverMixin` + `ItemStackRenderStateMixin` (held items), `EntitySelectorMixin`; Rust: `game/java_entities.rs` (draw, aim), `java_server/entities.rs` (`send_java_entities`, `java_entity_attack`/`interact`, `routed_hit`), `java_server/commands.rs` (`/summon`) |
 | GPU (mods that draw with the GPU) | `crates/horizon-jvm/src/gpu/` (`mod.rs`: renderpearl's device on wgpu, natives on `dev.horizonlab.bridge.Gpu`; `spirv.rs`: combined samplers split for naga), `HorizonGpu.java` (the renderpearl backend: textures, buffers, transient memory, encoder, passes, pipelines), `HorizonGraphics` (pictures in picture, GPU textures as HUD images), `HorizonClient.guiRenderer` (the game renderer's GPU parts) |
 | Mods' worldgen | `HorizonWorldgen.java` (also the biome queries: `biomes`, `findBiome`), `HorizonChunks.java` (chunk copies for code that reads chunks: saplings), `HorizonTints.java` (mods' block tints for the mesher) (vanilla's chunk steps on the mirror's level, chunks back as vanilla saves them), mixin `WorldGenRegionMixin`; Rust: `game/java_worldgen.rs` (`JavaTerrain`, wraps `VanillaTerrain` in `world_loading::make_streaming`), mods' biomes in `biome.rs` (`mod_biomes`) and the biome registry (`lan/data.rs`) |
 | Content conversion | `crates/horizon-port-pack` (`oracle.rs`, `carry.rs`), `HorizonContent.java` (facts, creative tabs), `crates/horizon-client/src/mod_content.rs` (content root) |
 | Recording, replays | `HorizonPacketTap.java` (the window's player's packets through a vanilla client pipeline), mixin `TapConnectionMixin`; Rust: `lan/packet_tap.rs` (kept from `lan/conn.rs`), `events::client_packets`/`wants_packets`/`client_closed`; Horizon's replay viewer `lan/replay.rs` (`--replay FILE.mcpr`); `HorizonClientCommands.java` (mods' Fabric client commands) |
-| Voice chat, device mods | `HorizonDeviceMods.java` (which mods use the player's sound devices; where their client code runs), `HorizonDeviceClient.java` (their client half in a game connected to another's server), `crates/horizon-jvm/src/device.rs`, `game/java_device.rs`; test `tools/java_bridge/voice_test.sh` |
-| Game side (Rust) | `crates/horizon-client/src/game/java_mods.rs` (start, content, creative), `java_server.rs` (actions from Java, menus, block entities, random ticks, `JAVA_STATES`, `JAVA_WINDOWS`), `java_screen.rs` (draws frames, sends input, key maps; `Screen::JavaMod` and `CLIENT_WINDOW` for client-only screens) |
+| Voice chat, device mods, the player's own client | `HorizonDeviceMods.java` (which mods use the player's sound devices; where each mod's client code runs, per player), `HorizonDeviceClient.java` (their client half in a game connected to another's server: the mods the server lacks, or every mod), `crates/horizon-jvm/src/device.rs`, `game/java_device.rs`; test `tools/java_bridge/voice_test.sh` |
+| Game side (Rust) | `crates/horizon-client/src/game/java_mods.rs` (the `java` state; `bridge.rs`: start, content, creative), `java_server.rs` (the types Horizon's files name) + feature-only `java_server/` by area: `tick.rs` (the tick, `apply_java_actions`, `with_java_world`, saves), `blocks.rs` (`JavaBlocks`, random ticks, fluids, neighbours, breaks, level writes, `JAVA_STATES`), `players.rs` (hurts, effects, falls, jumps, teleports, deaths, chat), `menus.rs` (`java_open_menu`, clicks, screens' input, `JAVA_WINDOWS`), `commands.rs`, `items.rs` (items, hoppers, pickups, drops), `entities.rs` (snapshots, attacks, rides, `routed_hit`); `java_screen.rs` (draws frames, sends input, key maps; `Screen::JavaMod` and `CLIENT_WINDOW` for client-only screens; plain, so a plain client draws a bridge server's screens; the server's sends in feature-only `java_screen/host.rs`) |
+| Plain build (no `java-mods`) | `game/java_hooks/{blocks,players,screens,entities,worldgen,lan,remote}.rs`: every hook Horizon's files call, answering "none"; `java_mods/off.rs`, `java_server/off.rs`: the state. Horizon's own files carry no `cfg(feature = "java-mods")`: the bridge's files are feature-only (`#![cfg]`: `java_device`, `java_entities`, `java_profile`, `java_worldgen`, `creatures/java.rs`, `mounts/java.rs`, `world_loading/java.rs`) or plain hook glue (`<file>/java.rs` in the game) |
 | NeoForge (prototype) | `java/dev/horizonlab/bridge/neo/NeoBoot.java`, `src/neoforge.rs`, `java_mods.rs` (`start_neoforge`, `HORIZON_NEOFORGE`), `java/neoforge/` (fixture, prototype platform), `tools/java_bridge/neoforge/`: see [java-bridge-neoforge.md](java-bridge-neoforge.md) |
 
 ## How a tick flows
 
-1. Horizon's server tick → `java_server.rs` (`tick_java_server`) → `events::game_time`, `events::server_tick` →
+1. Horizon's server tick → `java_server/tick.rs` (`tick_java_server`) → `events::game_time`, `events::server_tick` →
    `HorizonServer.tick`: the headless client's tick first (`HorizonClient.clientTick`), players mirrored, Fabric events fired, mods' hooks, levels' ticks,
    block entities (`HorizonBlockEntities.tick`), open menus (`stillValid`, `broadcastChanges`),
    screens (`HorizonClient.sendFrames`: tasks, screen ticks, frames), `syncInventories`
    (Horizon's block entities written back, menus shown, mods' messages delivered).
 2. Java sends results back as actions (`Natives.*` → `events::Action`), applied in
-   `java_server.rs` (`apply_java_actions`).
+   `java_server/tick.rs` (`apply_java_actions`).
 3. Horizon's world changes of Java mod blocks reach Java through `world::SET_HOOK` →
    `events::block_entities` (block entities exist from placement).
 4. Mods' entities: `HorizonEntities.tick` in the server tick; after it `events::entities`
@@ -98,7 +99,7 @@ saying something works.
 - The `LocalPlayer` carries the server player's id, UUID, profile, eye height and size (Jade's
   ray started at the feet before), and its old positions.
 - The headless client has services (the mirrored server's: profiles), a skin manager giving
-  each profile's default skin (`SkinManagerMixin`), a texture manager of named views
+  each player's real skin (`SkinManagerMixin` → `HorizonSkins`, below), a texture manager of named views
   (`TextureManagerMixin`, `HorizonTextures`: `getTexture(id)` knows the PNG; `register`
   keeps mods' textures by name), and atlas sprites (`TextureAtlasMixin`, `HorizonSprites`):
   each sprite is made from its PNG and `.mcmeta` (nine-slice), its texture found through the
@@ -406,6 +407,40 @@ inventory through what a vanilla client does for any mod. Tested with REI 26.3.8
   folder: on a dedicated server Horizon's own log, whose lines were overwritten.
   Regress `server-log`.
 
+## Mods' key bindings in Controls, mods' field of view (bridge-modkeys-fov)
+
+- **Mods' key bindings are Horizon's.** `HorizonClient.modKeys()` is every `KeyMapping` made
+  (`KeyMapping.ALL`: Fabric's `KeyMappingHelper` ones and plain `new KeyMapping`s alike) minus
+  vanilla's (the ones `Options` holds in its own fields), sorted as vanilla's list is; logged
+  once each time it grows (`N mod key binding(s): ...`). `keyMappings()` sends them
+  (`{name, category, key, default, label, categoryLabel}`, labels in the headless language) on
+  `horizon:java_key_mappings` beside `horizon:java_keys` (`send_java_keys`; own client:
+  `own_client_greet`). The game keeps them in `settings.keys` (`KeyBinds::set_mods`):
+  Controls → Key Binds lists them after vanilla's (in a vanilla category when the mod uses one,
+  else under the mod's own category heading), rebindable and resettable with conflict marks
+  across both lists; options.txt keeps them as `key_<name>:<key>` after vanilla's
+  (`OptionsFile::mod_keys`, kept whether or not the mod is there). A key or button press
+  while playing sends `"mappings": [names]` with its `bind` input: the mods' mappings the
+  player's Controls bind to it; Java sets those in that player's `Keys` only (no write to the
+  shared `KeyMapping.key`). A game that got no mappings sends none and Java matches by its own
+  keys as before. Regress `keys`, `keys-rebind` (G→H in the Controls UI, saved, G then
+  inert), `keys-server`.
+- **Mods' field of view on Horizon's camera.** 26.3 keeps FOV in `Camera` (`tick` →
+  private `tickFov`, private `calculateFov(float)`, `update` writes `fov`, `getFov()`); the
+  headless camera (allocated) gets its `minecraft` once and each player's
+  `oldFovModifier`/`fovModifier` swapped on: `camera.tick()` after the client tick
+  (`tickView`), then in the frame `calculateFov(1f)` (the mods' hooks run: Zoomify's
+  `@ModifyReturnValue`), written to `fov`, `getFov()` (hooks there too) over `options.fov ×
+  fovModifier` (death and fluids are inert headless) = the scale sent on change
+  (`Natives.view` → `Action::View` → `horizon:java_view`; own client: local). The game eases
+  it over the tick (`JavaView`) and multiplies `fov_degrees` after the native mods' FOV, so
+  `zoom_magnification`, far terrain's zoom aim and `horizon-ctl state`'s new `player.fov` see
+  it; turning slows by the same scale while it is below 1 (the mods' `turnPlayer` hooks don't
+  run headless). The hooks on the camera's FOV methods are logged once (`N mod hook(s) on the
+  camera's field of view: <mixin>.<handler> (@Kind on method)`, `HorizonHooks.hooking`).
+  Mods that change `AbstractClientPlayer.getFieldOfViewModifier` instead cancel out (the
+  headless camera has no camera entity: modifier 1). Regress `fov` (fixture `fovmod`).
+
 ## Cloth Config's screens, client waypoints, Litematica and Chat Heads (bridge-client-13)
 
 - **Mods with a `-` in their id were never carried** ("mod id \"cloth-config\" is not
@@ -579,13 +614,43 @@ counts is what a mod's client code does.
   ignores `voice_host` (it asks Fabric's side, which is the client's here). SVC's licence:
   All Rights Reserved (its jar runs as it is; nothing of it is in the repo).
 
-## Each game runs its own mods' client (`HORIZON_JAVA_OWN_CLIENT`, bridge-generic-2)
+## Each game runs its own mods' client (`HORIZON_JAVA_OWN_CLIENT`, bridge-generic-2; by default for mods the server lacks, bridge-own-client)
 
 The generic fix for per-player client state (Ludovic's condition 2 took the per-mod lists
 away): as in vanilla, a player's mods' client half runs in **their own game**, not in a server's
-one headless client shared by every player. Off by default for now: `HORIZON_JAVA_OWN_CLIENT=1`
-on both the host (or server) and the players' games (regress `maps-lan` and `rei-lan` set it).
-It generalises the device mods' path (voice chat, above) from some mods to all of them.
+one headless client shared by every player. It generalises the device mods' path (voice chat,
+above) from some mods to all of them.
+- **By default, per join (bridge-own-client, 2026-11-06)**: a Horizon server whose Java mods run
+  tells each joining game their ids (`horizon:java_server_mods`, `device::SERVER_MODS_CHANNEL`,
+  sent with the greeting in `send_java_keys`; `HorizonDeviceMods.ids`). After `JOIN_AFTER` (40
+  ticks) the game's `device::join(host, port, uuid, name, server_mods)` decides
+  (`HorizonDeviceClient.join`, `HorizonDeviceMods.missing`): the mods this game has and the
+  server doesn't (Fabric, Fabric API, the game and Horizon never count) run here.
+  - **No list arrived** (a vanilla or Paper server, a Horizon server without Java mods or whose
+    Java failed): every mod's client half runs here, as with the switch (`*`): log line `every
+    mod's client half runs here for this player, on host:port (the server runs no Java mods)`.
+  - **The server runs some, not all** (`+`): the own client runs only those mods and what they
+    depend on (`HorizonDeviceMods.ownRuns`, `withDependencies`: `runs()` answers false for the
+    rest), log line `X run here for this player (the server doesn't run them)`. Its HUD is drawn
+    over the server's (the device HUD layer), its keys are added to the server's (a key goes to
+    both: `own_client_also`), its settings screens are added to Options → Mods (opened here), the
+    HUD's size goes to both; the inventory overlay stays the server's.
+  - **Nothing missing**: the device mods' client as before (voice chat), or nothing.
+  The game tells the server on `RUNS_OWN_CHANNEL` (`*,ids`, `+,ids` or device ids); the server
+  keeps a set per player (`HorizonDeviceMods.RUN_THEIR_OWN`: `runsTheirOwn(uuid, mods)`, log
+  `Player's own game runs X's client half`), leaves those mods' client code out for that player
+  and sends their channels to that game (`deviceChannel(channel, player)`).
+- **Joining needs the mod list to match only for mods that change the world**: a carried Java
+  mod with no block, item or data (Xaero's, Jade, a HUD) is `side = "client"` (`carry.rs`
+  `changes_world`; content FORMAT 17), so a server without it accepts the player (it was
+  refused before: "Not on this server: xaerominimap").
+- The own client has no single-player server (`HorizonClient.joined`: Xaero then names its data
+  by the server's address, as a vanilla client) and the world spawn the server told the game
+  (`spawn` in the tick's state → `HorizonServer.ownSpawn` → the mirror's `effectiveRespawnData`;
+  Xaero's `handleSetSpawn` read null before).
+- `HORIZON_JAVA_OWN_CLIENT=1` on both sides keeps the old switch: every mod's client half in each
+  game whatever the server runs, the server's messages waiting for a game's client (regress
+  `maps-lan` and `rei-lan` set it).
 - **In a game connected to another's server** (LAN guest, a dedicated server's player;
   `game/java_device.rs` `tick_own_client`, `HorizonDeviceClient` `own*`,
   `HorizonServer.ownClientTick`): its JVM keeps a **mirror of what it sees**: a server's mirror
@@ -619,9 +684,15 @@ It generalises the device mods' path (voice chat, above) from some mods to all o
   client code for such a player (Better Combat's swings and recipe viewers over a mod's menu
   for a guest with the switch on); a player whose game has no Java mods gets no mod client at
   all with the switch on. JourneyMap + VoxelMap together: VoxelMap's client entrypoint fails
-  (both register `worldinfo:world_id`, as in the real game). Default on once those are done.
+  (both register `worldinfo:world_id`, as in the real game). With the server running some mods,
+  the own client's inventory overlay (a recipe viewer the server lacks) isn't shown, and its
+  mouse-button bindings go to the server only.
 - Test: `regress.py --jars <journeymap, REI + Architectury + Cloth + FD, fabric-api> maps-lan
-  rei-lan`.
+  rei-lan`; by default: `maps-client-only` (a Horizon server with no Java mods, the player with
+  Xaero), `maps-client-vanilla` (vanilla's server jar from `.local`, offline: `server_test.sh`
+  `VANILLA_SERVER=1`), `maps-client-some` (the server runs Jade, the player Jade + Xaero).
+  `server_test.sh` takes `SERVER_MODS`/`PLAYER_MODS` folders (regress: `server_mods=[...]`,
+  `log="player"` to check the player's log).
 
 ## Mods that change vanilla's behaviour (the mixin table, routed actions)
 
@@ -903,12 +974,24 @@ gets SPIR-V, vertex layouts and uniform lists.
   second per player (`PIP_INTERVAL`); in between the last blit is repeated.
 - Textures the headless client never uploaded (`HorizonTextures.View`: a mod's PNG, a dynamic
   texture) are uploaded the first time a pass samples them; atlases' views bind white.
-- Horizon's window draws images over 64 pixels from 8 slots of 512 (`JAVA_BIG_IMAGE_SLOTS`).
+- Horizon's window draws images over 64 pixels from 16 atlas slots of 512 (`JAVA_BIG_IMAGE_SLOTS`),
+  and images over 512 from **textures of their own** (`HudBatch::images`, up to 8: `JavaImages::own`
+  in `java_screen.rs`; `Blend::Image(id, linear)` runs in `hud.rs`, the HUD's alpha pipeline with
+  the image's bind group). Nearest when each image pixel covers whole window pixels, else linear.
   Only textures a render pass drew into (`HorizonGpu.drawnInto`: not atlases, which
   `TextureAtlas` also draws with passes, nor textures written from memory) become HUD images;
-  real atlases' quads go the headless sprites' way. A bigger one (a full-screen map's target,
-  the window's 1281x720) is read at most 10 times a second per player and sent shrunk
-  (`HorizonGraphics.shrink`, box filter) to 512.
+  real atlases' quads go the headless sprites' way. A big one (over 512: a full-screen map's
+  target, the window's framebuffer) is read at most 10 times a second per player, and shrunk
+  (`HorizonGraphics.shrink`: box filter, any ratio) to the receiver's largest image
+  (`HorizonClient.maxImage`): 2048 for this process's own game (`HorizonDeviceMods.own`, in
+  memory), 512 for a network player.
+- **Each player's window** (`HorizonClient.WINDOWS`): the game sends
+  `{"kind":"size",width,height,scale,px_w,px_h}` (GUI size and scale, framebuffer) on the HUD,
+  screen and overlay windows; `as()` puts the player's window on the headless `Window`
+  (framebuffer and GUI fields, `windowRenderState`, the GUI projection), so pictures in picture
+  are drawn at their GUI scale and full-screen targets at their framebuffer. A size input also
+  resizes the main render target. Test a big window with `SIZE=2560x1440 GUI_SCALE=6` (launch.sh;
+  regress `maps-hires`).
 - A GPU texture's pixels are read when the frame's ops are taken (`HorizonGraphics.ops()`:
   `readPending`), not at its blit: the real GUI draws its elements after the whole screen is
   extracted, and mods rely on it. XaeroPlus clears the World Map's target as Xaero adds it to the
@@ -973,8 +1056,29 @@ gets SPIR-V, vertex layouts and uniform lists.
   parts there), and renders each leaf part alone through vanilla's `ModelPart.render`: a part
   whose quads differ from its own cubes' faces is the mod's. Those are shown (the mirrored
   player's skin-part flags are all off), the others' cubes skipped, and the root rendered into
-  custom geometry with the skin texture. Horizon still draws its flat outer layers
-  too; downloaded skins (not resource ids) don't reach Horizon's atlas.
+  custom geometry with the skin texture, with the names of the parts the mod drew (`parts`).
+- **Players' real skins in the headless client** (`HorizonSkins`, bridge-skin-layers, 2026-11-06):
+  the mod's voxels were built from the profile's default skin (Ari/Steve) and laid over the
+  player's real one (white or red boxes at the arms, slim/wide mismatch). Now:
+  - a mirrored player's profile carries the `textures` property Horizon's server has for it
+    (`java_server.rs` passes each guest's once, `events::profile_textures`); `SkinManagerMixin`
+    answers `HorizonSkins.get`, which fetches the skin through a real `SkinTextureDownloader`
+    (skins only: `SkinDownloaderMixin` lets only that one through; files in the game folder's
+    `horizon-java/skins/`) under vanilla's id `minecraft:skins/<sha1>`, Horizon's own atlas key
+    for that skin (`skins::skin_location`), so `java_sprite` finds it;
+  - an offline name's launcher skin (`HORIZON_OFFLINE_SKIN`), which no server knows: the game
+    sends it once when it first hears a server's Java mods (`horizon:java_own_skin`: slim byte +
+    64x64 RGBA, `remote/java.rs` `send_java_own_skin`); the server registers it as a
+    `DynamicTexture` `horizon:offline_skin/<uuid>` (`events::own_skin` → `HorizonSkins.ownSkin`)
+    and makes the player's avatar again; `java_sprite` maps that id to this game's
+    `horizon/offline_skin` slot when the uuid is its own player's (other players' games don't
+    have that skin: they keep Horizon's flat layers for that player);
+  - Horizon leaves its own outer layers (flat, or its own 3D ones) out where a mod draws them
+    and the mesh's skin is in the atlas (`MobExtra::mod_drawn_parts`, ORed into the hidden
+    `PlayerModelPart` bits in `anim.rs`; `java_mod_drawn_parts`).
+  Regress `skinlayers-skin` (a slim test skin from `tools/java_bridge/fixture_skin.py`, never
+  Mojang art). Left: the mod draws all parts whatever the player's Skin Customization says (the
+  mirror's flags are off; Horizon's hidden parts aren't passed).
 
 ## Create's machines, contraptions and items (bridge-gpu-13)
 
@@ -1211,7 +1315,83 @@ gpu-13 made a bearing's contraption assemble, draw and turn. Left:
   case to add.
 - **Trains** are contraptions on tracks: blocked first by the use order (track placement).
 
+## Create's pumps, pipes and fans (bridge-create-1)
+
+Generic fixes found with Create Fly; regress `createpump`, `createfan` (scenes `createpump`,
+`createfan`); `createitemsin`'s scene got a glass pane north of its lava.
+- **Pumps worked; the tank never showed it.** A pump drinks Horizon's water source through the
+  mirror (read and removed: `LevelMixin`) into a tank, but the tank's renderer read the client
+  copy's fluid level, which never moved: Create syncs with `sendData` →
+  `ServerChunkCache.blockChanged` (not `sendBlockUpdated`), which marked the copy only
+  "changed" (a plain reload, `read(clientPacket=false)`, where the shown level doesn't chase).
+  Now `blockChanged` is an update too (vanilla's chunk holder sends the block entity's update
+  packet there), and an update loads through `ClientPacketListener`'s own lambda
+  (`lambda$handleBlockEntityData$0`), so mods' wraps of that load run (Create's
+  `onDataPacket`). gpu-14 had this; the batch-12 merge kept client-14's plain load.
+- **The client level's biome tints** (`ClientLevel.getBlockTint`): made without its constructor,
+  it has no tint caches (vanilla's nor Fabric's `customColorCache`); `ClientLevelMixin` computes
+  each tint (`calculateBlockTint`). Create's tank drawing water (Fabric's fluid colour) NPE'd.
+- **Block models whose parts depend on the world** (a wrapper's `addPartsWithInfo(BlockAndTintGetter,
+  BlockPos, BlockState, RandomSource, List)`: Create's fluid pipes add their arms, rims and
+  casing from the block entity's connections, pumps their rims, shafts their brackets).
+  Horizon's chunk drew only the model's own parts (a pipe was its middle stub, in water or
+  not). `HorizonEntityRender.worldParts`: for a block entity whose state's model has one, the
+  parts at its place in the client's level, as quads, sent with its renderer's (also for
+  blocks with no renderer), made again every 10 ticks or when its state changes; once one
+  place of a state gives other quads than the model alone, the state is drawn `whole` (its
+  chunk model left out) and every place of it is drawn so. Limit: like every block entity's
+  drawing, within 64 blocks of a player (a far pipe isn't drawn).
+- **A client copy's first tick as it is made** (`HorizonClientBlockEntities.get`): a renderer
+  drawing a copy made this tick (Create's mixer) failed before its client behaviours existed.
+- **Client code doesn't move the server's entities**: the client level's entities are the
+  mirror's own objects (`HorizonClient.entities`); a client block entity moving them (Create's
+  fan's air current runs on both sides) moved them twice. Their motion is put back after the
+  client copies tick. **A block a client sets** (`ClientLevel.setBlock` on a mirror: Create's
+  crushing wheel fixing its controller client-side) sets nothing (it NPE'd on the missing
+  prediction handler and stopped that block entity's client tick).
+- **Mods' block entities push players** (`HorizonServer.playerMotionsBefore/After`,
+  `Natives.playerMotion` → `Action::PlayerMotion` → `ClientboundSetEntityMotionPacket` to the
+  player's client). Before the block entities tick, each mirrored player's motion is its move
+  since the last tick (Horizon's velocity doesn't come over); a block entity that changes it
+  (Create's fan blowing; belts carrying players should too) sends the result. Vanilla's clients
+  run the same block entity and move their own player; the client level here holds no player
+  of the player's own, so the server's half stands in. Not done: Horizon's mobs in a fan's wind
+  (they stand in the mirror only as `HorizonNeighbours` copies, whose motion isn't written back).
+- Checked, working on this branch: the saw's blade, the blaze burner's head (one), no pale
+  squares (gpu-14), crushing wheels and fans processing item entities (mixins-11).
+
 ## 26.3 facts that cost time
+
+- **`SyncedBlockEntity.sendData` goes through `ServerChunkCache.blockChanged`**, not
+  `ServerLevel.sendBlockUpdated`: a client copy has to treat both as the update packet. And a
+  client copy loaded with plain `loadWithComponents` reads with `clientPacket=false`; mods do
+  their client-side syncing (lerped levels, behaviours) only in the packet's load
+  (`lambda$handleBlockEntityData$0`, which their `WrapOperation`s target).
+- **A `BlockStateModel`'s parts in a world** (`addPartsWithInfo` with a `BlockAndTintGetter` and
+  position) can differ completely from `collectParts`: Create's pipes have no arms without it.
+- **The field of view is the camera's, not the game renderer's.** `Camera.tick` → private
+  `tickFov` (modifier eased halfway), private `calculateFov(float)` (options' FOV × lerped
+  modifier, then death/fluid), `update(DeltaTracker)` stores it in `fov`, public `getFov()`.
+  Zoom mods hook `calculateFov`/`getFov` there; `GameRenderer.getFov` is gone.
+- **`KeyMapping.ALL` is every mapping** (private static `Map<String, KeyMapping>`; public
+  `KeyMapping.get(name)`); Fabric's `MODDED_KEY_BINDINGS` misses mods that make a plain `new
+  KeyMapping`. A category's label key is `key.category.<namespace>.<path>`
+  (`Identifier.toLanguageKey("key.category")`).
+- **A mixin config's package holds only mixins**: a mod (or fixture) class in it fails to load
+  with `IllegalClassLoadError: ... is in a defined mixin package`.
+- **Xaero's maps size themselves from the window.** The minimap's picture in picture is drawn at
+  `Window.getGuiScale()` (447x267 at scale 3, 858x498 at 6) and the World Map's target is the
+  framebuffer's size (1280x720, 1281 when the window's framebuffer had padding), so a headless
+  window fixed at scale 3 / 1280x720 made them blurry on any bigger screen. `Window` reads
+  `framebufferWidth` etc. directly; `windowRenderState` and the GUI projection must follow too.
+  With `guiScale` in the scratch options.txt the Java side logs a harmless `Failed to load options`
+  NPE (`Options.guiScale()` null at `resizeGui`): it was there before this change.
+- **Skins: `PlayerInfo` looks its skin up once** (`SkinManager.createLookup` keeps the future
+  `get` gave): a skin that arrives later only shows on a new `PlayerInfo`, so `HorizonSkins`
+  drops the player's avatar (`HorizonEntityRender.forgetAvatar`). A `DownloadedTexture`'s
+  `texturePath()` is its id itself (`skins/<sha1>`, no `textures/` prefix or `.png`); 3D Skin
+  Layers reads the pixels with `TextureManager.getTexture(id)` → `DynamicTexture.getPixels()`
+  when the resource manager hasn't the id. `NativeImage.setPixel` takes ARGB.
 
 - **One Vulkan device list a process.** On the user's Fedora 43 PC (RX 9070 XT, RADV, vulkan-loader
   1.4.341, Mesa 25.3.6) a second `vkEnumeratePhysicalDevices` in the process segfaults in the
@@ -1828,10 +2008,20 @@ Found in upstream sync 6 (2026-11-05, upstream `41d5649ed`, 1539 commits):
 ```sh
 # Java 25 (JAVA_HOME may point at 21 on these machines; the scripts pick 25)
 export JAVA_HOME=/usr/lib/jvm/java-25-openjdk-amd64 PATH=/usr/lib/jvm/java-25-openjdk-amd64/bin:$PATH
-cargo build --profile fast -p horizon-client -p horizon-client-lib --features horizon-client/java-mods   # ~5 min after a Rust change; horizon-ctl is horizon-client-lib's
-cargo test -p horizon-jvm                                                           # bridge tests
+cargo build --profile fast -p horizon-client -p horizon-client-lib --features horizon-client/java-mods-dev   # ~5 min after a Rust change; horizon-ctl is horizon-client-lib's
+cargo test -p horizon-jvm --features dev                                            # bridge tests (+ prototypes for boot112)
 cargo clippy --profile fast -p horizon-client --features java-mods --bins --lib -- -D warnings -A clippy::manual_range_contains
 ```
+
+**Features (2026-11-06, bridge-gate-2):** `java-mods` is the release build: Fabric only, mods run
+only for the launcher's owner record ("Ownership"). `java-mods-dev` adds the developers' opt-in
+`HORIZON_JAVA_MODS=1` and the stand-in services variable: every script in `tools/java_bridge/`,
+regress and `lan_e2e --java-mods` build or need it. `java-mods-prototypes` (implies `-dev`) adds
+the NeoForge and Forge 1.12 prototypes (`horizon_jvm::{neoforge,boot112}`, `HORIZON_NEOFORGE`,
+`tests/boot112.rs`); without it the game ignores `HORIZON_NEOFORGE`. **Trap:** a `java-mods` build
+started by a script with `HORIZON_JAVA_MODS=1` runs no mods ("no owner record" in the log):
+build with `java-mods-dev`. `tests/test_java_mods_release_features.py` checks the release builds
+name `java-mods` alone.
 
 A build made before `.local/` was prepared has no Fabric API modules (the fixture mods then
 fail to build): prepare, then `touch crates/horizon-jvm/build.rs` and build again.
@@ -1871,6 +2061,47 @@ Naturalist (mobs with ModelPart models, Fabric API only). The repo's own critter
 (`ENTITY=naturalist:bear` for another mod's).
 
 ## Status
+
+**Release (2026-11-09): `java-mods` pre-release "Fabric mods build java-mods-2026-11-09-d2af71b" (run 42714261361; launcher contract 2, 7 files, SHA256SUMS checked).**
+`claude/bridge-create-1` fast-forwarded into `java-bridge`. Testers download the launcher again
+once: contract-1 launchers refuse this build ("needs a newer launcher"), and a contract-2 launcher
+with an older build installed keeps it until `horizon-launcher java-mods update`. In it:
+- Fabric mods need an owner record the game confirms with Mojang's services itself
+  (`gate::decision`); hand-set variables run nothing (regress `direct`, `forged_word`,
+  `forged_record`; `owner` passes with a real record). See "Ownership and licences".
+- A warning before Fabric mods turn on (once per instance); the release build is Fabric-only
+  (dev opt-in and NeoForge/1.12 prototypes behind features no release enables).
+- Windows paths and locked files, first-run fixes (Play stops on the real reason, one download at
+  a time, wrong-version and duplicate jars flagged, a player's Fabric API skipped).
+- Mods' key bindings in Controls and mods' FOV; Xaero's maps at full resolution; 3D Skin Layers
+  on the real skin; client-side mods on any server; P0 clean-up (hooks in both builds,
+  `java_server/` split); Create's pumps, pipes and fans.
+- Checked before the push: `cargo check` plain and `java-mods`, launcher clippy `-D warnings`,
+  regress `nomodcode` (cloud); `direct`, `owner`, `keys`, `fov`, `pot` (iaxivers' PC). `hud` not
+  run (no 26.3 files on the cloud machine).
+
+Create's pumps, pipes and fans (2026-11-06, `bridge-create-1`): a pump fills a tank from
+Horizon's water and the tank shows it (client copies load the update packets as a client does),
+pipes draw whole, in water too (block models' parts in a world), fans blow players (mods' block
+entities setting a player's motion). See "Create's pumps, pipes and fans". Regress `createpump`,
+`createfan`. Left: Horizon's mobs in a fan's wind; far pipes (over 64 blocks) not drawn.
+
+Client-side mods on any server (2026-11-06, `bridge-own-client`, brief section 5): the player's own
+game runs the client half of the mods the server doesn't run, by default (no switch): every mod's
+against a vanilla server or a Horizon server without Java mods, only the missing ones beside a
+Horizon server's mods (its HUD over the server's). Carried mods with no world content are
+client-side, so servers without them accept the player. Headless: Xaero's minimap drawn for a
+dedicated server's player with no Java mods on the server (`maps-client-only`), against vanilla's
+server jar (`maps-client-vanilla`), and beside the server's Jade (`maps-client-some`). See "Each
+game runs its own mods' client" above.
+
+Xaero's maps at full resolution (2026-11-06, `bridge-hud-res`, brief section 3): the game sends its
+GUI scale and framebuffer with each size input, Java keeps a window per player (applied in `as()`),
+big images shrink by a fractional box filter to 2048 for the window's own game (512 for network
+players), and Horizon draws images over 512 from their own wgpu textures. At 2560x1440, GUI scale 6:
+the minimap's picture 447x267 → 858x498, the World Map 427x240 → 2048x1152. Regress `maps-hires`.
+Left: network players stay at 512 (deflate or a higher remote cap would need payload limits checked);
+the device client (`HorizonDeviceClient`) still lays out at scale 3.
 
 No code tied to recipe viewers' and HUD mods' internals (2026-11-04, `bridge-generic-ui`,
 Ludovic's second condition for REI, JEI, Jade, AppleSkin, Architectury, Cloth Config): every
@@ -2749,8 +2980,8 @@ the game folder (HORIZON_HOME). `OFF=1` runs it without `--java-mods`: no Java m
 For upstream (Ludovic asked for the bridge in the main repo), Java mods are **off unless the
 player turns them on**, per instance:
 - **The game** (built with `java-mods`) starts Java only when opted in: `--java-mods` from the
-  launcher past its owner gate (with `HORIZON_JAVA_MODS_OWNER`, "Ownership" below), or
-  `HORIZON_JAVA_MODS=1` (developers' scripts, servers). Every read of `mods-java/` goes through
+  launcher with an owner record the game confirms (`HORIZON_JAVA_MODS_OWNER`, "Ownership"
+  below), or, in a `java-mods-dev` build only, `HORIZON_JAVA_MODS=1` (developers' scripts, servers). Every read of `mods-java/` goes through
   `java_mods::mod_jars()`, which has no jars otherwise (one log line says how many it left off).
   So no Java start, no Java 25 download, no Fabric download without the switch. The tools set it:
   `launch.sh`, `lan_test.sh`, `server_test.sh` (`HORIZON_JAVA_MODS=1`), `install_test.sh`
@@ -2830,9 +3061,10 @@ Testers no longer build: the fork publishes **the `java-mods` pre-release** on i
   version's own release has no `-java` build, past the owner gate, it takes the fork's: the
   manifest's checksum, the archive's, both from SHA256SUMS signed by a key in java-mods-keys.txt,
   and only if the installed version prepares the manifest's format (`fits`; else "install a
-  newer/older version"). The install marker (`java/.installed`) names `iaxivers/horizon-java-bridge@<commit>`;
-  before each Play (`ensure`) such a build is replaced by a newer one that fits (best effort). A
-  `use-build` build has an empty marker and is never replaced.
+  newer/older version"). The install marker (`java/.installed`) names `iaxivers/horizon-java-bridge@<commit>`.
+  An installed build stays as it is (2026-11-06: no more check for a newer one at each Play): a new
+  version gets its own build, and `horizon-launcher java-mods update [--version T]` downloads the
+  newest that fits on request (`java_variant::update`, past the owner gate).
 - **Tested:** launcher unit tests `java_release::` (signed by a listed key for the channel; other
   keys, the nightly channel, no key, a swapped manifest refused; format check). The workflow on
   GitHub, dry run (branch `java-mods-build`, run 41995308602, ~45 min): both builds, both
@@ -2847,6 +3079,37 @@ Testers no longer build: the fork publishes **the `java-mods` pre-release** on i
   plays). Under gdb the SEGV shows in `vkEnumeratePhysicalDevices` (Mesa's device-select layer)
   with the JVM up. Harness-only as far as seen (players don't poll the socket); not fixed. Work
   around: start once without `--wait`, then test.
+
+### First-run traps (2026-11-06, bridge-firstrun)
+
+A review of a first Play with Fabric mods on; what changed:
+- **Play stops on the real reason** (`java_mods_page::ensure_at_play` → `Msg::JavaPlayStopped`
+  → `client_error`) when `java_variant::ensure_with` fails, instead of logging it and failing
+  later in `switch_command` with a message that never helped. Its download shows on Play's bar
+  (`Msg::JavaPlayProgress`, "Downloading") and its lines (Java 25, game files, the build) in
+  the game log.
+- **One download at a time:** `java_variant::BUILD_LOCK` around `ensure_with`, `follow` and
+  `use_build` (the switch and Play at once wrote the same `.java.partial`).
+- **Launcher contract:** `java_release::CONTRACT` (2 since bridge-gate-2's owner record; was 1), written as `contract` into
+  `java-mods.json` by java-mods-release.yml (read from that line); a manifest without it is 1.
+  `fits` refuses another contract ("needs a newer launcher: download it from <release page>").
+  **Bump it** with any change to the game's opt-in/owner check that an older launcher can't
+  meet (the gate owner's call): Play's refresh of a fork build then leaves the old build
+  playing and says why, instead of installing one that refuses the mods.
+- **Wrong-version jars:** `java_mods::runs_on` reads `depends.minecraft` (Fabric's predicates:
+  `>=`, `<`, `~`, `^`, `x` wildcards, AND by spaces, OR by arrays; unknown forms never flagged);
+  the tab and Add name a jar that excludes 26.3, and two jars with one mod id. `failures_in`
+  keeps Fabric's "- Mod '…'" report lines (no log prefix), so the tab marks the mod.
+- **A player's Fabric API is skipped** (`bridge.rs` `run_jars`, by id or `fabric-api*` name),
+  with a log line; Fabric then gets an explicit jar list (no folder scan) whenever jars were left
+  out. The pinned one always loads.
+- **Player-facing messages** name player actions (Prepare again on Home, download the launcher)
+  instead of `horizon-launcher …`/`horizon-prepare` commands; `has_game_files` also wants a jar
+  in `libraries/client/`, so the launcher re-prepares a version missing them.
+- **A Fabric jar dropped on the window** (`import::Dropped::JavaMod`) goes into the selected
+  instance's `mods-java/` with the switch on, else says to turn it on.
+- Tested: launcher unit tests (`java_variant::`, `java_release::`, `java_mods::`, `import::`),
+  clippy. Not tested on a real machine: the window's Play stop/progress and the drop.
 
 ### Launcher only (2026-11-04, bridge-launcher-only)
 
@@ -2865,7 +3128,7 @@ download of the server jar. What holds now:
 - **The game downloads no Java** (`find_or_fetch_java_home` is gone): `switch_command` passes the
   launcher's Java 25 as `HORIZON_JAVA_HOME`. The server jar always comes from the player's own
   install (`horizon-prepare`, as upstream).
-- **Developers' runs stay:** `HORIZON_JAVA_MODS=1` / `--java-mods` on the game binary (horizon-ctl,
+- **Developers' runs stay:** `HORIZON_JAVA_MODS=1` (a `java-mods-dev` build) on the game binary (horizon-ctl,
   regress, launch.sh), as Ludovic's own harnesses run the plain game.
 - **Tested headless:** `tools/java_bridge/launcher_switch_test.py` (no owner: `java-mods on` and
   Play download nothing and say "Sign in"; `use-build` works signed out). The window under Xvfb
@@ -2883,13 +3146,13 @@ without them, and its log says why: a player would take the world for modded, an
 opened without its mods loses their blocks and items. `HORIZON_JAVA_OPTIONAL=1` goes on without
 them, as it used to.
 
-### Ownership and licences (2026-11-05, bridge-ownership-1)
+### Ownership and licences (2026-11-05, bridge-ownership-1; owner record 2026-11-06, bridge-gate-2)
 
 The maintainers' conditions, and what holds them:
 - **(a) Fabric Loader, Mixin, Sat4j, ASM and Fabric API are never shipped, vendored, copied or read
   by Horizon's builds.** The repository has none of their files (`check_no_fabric.py --tree`; Python
   test `tests/test_check_no_fabric.py`). A release build (`HORIZON_BRIDGE_PLATFORM=source`, as
-  `java-mods-release.yml` and `package_java_variant.sh` build) now carries **the bridge's own
+  `java-mods-release.yml` and `package_java_variant.sh` build) carries **the bridge's own
   sources too** (`horizon-bridge-src.zip`), not only the platform mod's: build.rs fetches and reads
   nothing of Fabric's, and both steps fail if `.local/bridge` appears on the build machine or an
   archive holds a class or jar of theirs (`check_no_fabric.py <archives>`). On the player's machine,
@@ -2897,28 +3160,71 @@ The maintainers' conditions, and what holds them:
   compiles the bridge (`platform::ensure_bridge`, 7 sources, a few seconds) then the platform mod against them
   (`work/bridge/<key>/`, `work/platform/<key>/`). A developer's build (no `source`) still compiles
   against the jars it fetches into the checkout's `.local/bridge/lib`, on the developer's machine.
+  The release build is **Fabric only**: the NeoForge and 1.12 prototypes are behind
+  `java-mods-prototypes`, which no release enables.
 - **(b) Nothing plays without owning the game, nothing of Mojang's is downloaded for a non-owner.**
   The game downloads nothing of Mojang's, ever (no Java, jars or assets: the game jar is the player's
-  own preparation). Fabric mods run only when `horizon_jvm::gate` says so: `--java-mods` **with**
-  `HORIZON_JAVA_MODS_OWNER`, which only the launcher's `switch_command` sets, on Play's command, after
-  the strict owner gate; or `HORIZON_JAVA_MODS=1`, the developers' explicit opt-in (regress,
-  `launch.sh`, `lan_test.sh`, `server_test.sh`, `lan_e2e --java-mods`). `--java-mods` alone (the game
-  started by hand) runs no mods and fetches nothing: the log and stderr say "Fabric 26.3 mods run only
-  when Horizon's launcher starts the game for a signed-in account that owns Minecraft: Java Edition
-  …", and the game plays without them (no exit 78). The launcher fetches the Java mods build and
-  Mojang's Java 25 only past `owner_signed_in` (`ensure`, `follow`, `java-mods on`). These are local
-  checks, as in every launcher: they keep Horizon from offering a path, not a determined user out.
+  own preparation). Fabric mods run only when `horizon_jvm::gate` says so, and environment variables
+  alone never make it say so:
+  1. **The launcher's owner gate** (`account::launch`, the same check plain Play and
+     `download_for_owner` use) asks the Minecraft services with each account's token whether it
+     owns Minecraft: Java Edition; the last "yes" is kept in memory with its time
+     (`account::LAST_OWNER`).
+  2. **The owner record:** with the switch on, `java_variant::switch_command` writes, from a "yes"
+     at most 5 minutes old, the owner's session file (`account::write_owner_record`: profile UUID
+     and Minecraft access token, 0600, random name, the same writer and reaper as
+     `--session-file`) in `<launcher home>/java-mods-owner/`, and passes its path in
+     `HORIZON_JAVA_MODS_OWNER` beside `--java-mods`. No fresh "yes" (offline): Play refuses ("need
+     the Minecraft services to confirm …; turn Fabric 26.3 mods off to play offline").
+  3. **The game checks it itself** (`gate::decision`, on a thread from the process's first line,
+     `entry.rs`): the record is a regular file, its owner's only, written in the last 10 minutes
+     (`RECORD_LIFE`: a pre-launch command or wrapper may run in between; the launcher's reaper
+     keeps it as long); read once and deleted; its UUID is an
+     account of the launcher's `accounts.json` beside the record's folder; then the game calls
+     `GET /minecraft/profile` (must be that UUID) and `GET /entitlements/mcstore` (must hold
+     `game_minecraft`/`product_minecraft`) on api.minecraftservices.com with the token, as the
+     launcher's `owns_game` does. Only a token Mojang issued to an owner passes. 401/403/404 is a
+     "no"; 429, 5xx and network errors are "no answer". The launcher passes its proxy setting
+     (`proxy::spec_for`) as `HTTPS_PROXY` to the game, which the check and Fabric's downloads use.
+  Why not read the launcher's stored proof (`Secrets.owns`) directly: it lives in the OS keychain
+  (Secret Service, Keychain, Credential Manager), which the game can't read without a keychain
+  stack of its own, and any local file or variable a player can write as well. The token is the
+  one proof the game can check without new crypto. **Trade-off:** Fabric mods need the services
+  reachable at each start (plain Horizon still plays offline). Anything else runs no mods and
+  fetches nothing, and says why in the log/stderr: "Fabric 26.3 mods run only when Horizon's
+  launcher starts the game … (no owner record from the launcher | the owner record is missing,
+  too old or readable by others | … not signed in to the launcher | the Minecraft services did not
+  confirm … | … could not be reached …)". With jars in `mods-java/` the game then **stops**
+  (`not_started`, exit 78, "Java mods: not started: …", which the launcher's Java mods tab shows):
+  a modded world opened without its mods would lose their blocks and items. With no jars it plays. The launcher
+  fetches the Java mods build and Mojang's Java 25 only past `owner_signed_in` (`ensure`, `follow`,
+  `update`, `java-mods on`). A determined user can still patch a binary; these checks keep Horizon
+  from offering a path.
+  **Developers:** `HORIZON_JAVA_MODS=1` (regress, `launch.sh`, `lan_test.sh`, `server_test.sh`,
+  `lan_e2e --java-mods`) and `HORIZON_JAVA_MODS_SERVICES=<url>` (a stand-in services, `install_test.sh`'s
+  `tools/java_bridge/fake_services.py`) exist only in `java-mods-dev` builds.
 - **(c)** Startup and frame time with the bridge off: [java-bridge-perf.md](java-bridge-perf.md),
   "The bridge switched off" (`tools/java_bridge/perf_off.sh`).
-- **Checks:** unit `horizon-jvm gate::` (by hand → no mods; launcher marker → mods; dev opt-in);
-  launcher unit `java_variant::…the_command_becomes_the_java_builds…` (the marker on the gated
-  command, never `HORIZON_JAVA_MODS`); `launcher_switch_test.py` (no owner: nothing downloaded;
-  Play passes the marker; off: none); regress **`direct`** (`install_test.sh DIRECT=1`: scratch
-  install, `--java-mods`, no marker: the message, no `.local/bridge`, no Java runtime, no `libjvm`
-  in the process, the world plays) and **`owner`** (with the marker: Fabric fetched into the install,
-  the fixture loads).
-- **Trap:** a script of your own that starts the game with `--java-mods` now runs no mods: add
-  `HORIZON_JAVA_MODS=1` (developer) or `HORIZON_JAVA_MODS_OWNER=1` (as the launcher, `install_test.sh`).
+- **(d) A warning first:** turning "Fabric 26.3 mods (beta)" on in the window (Home's chip, Play's
+  ⋯ item, Launch…'s switch: all `flip_java_mods`) first shows a confirmation
+  (`java_mods_warning`, texts `java_variant::WARNING_TITLE`/`WARNING`, through `tr`): mods are
+  Java programs with full access to the computer, files and the Minecraft account; only add mods
+  you trust; beta. "Turn on Fabric mods" saves `java_mods_warned` in the instance (asked once per
+  instance); Cancel or a click outside leaves it off. `java-mods on` prints the same text once.
+- **Checks:** unit `horizon-jvm gate::` (hand-set variables and the old word `1` → no mods, before
+  any services call; stale, future, world-readable, unknown-account records refused and deleted;
+  the services' answers; `services_check` against a localhost stand-in: owner, Bedrock only,
+  another profile, refused token, 503, nothing listening; `--features dev`: the opt-in);
+  launcher units `account::…the_owner_record_needs_a_fresh_answer…`,
+  `java_variant::…the_command_becomes_the_java_builds…` (the record's path, never
+  `HORIZON_JAVA_MODS`); `tests/test_java_mods_release_features.py`; regress (install_test.sh, a
+  scratch install): **`direct`** (no record), **`forged_word`** (`HORIZON_JAVA_MODS_OWNER=1` by
+  hand), **`forged_record`** (a hand-written record + accounts.json, made-up token, Mojang's real
+  services): the message, no `.local/bridge`, no Java runtime, the game stopped, no world opened; and
+  **`owner`** (a record whose token the stand-in accepts: "confirmed by the Minecraft services",
+  Fabric fetched into the install, the fixture loads, the record deleted).
+- **Trap:** a script of your own that starts the game with `--java-mods` runs no mods: use a
+  `java-mods-dev` build with `HORIZON_JAVA_MODS=1`, or start it from the launcher.
 
 ### Windows
 
@@ -2935,6 +3241,19 @@ headless. What's different there:
 
 - JNI reads JVM options in the system's code page, not UTF-8: `create_vm` converts them, and a class
   path entry with a character the code page lacks goes by its short name (a user name like `Ivér`).
+  HotSpot and javac's launcher find their own Java home the same way (from their file's path,
+  through the code page): the home's `jvm.dll` and `javac.exe` go by `option_path` too. Where a
+  drive has 8.3 names off, Windows gives the long name back: `option_path` then fails with a
+  "move the launcher's data folder" error instead of a garbled class path.
+- Every stripper of `\\?\` (`horizon_prepare::java::without_verbatim`, which `plain_path`, the
+  launcher's `backend::plain` and `data_location` use) also turns `\\?\UNC\server\share` into
+  `\\server\share`. The launcher's Java homes (`java::installed`) are stripped before they reach
+  `HORIZON_JAVA_HOME`.
+- Windows locks a running program's folder and a jar Java has open: the launcher replaces the Java
+  mods build by moving the old one aside first (`java_variant::swap`), and removing a held jar says
+  "close the game first".
+- Fabric's folder scan takes `.jar` only, case-sensitively: `horizon_jvm::jars` and the launcher's
+  list do too, and the launcher adds `Foo.JAR` as `Foo.jar`.
 
 Not tested on Windows: the launcher's Java mods tab. The `tools/java_bridge/*.sh` scripts are developers' and Linux-only (Xvfb,
 mktemp).
@@ -3079,6 +3398,21 @@ client's tick, 7–24 ms (the mods' frame-start hooks up to 19 ms in the first m
 HUD).
 
 ## Hooks in Horizon's shared files (after the upstream sync)
+
+**Since bridge-p0 (2026-11-06):** Horizon's own files have no `cfg(feature = "java-mods")` left: each
+calls a hook that exists in both builds (a `Game` method or associated function; free-function
+hooks became associated ones, `Game::java_fluid(state)`), whose plain answer is in
+`game/java_hooks/<area>.rs` (one file per C PR) and whose body is in a feature-only file.
+`java_server.rs` is split by area (`java_server/{tick,blocks,players,menus,commands,items,entities}.rs`).
+The lower crates' bridge children have neutral names: render `assets/mod_fluids.rs`,
+`biome/mod_biomes.rs`, `datapack/mod_jars.rs`, `hud/mod_textures.rs`, `mesher/mod_blocks.rs`,
+`options_ui/mod_rows.rs`, `particles/mod_particles.rs`, `streaming/mod_tickets.rs`; client lib
+`item_render/mod_quads.rs`, `lan/conn/tap.rs`, `lan/containers/mod_windows.rs`,
+`lan/data/mod_biomes.rs`, `lan/guest/mod_abilities.rs`, `lan/hub/mod_guests.rs`,
+`landing/routed_fall.rs`, `menu/crafted_takes.rs`, `mod_content/own_states.rs`,
+`save/mod_presets.rs`, `title/create_world/mod_presets.rs`, `vanillagen/oracle.rs`. The
+launcher's fork fallback is `launcher/src/java_variant/fork.rs`. A new hook: its call in
+Horizon's file, its stub in `java_hooks/<area>.rs`, its body in a feature-only file.
 
 **Since bridge-upstream-prep-2 (2026-11-05):** logic left Horizon's files for `<file>/java.rs`
 child modules and `game/java_*.rs`; Game's `java_*` fields are one `java: JavaGame`

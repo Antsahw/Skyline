@@ -420,6 +420,7 @@ impl Settings {
         for (name, _, _) in crate::keybinds::MAPPINGS {
             keys.set(name, &f.key_binding(name));
         }
+        keys.load_mods(f.mod_keys.clone());
         let mut volumes = [1.0; 11];
         for (i, source) in SOUND_SOURCES.iter().enumerate() {
             volumes[i] = f.double(&format!("soundCategory_{source}")) as f32;
@@ -627,6 +628,7 @@ impl Settings {
         for (name, key) in self.keys.saved() {
             put_s(&mut f, &format!("key_{name}"), &key);
         }
+        f.mod_keys = self.keys.saved_mods().clone();
         f
     }
     /// These settings with one `options.txt` value changed (`horizon-ctl
@@ -636,14 +638,17 @@ impl Settings {
     pub fn with_option(&self, key: &str, value: &str) -> Result<Self, String> {
         let mut file = self.to_file();
         file.set_text(key, value)?;
-        Ok(Self {
+        let mut new = Self {
             horizon: self.horizon.clone(),
             controller: self.controller.clone(),
             extras: self.extras.clone(),
             mods: self.mods.clone(),
             video_modes: self.video_modes.clone(),
             ..Self::from_file(file)
-        })
+        };
+        // The server's Java mods' mappings, which no file holds.
+        new.keys.set_mods(self.keys.mod_keys().to_vec());
+        Ok(new)
     }
     /// The `options.txt` text (Options.save).
     pub fn serialize(&self) -> String {

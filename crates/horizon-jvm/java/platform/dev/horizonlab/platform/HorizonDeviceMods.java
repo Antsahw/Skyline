@@ -48,8 +48,58 @@ public final class HorizonDeviceMods {
     /** The player whose game this process is (Rust: the single-player world's owner), or null. */
     static volatile UUID own;
 
-    /** Players whose own game runs these mods' client half (it said so as it joined). */
-    static final Set<UUID> RUN_THEIR_OWN = ConcurrentHashMap.newKeySet();
+    /**
+     * On a server: players whose own game runs some mods' client half (it said so as it joined,
+     * on RUNS_OWN_CHANNEL), and which mods ("*": every mod). Their client code is left out here
+     * for that player, and their channels' messages go to that player's game.
+     */
+    static final java.util.Map<UUID, Set<String>> RUN_THEIR_OWN = new ConcurrentHashMap<>();
+
+    /**
+     * In a game whose own client runs only the mods its server doesn't (HorizonDeviceClient's
+     * own client for some mods): those mods and what they depend on; null: every mod.
+     */
+    static volatile Set<String> ownRuns;
+
+    /** The loader, the game, Fabric API and Horizon: there on both sides, never "missing". */
+    static boolean platform(String id) {
+        return id.equals("minecraft") || id.equals("java") || id.equals("horizon") || id.equals("fabricloader")
+                || id.equals("fabric") || id.startsWith("fabric-") || id.equals("fabric-api") || id.equals("mixinextras");
+    }
+
+    /** Every mod loaded here, comma separated: what a server tells the games joining it it runs. */
+    public static String ids() {
+        java.util.List<String> ids = new java.util.ArrayList<>();
+        for (var mod : FabricLoader.getInstance().getAllMods()) ids.add(mod.getMetadata().getId());
+        return String.join(",", ids);
+    }
+
+    /** This game's mods (not the platform's) that a server running {@code server} doesn't run. */
+    static Set<String> missing(Set<String> server) {
+        Set<String> out = new TreeSet<>();
+        for (var mod : FabricLoader.getInstance().getAllMods()) {
+            String id = mod.getMetadata().getId();
+            if (!platform(id) && !server.contains(id)) out.add(id);
+        }
+        return out;
+    }
+
+    /** {@code mods} and every mod they depend on (their libraries' client code runs with them). */
+    static Set<String> withDependencies(Set<String> mods) {
+        Set<String> out = new TreeSet<>(mods);
+        java.util.ArrayDeque<String> todo = new java.util.ArrayDeque<>(mods);
+        while (!todo.isEmpty()) {
+            var mod = FabricLoader.getInstance().getModContainer(todo.poll());
+            if (mod.isEmpty()) continue;
+            for (var dep : mod.get().getMetadata().getDependencies()) {
+                if (dep.getKind() != net.fabricmc.loader.api.metadata.ModDependency.Kind.DEPENDS
+                        && dep.getKind() != net.fabricmc.loader.api.metadata.ModDependency.Kind.RECOMMENDS) continue;
+                String id = dep.getModId();
+                if (FabricLoader.getInstance().isModLoaded(id) && out.add(id)) todo.add(id);
+            }
+        }
+        return out;
+    }
 
     /** The scan starts beside the client's start (HorizonClient.finish). */
     static synchronized void startScan() {
@@ -147,23 +197,28 @@ public final class HorizonDeviceMods {
      * (or when no player's client runs).
      */
     public static boolean runs(String mod) {
-        if (OWN_CLIENT) {
-            // A server's headless client runs none of the client of a player whose own game runs
-            // it; everything else runs as before (this game's own player, players whose game
-            // runs none, and in a game connected to another's server, its own player's client).
-            var mc = net.minecraft.client.Minecraft.getInstance();
-            var player = mc == null ? null : mc.player;
-            boolean theirs = player != null && RUN_THEIR_OWN.contains(player.getUUID());
-            if (theirs && DEBUG && SAID.add(mod + " " + player.getUUID())) {
+        // A server's headless client runs none of the client code its player's own game runs
+        // (every mod's, or the mods the server lacked as it said); everything else runs as
+        // before (this game's own player, players whose game runs none of it).
+        var mc = net.minecraft.client.Minecraft.getInstance();
+        var player = mc == null ? null : mc.player;
+        Set<String> theirs = player == null ? null : RUN_THEIR_OWN.get(player.getUUID());
+        if (theirs != null && (theirs.contains("*") || mod != null && theirs.contains(mod))) {
+            if (DEBUG && SAID.add(mod + " " + player.getUUID())) {
                 Natives.log("device mods: " + mod + " is left out for " + player.getUUID() + " (their own game runs it)");
             }
-            if (theirs) return false;
+            return false;
+        }
+        // In a game connected to another's server, its own client for some mods: those only (the
+        // game's and Fabric's own code always).
+        if (HorizonDeviceClient.own()) {
+            Set<String> only = ownRuns;
+            return only == null || mod == null || only.contains(mod);
         }
         if (mods().isEmpty()) return true;
         boolean device = mod != null && mods().contains(mod);
         if (HorizonDeviceClient.on()) return device;
         if (!device) return true;
-        var player = net.minecraft.client.Minecraft.getInstance() == null ? null : net.minecraft.client.Minecraft.getInstance().player;
         boolean runs = player == null || player.getUUID().equals(own);
         if (DEBUG && SAID.add(mod + " " + (player == null ? null : player.getUUID()) + " " + runs)) {
             Natives.log("device mods: " + mod + (runs ? " runs" : " is left out") + " for " + (player == null ? "no player" : player.getUUID()));
@@ -177,7 +232,7 @@ public final class HorizonDeviceMods {
 
     /** {@link #runs} for code of a class (a listener, a lambda's class). */
     public static boolean runs(Class<?> owner) {
-        if (!OWN_CLIENT && mods().isEmpty() && !HorizonDeviceClient.on()) return true;
+        if (quiet()) return true;
         String name = owner.getName();
         int lambda = name.indexOf("$$");
         String mod = HorizonFailures.modOf(lambda > 0 ? name.substring(0, lambda) : name);
@@ -187,17 +242,48 @@ public final class HorizonDeviceMods {
 
     /** {@link #runs} for a mixin's handler merged into a game class. */
     public static boolean runs(Method handler) {
-        if (!OWN_CLIENT && mods().isEmpty() && !HorizonDeviceClient.on()) return true;
+        if (quiet()) return true;
         MixinMerged merged = handler.getAnnotation(MixinMerged.class);
         if (merged == null) return runs(handler.getDeclaringClass());
         return runs(HorizonFailures.modOf(merged.mixin()));
     }
 
-    /** The mod a payload channel is for: its namespace when that is a device mod's id. */
+    /** Nothing to leave out anywhere: no device mods, no own client, nobody running their own. */
+    private static boolean quiet() {
+        return !OWN_CLIENT && RUN_THEIR_OWN.isEmpty() && !HorizonDeviceClient.own() && mods().isEmpty() && !HorizonDeviceClient.on();
+    }
+
+    /** A channel any mod's client half could use: all but vanilla's and Horizon's (Fabric API's too). */
+    private static boolean modChannel(net.minecraft.resources.Identifier channel) {
+        return !channel.getNamespace().equals("minecraft") && !channel.getNamespace().equals("horizon");
+    }
+
+    /**
+     * Game side: whether a message on {@code channel} goes between this game's client half and
+     * the server (a device mod's; with its own client, a mod's it runs: every mod's channel when
+     * it runs every mod).
+     */
     static boolean deviceChannel(net.minecraft.resources.Identifier channel) {
-        // Every mod's client half in its player's game: every channel but vanilla's and Horizon's
-        // (Fabric API's own, its client half's too).
-        if (OWN_CLIENT) return !channel.getNamespace().equals("minecraft") && !channel.getNamespace().equals("horizon");
+        if (OWN_CLIENT) return modChannel(channel);
+        if (HorizonDeviceClient.own()) {
+            Set<String> only = ownRuns;
+            if (only == null) return modChannel(channel);
+            if (only.contains(channel.getNamespace())) return true;
+        }
+        return device(channel.getNamespace());
+    }
+
+    /**
+     * Server side: whether a message on {@code channel} is between the mods' server code and
+     * {@code player}'s own game (a device mod's, or a mod's its game runs itself).
+     */
+    static boolean deviceChannel(net.minecraft.resources.Identifier channel, UUID player) {
+        if (OWN_CLIENT) return modChannel(channel);
+        Set<String> theirs = player == null ? null : RUN_THEIR_OWN.get(player);
+        if (theirs != null) {
+            if (theirs.contains("*")) return modChannel(channel);
+            if (theirs.contains(channel.getNamespace())) return true;
+        }
         return device(channel.getNamespace());
     }
 }

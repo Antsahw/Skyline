@@ -21,6 +21,11 @@ pub(super) struct JavaModsTab {
     note: Option<Result<String, String>>,
     /// The Fabric 26.3 mods switch's download, while it runs and once it ended.
     build: Option<JavaBuild>,
+    /// Play's download of the Fabric mods build (or Java 25), while Play waits for it.
+    play_progress: Option<f32>,
+    /// Turning the switch on waits for the player to confirm `java_variant::WARNING` (once per
+    /// instance: `java_mods_warned`).
+    confirm_on: bool,
 }
 
 /// The switch's download of a version's Java mods build: the version, and how it went once done.
@@ -59,14 +64,39 @@ impl Launcher {
         self.selected_instance().is_some_and(|i| i.java_mods)
     }
 
-    /// Turns the selected instance's Fabric 26.3 mods on or off, saved at once. On: its
-    /// `mods-java/` is made, and its version's Java mods build downloads unless it's there.
+    /// Turns the selected instance's Fabric 26.3 mods on or off, saved at once. On: first the
+    /// warning (`java_variant::WARNING`) unless the player confirmed it for this instance
+    /// before, then its `mods-java/` is made, and its version's Java mods build downloads unless
+    /// it's there.
     pub(super) fn flip_java_mods(&mut self) {
+        let Some(i) = self.selected_instance() else {
+            return;
+        };
+        if !i.java_mods && !i.java_mods_warned {
+            self.java_mods.confirm_on = true;
+            return;
+        }
+        self.set_java_mods(!i.java_mods);
+    }
+
+    /// The warning's answer: on, and remembered for this instance; or left off.
+    fn answer_java_mods_warning(&mut self, on: bool) {
+        self.java_mods.confirm_on = false;
+        if on {
+            self.set_java_mods(true);
+        }
+    }
+
+    fn set_java_mods(&mut self, on: bool) {
         let Some(i) = self.selected_instance().cloned() else {
             return;
         };
-        let on = !i.java_mods;
-        if let Err(e) = instances::edit(&i.id, |m| m.java_mods = on) {
+        let edited = instances::edit(&i.id, |m| {
+            m.java_mods = on;
+            // Only the confirmation leads here with the warning unread.
+            m.java_mods_warned |= on;
+        });
+        if let Err(e) = edited {
             self.java_mods.build = Some(JavaBuild {
                 tag: String::new(),
                 done: Some(Err(e)),
@@ -128,6 +158,35 @@ impl Launcher {
         }
     }
 
+    /// Play's download for the Fabric mods moved on (`ensure_at_play`).
+    pub(super) fn java_play_progress(&mut self, p: f32) {
+        self.java_mods.play_progress = Some(p);
+    }
+
+    /// How far Play's download for the Fabric mods is, while Play waits for it.
+    pub(super) fn java_play_progress_shown(&self) -> Option<f32> {
+        self.starting_client
+            .as_ref()
+            .and(self.java_mods.play_progress)
+    }
+
+    /// Play's start is over (the game started, or Play stopped): no download bar.
+    pub(super) fn java_play_done(&mut self) {
+        self.java_mods.play_progress = None;
+    }
+
+    /// Play stopped before the game: the Fabric mods build or Java 25 can't be had. Said in
+    /// the window, as any other reason Play can't start.
+    pub(super) fn java_play_stopped(&mut self, why: String) {
+        self.java_play_done();
+        if self.starting_client.take().is_some() {
+            self.client_error = Some(why);
+            self.starting_pack = None;
+            self.joining = None;
+            self.quick_play = None;
+        }
+    }
+
     /// A switch's download ended.
     pub(super) fn java_build_done(&mut self, tag: String, result: Result<(), String>) {
         if let Some(build) = self.java_mods.build.as_mut().filter(|b| b.tag == tag) {
@@ -184,6 +243,132 @@ impl Launcher {
         )
     }
 
+    /// The warning before Fabric 26.3 mods turn on for the selected instance, over the page.
+    pub(super) fn java_mods_warning(&mut self, cx: &mut Context<Self>) -> Option<Stateful<Div>> {
+        use horizon_theme::glass::{ink, radius};
+        if !self.java_mods.confirm_on {
+            return None;
+        }
+        let t = self.theme;
+        let name = self.selected_instance()?.name.clone();
+        let title = div()
+            .font_weight(FontWeight::SEMIBOLD)
+            .text_size(px(22.))
+            .line_height(px(28.))
+            .text_color(if t.glass {
+                glass_ui::white(ink::FULL)
+            } else {
+                t.ink
+            })
+            .child(tr(java_variant::WARNING_TITLE).to_string());
+        let line = |en: &str, strong: bool| {
+            let color = match (t.glass, strong) {
+                (true, true) => glass_ui::white(ink::FULL),
+                (true, false) => glass_ui::white(ink::BODY),
+                (false, true) => t.ink,
+                (false, false) => t.ink_soft,
+            };
+            text(theme::LABEL)
+                .text_color(color)
+                .child(tr(en).to_string())
+        };
+        let answers = div()
+            .flex()
+            .items_center()
+            .gap(px(8.))
+            .mt(px(8.))
+            .child(
+                button(
+                    "java-mods-warning-on",
+                    "Turn on Fabric mods",
+                    Kind::Primary,
+                    &t,
+                )
+                .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                    this.answer_java_mods_warning(true);
+                    cx.notify();
+                })),
+            )
+            .child(
+                button("java-mods-warning-cancel", "Cancel", Kind::Ghost, &t).on_click(
+                    cx.listener(|this, _: &ClickEvent, _, cx| {
+                        this.answer_java_mods_warning(false);
+                        cx.notify();
+                    }),
+                ),
+            );
+        let body = div()
+            .flex()
+            .flex_col()
+            .gap(px(12.))
+            // A set width: text measured at it wraps where it is drawn.
+            .w(px(520.))
+            .max_w_full()
+            .p(px(32.))
+            .child(
+                text(theme::CAPTION)
+                    .text_color(if t.glass {
+                        glass_ui::white(ink::QUIET)
+                    } else {
+                        t.muted
+                    })
+                    .child(name),
+            )
+            .child(title)
+            .child(line(java_variant::WARNING[0], true))
+            .child(line(java_variant::WARNING[1], true))
+            .child(line(java_variant::WARNING[2], false))
+            .child(answers);
+        let card = if t.glass {
+            glass_ui::dialog_plate(radius::MODAL)
+        } else {
+            div()
+                .rounded(px(8.))
+                .bg(t.panel)
+                .border_1()
+                .border_color(t.raised)
+        }
+        .id("java-mods-warning-card")
+        .occlude()
+        .child(body);
+        let scrim = if t.glass {
+            glass_ui::scrim()
+        } else {
+            t.page.opacity(0.8)
+        };
+        Some(
+            div()
+                .id("java-mods-warning")
+                .absolute()
+                .top_0()
+                .left_0()
+                .size_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .p(px(24.))
+                .occlude()
+                .on_scroll(|_, _, cx| cx.stop_propagation())
+                .children(t.glass.then(glass_ui::scrim_backdrop))
+                .child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .size_full()
+                        .bg(scrim)
+                        .on_mouse_down(
+                            gpui::MouseButton::Left,
+                            cx.listener(|this, _: &MouseDownEvent, _, cx| {
+                                this.answer_java_mods_warning(false);
+                                cx.notify();
+                            }),
+                        ),
+                )
+                .child(card),
+        )
+    }
+
     /// Home's Java mods tab and its count, when the selected instance has the switch on.
     pub(super) fn java_mods_tab_entry(&mut self) -> Option<(home_tabs::HomeTab, Option<usize>)> {
         self.has_java_mods_tab()
@@ -219,14 +404,32 @@ impl Launcher {
         self.java_mods.list.len()
     }
 
-    fn add_java_mods(&mut self, home: PathBuf, paths: Vec<PathBuf>) {
+    pub(super) fn add_java_mods(&mut self, home: PathBuf, paths: Vec<PathBuf>) {
+        let had = java_mods::list(&home);
         let mut added = Vec::new();
         let mut failed = Vec::new();
         for path in paths {
             match java_mods::add(&home, &path) {
-                Ok(m) => added.push(m.title().to_string()),
+                Ok(m) => {
+                    if let Some(wants) = &m.wrong_minecraft {
+                        failed.push(wrong_minecraft(&m.file, wants));
+                    }
+                    if let Some(other) = had
+                        .iter()
+                        .find(|h| h.id.is_some() && h.id == m.id && h.file != m.file)
+                    {
+                        failed.push(trf(
+                            "{file} is the same mod as {other}: keep only one of them.",
+                            &[("file", &m.file), ("other", &other.file)],
+                        ));
+                    }
+                    added.push(m.title().to_string());
+                }
                 Err(e) => failed.push(e),
             }
+        }
+        if !added.is_empty() && !failed.is_empty() {
+            failed.insert(0, trf("Added {names}.", &[("names", &added.join(", "))]));
         }
         self.java_mods.note = Some(if failed.is_empty() {
             Ok(trf(
@@ -342,6 +545,16 @@ impl Launcher {
         for failure in self.java_mods.failures.iter().filter(|f| f.name.is_none()) {
             section = section.child(notice(failure.text.clone(), &t));
         }
+        for (id, files) in java_mods::duplicates(&self.java_mods.list) {
+            section = section.child(notice(
+                trf(
+                    "{files} are the same mod ({id}): Fabric won't start with both. Keep only \
+                     one of them.",
+                    &[("files", &files.join(", ")), ("id", &id)],
+                ),
+                &t,
+            ));
+        }
         if self.java_mods.list.is_empty() {
             section = section.child(text(theme::CAPTION).text_color(t.muted).child(tr(
                 "No Java mods yet: add Fabric mods' jars, or drop them here.",
@@ -386,6 +599,17 @@ impl Launcher {
                         text(theme::CAPTION)
                             .text_color(t.danger)
                             .child(f.text.clone()),
+                    );
+                }
+                let wrong = m
+                    .wrong_minecraft
+                    .as_ref()
+                    .map(|w| wrong_minecraft(&m.file, w));
+                if let Some(wrong) = &wrong {
+                    info = info.child(
+                        text(theme::CAPTION)
+                            .text_color(t.danger)
+                            .child(wrong.clone()),
                     );
                 }
                 let mut actions = div().flex().items_center().gap(px(6.));
@@ -444,7 +668,7 @@ impl Launcher {
                     .px(px(10.))
                     .py(px(6.))
                     .border_2()
-                    .border_color(if failed.is_empty() {
+                    .border_color(if failed.is_empty() && wrong.is_none() {
                         t.outline
                     } else {
                         t.danger
@@ -472,12 +696,32 @@ impl Launcher {
     }
 }
 
+/// What the tab says of a jar made for another Minecraft version.
+fn wrong_minecraft(file: &str, wants: &str) -> String {
+    trf(
+        "{file} is made for Minecraft {wants}, not {version}: it can't start in Horizon. Get its \
+         version for {version}.",
+        &[
+            ("file", file),
+            ("wants", wants),
+            ("version", java_mods::MINECRAFT),
+        ],
+    )
+}
+
 /// Play's thread, before the session: with Fabric 26.3 mods on ([`Launcher::java_build_at_play`]),
-/// the version's Java mods build first, when it isn't there yet; why not goes to the game's log.
-pub(super) fn ensure_at_play(java_build: bool, tag: &str, tx: &Sender<Msg>) {
-    if java_build {
-        if let Err(e) = java_variant::ensure(tag, |_| {}) {
-            let _ = tx.send(Msg::Line(Job::Client, e));
-        }
+/// the version's Java mods build first, when it isn't there yet, its lines in the game log and
+/// its download on Play's bar. Why it can't be had stops Play (`Msg::JavaPlayStopped`, shown
+/// in the window): the game would refuse the mods anyway.
+pub(super) fn ensure_at_play(java_build: bool, tag: &str, tx: &Sender<Msg>) -> Result<(), String> {
+    if !java_build {
+        return Ok(());
     }
+    let progress = |p: f32| {
+        let _ = tx.send(Msg::JavaPlayProgress(p));
+    };
+    let log = |line: &str| {
+        let _ = tx.send(Msg::Line(Job::Client, line.to_string()));
+    };
+    java_variant::ensure_with(tag, &progress, &log)
 }

@@ -3,15 +3,21 @@
 //! text, items) reach the player's game on [`CHANNEL`]; the game draws them in place of its own
 //! container screen and sends the mouse
 //! and keys back on [`INPUT`], which the screen runs.
-use super::{Game, Screen, lan::LanHost};
+//!
+//! Plain in every build: a plain Horizon client joined to a server running Java mods draws
+//! their screens, HUD and overlay from the frames the server sends, and sends their input and
+//! key bindings back (no JVM here: `remote/java.rs` hands it the payloads). The server's side
+//! is feature-only (`java_screen/host.rs`); this game's own mods' client's part answers
+//! "none" without the feature (`java_hooks/screens.rs`).
+use super::{Game, Screen};
 use horizon_client::hud::{HudBatch, rgba};
 use horizon_client::items::ItemStack;
-use horizon_protocol::packets::{
-    configuration::CustomPayload,
-    play::{Clientbound as C, Serverbound as S},
-};
+use horizon_protocol::packets::{configuration::CustomPayload, play::Serverbound as S};
 use serde_json::{Value, json};
 use winit::keyboard::KeyCode;
+
+#[cfg(feature = "java-mods")]
+mod host;
 
 /// A frame, server to client: `{"window": id, "ops": [...]}`.
 pub(super) const CHANNEL: &str = "horizon:java_screen";
@@ -23,16 +29,90 @@ pub(super) const INPUT: &str = "horizon:java_screen_input";
 /// clicks a `KeyMapping` with no screen open.
 pub(super) const KEYS: &str = "horizon:java_keys";
 
+/// Game to server, once as it meets a server's Java mods: the player's own skin where no
+/// server knows it (an offline name's, from the launcher): a byte 1 for slim arms (else 0),
+/// then the 64x64 RGBA rows. Mods that build from a player's skin (3D skin layers) use it.
+pub(super) const OWN_SKIN: &str = "horizon:java_own_skin";
+
 /// Server to game: the Java mods with a settings screen (`[[id, name], ...]`), sent once as a
 /// player joins; the game lists them on its Mods page, and asks for one on [`INPUT`]
 /// (`{"kind": "modconfig", "mod": id}`): the server opens it as a client-only screen.
 pub(super) const CONFIG_MODS: &str = "horizon:java_config_mods";
 
+/// Server to game: the Java mods' key bindings (`[{name, category, key, default, label,
+/// categoryLabel}]`, labels in the server's language), sent as a player joins and when they
+/// change: the game lists them on its Controls page, keeps the player's own keys for them in
+/// options.txt (`key_<name>`), and names the mappings a key is bound to in its `bind` input
+/// (`"mappings": [name, ...]`), which Java sets in that player's keys only.
+pub(super) const KEY_MAPPINGS: &str = "horizon:java_key_mappings";
+
+/// Server to game: the player's field of view as the Java mods make it (`Camera.calculateFov`'s
+/// hooks: a zoom mod's), over vanilla's: a number, the scale the camera takes (1: none), sent
+/// when it changes.
+pub(super) const VIEW: &str = "horizon:java_view";
+
 /// The keys a server's Java mods bind, and which of them this game told it are down.
 #[derive(Default)]
 pub(super) struct JavaBinds {
-    keys: std::collections::HashSet<i32>,
+    pub(super) keys: std::collections::HashSet<i32>,
     down: std::collections::HashSet<i32>,
+}
+
+/// The Java mods' field-of-view scale ([`VIEW`]): the last told, and the two ticks it eases
+/// between in frames.
+pub(super) struct JavaView {
+    target: f32,
+    old: f32,
+    now: f32,
+}
+impl Default for JavaView {
+    fn default() -> Self {
+        Self {
+            target: 1.0,
+            old: 1.0,
+            now: 1.0,
+        }
+    }
+}
+impl JavaView {
+    /// A client tick: the scale told since is this tick's.
+    pub(super) fn tick(&mut self) {
+        self.old = self.now;
+        self.now = self.target;
+    }
+    /// The scale in a frame, `partial` into the tick.
+    pub(super) fn scale(&self, partial: f32) -> f32 {
+        let s = self.old + (self.now - self.old) * partial.clamp(0.0, 1.0);
+        if s.is_finite() && s > 0.0 { s } else { 1.0 }
+    }
+}
+
+/// The mods' key bindings in [`KEY_MAPPINGS`]'s JSON.
+fn mod_keys(data: &[u8]) -> Option<Vec<horizon_client::keybinds::ModKey>> {
+    let list = serde_json::from_slice::<Vec<Value>>(data).ok()?;
+    let text = |o: &Value, k: &str| o.get(k).and_then(Value::as_str).unwrap_or("").to_owned();
+    Some(
+        list.iter()
+            .filter_map(|o| {
+                let name = o.get("name")?.as_str()?;
+                Some(horizon_client::keybinds::ModKey {
+                    name: horizon_client::keybinds::intern(name),
+                    category: text(o, "category"),
+                    default: o
+                        .get("default")
+                        .and_then(Value::as_str)
+                        .unwrap_or("key.keyboard.unknown")
+                        .to_owned(),
+                    label: o
+                        .get("label")
+                        .and_then(Value::as_str)
+                        .unwrap_or(name)
+                        .to_owned(),
+                    category_label: text(o, "categoryLabel"),
+                })
+            })
+            .collect(),
+    )
 }
 /// The window of a client-only screen (a mod's `Gui.setScreen` with no menu: its settings, a
 /// guide book): no menu's window is open under it. Its frames say this window, and
@@ -79,7 +159,8 @@ pub(super) struct JavaOverlay {
     sent_mouse: Option<(i32, i32)>,
     /// When the last mouse move went (moves go at most every [`MOVE_EVERY`]).
     sent_mouse_at: Option<std::time::Instant>,
-    sent_size: Option<(i32, i32)>,
+    /// The GUI size and scale last sent.
+    sent_size: Option<(i32, i32, i32)>,
     typing: bool,
     /// A press went to the overlay: its drags and release go there too.
     pressed: bool,
@@ -95,13 +176,64 @@ pub(super) struct JavaOverlay {
 #[derive(Default)]
 pub(super) struct JavaImages {
     slots: Vec<(String, usize, u32, u32)>,
+    /// Images bigger than a big slot (a full-screen map, a minimap at a high GUI scale), each
+    /// with a texture of its own (`HudBatch::images`), as sent: least recently stored first.
+    own: Vec<(String, horizon_client::hud::HudImage)>,
+    next_own: u32,
+}
+
+/// At most this many images with their own texture (a full-screen map and a few minimaps).
+const OWN_IMAGES: usize = 8;
+
+impl JavaImages {
+    /// The images with their own texture, for this frame's HUD batch.
+    pub(super) fn own_images(&self) -> Vec<horizon_client::hud::HudImage> {
+        self.own.iter().map(|(_, image)| image.clone()).collect()
+    }
+
+    /// Image `name` (`w` x `h`) into a texture of its own: its own again (a new version),
+    /// else a new one, the least recently stored going past [`OWN_IMAGES`].
+    fn store_own(&mut self, name: &str, w: u32, h: u32, rgba: Vec<u8>) {
+        let (id, version) = match self.own.iter().position(|(n, _)| n == name) {
+            Some(i) => {
+                let (_, old) = self.own.remove(i);
+                (old.id, old.version + 1)
+            }
+            None => {
+                if self.own.len() >= OWN_IMAGES {
+                    self.own.remove(0);
+                }
+                self.next_own += 1;
+                (self.next_own, 0)
+            }
+        };
+        self.own.push((
+            name.to_owned(),
+            horizon_client::hud::HudImage {
+                id,
+                version,
+                width: w,
+                height: h,
+                rgba: std::sync::Arc::new(rgba),
+            },
+        ));
+    }
+
+    /// Image `name`'s own texture: its id and size.
+    fn own_image(&self, name: &str) -> Option<(u32, u32, u32)> {
+        self.own
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, i)| (i.id, i.width, i.height))
+    }
 }
 
 /// What Java mods last drew on the window's HUD.
 #[derive(Default)]
 pub(super) struct JavaHud {
     ops: Vec<Value>,
-    sent_size: Option<(i32, i32)>,
+    /// The GUI size and scale last sent.
+    sent_size: Option<(i32, i32, i32)>,
 }
 
 /// The mod screen a window shows, as its last frame drew it.
@@ -112,7 +244,8 @@ pub(super) struct JavaScreen {
     /// What the server last heard: the mouse (and when), and the GUI's size.
     sent_mouse: Option<(i32, i32)>,
     sent_mouse_at: Option<std::time::Instant>,
-    sent_size: Option<(i32, i32)>,
+    /// The GUI size and scale last sent.
+    sent_size: Option<(i32, i32, i32)>,
     /// A text box of the screen has the keyboard (the frame's `typing`): it takes the
     /// inventory key's letter too.
     typing: bool,
@@ -157,14 +290,7 @@ fn stack(o: &Value) -> Option<ItemStack> {
 /// Whether this game's own JVM runs every mod's client half (java_device): the server's HUD,
 /// overlay, keys and settings list are then not this game's.
 pub(super) fn own_java_client() -> bool {
-    #[cfg(feature = "java-mods")]
-    {
-        super::java_device::own_client()
-    }
-    #[cfg(not(feature = "java-mods"))]
-    {
-        false
-    }
+    Game::java_own_all()
 }
 
 impl Game<'_> {
@@ -174,7 +300,33 @@ impl Game<'_> {
     pub(super) fn remote_java_keys(&mut self, data: &[u8]) {
         if let Ok(keys) = serde_json::from_slice::<Vec<i32>>(data) {
             self.java.binds.keys = keys.into_iter().collect();
+            // This game's own client's, for the mods the server doesn't run (java_device).
+            self.java.binds.keys.extend(Game::java_own_keys());
         }
+    }
+
+    /// The server's Java mods' key bindings ([`KEY_MAPPINGS`]): the Controls page's rows.
+    pub(super) fn remote_java_key_mappings(&mut self, data: &[u8]) {
+        if let Some(mods) = mod_keys(data) {
+            self.settings.keys.set_mods(mods);
+        }
+    }
+
+    /// The field-of-view scale the server's Java mods make ([`VIEW`]).
+    pub(super) fn remote_java_view(&mut self, data: &[u8]) {
+        if let Ok(scale) = serde_json::from_slice::<f32>(data) {
+            self.java.view.target = if scale.is_finite() && scale > 0.0 {
+                scale
+            } else {
+                1.0
+            };
+        }
+    }
+
+    /// The mods' mappings the player's Controls bind to an input (`key.keyboard.g`), for the
+    /// `bind` input's `mappings`; `None` when the server told none (it matches by its keys).
+    fn java_mappings_for(&self, key: &str) -> Option<Vec<&'static str>> {
+        (!self.settings.keys.mod_keys().is_empty()).then(|| self.settings.keys.mods_for(key))
     }
 
     /// The server's Java mods with a settings screen ([`CONFIG_MODS`]): the Mods page's list.
@@ -195,7 +347,6 @@ impl Game<'_> {
         self.screen = Screen::Playing;
         self.java.overlay.mods_page = true;
         let input = json!({"kind": "modconfig", "mod": id});
-        #[cfg(feature = "java-mods")]
         if Self::own_client_takes(&input) {
             self.own_client_input(&input);
             return;
@@ -210,14 +361,22 @@ impl Game<'_> {
     /// A key of the window, for Java mods' key bindings: pressed while playing (no screen), or
     /// released after it was sent down (KeyboardHandler.keyPress: KeyMapping.set and click).
     pub(super) fn java_bind_key(&mut self, key: KeyCode, pressed: bool) {
-        if self.java.binds.keys.is_empty() || self.remote.is_none() {
+        if (self.java.binds.keys.is_empty() && self.settings.keys.mod_keys().is_empty())
+            || self.remote.is_none()
+        {
             return;
         }
         let Some(code) = sdl_key(key) else {
             return;
         };
+        // The mods' mappings this key is bound to in the player's Controls.
+        let mappings =
+            horizon_client::keybinds::key_name(key).and_then(|name| self.java_mappings_for(name));
         // -1: a mod takes every key (MaLiLib's hotkeys, in KeyboardHandler.keyPress).
-        if !self.java.binds.keys.contains(&code) && !self.java.binds.keys.contains(&-1) {
+        if !self.java.binds.keys.contains(&code)
+            && !self.java.binds.keys.contains(&-1)
+            && mappings.as_ref().is_none_or(Vec::is_empty)
+        {
             return;
         }
         let send = if pressed {
@@ -233,15 +392,19 @@ impl Game<'_> {
             if self.has_control_down() {
                 mods |= CONTROL;
             }
-            #[cfg(feature = "java-mods")]
-            super::java_device::key(code, sdl_keycode(key, code), mods, pressed);
-            let input = json!({"kind": "bind", "key": code, "keycode": sdl_keycode(key, code),
+            Game::java_own_key(code, sdl_keycode(key, code), mods, pressed);
+            let mut input = json!({"kind": "bind", "key": code, "keycode": sdl_keycode(key, code),
                 "mods": mods, "down": pressed});
-            // This game's own client has the mods' key bindings.
-            #[cfg(feature = "java-mods")]
+            if let Some(mappings) = mappings {
+                input["mappings"] = json!(mappings);
+            }
+            // This game's own client has the mods' key bindings (beside the server's: both).
             if Self::own_client_takes(&input) {
                 self.own_client_input(&input);
                 return;
+            }
+            if Self::own_client_also(&input) {
+                self.own_client_input(&input);
             }
             let data = input.to_string().into_bytes();
             self.send(S::CustomPayload(CustomPayload {
@@ -273,9 +436,12 @@ impl Game<'_> {
     /// `-100 - button` is bound ([`KEYS`]), released after it was sent down.
     pub(super) fn java_bind_mouse(&mut self, button: winit::event::MouseButton, pressed: bool) {
         use winit::event::MouseButton as B;
-        if self.java.binds.keys.is_empty() || self.remote.is_none() {
+        if (self.java.binds.keys.is_empty() && self.settings.keys.mod_keys().is_empty())
+            || self.remote.is_none()
+        {
             return;
         }
+        let mappings = self.java_mappings_for(&horizon_client::keybinds::mouse_name(button));
         // SDL's numbers, as 26.3's InputConstants.Type.MOUSE keys are (left 1, middle 2, right 3).
         let number = match button {
             B::Left => 1,
@@ -286,7 +452,7 @@ impl Game<'_> {
             B::Other(n) => i32::from(n),
         };
         let code = -100 - number;
-        if !self.java.binds.keys.contains(&code) {
+        if !self.java.binds.keys.contains(&code) && mappings.as_ref().is_none_or(Vec::is_empty) {
             return;
         }
         let send = if pressed {
@@ -295,9 +461,11 @@ impl Game<'_> {
             self.java.binds.down.remove(&code)
         };
         if send {
-            let data = json!({"kind": "bind", "mouse": number, "down": pressed})
-                .to_string()
-                .into_bytes();
+            let mut input = json!({"kind": "bind", "mouse": number, "down": pressed});
+            if let Some(mappings) = mappings {
+                input["mappings"] = json!(mappings);
+            }
+            let data = input.to_string().into_bytes();
             self.send(S::CustomPayload(CustomPayload {
                 channel: INPUT.into(),
                 data,
@@ -404,29 +572,28 @@ impl Game<'_> {
             return;
         }
         let size = (batch.width as i32, batch.height as i32);
+        let scale = batch.scale;
         let mouse = (self.cursor.0 as i32, self.cursor.1 as i32);
         let overlay = &mut self.java.overlay;
         let open = !overlay.open;
-        let send_size = !open && overlay.sent_size != Some(size);
+        let send_size = !open && overlay.sent_size != Some((size.0, size.1, scale as i32));
         let now = std::time::Instant::now();
         let send_mouse = move_due(overlay.sent_mouse, overlay.sent_mouse_at, mouse, now);
         overlay.open = true;
-        overlay.sent_size = Some(size);
+        overlay.sent_size = Some((size.0, size.1, scale as i32));
         if send_mouse {
             overlay.sent_mouse = Some(mouse);
             overlay.sent_mouse_at = Some(now);
         }
         if open {
-            self.send_java_screen_input(
-                OVERLAY_WINDOW,
-                json!({"kind": "open", "width": size.0, "height": size.1}),
-            );
+            self.send_java_screen_input(OVERLAY_WINDOW, {
+                let mut open = self.java_size_input(size, scale);
+                open["kind"] = json!("open");
+                open
+            });
         }
         if send_size {
-            self.send_java_screen_input(
-                OVERLAY_WINDOW,
-                json!({"kind": "size", "width": size.0, "height": size.1}),
-            );
+            self.send_java_screen_input(OVERLAY_WINDOW, self.java_size_input(size, scale));
         }
         if send_mouse {
             self.send_java_screen_input(
@@ -500,24 +667,15 @@ impl Game<'_> {
     /// titles' layer ends: under chat and titles is close enough.
     pub(super) fn draw_java_hud(&mut self, batch: &mut HudBatch) {
         // The device client's HUD (this game's own JVM: java_device), over the server's.
-        #[cfg(feature = "java-mods")]
-        {
-            super::java_device::gui_size(batch.width as i32, batch.height as i32);
-            let ops = super::java_device::hud_ops();
-            if !ops.is_empty() {
-                self.draw_java_ops(batch, &ops);
-            }
-        }
+        self.draw_own_client_hud(batch);
         let Some(hud) = self.java.hud.as_mut() else {
             return;
         };
         let size = (batch.width as i32, batch.height as i32);
-        if hud.sent_size != Some(size) {
-            hud.sent_size = Some(size);
-            self.send_java_screen_input(
-                HUD_WINDOW,
-                json!({"kind": "size", "width": size.0, "height": size.1}),
-            );
+        let scale = batch.scale;
+        if hud.sent_size != Some((size.0, size.1, scale as i32)) {
+            hud.sent_size = Some((size.0, size.1, scale as i32));
+            self.send_java_screen_input(HUD_WINDOW, self.java_size_input(size, scale));
         }
         let ops = std::mem::take(&mut self.java.hud.as_mut().expect("checked").ops);
         if !ops.is_empty() {
@@ -573,23 +731,21 @@ impl Game<'_> {
         };
         // The screen lays out in this GUI size, and hovers where the mouse is.
         let size = (batch.width as i32, batch.height as i32);
+        let scale = batch.scale;
         let mouse = (self.cursor.0 as i32, self.cursor.1 as i32);
         let screen = self.java.screen.as_mut().expect("checked");
         let now = std::time::Instant::now();
         let (send_size, send_mouse) = (
-            screen.sent_size != Some(size),
+            screen.sent_size != Some((size.0, size.1, scale as i32)),
             move_due(screen.sent_mouse, screen.sent_mouse_at, mouse, now),
         );
-        screen.sent_size = Some(size);
+        screen.sent_size = Some((size.0, size.1, scale as i32));
         if send_mouse {
             screen.sent_mouse = Some(mouse);
             screen.sent_mouse_at = Some(now);
         }
         if send_size {
-            self.send_java_screen_input(
-                window,
-                json!({"kind": "size", "width": size.0, "height": size.1}),
-            );
+            self.send_java_screen_input(window, self.java_size_input(size, scale));
         }
         if send_mouse {
             self.send_java_screen_input(
@@ -666,35 +822,63 @@ impl Game<'_> {
                 {
                     // A mod's dynamic texture: its slot, the part of it the image fills.
                     let name = o.get("texture").and_then(Value::as_str).unwrap_or_default();
-                    let Some(&(_, slot, w, h)) =
-                        self.java.images.slots.iter().find(|s| s.0 == name)
-                    else {
-                        continue;
-                    };
-                    let atlas = &self.gui.atlas;
-                    let (sprite_name, slot_side) = horizon_client::hud::java_image_slot(slot);
-                    let Some(sprite) = atlas.sprites.get(&sprite_name).copied() else {
-                        continue;
-                    };
-                    let side = slot_side as f32;
-                    let (fw, fh) = (
-                        w.min(slot_side) as f32 / side,
-                        h.min(slot_side) as f32 / side,
-                    );
-                    let (u, v) = ((sprite.u1 - sprite.u0) * fw, (sprite.v1 - sprite.v0) * fh);
-                    let mut r = sprite;
-                    r.u0 = sprite.u0 + int(o, "u0").clamp(0.0, 1.0) * u;
-                    r.u1 =
-                        sprite.u0 + o.get("u1").map_or(1.0, |_| int(o, "u1")).clamp(0.0, 1.0) * u;
-                    r.v0 = sprite.v0 + int(o, "v0").clamp(0.0, 1.0) * v;
-                    r.v1 =
-                        sprite.v0 + o.get("v1").map_or(1.0, |_| int(o, "v1")).clamp(0.0, 1.0) * v;
-                    let color = o
-                        .get("color")
-                        .and_then(Value::as_i64)
-                        .map_or(u32::MAX, argb);
-                    let (x, y, w, h) = rect();
-                    batch.rect_uv(x, y, w, h, r, color);
+                    // One too big for a slot: its own texture, nearest when each of its pixels
+                    // covers whole window pixels (pixel art stays sharp), else linear.
+                    if let Some((id, w, h)) = self.java.images.own_image(name) {
+                        let full = |key: &str| o.get(key).map_or(1.0, |_| int(o, key));
+                        let r = horizon_client::hud::Rect {
+                            u0: int(o, "u0").clamp(0.0, 1.0),
+                            u1: full("u1").clamp(0.0, 1.0),
+                            v0: int(o, "v0").clamp(0.0, 1.0),
+                            v1: full("v1").clamp(0.0, 1.0),
+                            w,
+                            h,
+                        };
+                        let color = o
+                            .get("color")
+                            .and_then(Value::as_i64)
+                            .map_or(u32::MAX, argb);
+                        let (x, y, dw, dh) = rect();
+                        let ratio = |drawn: f32, texels: f32| drawn * batch.scale / texels.max(1.0);
+                        let (rx, ry) = (
+                            ratio(dw.abs(), (r.u1 - r.u0).abs() * w as f32),
+                            ratio(dh.abs(), (r.v1 - r.v0).abs() * h as f32),
+                        );
+                        let whole = |k: f32| k >= 0.99 && (k - k.round()).abs() < 0.02;
+                        let linear = affine || !(whole(rx) && whole(ry));
+                        batch.rect_uv(x, y, dw, dh, r, color);
+                        batch.blend_since(start, horizon_client::hud::Blend::Image(id, linear));
+                    } else {
+                        let Some(&(_, slot, w, h)) =
+                            self.java.images.slots.iter().find(|s| s.0 == name)
+                        else {
+                            continue;
+                        };
+                        let atlas = &self.gui.atlas;
+                        let (sprite_name, slot_side) = horizon_client::hud::java_image_slot(slot);
+                        let Some(sprite) = atlas.sprites.get(&sprite_name).copied() else {
+                            continue;
+                        };
+                        let side = slot_side as f32;
+                        let (fw, fh) = (
+                            w.min(slot_side) as f32 / side,
+                            h.min(slot_side) as f32 / side,
+                        );
+                        let (u, v) = ((sprite.u1 - sprite.u0) * fw, (sprite.v1 - sprite.v0) * fh);
+                        let mut r = sprite;
+                        r.u0 = sprite.u0 + int(o, "u0").clamp(0.0, 1.0) * u;
+                        r.u1 = sprite.u0
+                            + o.get("u1").map_or(1.0, |_| int(o, "u1")).clamp(0.0, 1.0) * u;
+                        r.v0 = sprite.v0 + int(o, "v0").clamp(0.0, 1.0) * v;
+                        r.v1 = sprite.v0
+                            + o.get("v1").map_or(1.0, |_| int(o, "v1")).clamp(0.0, 1.0) * v;
+                        let color = o
+                            .get("color")
+                            .and_then(Value::as_i64)
+                            .map_or(u32::MAX, argb);
+                        let (x, y, w, h) = rect();
+                        batch.rect_uv(x, y, w, h, r, color);
+                    }
                 }
                 kind @ ("blit" | "sprite") => {
                     // A sprite's texture as its atlas's sources lay it out, when the frame says
@@ -865,17 +1049,6 @@ impl Game<'_> {
         kept
     }
 
-    /// The Java image slot holding the image named `name`, with the image's size.
-    #[cfg_attr(not(feature = "java-mods"), allow(dead_code))]
-    pub(super) fn java_image_slot(&self, name: &str) -> Option<(usize, u32, u32)> {
-        self.java
-            .images
-            .slots
-            .iter()
-            .find(|s| s.0 == name)
-            .map(|s| (s.1, s.2, s.3))
-    }
-
     /// A mod's dynamic texture's pixels (`{"op":"image","name","width","height","rgba"}`):
     /// into an atlas slot (its own again, else a free one, else the least recently stored),
     /// shrunk to fit.
@@ -893,8 +1066,21 @@ impl Game<'_> {
             return;
         }
         use horizon_client::hud::{
-            JAVA_BIG_IMAGE_SLOTS, JAVA_IMAGE_SIZE, JAVA_IMAGE_SLOTS, java_image_slot,
+            JAVA_BIG_IMAGE_SIZE, JAVA_BIG_IMAGE_SLOTS, JAVA_IMAGE_SIZE, JAVA_IMAGE_SLOTS,
+            java_image_slot,
         };
+        // Bigger than a big slot: a texture of its own, as sent. A GPU target or dynamic
+        // texture is only blitted (drawn from there); anything else (a model's texture) keeps
+        // a slot as well, shrunk, for what draws from the atlas.
+        if w > JAVA_BIG_IMAGE_SIZE || h > JAVA_BIG_IMAGE_SIZE {
+            let only_blitted = name.starts_with("horizon:dynamic/");
+            let pixels = rgba[..(w * h * 4) as usize].to_vec();
+            self.java.images.store_own(name, w, h, pixels);
+            if only_blitted {
+                self.java.images.slots.retain(|s| s.0 != name);
+                return;
+            }
+        }
         // Images bigger than a small slot take a big one (small and big slots are evicted
         // apart, least recently stored first).
         let big = w > JAVA_IMAGE_SIZE || h > JAVA_IMAGE_SIZE;
@@ -954,19 +1140,34 @@ impl Game<'_> {
         text.resolve_legacy()
     }
 
+    /// A size input: the GUI's size and scale, and the framebuffer's (mods' full-screen
+    /// targets and pictures in picture are made at those).
+    fn java_size_input(&self, size: (i32, i32), scale: f32) -> Value {
+        let (px_w, px_h) = self.renderer.as_ref().map_or(
+            (
+                (size.0 as f32 * scale) as u32,
+                (size.1 as f32 * scale) as u32,
+            ),
+            |r| (r.config.width, r.config.height),
+        );
+        json!({"kind": "size", "width": size.0, "height": size.1, "scale": scale.round() as i32,
+               "px_w": px_w, "px_h": px_h})
+    }
+
     fn send_java_screen_input(&mut self, window: i32, mut input: Value) {
         input["window"] = json!(window);
         // The device client's screen (this game's own JVM: java_device) takes its own input.
-        #[cfg(feature = "java-mods")]
-        if window == CLIENT_WINDOW && super::java_device::screen_open() {
+        if window == CLIENT_WINDOW && Game::java_device_screen_open() {
             self.device_screen_input(&input);
             return;
         }
-        // This game's own client (every mod's client half here): its windows' input.
-        #[cfg(feature = "java-mods")]
+        // This game's own client (mods' client half here): its windows' input.
         if Self::own_client_takes(&input) {
             self.own_client_input(&input);
             return;
+        }
+        if Self::own_client_also(&input) {
+            self.own_client_input(&input);
         }
         let data = input.to_string().into_bytes();
         self.send(S::CustomPayload(CustomPayload {
@@ -1105,58 +1306,6 @@ impl Game<'_> {
             self.send_java_screen_input(window, json!({"kind": "char", "char": ch as u32}));
         }
         true
-    }
-
-    // ---- The server -----------------------------------------------------------------------
-
-    /// What Java mods draw on a player's HUD, from Java: to their game.
-    #[cfg_attr(not(feature = "java-mods"), allow(dead_code))]
-    pub(super) fn send_java_hud_frame(host: &mut LanHost, conn: u32, frame: &str) {
-        host.hub.send_to(
-            conn,
-            &C::CustomPayload(CustomPayload {
-                channel: HUD_CHANNEL.into(),
-                data: frame.as_bytes().to_vec(),
-            }),
-        );
-    }
-
-    /// What Java mods draw over a player's inventory, from Java: to their game.
-    #[cfg_attr(not(feature = "java-mods"), allow(dead_code))]
-    pub(super) fn send_java_overlay_frame(host: &mut LanHost, conn: u32, frame: &str) {
-        host.hub.send_to(
-            conn,
-            &C::CustomPayload(CustomPayload {
-                channel: OVERLAY_CHANNEL.into(),
-                data: frame.as_bytes().to_vec(),
-            }),
-        );
-    }
-
-    /// A player's client-only screen closed, from Java: their game leaves it.
-    #[cfg_attr(not(feature = "java-mods"), allow(dead_code))]
-    pub(super) fn send_java_screen_close(host: &mut LanHost, conn: u32) {
-        let data = format!("{{\"window\":{CLIENT_WINDOW},\"close\":true}}").into_bytes();
-        host.hub.send_to(
-            conn,
-            &C::CustomPayload(CustomPayload {
-                channel: CHANNEL.into(),
-                data,
-            }),
-        );
-    }
-
-    /// A frame of a player's mod screen, from Java: to their game, for their window.
-    #[cfg_attr(not(feature = "java-mods"), allow(dead_code))]
-    pub(super) fn send_java_screen_frame(host: &mut LanHost, conn: u32, window: i32, frame: &str) {
-        let data = format!("{{\"window\":{window},\"ops\":{frame}}}").into_bytes();
-        host.hub.send_to(
-            conn,
-            &C::CustomPayload(CustomPayload {
-                channel: CHANNEL.into(),
-                data,
-            }),
-        );
     }
 }
 

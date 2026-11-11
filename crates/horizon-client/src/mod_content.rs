@@ -646,7 +646,7 @@ struct NewBlock<'a> {
     /// The template's item, if it has one.
     item: Option<String>,
     /// Its own states (`states` in the declaration), else empty: the template's.
-    own: Vec<java::OwnState>,
+    own: Vec<own_states::OwnState>,
     shapes: Option<Vec<VoxelShape>>,
     collision_shapes: Option<Vec<VoxelShape>>,
     default: u32,
@@ -1121,14 +1121,15 @@ impl<'a> Plan<'a> {
                 for (position, &(state, combo)) in order.iter().enumerate() {
                     rows[state as usize * combos.len() + combo as usize] = position as u32;
                 }
-                let own = java::own_states(decl, &states, &combos, &shapes, &facts, &mut by_key)?;
+                let own =
+                    own_states::own_states(decl, &states, &combos, &shapes, &facts, &mut by_key)?;
                 let mut rename = Rename::new(&decl.template, &decl.id);
                 rename.first = next;
                 rename.fanout = combos.len() as u32;
                 rename.rows = rows;
                 let count =
                     u32::try_from(states.len() as u64 * combos.len() as u64).unwrap_or(u32::MAX);
-                let count = java::own_count(&own).unwrap_or(count);
+                let count = own_states::own_count(&own).unwrap_or(count);
                 next = next.saturating_add(count);
                 rename.states = states;
                 if let Some(s) = &decl.properties.sounds {
@@ -2194,9 +2195,9 @@ fn place_in_biomes(
 
 #[path = "mod_content_biomes.rs"]
 mod biomes;
-mod java;
+mod own_states;
 mod raw_json;
-use java::Rows;
+use own_states::Rows;
 
 /// The overlay being written: `out` mirrors `base` through links, and a
 /// directory becomes real only when something inside it is written.

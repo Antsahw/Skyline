@@ -864,7 +864,7 @@ impl Game<'_> {
             self.lan_acting_entity,
         ) = acting;
         self.known_movement = known_movement;
-        super::java_server::set_java_actor(java_actor);
+        Game::set_java_actor(java_actor);
         play.death_cause = std::mem::replace(&mut self.ui.death_cause, death_cause);
         // An ender chest the guest opened: the menu shows their inventory
         // itself (lan_open_container), not a stand-in block entity.
@@ -2527,6 +2527,9 @@ impl Game<'_> {
             S::CustomPayload(p) if p.channel == super::java_screen::INPUT => {
                 self.java_screen_input(host, conn, &p.data)
             }
+            S::CustomPayload(p) if p.channel == super::java_screen::OWN_SKIN => {
+                self.java_own_skin(host, conn, &p.data)
+            }
             S::CustomPayload(p) if p.channel == horizon_protocol::quiet::CHANNEL => {
                 self.guest_quiet_commands(host, conn, &p.data)
             }
@@ -2536,7 +2539,6 @@ impl Game<'_> {
             S::CustomPayload(p) if p.channel == horizon_client::lod_net::CHANNEL => {
                 self.guest_far_terrain(host, conn, &p.data)
             }
-            #[cfg(feature = "java-mods")]
             S::CustomPayload(p) => self.java_device_payload(host, conn, &p.channel, &p.data),
             S::ChatCommandSigned(p) => self.guest_signed_command(host, conn, p),
             S::ChangeDifficulty(p) if host.hub.guests[gi].permission >= 2 => {

@@ -136,32 +136,67 @@ def screen_has(slot, item):
     return rf'"item":"{re.escape(item)}"[^}}]*"slot":{slot}\b|"slot":{slot}[^}}]*"item":"{re.escape(item)}"'
 
 
+# A step for the ownership cases refused: what was fetched, and whether the game went on, in
+# $I/direct.txt. The game stops (exit 78) rather than open the world without its mods.
+NOTHING_FETCHED = ('sleep 3; { [ -e "$I/version/.local/bridge" ] && echo "fabric: fetched" || echo "fabric: none"; '
+                   'ls -A "$I/lh/minecraft/runtime" 2>/dev/null | grep -q . && echo "java: fetched" || echo "java: none"; '
+                   'pgrep -f "^$I/version/horizon-client" >/dev/null && echo "game: running" || echo "game: stopped"; '
+                   'ls "$I/home/saves/W/region" 2>/dev/null | grep -q . && echo "world: opened" || echo "world: none"; '
+                   '} > "$I/direct.txt"')
+NOTHING_FETCHED_CHECKS = [
+    check_file("direct.txt", r"fabric: none", "nothing of Fabric's downloaded (no .local/bridge)"),
+    check_file("direct.txt", r"java: none", "no Java runtime downloaded"),
+    check_file("direct.txt", r"game: stopped", "the game stopped instead of playing without the mods"),
+    check_file("direct.txt", r"world: none", "the world was not opened without its mods"),
+]
+
+
 CASES = {
     "direct": dict(
-        about="Ownership: the game started by hand with --java-mods (no launcher, no signed-in owner) runs no "
+        about="Ownership: the game started by hand with --java-mods (no launcher, no owner record) runs no "
               "mods, downloads nothing (no Fabric, no Java, nothing of Mojang's), says the launcher is needed "
-              "and plays without them (install_test.sh DIRECT=1: a scratch install, as a player's)",
+              "and stops instead of opening the world without them (install_test.sh DIRECT=1: a scratch install, as a player's)",
         fixtures=["hellomod"], scene="none", install=True, env={"DIRECT": "1"},
-        steps=['{ [ -e "$I/version/.local/bridge" ] && echo "fabric: fetched" || echo "fabric: none"; '
-               'grep -q libjvm "/proc/$PID/maps" && echo "jvm: loaded" || echo "jvm: none"; '
-               'ls -A "$I/lh/minecraft/runtime" 2>/dev/null | grep -q . && echo "java: fetched" || echo "java: none"; '
-               '$G state > "$I/state.json"; } > "$I/direct.txt"'],
-        checks=[check_log(r"Java mods: off: Fabric 26\.3 mods run only when Horizon's launcher starts the game for a "
-                          r"signed-in account that owns", "the log says the launcher with a signed-in owner is needed"),
-                check_file("direct.txt", r"fabric: none", "nothing of Fabric's downloaded (no .local/bridge)"),
-                check_file("direct.txt", r"java: none", "no Java runtime downloaded"),
-                check_file("direct.txt", r"jvm: none", "no JVM in the game's process"),
-                check_json("state.json", ["screen"], "playing", "the world plays without the mods")],
+        steps=[NOTHING_FETCHED],
+        checks=[check_log(r"Java mods: not started: Fabric 26\.3 mods run only when Horizon's launcher starts the game for a "
+                          r"signed-in account that owns.*no owner record", "the log says the launcher with a signed-in owner is needed"),
+                *NOTHING_FETCHED_CHECKS],
+        forbid=[r"Java mods: JVM", r"Java mods: Fabric loaded", r"downloading https"],
+    ),
+    "forged_word": dict(
+        about="Ownership: --java-mods with HORIZON_JAVA_MODS_OWNER=1 set by hand (the old launcher word, no "
+              "owner record) runs no mods and downloads nothing (install_test.sh FORGED=word)",
+        fixtures=["hellomod"], scene="none", install=True, env={"FORGED": "word"},
+        steps=[NOTHING_FETCHED],
+        checks=[check_log(r"Java mods: not started: Fabric 26\.3 mods run only .*the owner record is missing",
+                          "the hand-set variable is no owner record"),
+                *NOTHING_FETCHED_CHECKS],
+        forbid=[r"Java mods: JVM", r"Java mods: Fabric loaded", r"downloading https"],
+    ),
+    "forged_record": dict(
+        about="Ownership: an owner record written by hand (an account in the launcher's accounts.json, a "
+              "made-up token) is checked with Mojang's own services, which refuse the token or can't be "
+              "reached: no mods, nothing downloaded (install_test.sh FORGED=record)",
+        fixtures=["hellomod"], scene="none", install=True, env={"FORGED": "record"},
+        steps=[NOTHING_FETCHED],
+        checks=[check_log(r"Java mods: not started: Fabric 26\.3 mods run only .*\(the Minecraft services (did not confirm|"
+                          r"could not be reached)", "the services decided, not the file"),
+                *NOTHING_FETCHED_CHECKS],
         forbid=[r"Java mods: JVM", r"Java mods: Fabric loaded", r"downloading https"],
     ),
     "owner": dict(
-        about="Ownership: the game as the launcher starts it past its owner gate (--java-mods and "
-              "HORIZON_JAVA_MODS_OWNER, a scratch install): Fabric is fetched on this machine and the mod loads",
+        about="Ownership: the game as the launcher starts it past its owner gate (--java-mods and an owner "
+              "record whose token a stand-in for the Minecraft services accepts, a scratch install): Fabric "
+              "is fetched on this machine and the mod loads",
         fixtures=["hellomod"], scene="none", install=True, timeout=900,
-        steps=['sleep 2; ls "$I/version/.local/bridge/lib" > "$I/fabric.txt"'],
-        checks=[check_log(r"Java mods: Fabric loaded .*horizon_hello", "Fabric and the mod loaded"),
+        steps=['sleep 2; ls "$I/version/.local/bridge/lib" > "$I/fabric.txt"; '
+               '[ -e "$I/lh/java-mods-owner/session-test.json" ] && echo kept > "$I/record.txt" || echo read > "$I/record.txt"'],
+        checks=[check_log(r"Java mods: on \(the launcher's owner, confirmed by the Minecraft services\)",
+                          "the game confirmed the owner itself"),
+                check_log(r"Java mods: Fabric loaded .*horizon_hello", "Fabric and the mod loaded"),
                 check_file("fabric.txt", r"fabric-loader-0\.20\.1\.jar",
-                           "Fabric Loader fetched on this machine, into the install's own .local/bridge")],
+                           "Fabric Loader fetched on this machine, into the install's own .local/bridge"),
+                check_file("record.txt", r"read", "the game deleted the owner record it read")],
     ),
     "pot": dict(
         about="Farmer's Delight: the cooking pot's screen opens; beef moved into it",
@@ -458,7 +493,7 @@ CASES = {
                "$C command \"summon item $(at $X+2.5) $((Y+2)) $(at $Z-1.5) {Item:{id:'minecraft:iron_ingot',count:3},PickupDelay:200}\" >/dev/null; "
                "$C command \"summon item $(at $X+3.5) $((Y+3)) $(at $Z+1.5) {Item:{id:'minecraft:wheat',count:2},PickupDelay:200}\" >/dev/null; "
                "$C command \"summon item $(at $X-1.5) $((Y+3)) $(at $Z-1.5) {Item:{id:'minecraft:cobblestone',count:2},PickupDelay:200}\" >/dev/null; "
-               "$C command \"summon item $(at $X-1.5) $Y $(at $Z+1.5) {Item:{id:'minecraft:raw_iron',count:1},PickupDelay:200}\" >/dev/null; "
+               "$C command \"summon item $(at $X-1.5) $Y $(at $Z+0.5) {Item:{id:'minecraft:raw_iron',count:1},PickupDelay:200}\" >/dev/null; "
                "sleep 15; $C entities 12 > $S/items.json; $C look-at block $((X+2)) $Y $((Z-2)) up >/dev/null; sleep 1"],
         checks=[check_log(r'ber create:depot at .*Item:\{count:3,id:"minecraft:iron_ingot"\}', "the depot holds the thrown ingots"),
                 check_log(r"ber create:millstone at .*(minecraft:wheat|create:wheat_flour)", "the millstone took the wheat"),
@@ -513,6 +548,38 @@ CASES = {
         look="createparts-0: the burner under its basin, the mixer over it, the press over a basin, the saw "
              "with its blade, no pale squares on the floor under them; createparts-2 from closer",
     ),
+    "createpump": dict(
+        about="Create's pump (bridge-create-1): a pump turned by a motor drinks a water source of Horizon's through "
+              "a pipe into a fluid tank, which draws the water (the client's copy loads the server's update "
+              "packets through the packet listener, Create's sendData goes through the chunk cache's blockChanged; "
+              "the client level's biome tints); pipes draw their arms and rims (a block model's parts in a "
+              "world, addPartsWithInfo, drawn at its place), in water too",
+        mods=["create"], optional=["fabric-api"], scene="createpump", env={"HORIZON_JAVA_DEBUG": "ber"}, timeout=900,
+        steps=['sleep 12; read X Y Z < $S/pos; $C blocks $((X+3)) $Y $((Z-2)) $((X+3)) $Y $((Z-2)) > $S/pit.json',
+               'read X Y Z < $S/pos; $C command "tp @s $(awk "BEGIN{print $X+0.5}") $Y $(awk "BEGIN{print $Z-0.5}") -90 10" >/dev/null; sleep 3',
+               'read X Y Z < $S/pos; $C command "tp @s $(awk "BEGIN{print $X+3.5}") $((Y+1)) $(awk "BEGIN{print $Z+1.5}") 0 55" >/dev/null; sleep 3'],
+        checks=[check_file("pit.json", r'"blocks":\[\]', "the pump drank the water source (Horizon's block gone)"),
+                check_log(r"ber create:fluid_tank at .*: [1-9]\d* model\(s\).*Fluid:\{amount:[1-9]", "the tank holds water and draws it"),
+                check_log(r"create:fluid_pipe\}\[down=false,east=false,north=true,south=true[^\]]*\] draws [1-9]\d* quads in a world",
+                          "the pipe draws its arms and rim (its model's parts in a world)"),
+                check_log(r"create:fluid_pipe\}\[[^\]]*waterlogged=true[^\]]*\] draws [1-9]\d* quads in a world",
+                          "the pipes laid through water too")],
+        forbid=[r"Java mods: drawing create:", r"couldn't load its update packet", r"model in a world couldn't be read"],
+        look="createpump-1: the pipe whole from the pit to the pump, its rim at the open end, water in the tank's "
+             "window; createpump-2: the pipes in the water whole",
+    ),
+    "createfan": dict(
+        about="Create's fan blows the player (bridge-create-1): a mod's block entity setting a mirrored player's "
+              "motion (from its motion as Horizon moved it) reaches the player's client as vanilla's "
+              "ClientboundSetEntityMotionPacket (Natives.playerMotion)",
+        mods=["create"], optional=["fabric-api"], scene="createfan", timeout=900,
+        steps=['read X Y Z < $S/pos; $C command "tp @s $(awk "BEGIN{print $X+0.5}") $Y $(awk "BEGIN{print $Z+0.5}") -90 10" >/dev/null; '
+               'sleep 0.3; $C state > $S/before.json; sleep 6; $C state > $S/after.json; python3 -c "import json;'
+               'b=json.load(open(\'$S/before.json\'))[\'player\'][\'position\'];a=json.load(open(\'$S/after.json\'))[\'player\'][\'position\'];'
+               'print(\'blown\' if b[0]-a[0]>0.8 else \'still\', b[0]-a[0])" > $S/blown.txt'],
+        checks=[check_file("blown.txt", r"^blown", "the fan's wind pushed the player west, away from it")],
+        look="createfan-0: the fan ahead, further than where the player stood",
+    ),
     "jeifluids": dict(
         about="Fluids in screens: JEI's list draws water from its still sprite (vanilla's blitTiledSprite, "
               "through the client's real block atlas), tinted, not as a black square",
@@ -551,6 +618,20 @@ CASES = {
         checks=[check_log(r"mods draw [1-9][0-9]* quads of a player's model parts their own way", "the layers' meshes are drawn")],
         forbid=[r"the player's model parts mods draw couldn't be drawn"],
         look="none-1: the player from the front; jacket, sleeves and trousers stand out in 3D",
+    ),
+    "skinlayers-skin": dict(
+        about="3D Skin Layers on the player's own skin (the launcher's offline skin, a slim test skin with bright "
+              "outer layers): the mod's voxels built from and drawn with it, Horizon's flat layers left out under them",
+        mods=["skinlayers", "fabric-api"], scene="none", skin_fixture=True,
+        steps=['$C command "fill ~-4 ~ ~-4 ~4 ~3 ~4 air" >/dev/null; $C command "time set noon" >/dev/null; '
+               'sleep 6; $C key f5 tap >/dev/null; $C key f5 tap >/dev/null; $C look 0 10 >/dev/null; sleep 4'],
+        checks=[check_log(r"the player's own skin \(slim\) for [0-9a-f-]+ came from its game", "the game sends its offline skin"),
+                check_log(r"mods draw [1-9][0-9]* quads of a player's model parts their own way \(horizon:offline_skin/",
+                          "the layers' meshes are built from and drawn with the player's own skin"),
+                check_log(r"Java mods: Horizon leaves out its own layers mods draw on players: [a-z_ ]*sleeve",
+                          "Horizon's flat layers give way to the mod's (the sleeves too)")],
+        forbid=[r"the player's model parts mods draw couldn't be drawn"],
+        look="none-1: the player from the front: magenta and cyan sleeves on slim arms, green jacket, yellow hat",
     ),
     "hud": dict(
         about="Jade's tooltip and AppleSkin on Horizon's HUD",
@@ -783,6 +864,49 @@ CASES = {
         fixtures=["keysmod"], scene="none",
         steps=['$C key g tap >/dev/null; sleep 1; $C key g tap >/dev/null; sleep 1; $C messages > $S/messages.json'],
         checks=[check_file("messages.json", r"key G pressed by", "the mod saw G")],
+    ),
+    "keys-rebind": dict(
+        about="Mods' key bindings in Horizon's Controls (keysmod's G under Miscellaneous): rebound to H there, "
+              "saved in options.txt; H then reaches the mod, G no longer does",
+        fixtures=["keysmod"], scene="none",
+        steps=['$C options keybinds >/dev/null; sleep 1; $C click field-0 >/dev/null; $C type ping >/dev/null; sleep 0.5; $C ui > $S/ui1.json',
+               '$C click g >/dev/null; sleep 0.3; $C key h tap >/dev/null; sleep 0.5; $C ui > $S/ui2.json',
+               'for i in 1 2 3 4 5; do $C state | grep -q \'"screen":"playing"\' && break; $C key esc tap >/dev/null; sleep 0.4; done; '
+               'cp $S/options.txt $S/options-saved.txt; $C key g tap >/dev/null; sleep 1.5; $C messages > $S/after-g.json',
+               '$C key h tap >/dev/null; sleep 1.5; $C messages > $S/after-h.json'],
+        checks=[check_file("ui1.json", r'"id":"g"', "Key Binds lists the mod's mapping (on G)"),
+                check_file("ui2.json", r'"id":"h"', "rebound to H on the Controls page"),
+                check_file("options-saved.txt", r"(?m)^key_key\.horizon_keys\.ping:key\.keyboard\.h$", "saved as key_<name>:<key>"),
+                check_file("after-g.json", r"\A(?![\s\S]*key G pressed by)", "G no longer reaches the mod"),
+                check_file("after-h.json", r"key G pressed by", "H reaches the mod's mapping")],
+        look="the Key Binds page filtered to the mod's row, H on its button",
+    ),
+    "keys-server": dict(
+        about="A dedicated server's player: the mods' key bindings in their Controls, rebound there (G to H), pressed by name",
+        fixtures=["keysmod"], scene="none", server=True,
+        steps=['sleep 3; $G options keybinds >/dev/null; sleep 1; $G click field-0 >/dev/null; $G type ping >/dev/null; sleep 0.5; $G ui > $S/ui1.json',
+               '$G click g >/dev/null; sleep 0.3; $G key h tap >/dev/null; sleep 0.5; $G ui > $S/ui2.json; '
+               'for i in 1 2 3 4 5; do $G state | grep -q \'"screen":"playing"\' && break; $G key esc tap >/dev/null; sleep 0.4; done; '
+               '$G key h tap >/dev/null; sleep 1.5; $G messages > $S/after-h.json'],
+        checks=[check_file("ui1.json", r'"id":"g"', "the player's Key Binds lists the server mod's mapping"),
+                check_file("ui2.json", r'"id":"h"', "rebound to H"),
+                check_file("after-h.json", r"key G pressed by", "H reaches the mod for that player")],
+    ),
+    "fov": dict(
+        about="Mods' field of view on Horizon's camera (fovmod: @ModifyReturnValue on Camera.calculateFov halves it "
+              "while its Z key, a plain new KeyMapping in its own category, is held)",
+        fixtures=["fovmod"], scene="none",
+        steps=['$C state > $S/before.json',
+               '$C key z down >/dev/null; sleep 1.5; $C state > $S/zoomed.json',
+               '$C key z up >/dev/null; sleep 1.5; $C state > $S/after.json',
+               '$C options keybinds >/dev/null; sleep 1; $C click field-0 >/dev/null; $C type zoom >/dev/null; sleep 0.5; $C ui > $S/ui.json'],
+        checks=[check_log(r"mod hook\(s\) on the camera's field of view: \S*CameraMixin\S* \(@ModifyReturnValue on calculateFov\)",
+                          "the mod's hook on Camera.calculateFov is found"),
+                check_log(r"mod key binding\(s\): .*key\.horizon_fov\.zoom", "a plain new KeyMapping is a mod's key binding"),
+                check_file("zoomed.json", r'"fov":35(\.0+)?[,}]', "Z held: the camera's FOV is half of 70"),
+                check_file("after.json", r'"fov":70(\.0+)?[,}]', "Z released: back to 70"),
+                check_file("ui.json", r'"id":"z"', "Key Binds lists the zoom key")],
+        look="none-2.png zoomed in (half the FOV) against none-3.png; none-4.png the Key Binds page with 'Horizon FOV'",
     ),
     "entity": dict(
         about="A mod's mob (the crittermod fixture): summoned, ticked, drawn",
@@ -1427,9 +1551,22 @@ CASES = {
         mods=["xaero", "xaeroworldmap", "xaeroplus"], scene="none", env={"HORIZON_JAVA_DEBUG": "gpu"},
         steps=['sleep 40', '$C key m tap; sleep 15'],
         checks=[check_log(r"gpu: horizon:dynamic/gpu\d+ 447x267, \d+ pixels not transparent, [1-9]\d{3,} not black", "the minimap draws"),
-                check_log(r"gpu: horizon:dynamic/gpu\d+ 427x240, \d+ pixels not transparent, [1-9]\d{4,} not black", "the World Map's target (shrunk) has the map")],
+                check_log(r"gpu: horizon:dynamic/gpu\d+ 128[01]x720, \d+ pixels not transparent, [1-9]\d{4,} not black", "the World Map's target has the map, whole (the window's own game takes up to 2048 px)")],
         forbid=[r"handler\$\w+\$xaero\w*\$\w+\): java", r"Failed to get data directory"],
         look="the World Map: the explored land in its colours, the red arrow, X/Y/Z at the top",
+    ),
+    "maps-hires": dict(
+        about="Xaero's Minimap and World Map at 2560x1440, GUI scale 6: the minimap's picture is drawn at the window's scale "
+              "and the World Map's target at its framebuffer, sent near whole (own textures in Horizon's HUD, not 512 px slots)",
+        mods=["xaero", "xaeroworldmap"], scene="none",
+        env={"HORIZON_JAVA_DEBUG": "gpu", "SIZE": "2560x1440", "GUI_SCALE": "6"},
+        steps=['sleep 40', '$C key m tap; sleep 20'],
+        checks=[check_log(r"gpu: horizon:dynamic/gpu\d+ (8[5-9]\d|9[0-4]\d)x\d+, \d+ pixels not transparent, [1-9]\d{3,} not black",
+                          "the minimap's picture is at scale 6 (~894 px wide, 447 at scale 3)"),
+                check_log(r"gpu: horizon:dynamic/gpu\d+ (1[2-9]\d\d|20[0-4]\d)x\d+, \d+ pixels not transparent, [1-9]\d{4,} not black",
+                          "the World Map's image is at least 1280 wide (427 before)")],
+        forbid=[r"handler\$\w+\$xaero\w*\$\w+\): java"],
+        look="none-1.png: a sharp minimap top left; none-2.png: a sharp World Map",
     ),
     "worldmap-lazy": dict(
         about="Xaero's Minimap and World Map with the mirror's models baked on first use (a big pack's don't fit: HORIZON_JAVA_MODELS=off): both draw, no frame hook fails on a missing ModelManager",
@@ -1438,7 +1575,7 @@ CASES = {
         checks=[check_log(r"models are baked on first use", "the models are lazy"),
                 check_log(r"models baked on first use \(BlockState\)", "map mods baked the states they read"),
                 check_log(r"gpu: horizon:dynamic/gpu\d+ 447x267, \d+ pixels not transparent, [1-9]\d{3,} not black", "the minimap draws"),
-                check_log(r"gpu: horizon:dynamic/gpu\d+ 427x240, \d+ pixels not transparent, [1-9]\d{4,} not black", "the World Map's target (shrunk) has the map")],
+                check_log(r"gpu: horizon:dynamic/gpu\d+ 128[01]x720, \d+ pixels not transparent, [1-9]\d{4,} not black", "the World Map's target has the map, whole (the window's own game takes up to 2048 px)")],
         forbid=[r"handler\$\w+\$xaero\w*\$\w+\): java", r"ModelManager\.getBlockStateModelSet\(\)", r"model baked on first use failed"],
         look="the World Map in its colours (plains, forest, water), the red arrow, X/Y/Z at the top",
     ),
@@ -1547,9 +1684,52 @@ CASES = {
         steps=['sleep 70', '$G key m tap; sleep 15; $G key escape tap; sleep 2; $G state > $S/player.json'],
         checks=[check_log(r"Done \(", "the server starts"),
                 check_file("player.json", r'"screen":"playing"', "the player plays"),
-                check_log(r"gpu: horizon:dynamic/gpu\d+ 427x240, \d+ pixels not transparent, [1-9]\d{4,} not black", "the World Map's target has the map")],
+                check_log(r"gpu: horizon:dynamic/gpu\d+ 512x288, \d+ pixels not transparent, [1-9]\d{4,} not black", "the World Map's target has the map (1280x720 shrunk to a network player's 512)")],
         forbid=[r"journeymap.common.event.FabricServerEvents\]: java", r"handler\$\w+\$xaero\w*\$\w+\): java"],
         look="server-1.png: JourneyMap's minimap top right, Xaero's top left; server-2.png: Xaero's World Map",
+    ),
+    "maps-client-only": dict(
+        about="A client-side mod on a server that doesn't run it: a Horizon dedicated server with no Java mods, its "
+              "player with Xaero's Minimap; the player's own game runs Xaero's client half (by default, no switch) "
+              "and draws its minimap",
+        mods=["xaero"], server_mods=[], log="player", scene="none", server=True, env={"HORIZON_JAVA_DEBUG": "gpu"},
+        steps=['sleep 60; $G state > $S/player.json'],
+        checks=[check_file("player.json", r'"screen":"playing"', "the player plays"),
+                check_log(r"every mod's client half runs here for this player, on localhost:\d+ \(the server runs no Java mods\)",
+                          "the player's own game runs its mods' client half (the server said none)"),
+                check_log(r"gpu: a blit of horizon:dynamic/gpu\d+", "the minimap's GPU target is drawn on the HUD")],
+        forbid=[r"this game's own client has no mirror", r"own client's tick failed"],
+        look="server-1.png: Xaero's minimap top left, mapped around the player",
+    ),
+    "maps-client-vanilla": dict(
+        about="maps-client-only against vanilla's own server jar (offline mode, from .local): Xaero's minimap in the "
+              "player's own game",
+        mods=["xaero"], server_mods=[], log="player", scene="none", server=True,
+        env={"HORIZON_JAVA_DEBUG": "gpu", "VANILLA_SERVER": "1"},
+        steps=['sleep 60; $G state > $S/player.json'],
+        checks=[check_file("player.json", r'"screen":"playing"', "the player plays"),
+                check_log(r"every mod's client half runs here for this player, on localhost:\d+ \(the server runs no Java mods\)",
+                          "the player's own game runs its mods' client half"),
+                check_log(r"gpu: a blit of horizon:dynamic/gpu\d+", "the minimap's GPU target is drawn on the HUD")],
+        forbid=[r"this game's own client has no mirror", r"own client's tick failed"],
+        look="server-1.png: Xaero's minimap top left on a vanilla server",
+    ),
+    "maps-client-some": dict(
+        about="A server running some of the player's mods (Jade), not all (Xaero's Minimap): the player's own game "
+              "runs only Xaero's client half, drawn over the server's HUD (Jade's box stays the server's)",
+        mods=["jade", "xaero"], server_mods=["jade"], log="player", scene="none", server=True,
+        env={"HORIZON_JAVA_DEBUG": "gpu"},
+        steps=['$G look 0 80 >/dev/null; sleep 60; $G state > $S/player.json; cp $S/logs/latest.log $S/server-log.txt'],
+        checks=[check_file("player.json", r'"screen":"playing"', "the player plays"),
+                check_log(r"xaerominimap run here for this player \(the server doesn't run them\)",
+                          "the player's own game runs the mods the server lacks"),
+                check_log(r"gpu: a blit of horizon:dynamic/gpu\d+", "the minimap's GPU target is drawn on the HUD"),
+                check_file("server-log.txt", r"Player's own game runs [^\n]*xaerominimap's client half",
+                           "the server was told which mods the player's game runs"),
+                check_file("server-log.txt", r"\A(?![\s\S]*Player's own game runs [^\n]*jade)",
+                           "Jade still runs on the server for the player")],
+        forbid=[r"this game's own client has no mirror", r"own client's tick failed", r"Jade failed"],
+        look="server-1.png: Xaero's minimap top left (the player's own game), Jade's box at the top (the server's)",
     ),
     "rei-lan": dict(
         about="REI per player, as in vanilla (each game runs its own client: HORIZON_JAVA_OWN_CLIENT): a LAN guest with 4 oak logs turns on its craftable-only filter and sees what it can craft; the host's stays off, its list full",
@@ -2038,7 +2218,7 @@ def build(java_only):
             sys.exit(f"Java build failed:\n{r.stderr[-2000:]}")
         return {"HORIZON_JAVA_JARS": r.stdout.strip().splitlines()[-1]}
     r = subprocess.run(["cargo", "build", "-q", "--profile", "fast", "-p", "horizon-client",
-                        "-p", "horizon-client-lib", "--features", "horizon-client/java-mods"], cwd=ROOT, env=env,
+                        "-p", "horizon-client-lib", "--features", "horizon-client/java-mods-dev"], cwd=ROOT, env=env,
                        capture_output=True, text=True)
     if r.returncode != 0:
         sys.exit(f"build failed:\n{r.stderr[-3000:]}")
@@ -2068,8 +2248,23 @@ def run_game(case, name, jars, out, extra_env, pack=None, join_within=None):
                 (folder / rel).parent.mkdir(parents=True, exist_ok=True)
                 (folder / rel).write_text(text)
             config = {"CONFIG": str(folder)}
+        if case.get("skin_fixture"):
+            # The player's offline skin from the launcher: a test skin made here (slim arms,
+            # bright outer layers), never Mojang's art.
+            skin = out / "fixture-skin.png"
+            subprocess.run([sys.executable, str(TOOLS / "fixture_skin.py"), str(skin)], check=True)
+            config.update(HORIZON_OFFLINE_SKIN=str(skin), HORIZON_OFFLINE_SKIN_MODEL="slim")
         env = dict(os.environ, MODS=str(mods), SCENE=case["scene"], OUT=str(out), NO_BUILD="1", **extra_env,
                    **case.get("env", {}), **config)
+        if "server_mods" in case:
+            # The server's own jars (server_test.sh's SERVER_MODS): those of the case's named
+            # here; the player's game has all of them.
+            server = top / "server-mods"
+            server.mkdir()
+            for jar in jars:
+                if any(fnmatch.fnmatch(jar.name.lower(), g) for n in case["server_mods"] for g in MODS[n]):
+                    shutil.copy(jar, server)
+            env["SERVER_MODS"] = str(server)
         if pack is not None:
             # The pack's own folder (launch.sh takes its config/ too); its content kept between runs.
             env.update(MODS=str(pack), CACHE=str(out.parent / "pack-cache"),
@@ -2088,6 +2283,10 @@ def run_game(case, name, jars, out, extra_env, pack=None, join_within=None):
         if case.get("server"):
             scratch = Path(Path("/tmp/hz-bridge-server").read_text().strip())
             log_path = scratch / "logs" / "latest.log"
+            if case.get("log") == "player":
+                # The checks read the player's game's log (log="player").
+                player = Path(Path("/tmp/hz-bridge-player").read_text().strip())
+                log_path = player / "home" / "logs" / "latest.log"
         elif case.get("install"):
             scratch = Path(Path("/tmp/hz-bridge-install").read_text().strip())
             log_path = scratch / "home" / "logs" / "latest.log"

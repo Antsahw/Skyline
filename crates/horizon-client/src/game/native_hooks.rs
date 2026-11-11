@@ -8172,7 +8172,7 @@ pub(super) fn block_contact(
 /// it canceled the hit. Its one caller.
 pub(super) fn hurt_server(hurting: Hurting<'_>, amount: &mut f32) -> bool {
     // Java mods first: a player's hurtServer head and Fabric's ALLOW_DAMAGE (java_server.rs).
-    if super::java_server::java_hurt(&hurting, amount) {
+    if Game::java_hurt_player(&hurting, amount) {
         return true;
     }
     let (entity, kind, source) = hurt_server_args(hurting);

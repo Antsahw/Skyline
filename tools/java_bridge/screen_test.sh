@@ -28,7 +28,7 @@ elif [ -n "$JAVA_ONLY" ]; then
   jars=$("$R/tools/java_bridge/java.sh") || exit 1  # (export X=$(...) would hide its failure)
   export HORIZON_JAVA_JARS=$jars
 else
-  cd "$R" && cargo build -q --profile fast -p horizon-client -p horizon-client-lib --features horizon-client/java-mods 2>&1 \
+  cd "$R" && cargo build -q --profile fast -p horizon-client -p horizon-client-lib --features horizon-client/java-mods-dev 2>&1 \
     | grep -vE "Picked up JAVA_TOOL" | grep -E "^error|error:|\.java:[0-9]+" -A6 | head -30
 fi
 S=$("$R/tools/java_bridge/launch.sh") || exit 1
@@ -271,7 +271,8 @@ case "$SCENE" in
     'echo $X $Y $Z > $S/pos' 'sleep 1' ;;
   # Create, Horizon's items into its blocks (bridge-mixins-11): a depot, a millstone on a
   # motor, crushing wheels on two motors (their controller between, facing down), a fan on a
-  # motor blowing north through lava; $S/pos the player's block.
+  # motor blowing north through lava, a glass pane north of the lava (the air goes through, the
+  # lava doesn't flow under the item: it burnt there, depending on the land); $S/pos the player's block.
   createitemsin) "$R/tools/java_bridge/around.sh" \
     'q "gamemode creative"' 'q "tp @s $X $Y $Z 0 20"' \
     'q "setblock $((X+2)) $Y $((Z-2)) create:depot"' \
@@ -283,6 +284,7 @@ case "$SCENE" in
     'q "setblock $((X-1)) $((Y+1)) $((Z-3)) create:creative_motor[facing=south]"' \
     'q "setblock $((X-2)) $Y $((Z+4)) create:creative_motor[facing=north]"' \
     'q "setblock $((X-2)) $Y $((Z+3)) create:encased_fan[facing=north]"' \
+    'q "setblock $((X-2)) $Y $((Z+1)) minecraft:glass_pane"' \
     'q "setblock $((X-2)) $Y $((Z+2)) minecraft:lava"' \
     'echo $X $Y $Z > $S/pos' 'sleep 3' ;;
   # Lava's interactions with Create (bridge-mixins-11): a 2x2 pool of still water in the floor
@@ -317,6 +319,30 @@ case "$SCENE" in
     'q "setblock $((X+3)) $Y $Z create:water_wheel[facing=east]"' \
     'q "setblock $((X+3)) $((Y+1)) $((Z-1)) minecraft:water"' \
     'echo $((X+3)) $Y $Z > $S/pos' 'q "tp @s ~ ~ ~ -90 20"' 'sleep 4' ;;
+  # Create's pump (bridge-create-1), east of the player (looking east): north to south a water
+  # source in a walled pit, a pipe, a pump (facing south) turned by a motor over a cogwheel, a
+  # fluid tank; further south a row of pipes laid through water (waterlogged). $S/pos the
+  # player's block.
+  createpump) "$R/tools/java_bridge/around.sh" \
+    'q "fill $((X+2)) $Y $((Z-3)) $((X+4)) $Y $((Z-3)) stone"' \
+    'q "setblock $((X+2)) $Y $((Z-2)) stone"' 'q "setblock $((X+4)) $Y $((Z-2)) stone"' \
+    'q "setblock $((X+3)) $Y $((Z-2)) minecraft:water"' \
+    'q "setblock $((X+3)) $Y $((Z-1)) create:fluid_pipe[north=true,south=true]"' \
+    'q "setblock $((X+3)) $Y $Z create:mechanical_pump[facing=south]"' \
+    'q "setblock $((X+3)) $((Y+1)) $Z create:cogwheel[axis=z]"' \
+    'q "setblock $((X+3)) $((Y+1)) $((Z-1)) create:creative_motor[facing=south]"' \
+    'q "setblock $((X+3)) $Y $((Z+1)) create:fluid_tank"' \
+    'q "fill $((X+1)) $((Y-1)) $((Z+3)) $((X+4)) $((Y-1)) $((Z+3)) water"' \
+    'q "fill $((X+2)) $((Y-1)) $((Z+3)) $((X+3)) $((Y-1)) $((Z+3)) create:fluid_pipe[east=true,west=true,waterlogged=true]"' \
+    'echo $X $Y $Z > $S/pos' 'q "tp @s ~ ~ ~ -90 25"' 'sleep 4' ;;
+  # Create's fan blowing at the player (bridge-create-1): a fan three blocks east facing west
+  # on a motor (16 rpm: its wind reaches about four blocks), the player in survival facing it;
+  # $S/pos the player's block.
+  createfan) "$R/tools/java_bridge/around.sh" \
+    'q "gamemode survival"' 'q "tp @s $(p $X+0.5) $Y $(p $Z+0.5) -90 10"' \
+    'q "setblock $((X+3)) $Y $Z create:encased_fan[facing=west]"' \
+    'q "setblock $((X+4)) $Y $Z create:creative_motor[facing=west]"' \
+    'echo $X $Y $Z > $S/pos' 'sleep 1' ;;
   none) ;;
 esac
 # For steps: aim FILE looks at the block whose "x y z" FILE holds (a small one too: a flower),

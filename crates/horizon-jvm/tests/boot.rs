@@ -36,12 +36,14 @@ fn jvm_starts_and_both_directions_work() {
     let dir = std::env::temp_dir().join(format!("horizon-jvm-test-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("b.jar"), b"").unwrap();
-    std::fs::write(dir.join("a.JAR"), b"").unwrap();
+    std::fs::write(dir.join("a.jar"), b"").unwrap();
+    // Fabric's folder scan skips an upper-case extension: so does the list of what it loads.
+    std::fs::write(dir.join("c.JAR"), b"").unwrap();
     std::fs::write(dir.join("notes.txt"), b"").unwrap();
     let jars = horizon_jvm::jars(&dir);
-    assert_eq!(jars.len(), 2, "only .jar files, any case: {jars:?}");
+    assert_eq!(jars.len(), 2, "only lower-case .jar files: {jars:?}");
     assert!(
-        jars[0].ends_with("a.JAR") && jars[1].ends_with("b.jar"),
+        jars[0].ends_with("a.jar") && jars[1].ends_with("b.jar"),
         "sorted: {jars:?}"
     );
     assert!(horizon_jvm::jars(&dir.join("missing")).is_empty());

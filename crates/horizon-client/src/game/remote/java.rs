@@ -5,7 +5,10 @@ use super::*;
 impl Game<'_> {
     /// A new server: its Java mods (if any) say which keys they bind once we're in.
     pub(super) fn java_new_server(&mut self) {
+        self.java.own_skin_sent = false;
         self.java.binds = Default::default();
+        self.java.view = Default::default();
+        self.settings.keys.set_mods(Vec::new());
         self.java.overlay = Default::default();
         self.settings.mods.java.clear();
     }
@@ -13,18 +16,27 @@ impl Game<'_> {
     /// A payload on one of the Java mods' channels (game/java_screen.rs,
     /// game/java_entities.rs, game/java_device.rs), handled: false for any other channel.
     pub(super) fn remote_java_payload(&mut self, channel: &str, data: &[u8]) -> bool {
-        // A game running its own mods' client (HORIZON_JAVA_OWN_CLIENT) draws those itself.
+        // A game running every mod's client itself draws those itself.
         let own = super::super::java_screen::own_java_client();
+        if !own && channel.starts_with("horizon:java_") {
+            self.send_java_own_skin();
+        }
         match channel {
             super::super::java_screen::CONFIG_MODS if !own => self.remote_java_config_mods(data),
             super::super::java_screen::OVERLAY_CHANNEL if !own => self.remote_java_overlay(data),
             super::super::java_screen::HUD_CHANNEL if !own => self.remote_java_hud(data),
             super::super::java_screen::CHANNEL => self.remote_java_screen(data),
             super::super::java_screen::KEYS if !own => self.remote_java_keys(data),
+            super::super::java_screen::KEY_MAPPINGS if !own => self.remote_java_key_mappings(data),
+            super::super::java_screen::VIEW if !own => self.remote_java_view(data),
             #[cfg(feature = "java-mods")]
             super::super::java_entities::CHANNEL => self.remote_java_entities(data),
             #[cfg(feature = "java-mods")]
             super::super::java_entities::PARTICLES => self.remote_java_particles(data),
+            #[cfg(feature = "java-mods")]
+            horizon_jvm::device::SERVER_MODS_CHANNEL => {
+                super::super::java_device::server_mods(data)
+            }
             #[cfg(feature = "java-mods")]
             _ if super::super::java_device::takes(channel) => {
                 super::super::java_device::payload(channel, data)
@@ -32,6 +44,35 @@ impl Game<'_> {
             _ => return false,
         }
         true
+    }
+
+    /// The launcher's offline skin, which only this game draws, to a server running Java
+    /// mods ([`OWN_SKIN`](super::super::java_screen::OWN_SKIN)), once: what mods build from a
+    /// player's skin there (3D skin layers' voxels) is then this player's own. Not when the
+    /// server or the account gives the player a skin (the server has that one).
+    fn send_java_own_skin(&mut self) {
+        if self.java.own_skin_sent {
+            return;
+        }
+        let Some(r) = self.remote.as_ref() else {
+            return;
+        };
+        if r.skins.get(&r.profile).map(String::as_str) != Some("horizon/offline_skin") {
+            return;
+        }
+        let Some((rgba, slim)) = horizon_client::skins::offline_skin() else {
+            return;
+        };
+        self.java.own_skin_sent = true;
+        let mut data = Vec::with_capacity(1 + rgba.len());
+        data.push(u8::from(*slim));
+        data.extend_from_slice(rgba);
+        self.send(S::CustomPayload(
+            horizon_protocol::packets::configuration::CustomPayload {
+                channel: super::super::java_screen::OWN_SKIN.into(),
+                data,
+            },
+        ));
     }
 
     /// A Java mod's entity: the server's mods use it (Player.interactOn); this client has

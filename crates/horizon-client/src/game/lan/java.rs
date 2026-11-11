@@ -12,7 +12,6 @@ impl Game<'_> {
         }
         // With Java mods, also until the spawn's chunks are there: their tick functions may
         // build on them first (the spawn a load function moved can be anywhere).
-        #[cfg(feature = "java-mods")]
         if super::super::java_mods::has_java_mods() {
             let loading = super::super::java_mods::java_loading();
             let lit = self.spawn_chunks_lit();
@@ -43,10 +42,7 @@ impl Game<'_> {
         if self.java.held_joins.is_empty() || self.dim != super::super::Dim::Overworld {
             return Vec::new();
         }
-        #[cfg(feature = "java-mods")]
         let loading = super::super::java_mods::java_loading();
-        #[cfg(not(feature = "java-mods"))]
-        let loading = false;
         // The (new) spawn's chunks, as the player would load them.
         let lit = self.spawn_chunks_lit();
         if !lit && let Some(s) = self.spawn {

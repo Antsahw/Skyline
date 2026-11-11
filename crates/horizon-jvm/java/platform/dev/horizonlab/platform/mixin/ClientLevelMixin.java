@@ -49,6 +49,30 @@ public abstract class ClientLevelMixin {
         }
     }
 
+    /**
+     * A biome tint a mod's client code asks for (Create's tank drawing water: Fabric's fluid
+     * colour, BiomeColors.getAverageWaterColor): the level is made without its constructor, so
+     * it has no tint caches (vanilla's nor Fabric's); computed each time, as their misses are.
+     */
+    @Inject(method = "getBlockTint", at = @At("HEAD"), cancellable = true)
+    private void horizon$tint(net.minecraft.core.BlockPos pos, net.minecraft.world.level.ColorResolver resolver,
+                              CallbackInfoReturnable<Integer> cir) {
+        if (HorizonServer.isMirror(this)) cir.setReturnValue(((ClientLevel) (Object) this).calculateBlockTint(pos, resolver));
+    }
+
+    /**
+     * A block a mod's client code sets in a client level (Create's crushing wheel fixing its
+     * controller in its client tick): a client's own view of the world, which Horizon's game
+     * draws from the server's; the level has no prediction handler (made without its
+     * constructor: its NPE failed the block entity's whole client tick). Nothing is set.
+     */
+    @Inject(method = "setBlock(Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/block/state/BlockState;II)Z",
+            at = @At("HEAD"), cancellable = true)
+    private void horizon$setBlock(net.minecraft.core.BlockPos pos, net.minecraft.world.level.block.state.BlockState state,
+                                  int flags, int recursion, CallbackInfoReturnable<Boolean> cir) {
+        if (HorizonServer.isMirror(this)) cir.setReturnValue(false);
+    }
+
     /** A packet a mod's client code sends through the level: no connection to take it. */
     @Inject(method = "sendPacketToServer", at = @At("HEAD"), cancellable = true)
     private void horizon$send(net.minecraft.network.protocol.Packet<?> packet, org.spongepowered.asm.mixin.injection.callback.CallbackInfo ci) {

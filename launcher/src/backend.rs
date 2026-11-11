@@ -932,13 +932,11 @@ pub fn data_dir() -> PathBuf {
 }
 
 /// A canonical path without Windows' verbatim prefix: `canonicalize` gives `\\?\C:\...` there,
-/// and some tools stat `\\?\C:` — the volume itself — and fail. A drive path loses its `\\?\`;
-/// any other path is left as it is.
+/// and some tools stat `\\?\C:` — the volume itself — and fail; Java takes no verbatim path at
+/// all. A drive path loses its `\\?\`, a share's `\\?\UNC\` becomes `\\`; any other path is
+/// left as it is.
 pub(crate) fn plain(path: PathBuf) -> PathBuf {
-    match path.to_str().and_then(|p| p.strip_prefix(r"\\?\")) {
-        Some(rest) if rest.as_bytes().get(1) == Some(&b':') => PathBuf::from(rest),
-        _ => path,
-    }
+    horizon_prepare::java::without_verbatim(path)
 }
 
 /// `path` spelled only in ASCII: what Windows' MinGW-w64 tools can open (they read paths
@@ -3991,6 +3989,10 @@ pub enum Msg {
     Imported(Result<String, String>),
     /// A version's Fabric mods build is installed (`java_variant::ensure`), or why not.
     JavaBuild(String, Result<(), String>),
+    /// Play's download of the Fabric mods build or Java 25 (`java_variant::ensure_with`), 0 to 1.
+    JavaPlayProgress(f32),
+    /// Play stopped before the game: why the Fabric mods build or Java 25 can't be had.
+    JavaPlayStopped(String),
     /// A Java instance's game is ready to start (`java_game`, wrapped): the instance's id and
     /// game folder, and the command or why not.
     /// A Java instance's game ready to start, and its variables for the post-exit command.
@@ -4398,16 +4400,16 @@ mod tests {
     /// check stats `\\?\C:`, the volume itself, which Windows refuses, os error 1), and keeps
     /// it where there is no drive form.
     #[test]
-    fn a_canonical_windows_path_loses_only_a_drives_verbatim_prefix() {
+    fn a_canonical_windows_path_loses_its_verbatim_prefix() {
         let plain = |p: &str| plain(PathBuf::from(p));
         assert_eq!(
             plain(r"\\?\C:\Users\me\AppData\Roaming\horizon-launcher\native"),
             PathBuf::from(r"C:\Users\me\AppData\Roaming\horizon-launcher\native")
         );
-        // A share has no drive form to fall back to; other paths have no prefix.
+        // A share keeps its plain `\\server\share` form; other paths have no prefix.
         assert_eq!(
             plain(r"\\?\UNC\server\share\native"),
-            PathBuf::from(r"\\?\UNC\server\share\native")
+            PathBuf::from(r"\\server\share\native")
         );
         assert_eq!(
             plain("/home/me/.local/share/horizon-launcher/native"),

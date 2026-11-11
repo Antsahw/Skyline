@@ -4,6 +4,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import dev.horizonlab.bridge.Natives;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import net.minecraft.client.Minecraft;
@@ -55,22 +56,47 @@ public final class HorizonDeviceClient {
     }
 
     /**
-     * Every mod's client half for this game's player: the host's own client code, run on a
-     * mirror of what this game sees (HorizonServer.ownClientTick), with the mods' messages over
-     * this game's connection. Returns "*" and the mods' ids.
+     * Mods' client halves for this game's player: the host's own client code, run on a mirror
+     * of what this game sees (HorizonServer.ownClientTick), with the mods' messages over this
+     * game's connection. {@code only}: the mods the server doesn't run (null: every mod: the
+     * server runs no Java mods, or HORIZON_JAVA_OWN_CLIENT). Returns "*" (every mod) or "+"
+     * (only these) and the mods' ids: what the server leaves out for this player.
      */
-    private static String ownJoin(String host, int port, String uuid, String name) {
+    private static String ownJoin(String host, int port, String uuid, String name, Set<String> only) {
         Thread.currentThread().setContextClassLoader(HorizonDeviceClient.class.getClassLoader());
         own = UUID.fromString(uuid);
         ownName = name;
         ownServer = host + ":" + port;
         ownHost = host;
         ownPort = port;
-        HorizonLoop.ownPlayer(uuid);
-        Natives.log("Java mods: every mod's client half runs here for this player, on " + ownServer);
         java.util.List<String> ids = new java.util.ArrayList<>();
-        for (var mod : net.fabricmc.loader.api.FabricLoader.getInstance().getAllMods()) ids.add(mod.getMetadata().getId());
-        return "*," + String.join(",", ids);
+        if (only == null) {
+            HorizonDeviceMods.ownRuns = null;
+            for (var mod : net.fabricmc.loader.api.FabricLoader.getInstance().getAllMods()) ids.add(mod.getMetadata().getId());
+        } else {
+            Set<String> listed = new java.util.TreeSet<>(only);
+            listed.addAll(HorizonDeviceMods.mods());
+            ids.addAll(listed);
+            HorizonDeviceMods.ownRuns = java.util.Collections.unmodifiableSet(HorizonDeviceMods.withDependencies(listed));
+        }
+        HorizonLoop.ownPlayer(uuid);
+        if (only == null) {
+            Natives.log("Java mods: every mod's client half runs here for this player, on " + ownServer
+                    + (HorizonDeviceMods.OWN_CLIENT ? "" : " (the server runs no Java mods)"));
+        } else {
+            Natives.log("Java mods: " + String.join(", ", ids) + " run here for this player (the server doesn't run them), on "
+                    + ownServer + "; with " + String.join(", ", HorizonDeviceMods.ownRuns));
+        }
+        return (only == null ? "*," : "+,") + String.join(",", ids);
+    }
+
+    /** The mods' ids a server said it runs (comma separated; null: it said nothing). */
+    private static Set<String> parse(String mods) {
+        Set<String> out = new java.util.HashSet<>();
+        if (mods != null) {
+            for (String mod : mods.split(",")) if (!mod.isEmpty()) out.add(mod);
+        }
+        return out;
     }
 
     /** The server this game plays on, as its own client names it (host:port), or null. */
@@ -100,6 +126,10 @@ public final class HorizonDeviceClient {
                 HorizonClient.windowSize();
             }
         }
+        if (state.has("spawn")) {
+            var at = state.getAsJsonArray("spawn");
+            HorizonServer.ownSpawn = new net.minecraft.core.BlockPos(at.get(0).getAsInt(), at.get(1).getAsInt(), at.get(2).getAsInt());
+        }
         double[] motion = {state.get("x").getAsDouble(), state.get("y").getAsDouble(), state.get("z").getAsDouble(),
                 state.get("yaw").getAsDouble(), state.get("pitch").getAsDouble()};
         String[] inventory = null;
@@ -114,14 +144,19 @@ public final class HorizonDeviceClient {
     }
 
     /**
-     * The game joined another's server at {@code host}:{@code port} as {@code uuid}: the device
-     * mods' client joins. Returns the device mods' ids (comma-separated) for the game to tell the
-     * server, or "" when there are none (nothing is started).
+     * The game joined another's server at {@code host}:{@code port} as {@code uuid}; the server
+     * runs the Java mods {@code serverMods} (comma separated; null: it said none, a server with
+     * no Java mods or not Horizon's). The mods this game has and the server doesn't run their
+     * client half here, as in vanilla (ownJoin); with none missing, the device mods' client
+     * joins. Returns what the game tells the server (ownJoin's answer, or the device mods' ids),
+     * or "" when nothing runs here.
      */
-    public static String join(String host, int port, String uuid, String name) {
+    public static String join(String host, int port, String uuid, String name, String serverMods) {
         if (!HorizonClient.headless()) return "";
         if (on || own != null) leave();
-        if (HorizonDeviceMods.OWN_CLIENT) return ownJoin(host, port, uuid, name);
+        if (HorizonDeviceMods.OWN_CLIENT) return ownJoin(host, port, uuid, name, null);
+        var missing = HorizonDeviceMods.missing(parse(serverMods));
+        if (!missing.isEmpty()) return ownJoin(host, port, uuid, name, serverMods == null ? null : missing);
         var mods = HorizonDeviceMods.mods();
         if (mods.isEmpty()) return "";
         Thread.currentThread().setContextClassLoader(HorizonDeviceClient.class.getClassLoader());
@@ -333,6 +368,7 @@ public final class HorizonDeviceClient {
             try {
                 HorizonGraphics graphics = new HorizonGraphics(HorizonClient.width, HorizonClient.height);
                 graphics.imagesSent = HorizonClient.imagesSent(local.getUUID());
+                graphics.maxImage = HorizonGraphics.LOCAL_MAX_IMAGE;
                 HorizonClient.mouseAt(mouseX, mouseY);
                 HorizonScreenEvents.extract(screen, graphics, (int) mouseX, (int) mouseY, 0);
                 String ops = graphics.ops().toString();
@@ -351,7 +387,7 @@ public final class HorizonDeviceClient {
     /** A key of the player's game while playing (a device mod's key binding, its key handlers). */
     public static void key(int key, int keycode, int mods, boolean down) {
         if (!on) return;
-        HorizonClient.bind(local.getUUID(), key, down);
+        HorizonClient.bind(local.getUUID(), key, down, null);
         try {
             HorizonClient.firePress(key, keycode, mods, down);
         } catch (Throwable t) {
@@ -488,6 +524,7 @@ public final class HorizonDeviceClient {
             }
             HorizonServer.ownClientLeft(id);
             own = null;
+            HorizonDeviceMods.ownRuns = null;
             Natives.log("Java mods: this game's own client left " + ownServer);
             return;
         }

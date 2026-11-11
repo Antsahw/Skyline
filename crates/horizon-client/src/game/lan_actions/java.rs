@@ -48,7 +48,7 @@ impl JumpsRefused {
 
 /// Java mods' hooks are about guest `uuid` while it acts: the player they were about before.
 pub(super) fn set_actor(uuid: u128) -> Option<String> {
-    super::super::java_server::set_java_actor(Some(horizon_protocol::crypto::uuid_string(uuid)))
+    Game::set_java_actor(Some(horizon_protocol::crypto::uuid_string(uuid)))
 }
 
 impl Game<'_> {
@@ -63,7 +63,7 @@ impl Game<'_> {
         data: &[u8],
     ) {
         if channel == horizon_jvm::device::RUNS_OWN_CHANNEL {
-            self.java_device_runs_own(host, conn)
+            self.java_device_runs_own(host, conn, data)
         } else {
             self.java_device_from_game(host, conn, channel, data)
         }

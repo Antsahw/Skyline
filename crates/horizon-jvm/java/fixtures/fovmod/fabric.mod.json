@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "horizon_fov",
+  "version": "1.0.0",
+  "name": "Horizon FOV",
+  "description": "A zoom as Zoomify's: a key binding (Z, made with a plain new KeyMapping in a category of its own) that halves the camera's field of view while it is held (@ModifyReturnValue on Camera.calculateFov): a check of the Java mod bridge's mod keys and mods' field of view.",
+  "environment": "client",
+  "mixins": ["horizon_fov.mixins.json"],
+  "entrypoints": {
+    "client": ["dev.horizonlab.fovmod.FovClient"]
+  },
+  "depends": {
+    "fabricloader": ">=0.20",
+    "minecraft": "26.3"
+  }
+}
