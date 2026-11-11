@@ -137,6 +137,7 @@ public final class Screens120 {
             var screen = (net.minecraft.client.gui.screens.Screen) constructorOf(constructor)
                     .invoke(constructor, menu, player.getInventory(), title);
             font();
+            options();
             try {
                 screen.init(net.minecraft.client.Minecraft.getInstance(), width, height);
             } catch (RuntimeException | LinkageError e) {
@@ -182,6 +183,13 @@ public final class Screens120 {
      */
     public static String frame(net.minecraft.server.level.ServerPlayer player, int width, int height,
             int mouseX, int mouseY) {
+        // A server closes a menu its player can no longer use (ServerPlayer.tick): walked
+        // away from it, or the block broken under it.
+        var menu = player.containerMenu;
+        if (menu != null && menu != player.inventoryMenu && !menu.stillValid(player)) {
+            close(player);
+            return null;
+        }
         if (!open(player, width, height)) {
             return null;
         }
@@ -202,6 +210,146 @@ public final class Screens120 {
             if (Graphics120.current() == recording) {
                 recording.finish();
             }
+        }
+    }
+
+    /** The player whose input a screen is taking now: a slot click lands on their menu. */
+    private static net.minecraft.server.level.ServerPlayer acting;
+    /** The modifier keys held with that input, as GLFW's bits: 1 shift, 2 control, 4 alt. */
+    private static int heldMods;
+    /** The screen asked to close (its onClose) while taking the input. */
+    private static boolean closeAsked;
+    /** The input kinds that failed once, said once each. */
+    private static final java.util.Set<String> INPUT_FAILED = new java.util.HashSet<>();
+
+    /** The player a screen's input is for, while it is taken; null otherwise. */
+    public static net.minecraft.server.level.ServerPlayer acting() {
+        return acting;
+    }
+
+    /**
+     * Whether a key is held, for the screen asking (InputConstants.isKeyDown): only the
+     * modifiers the input came with. A shift-click moves a stack across, which is the screen
+     * asking whether shift is down, not the event saying it.
+     */
+    public static boolean keyDown(int key) {
+        return switch (key) {
+            case 340, 344 -> (heldMods & 1) != 0;
+            case 341, 345 -> (heldMods & 2) != 0;
+            case 342, 346 -> (heldMods & 4) != 0;
+            default -> false;
+        };
+    }
+
+    /** The screen closes itself (Escape, the inventory key): AbstractContainerScreenMixin. */
+    public static void closeAsked() {
+        closeAsked = true;
+    }
+
+    /**
+     * The headless client's options. A container screen reads its key bindings from them --
+     * the pick-block button, the inventory key, the hotbar keys -- and whether the touchscreen
+     * mode is on. Real ones, built as the client builds them, from a file that isn't there:
+     * every option at vanilla's default, which is what a player who never opened the settings
+     * has, and nothing written anywhere.
+     */
+    private static synchronized void options() {
+        var minecraft = net.minecraft.client.Minecraft.getInstance();
+        if (minecraft.options != null) {
+            return;
+        }
+        try {
+            java.io.File none = java.nio.file.Files.createTempDirectory("horizon-options120").toFile();
+            none.deleteOnExit();
+            ((dev.horizonlab.platform120.mixin.MinecraftAccess) minecraft)
+                    .horizon$setOptions(new net.minecraft.client.Options(minecraft, none));
+        } catch (java.io.IOException e) {
+            throw new IllegalStateException("no folder for the client's options: " + e, e);
+        }
+    }
+
+    /**
+     * The window a screen asks for, to ask GLFW which keys are held: allocated, never opened.
+     * Its handle is 0, and the one question asked with it is answered by {@link #keyDown}.
+     */
+    private static com.mojang.blaze3d.platform.Window window;
+
+    public static synchronized com.mojang.blaze3d.platform.Window window() {
+        if (window == null) {
+            window = Allocate.make(com.mojang.blaze3d.platform.Window.class);
+        }
+        return window;
+    }
+
+    /**
+     * One input of `player`'s on their open screen, as the screen's own handlers take it: a
+     * click, a release, a drag, the mouse moving, a scroll, a key, a typed character, or the
+     * screen being closed. The coordinates are the screen's, the buttons and keys GLFW's.
+     *
+     * <p>A slot click goes where the screen sends it, to the menu, and here that is the
+     * server's menu itself (AbstractContainerScreenMixin): a client would send it as a packet
+     * for the server to run the same method. True when the screen is still open after.
+     */
+    public static boolean input(net.minecraft.server.level.ServerPlayer player, String json) {
+        var o = com.google.gson.JsonParser.parseString(json).getAsJsonObject();
+        String kind = o.has("kind") ? o.get("kind").getAsString() : "";
+        if (kind.equals("close")) {
+            close(player);
+            return false;
+        }
+        var screen = SCREENS.get(player.getUUID());
+        if (screen == null || MADE_FOR.get(player.getUUID()) != player.containerMenu) {
+            // No frame drawn for this menu yet: nothing on the player's screen to take it.
+            return player.containerMenu != null && player.containerMenu != player.inventoryMenu;
+        }
+        double x = num(o, "x"), y = num(o, "y");
+        int button = (int) num(o, "button");
+        acting = player;
+        heldMods = (int) num(o, "mods");
+        closeAsked = false;
+        options();
+        try {
+            switch (kind) {
+                case "press" -> screen.mouseClicked(x, y, button);
+                case "release" -> screen.mouseReleased(x, y, button);
+                case "drag" -> screen.mouseDragged(x, y, button, num(o, "dx"), num(o, "dy"));
+                case "move" -> screen.mouseMoved(x, y);
+                case "scroll" -> screen.mouseScrolled(x, y, num(o, "v"));
+                case "key" -> screen.keyPressed((int) num(o, "key"), (int) num(o, "scancode"), heldMods);
+                case "char" -> screen.charTyped((char) num(o, "char"), heldMods);
+                default -> { }
+            }
+        } catch (RuntimeException | LinkageError e) {
+            // Said once per kind: a screen that can't take a key can't take any key.
+            if (INPUT_FAILED.add(screen.getClass().getName() + " " + kind)) {
+                System.out.println("Screens120: " + screen.getClass().getName() + " couldn't take a " + kind + ":");
+                e.printStackTrace(System.out);
+            }
+        } finally {
+            acting = null;
+            heldMods = 0;
+        }
+        if (closeAsked) {
+            close(player);
+            return false;
+        }
+        return true;
+    }
+
+    private static double num(com.google.gson.JsonObject o, String key) {
+        return o.has(key) && o.get(key).isJsonPrimitive() ? o.get(key).getAsDouble() : 0;
+    }
+
+    /**
+     * `player` closes their open screen: the menu closes as the server closes one
+     * (ServerPlayer.doCloseContainer), so what was carried on the cursor goes back into the
+     * inventory and the block behind it hears it was closed.
+     */
+    public static void close(net.minecraft.server.level.ServerPlayer player) {
+        SCREENS.remove(player.getUUID());
+        MADE_FOR.remove(player.getUUID());
+        if (player.containerMenu != null && player.containerMenu != player.inventoryMenu) {
+            player.doCloseContainer();
         }
     }
 

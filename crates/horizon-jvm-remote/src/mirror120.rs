@@ -116,6 +116,38 @@ pub struct Used {
     pub opened: Option<OpenedMenu>,
 }
 
+/// What an input on a screen did.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ScreenInput {
+    /// Whether the screen is still open (Escape, the inventory key, or a `close` shut it).
+    pub open: bool,
+    /// The player's inventory slots it changed (0 to 35, hotbar first), each the stack now
+    /// there as 1.20.1 item NBT, or `None` for a slot it emptied.
+    pub slots: Vec<(usize, Option<String>)>,
+    /// The blocks set, in order.
+    pub set: Vec<SetBlock>,
+    /// The block entities the mods' code changed, in order (the pot's contents).
+    pub block_entities: Vec<SetBlockEntity>,
+    /// The items the mods' code dropped, in order.
+    pub spawned: Vec<SpawnItem>,
+}
+
+/// A player's 36 main inventory slots (hotbar first) as [`Runtime120::screen_frame`] and
+/// [`Runtime120::screen_input`] take them: each stack's item, count and damage, or nothing.
+pub fn inventory_json(slots: &[Option<(&str, i32, i32)>]) -> String {
+    serde_json::Value::Array(
+        slots
+            .iter()
+            .take(36)
+            .map(|slot| match slot {
+                Some((item, count, damage)) => serde_json::json!([item, count, damage]),
+                None => serde_json::Value::Null,
+            })
+            .collect(),
+    )
+    .to_string()
+}
+
 /// A menu a mod opened for a player.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpenedMenu {
@@ -296,25 +328,97 @@ impl Runtime120 {
     /// One frame of the screen of the menu `player` has open, drawn at `width` by `height`
     /// with the mouse at (`mouse_x`, `mouse_y`): the operations Horizon's screen drawing reads,
     /// as JSON. `None` when they have no menu open, or its mod registered no screen for it.
+    ///
+    /// `inventory` is the player's 36 main slots as Horizon has them ([`inventory_json`]): the
+    /// screen shows those. `at` is where the player stands: a menu they walked away from, or
+    /// whose block is gone, closes, as a server closes it, and the answer is `None`.
+    #[allow(clippy::too_many_arguments)]
     pub fn screen_frame(
         &mut self,
+        world: &dyn World120,
         player: &str,
+        inventory: &str,
+        at: [f64; 3],
         width: i32,
         height: i32,
         mouse_x: i32,
         mouse_y: i32,
     ) -> Result<Option<String>, String> {
-        let frame = self.call_with(
-            "screenFrame",
-            &[
-                Value::Str(player.to_owned()),
-                Value::I32(width),
-                Value::I32(height),
-                Value::I32(mouse_x),
-                Value::I32(mouse_y),
-            ],
-        )?;
-        Ok((!frame.is_empty()).then_some(frame))
+        let args = [
+            Value::Str(player.to_owned()),
+            Value::Str(inventory.to_owned()),
+            Value::F64(at[0]),
+            Value::F64(at[1]),
+            Value::F64(at[2]),
+            Value::I32(width),
+            Value::I32(height),
+            Value::I32(mouse_x),
+            Value::I32(mouse_y),
+        ];
+        // A screen reads the world as it draws (a cooking pot asks whether the block under it
+        // is hot, for its flame), so a frame is a call in the world like any other.
+        let mut handler = InWorld {
+            world,
+            set: Vec::new(),
+            block_entities: Vec::new(),
+            spawned: Vec::new(),
+            log: self.log.clone(),
+        };
+        let values = self.call_values("screenFrame", &args, &mut handler)?;
+        let frame = values.first().and_then(Value::as_str).unwrap_or_default();
+        Ok((!frame.is_empty()).then(|| frame.to_owned()))
+    }
+
+    /// One input of `player`'s on their open screen: `input` is a JSON object with `kind`
+    /// (`press`, `release`, `drag`, `move`, `scroll`, `key`, `char` or `close`), and as the
+    /// kind needs, `x`, `y` (the screen's coordinates), `button` (GLFW's: 0 left, 1 right),
+    /// `dx`, `dy`, `v` (the scroll), `key`, `scancode`, `char` and `mods` (GLFW's bits).
+    /// `inventory` is the player's 36 main slots as Horizon has them ([`inventory_json`]).
+    pub fn screen_input(
+        &mut self,
+        world: &dyn World120,
+        player: &str,
+        inventory: &str,
+        input: &str,
+    ) -> Result<ScreenInput, String> {
+        let args = [
+            Value::Str(player.to_owned()),
+            Value::Str(inventory.to_owned()),
+            Value::Str(input.to_owned()),
+        ];
+        let mut handler = InWorld {
+            world,
+            set: Vec::new(),
+            block_entities: Vec::new(),
+            spawned: Vec::new(),
+            log: self.log.clone(),
+        };
+        let values = self.call_values("screenInput", &args, &mut handler)?;
+        let open = match values.first() {
+            Some(Value::Bool(open)) => *open,
+            other => return Err(format!("screenInput: answer 0 is {other:?}")),
+        };
+        let changed = values.get(1).and_then(Value::as_str).unwrap_or("{}");
+        let changed: serde_json::Map<String, serde_json::Value> = serde_json::from_str(changed)
+            .map_err(|e| format!("screenInput: the changed slots don't read: {e}"))?;
+        let mut slots: Vec<(usize, Option<String>)> = changed
+            .into_iter()
+            .filter_map(|(slot, snbt)| {
+                let snbt = snbt.as_str()?;
+                Some((
+                    slot.parse().ok()?,
+                    (!snbt.is_empty()).then(|| snbt.to_owned()),
+                ))
+            })
+            .collect();
+        slots.sort_by_key(|(slot, _)| *slot);
+        Ok(ScreenInput {
+            open,
+            slots,
+            set: handler.set,
+            block_entities: handler.block_entities,
+            spawned: handler.spawned,
+        })
     }
 
     /// What a screen's drawing records, as the frame JSON Horizon's screen drawing reads.

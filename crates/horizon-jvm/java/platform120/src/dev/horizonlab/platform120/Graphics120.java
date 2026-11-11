@@ -50,11 +50,12 @@ public final class Graphics120 {
         return o;
     }
 
+    /** A rectangle as Horizon's screen drawing reads one: its two corners. */
     private static void rect(JsonObject o, int x, int y, int width, int height) {
-        o.addProperty("x", x);
-        o.addProperty("y", y);
-        o.addProperty("w", width);
-        o.addProperty("h", height);
+        o.addProperty("x0", x);
+        o.addProperty("y0", y);
+        o.addProperty("x1", x + width);
+        o.addProperty("y1", y + height);
     }
 
     /** A filled rectangle. `GuiGraphics.fill`. */
@@ -138,6 +139,61 @@ public final class Graphics120 {
         o.addProperty("x", x);
         o.addProperty("y", y);
         o.addProperty("item", stack.save(new net.minecraft.nbt.CompoundTag()).toString());
+    }
+
+    /**
+     * A slot's count and durability bar over its item. `text` is what the screen asked to show
+     * for the count (null: vanilla's own, the count unless it is one).
+     */
+    public void decorations(ItemStack stack, int x, int y, String text) {
+        if (stack == null || stack.isEmpty()) {
+            return;
+        }
+        JsonObject o = op("decorations");
+        o.addProperty("x", x);
+        o.addProperty("y", y);
+        o.addProperty("item", stack.save(new net.minecraft.nbt.CompoundTag()).toString());
+        String count = text != null ? text : stack.getCount() != 1 ? Integer.toString(stack.getCount()) : null;
+        if (count != null) {
+            o.addProperty("count", count);
+        }
+    }
+
+    /** A tooltip of lines, each kept as its component's JSON; Horizon places it at its mouse. */
+    public void tooltip(java.util.List<? extends Component> lines) {
+        if (lines == null || lines.isEmpty()) {
+            return;
+        }
+        JsonArray out = new JsonArray();
+        for (Component line : lines) {
+            out.add(Component.Serializer.toJson(line));
+        }
+        op("tooltip").add("lines", out);
+    }
+
+    /** A tooltip of already-shaped lines: their styling is gone, so they go as plain text. */
+    public void tooltipChars(java.util.List<? extends FormattedCharSequence> lines) {
+        if (lines == null || lines.isEmpty()) {
+            return;
+        }
+        java.util.List<Component> plain = new java.util.ArrayList<>();
+        for (FormattedCharSequence line : lines) {
+            StringBuilder out = new StringBuilder();
+            line.accept((index, style, codePoint) -> {
+                out.appendCodePoint(codePoint);
+                return true;
+            });
+            plain.add(Component.literal(out.toString()));
+        }
+        tooltip(plain);
+    }
+
+    /** An item's own tooltip, which Horizon makes from the stack. */
+    public void itemTooltip(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) {
+            return;
+        }
+        op("item_tooltip").addProperty("item", stack.save(new net.minecraft.nbt.CompoundTag()).toString());
     }
 
     /** Drawing kept inside a rectangle until {@link #unscissor}. */

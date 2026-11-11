@@ -22,10 +22,12 @@
     "ServerGamePacketListenerMixin"
   ],
   "client": [
+    "AbstractContainerScreenMixin",
     "FontAccess",
     "GlStateManagerMixin",
     "GuiGraphicsAccess",
     "GuiGraphicsMixin",
+    "InputConstantsMixin",
     "MenuScreensAccess",
     "MinecraftAccess",
     "MinecraftMixin",

@@ -181,4 +181,83 @@ public abstract class GuiGraphicsMixin {
             ci.cancel();
         }
     }
+
+    /** A slot's count and durability bar: Horizon draws them over the item. */
+    @Inject(method = "renderItemDecorations(Lnet/minecraft/client/gui/Font;Lnet/minecraft/world/item/ItemStack;IILjava/lang/String;)V",
+            at = @At("HEAD"), cancellable = true)
+    private void horizon$decorations(Font font, ItemStack stack, int x, int y, String text, CallbackInfo ci) {
+        Graphics120 to = Graphics120.current();
+        if (to != null) {
+            int[] a = horizon$at(x, y);
+            to.decorations(stack, a[0], a[1], text);
+            ci.cancel();
+        }
+    }
+
+    /** An item's tooltip, as its stack: Horizon writes its lines. */
+    @Inject(method = "renderTooltip(Lnet/minecraft/client/gui/Font;Lnet/minecraft/world/item/ItemStack;II)V",
+            at = @At("HEAD"), cancellable = true)
+    private void horizon$itemTooltip(Font font, ItemStack stack, int x, int y, CallbackInfo ci) {
+        Graphics120 to = Graphics120.current();
+        if (to != null) {
+            to.itemTooltip(stack);
+            ci.cancel();
+        }
+    }
+
+    /** A tooltip of lines (an item's in a container screen, with its image, which is lost). */
+    @Inject(method = "renderTooltip(Lnet/minecraft/client/gui/Font;Ljava/util/List;Ljava/util/Optional;II)V",
+            at = @At("HEAD"), cancellable = true)
+    private void horizon$tooltipWithImage(Font font, java.util.List<Component> lines,
+            java.util.Optional<?> image, int x, int y, CallbackInfo ci) {
+        Graphics120 to = Graphics120.current();
+        if (to != null) {
+            to.tooltip(lines);
+            ci.cancel();
+        }
+    }
+
+    @Inject(method = "renderTooltip(Lnet/minecraft/client/gui/Font;Lnet/minecraft/network/chat/Component;II)V",
+            at = @At("HEAD"), cancellable = true)
+    private void horizon$tooltipLine(Font font, Component line, int x, int y, CallbackInfo ci) {
+        Graphics120 to = Graphics120.current();
+        if (to != null) {
+            to.tooltip(java.util.List.of(line));
+            ci.cancel();
+        }
+    }
+
+    @Inject(method = "renderComponentTooltip(Lnet/minecraft/client/gui/Font;Ljava/util/List;II)V",
+            at = @At("HEAD"), cancellable = true)
+    private void horizon$tooltipLines(Font font, java.util.List<Component> lines, int x, int y, CallbackInfo ci) {
+        Graphics120 to = Graphics120.current();
+        if (to != null) {
+            to.tooltip(lines);
+            ci.cancel();
+        }
+    }
+
+    @Inject(method = "renderTooltip(Lnet/minecraft/client/gui/Font;Ljava/util/List;II)V",
+            at = @At("HEAD"), cancellable = true)
+    private void horizon$tooltipShaped(Font font, java.util.List<? extends FormattedCharSequence> lines,
+            int x, int y, CallbackInfo ci) {
+        Graphics120 to = Graphics120.current();
+        if (to != null) {
+            to.tooltipChars(lines);
+            ci.cancel();
+        }
+    }
+
+    @Inject(method = "renderTooltip(Lnet/minecraft/client/gui/Font;Ljava/util/List;"
+            + "Lnet/minecraft/client/gui/screens/inventory/tooltip/ClientTooltipPositioner;II)V",
+            at = @At("HEAD"), cancellable = true)
+    private void horizon$tooltipPlaced(Font font, java.util.List<FormattedCharSequence> lines,
+            net.minecraft.client.gui.screens.inventory.tooltip.ClientTooltipPositioner positioner,
+            int x, int y, CallbackInfo ci) {
+        Graphics120 to = Graphics120.current();
+        if (to != null) {
+            to.tooltipChars(lines);
+            ci.cancel();
+        }
+    }
 }

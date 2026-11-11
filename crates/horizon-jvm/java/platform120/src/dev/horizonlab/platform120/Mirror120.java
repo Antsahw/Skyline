@@ -624,10 +624,80 @@ public final class Mirror120 {
      * screen drawing reads, as JSON. Empty when they have no menu open, or its mod registered
      * no screen for it.
      */
-    public static Object[] screenFrame(String uuid, int width, int height, int mouseX, int mouseY) {
+    public static Object[] screenFrame(String uuid, String inventory, double x, double y, double z,
+            int width, int height, int mouseX, int mouseY) {
         ServerPlayer player = PLAYERS.get(UUID.fromString(uuid));
-        String frame = player == null ? null : Screens120.frame(player, width, height, mouseX, mouseY);
-        return new Object[] {frame == null ? "" : frame};
+        if (player == null) return new Object[] {""};
+        begin();
+        try {
+            // The inventory slots the screen shows are Horizon's, as they are now, and the
+            // player is where Horizon has them: a menu asks that to stay open.
+            takeInventory(player, inventory);
+            player.setPos(x, y, z);
+            String frame = Screens120.frame(player, width, height, mouseX, mouseY);
+            return new Object[] {frame == null ? "" : frame};
+        } finally {
+            finish();
+        }
+    }
+
+    /**
+     * One input of `uuid`'s player on their open screen (Screens120.input), with Horizon's
+     * inventory as it is now ({@link #takeInventory}). Gives whether the screen is still open,
+     * and the inventory slots the input changed as JSON ({@code {"<slot>": "<1.20.1 item NBT>"}},
+     * an empty string for a slot emptied): a stack taken into the pot, one shift-clicked out,
+     * what was on the cursor put back as the screen closed. What it did to the block entities
+     * goes back as every call's does ({@link #finish}).
+     */
+    public static Object[] screenInput(String uuid, String inventory, String input) {
+        ServerPlayer player = PLAYERS.get(UUID.fromString(uuid));
+        if (player == null) return new Object[] {false, "{}"};
+        begin();
+        String[] given = takeInventory(player, inventory);
+        boolean open;
+        try {
+            open = Screens120.input(player, input);
+        } finally {
+            finish();
+        }
+        com.google.gson.JsonObject changed = new com.google.gson.JsonObject();
+        var items = player.getInventory().items;
+        for (int i = 0; i < given.length && i < items.size(); i++) {
+            ItemStack now = items.get(i);
+            if (!key(now).equals(given[i])) {
+                changed.addProperty(Integer.toString(i), now.isEmpty() ? "" : now.save(new net.minecraft.nbt.CompoundTag()).toString());
+            }
+        }
+        return new Object[] {open, changed.toString()};
+    }
+
+    /**
+     * Horizon's inventory onto the player here: `json` is its 36 main slots, hotbar first, each
+     * {@code [id, count, damage]} or null. A slot already holding that stack keeps the one it
+     * has, with whatever NBT it carries; the others take Horizon's. Gives each slot's key as
+     * given, for saying afterwards which ones changed.
+     */
+    private static String[] takeInventory(ServerPlayer player, String json) {
+        var items = player.getInventory().items;
+        var slots = com.google.gson.JsonParser.parseString(json == null || json.isEmpty() ? "[]" : json).getAsJsonArray();
+        String[] given = new String[Math.min(slots.size(), items.size())];
+        for (int i = 0; i < given.length; i++) {
+            var slot = slots.get(i);
+            ItemStack stack = ItemStack.EMPTY;
+            if (slot != null && slot.isJsonArray()) {
+                var a = slot.getAsJsonArray();
+                stack = stack(a.get(0).getAsString(), a.get(1).getAsInt(), a.get(2).getAsInt());
+            }
+            given[i] = key(stack);
+            if (!key(items.get(i)).equals(given[i])) items.set(i, stack);
+        }
+        return given;
+    }
+
+    /** A stack as Horizon tells one apart: its item, count and damage. */
+    private static String key(ItemStack stack) {
+        if (stack.isEmpty()) return "";
+        return BuiltInRegistries.ITEM.getKey(stack.getItem()) + "," + stack.getCount() + "," + stack.getDamageValue();
     }
 
     /** What a screen's drawing records: {@link Screens120#probe}. */

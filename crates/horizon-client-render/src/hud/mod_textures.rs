@@ -88,6 +88,19 @@ pub(super) fn walk_java_textures(ns: &Path, folders: &[&str], files: &mut Vec<Pa
         walk(&ns.join("textures/particle"), files);
     }
     walk(&ns.join("textures/block"), files);
+    // An empty slot's outline (a bowl where the bowl goes): in 1.20.1 a slot draws it from the
+    // blocks atlas, so it sits among the items, which are otherwise too many to pack here.
+    for file in fs::read_dir(ns.join("textures/item"))
+        .into_iter()
+        .flatten()
+        .flatten()
+    {
+        let name = file.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with("empty_") && name.ends_with(".png") {
+            files.push(file.path());
+        }
+    }
     for file in fs::read_dir(ns.join("textures"))
         .into_iter()
         .flatten()

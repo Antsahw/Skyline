@@ -26,7 +26,7 @@ from the mod's side rather than the bridge's.
 | Block shape for aiming, where the block entity decides it | **done** | phase 3d |
 | Its blocks drawn from the models in its jar | **done** | phase 2 |
 | Its blocks drawn by code (no blockstate file) | **not yet** | phase 7 |
-| **Screens: machines, backpacks, anything you right-click into** | **partial** | phase 4: the menu opens and the mod's own screen draws a frame; not shown in the game yet, no input back |
+| **Screens: machines, backpacks, anything you right-click into** | **partial** | phase 4: the mod's own screen opens on the player's game and takes clicks, shift-clicks, drags and keys, with counts and tooltips; tested in the runtime, not yet in a real game; tooltip images and shader tints missing |
 | Items with their own use behaviour (tools, food, wands) | **unverified** | — |
 | Sounds the mod ships | **unverified** | — |
 | Particles the mod spawns | **not yet** | phase 5 |
@@ -70,7 +70,7 @@ A 1.20.1 mod is **fully supported** when all of this is true of it:
 2. Its content is in the game: blocks, items, recipes, tags, creative tabs, names. *(done)*
 3. Its blocks behave: placing, breaking, clicking, ticking, keeping state. *(done)*
 4. Its blocks look right, including ones drawn by code. *(phase 7)*
-5. Its screens open, draw, and respond to clicks and keys. *(phase 4: they open and draw)*
+5. Its screens open, draw, and respond to clicks and keys. *(phase 4: done in the runtime; the in-game check is next)*
 6. Its messages reach the player and back. *(phase 5)*
 7. Its items and fluids move through other mods' and Horizon's containers. *(phase 3 + 5)*
 8. Its mobs spawn, move, fight and are fought. *(phase 6)*
@@ -78,9 +78,9 @@ A 1.20.1 mod is **fully supported** when all of this is true of it:
 10. Its client bits work: keys, HUD, config. *(phase 4 + 5)*
 11. None of the above costs more than a few frames a second. *(measured per phase)*
 
-Points 1–3 are done. Point 5 is half done: a screen opens and draws, but is not shown in the
-game and takes no input yet. Points 4 and 6–10 are the rest of the
-roadmap.
+Points 1–3 are done. Point 5 works in the runtime test -- a screen opens, draws, and takes
+the player's clicks and keys -- and needs its first check in a real game. Points 4 and 6–10
+are the rest of the roadmap.
 
 ## How to find out where a mod stands
 

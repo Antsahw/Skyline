@@ -444,6 +444,10 @@ impl super::Game<'_> {
         };
         let dimension = self.dim.id().to_owned();
         self.apply_java120(&dimension, &used.set, &used.block_entities, &used.spawned);
+        if let Some(opened) = &used.opened {
+            // A menu opened (a cooking pot): its screen goes to the player's game.
+            self.java120_opened(&request.uuid, &opened.kind);
+        }
         // The held stack as the mods' code left it (worn, used up, turned into another).
         let after = (used.item.as_str(), used.count, used.damage);
         let before = held.as_ref().map_or(("minecraft:air", 0, 0), |h| {
@@ -700,3 +704,5 @@ mod tests {
         assert!(stack_from_120("not nbt at all").is_none());
     }
 }
+
+mod screens;

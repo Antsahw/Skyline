@@ -356,7 +356,7 @@ clicks pass until then). A click on a block of a 1.20.1 mod's namespace, or with
 their items, goes to it at `useItemOn`'s head (`java120_use_block`, beside the 26.3 bridge's
 hook in `lan_actions.rs`); what it set and what it did to the held stack land in Horizon.
 
-## Phase 4 status: a mod's screen draws (2026-11-11)
+## Phase 4 status: a mod's screen draws, shows and is used (2026-11-11)
 
 Right-clicking a Farmer's Delight cooking pot opens its menu, and its own `CookingPotScreen`
 draws a frame -- in the runtime, not yet in the game.
@@ -391,10 +391,57 @@ The frame, checked by the test against real Farmer's Delight jars: the pot's tex
 outline in the container slot, the title in vanilla's label grey, and behind it the darkened
 world in vanilla's own colours.
 
-**Not done here:** the game does not show the frame yet (the Rust side of the click still has
-to open a screen and ask for frames); clicks, keys and slot clicks do not go back; tooltips,
-item counts and durability bars are not recorded; a shader colour set with `setColor` is lost;
-text is laid out with approximate widths. Those are the rest of phase 4.
+### Part 5: on the player's screen, and used (2026-11-11)
+
+The frame now reaches the player's game, and the player's clicks reach the screen. (Tested
+in the runtime against real jars; the in-game path is built and compiles, and its first check
+in a real game is pending.)
+
+- **Shown with the 26.3 bridge's screen code.** A click that opens a mod's menu
+  (`Used::opened`) registers the screen for that player's connection
+  (`game/java_mods_120/screens.rs`); every server tick its frame is drawn and, when it changed,
+  sent on `horizon:java_screen` as a client-only screen (window -1). The player's game shows it
+  with `game/java_screen.rs` exactly as it shows a 26.3 mod's: nothing new on the client. The
+  recorder's rectangles became corners (`x0 y0 x1 y1`) to match what that code reads.
+- **Input runs through the screen's own handlers.** Clicks, releases, drags, scrolls, keys and
+  typed characters come back on `horizon:java_screen_input`, converted to 1.20.1's terms (GLFW
+  key codes from the SDL scancodes 26.3 sends, GLFW buttons and modifier bits), and go to
+  `mouseClicked`, `keyPressed` and the rest (`Screens120.input`). A slot click, which a client
+  sends to the server as a packet, runs the server's `AbstractContainerMenu.clicked` directly
+  (`AbstractContainerScreenMixin`) -- the menu the screen draws *is* the server's.
+- **The inventory travels with each call.** The player's 36 slots go to the runtime with every
+  frame and input (by item, count and damage; a slot already holding that stack keeps its NBT),
+  and the slots an input changed come back as 1.20.1 NBT, through vanilla's fixes, so an
+  enchanted tool shift-clicked out of a machine keeps its enchantments. What the cursor
+  carries lives in the runtime's menu, and goes back into the inventory when the menu closes,
+  as a server's does.
+- **Closing is the screen's.** Escape and the inventory key reach the screen, whose `onClose`
+  asks to close (the mixin takes it, as a client's would send the close packet); the menu then
+  closes as `ServerPlayer.doCloseContainer` closes it. A frame also checks `stillValid` with
+  the player where Horizon has them: walk away, or break the pot, and it closes.
+- **More of the headless client:** real `Options` (built from a file that isn't there: every
+  key binding at its default), an allocated `Window` for the one question asked of it, and
+  `InputConstants.isKeyDown` answered from the input's modifiers, so a shift-click is one.
+- **Counts and tooltips.** `renderItemDecorations` is recorded as the `decorations` operation
+  (the count, or the text the screen asked for), and every `renderTooltip` overload as
+  `tooltip` lines (component JSON) or `item_tooltip` (the stack, for Horizon to write).
+  A mod whose tooltip code fails here -- it reads the client's player, which this client
+  hasn't got -- shows the item's name instead of losing the frame.
+- **Empty-slot outlines** (`textures/item/empty_*.png`, drawn by 1.20.1 from the blocks atlas)
+  are packed into Horizon's screen atlas, so the pot's bowl outline can be drawn.
+
+The test, on real Farmer's Delight jars (1.4.3 and Refabricated 2.5.7): the hotbar's carrots
+and potatoes drawn in their slots 18 pixels apart, the count over the five carrots and their
+tooltip with the mouse on them; a shift-click moves the carrots into the pot (the block entity comes
+back holding them, the hotbar slot empty); a click picks the potatoes up and the next frame
+draws them under the mouse; Escape closes the screen and puts them back in the inventory; and
+a reopened pot closes once the player is out of reach.
+
+**Not done here:** a tooltip's image (a bundle's contents, AppleSkin's hunger bar) is lost;
+a shader colour set with `setColor` is lost; text is laid out with
+approximate widths; a stack's components other than damage don't reach the runtime (an
+enchanted tool put *into* a machine loses its enchantments); what the cursor holds is lost if
+the server stops with the screen open. Those are the rest of phase 4.
 
 ## Phase 3d status: the shape only the mod knows (2026-11-10)
 
@@ -675,8 +722,9 @@ NeoForge could run beside Fabric 26.3 rather than in its place.
    ejects reaches Horizon, and their block entities tick and stay alive between ticks (all
    above). Next: the chunk mirror and batched deltas ("Measured"), the downgrade tables, the
    Fabric Transfer API on Horizon's containers.
-4. **gui120.** Started (Phase 4 status): menus open, a mod's own screen draws a frame. Next:
-   showing it in the game, input and slot clicks back, tooltips and item decorations.
+4. **gui120.** Started (Phase 4 status): menus open, a mod's own screen is shown in the game and
+   takes clicks and keys, with counts and tooltips. Next: the first check in a real game,
+   tooltip images, `setColor` tints, real text widths, a stack's components into the runtime.
 5. **Events and networking.** Fabric API 1.20.1 events at the bridge's hook points, mod packets.
 6. **Entities and worldgen.** Data-driven registries from a real server load (mods' biomes
    through Fabric's biome API show up only there).

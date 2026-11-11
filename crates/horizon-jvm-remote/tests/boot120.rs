@@ -7,6 +7,7 @@
 mod support;
 
 use horizon_jvm_remote::boot120::{self, Fabric120, Side};
+use horizon_jvm_remote::mirror120::inventory_json;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -387,10 +388,10 @@ fn right_clicking_a_block_runs_its_1_20_1_code_on_horizons_blocks() {
             ["fill", "gradient", "scissor", "text", "unscissor"],
             "every call recorded, in drawing order: {json}"
         );
-        // The rectangle as Horizon wants it: a corner and a size, not two corners.
+        // The rectangle as Horizon's screen drawing reads one: its two corners.
         assert_eq!(
-            (&ops[0]["x"], &ops[0]["y"], &ops[0]["w"], &ops[0]["h"]),
-            (&10.into(), &20.into(), &100.into(), &50.into()),
+            (&ops[0]["x0"], &ops[0]["y0"], &ops[0]["x1"], &ops[0]["y1"]),
+            (&10.into(), &20.into(), &110.into(), &70.into()),
             "{json}"
         );
         assert_eq!(ops[3]["text"], "Cooking Pot", "{json}");
@@ -456,6 +457,29 @@ fn right_clicking_a_block_runs_its_1_20_1_code_on_horizons_blocks() {
             used.set[0].state,
             "farmersdelight:stove[facing=north,lit=true]"
         );
+        // A mod's block placed on top of a mod's block: a stove held against a stove. The
+        // stove's own click has nothing to do with a stove in the hand (it cooks food on top),
+        // so it passes, and the held stove is placed above it.
+        let stove = WithEntity {
+            block: OneBlock(
+                "farmersdelight:stove[facing=north,lit=false]".into(),
+                [30, 64, 0],
+            ),
+            entity: "{id:\"farmersdelight:stove\",x:30,y:64,z:0}".into(),
+        };
+        let mut held_stove = on_top_of([30, 64, 0]);
+        held_stove.item = "farmersdelight:stove".into();
+        held_stove.count = 1;
+        let stacked = runtime
+            .use_block(&stove, &held_stove)
+            .expect("a stove on a stove");
+        assert!(
+            stacked
+                .set
+                .iter()
+                .any(|s| s.pos == [30, 65, 0] && s.state.starts_with("farmersdelight:stove")),
+            "the held stove is placed on top: {stacked:?}"
+        );
         // Phase 4: a cooking pot opened with an empty hand opens its menu. Vanilla's own
         // openMenu runs on the mirror player -- the menu made, its slots listened to -- and only
         // the packet telling a client to show it goes nowhere; the click reports the menu
@@ -484,12 +508,24 @@ fn right_clicking_a_block_runs_its_1_20_1_code_on_horizons_blocks() {
         );
         eprintln!("the cooking pot opened: {opened:?}");
 
+        let no_inventory = inventory_json(&[]);
+        // Standing two blocks from it, as a player who just clicked it does.
+        let by_the_pot = [0.5, 64.0, 2.5];
         // And its screen draws: Farmer's Delight's own CookingPotScreen, built on the menu
         // the click opened and laid out at a GUI-scaled 1280x720, draws one frame into the
         // recorder. Its background is the pot's own texture, placed where a container screen
         // centres itself; its labels are the pot's title and the player's inventory.
         let frame = runtime
-            .screen_frame(&empty_hand.uuid, 427, 240, -1, -1)
+            .screen_frame(
+                &pot,
+                &empty_hand.uuid,
+                &no_inventory,
+                by_the_pot,
+                427,
+                240,
+                -1,
+                -1,
+            )
             .expect("the screen draws")
             .unwrap_or_else(|| panic!("the pot has a screen"));
         eprintln!("a cooking pot's frame: {frame}");
@@ -505,8 +541,8 @@ fn right_clicking_a_block_runs_its_1_20_1_code_on_horizons_blocks() {
             })
             .unwrap_or_else(|| panic!("the pot's own background is drawn: {frame}"));
         // 176 by 166, as a container screen is, centred on the 427 by 240 screen.
-        assert_eq!(background["x"], (427 - 176) / 2, "centred: {background}");
-        assert_eq!(background["y"], (240 - 166) / 2, "centred: {background}");
+        assert_eq!(background["x0"], (427 - 176) / 2, "centred: {background}");
+        assert_eq!(background["y0"], (240 - 166) / 2, "centred: {background}");
         // Behind it, the darkened world, in vanilla's own colours.
         let wash = ops
             .iter()
@@ -527,6 +563,224 @@ fn right_clicking_a_block_runs_its_1_20_1_code_on_horizons_blocks() {
                 .iter()
                 .any(|t| t.contains("cooking_pot") || t.contains("Cooking Pot")),
             "the pot's title is drawn: {texts:?}"
+        );
+
+        // The screen takes input. Five carrots in the first hotbar slot and three potatoes in
+        // the second, as Horizon has them: the screen shows them where the hotbar is.
+        let mut slots = vec![None; 36];
+        slots[0] = Some(("minecraft:carrot", 5, 0));
+        slots[1] = Some(("minecraft:potato", 3, 0));
+        let inventory = inventory_json(&slots);
+        let frame = runtime
+            .screen_frame(
+                &pot,
+                &empty_hand.uuid,
+                &inventory,
+                by_the_pot,
+                427,
+                240,
+                -1,
+                -1,
+            )
+            .expect("the screen draws")
+            .expect("still open");
+        let ops: serde_json::Value = serde_json::from_str(&frame).expect("operations as JSON");
+        let drawn_at = |item: &str| {
+            ops.as_array()
+                .into_iter()
+                .flatten()
+                .find(|o| o["op"] == "item" && o["item"].as_str().is_some_and(|i| i.contains(item)))
+                .map(|o| {
+                    (
+                        o["x"].as_f64().unwrap_or(0.0),
+                        o["y"].as_f64().unwrap_or(0.0),
+                    )
+                })
+                .unwrap_or_else(|| panic!("the {item} is drawn in its slot: {frame}"))
+        };
+        let (carrot, potato) = (drawn_at("carrot"), drawn_at("potato"));
+        // The hotbar is the bottom row of a 176x166 container screen, slots 18 apart.
+        assert_eq!(potato.0 - carrot.0, 18.0, "{carrot:?} {potato:?}");
+        assert_eq!(carrot.1, 37.0 + 142.0, "{carrot:?}");
+        // The count over a stack of five; and with the mouse over it, its tooltip.
+        let hovered = runtime
+            .screen_frame(
+                &pot,
+                &empty_hand.uuid,
+                &inventory,
+                by_the_pot,
+                427,
+                240,
+                carrot.0 as i32 + 8,
+                carrot.1 as i32 + 8,
+            )
+            .expect("the screen draws")
+            .expect("still open");
+        let hovered: serde_json::Value = serde_json::from_str(&hovered).expect("JSON");
+        let hovered = hovered.as_array().expect("operations");
+        assert!(
+            hovered
+                .iter()
+                .any(|o| o["op"] == "decorations" && o["count"] == "5"),
+            "the carrots' count: {hovered:?}"
+        );
+        // Either as lines (vanilla's container tooltip) or as the stack, for Horizon to make
+        // the lines (a screen that calls renderTooltip with the item, as the older Farmer's
+        // Delight does): either way, the carrots'.
+        let tooltip = hovered
+            .iter()
+            .find(|o| o["op"] == "tooltip" || o["op"] == "item_tooltip")
+            .unwrap_or_else(|| panic!("a tooltip over the carrots: {hovered:?}"));
+        let names_them = if tooltip["op"] == "tooltip" {
+            tooltip["lines"][0].as_str()
+        } else {
+            tooltip["item"].as_str()
+        };
+        assert!(
+            names_them.is_some_and(|l| l.contains("carrot")),
+            "it names them: {tooltip}"
+        );
+
+        // A shift-click on the carrots moves them into the pot, as a server runs that click:
+        // the menu's own quickMoveStack, so the pot's ingredient slots take them.
+        let click = |kind: &str, (x, y): (f64, f64), mods: i32| {
+            serde_json::json!({"kind": kind, "x": x + 8.0, "y": y + 8.0, "button": 0, "mods": mods})
+                .to_string()
+        };
+        let moved = runtime
+            .screen_input(
+                &pot,
+                &empty_hand.uuid,
+                &inventory,
+                &click("press", carrot, 1),
+            )
+            .expect("a shift-click");
+        assert!(moved.open, "{moved:?}");
+        assert_eq!(
+            moved.slots,
+            [(0, None)],
+            "the carrots left the hotbar: {moved:?}"
+        );
+        assert!(
+            moved
+                .block_entities
+                .iter()
+                .any(|b| b.snbt.contains("carrot") && b.snbt.contains("5")),
+            "and are in the pot: {moved:?}"
+        );
+        slots[0] = None;
+        let inventory = inventory_json(&slots);
+        runtime
+            .screen_input(
+                &pot,
+                &empty_hand.uuid,
+                &inventory,
+                &click("release", carrot, 1),
+            )
+            .expect("the release");
+
+        // A plain click picks the potatoes up onto the cursor: gone from the slot.
+        let picked = runtime
+            .screen_input(
+                &pot,
+                &empty_hand.uuid,
+                &inventory,
+                &click("press", potato, 0),
+            )
+            .expect("a click");
+        assert_eq!(picked.slots, [(1, None)], "on the cursor now: {picked:?}");
+        slots[1] = None;
+        let inventory = inventory_json(&slots);
+        // The cursor's stack is drawn under the mouse.
+        let frame = runtime
+            .screen_frame(
+                &pot,
+                &empty_hand.uuid,
+                &inventory,
+                by_the_pot,
+                427,
+                240,
+                200,
+                100,
+            )
+            .expect("the screen draws")
+            .expect("still open");
+        assert!(
+            frame.contains("potato"),
+            "the carried potatoes are drawn: {frame}"
+        );
+
+        // Escape closes the screen, as the screen's own key handling does, and the menu
+        // closes as a server closes one: what was on the cursor goes back into the inventory.
+        let closed = runtime
+            .screen_input(
+                &pot,
+                &empty_hand.uuid,
+                &inventory,
+                &serde_json::json!({"kind": "key", "key": 256, "scancode": 9, "mods": 0})
+                    .to_string(),
+            )
+            .expect("Escape");
+        assert!(!closed.open, "Escape closes it: {closed:?}");
+        assert!(
+            closed
+                .slots
+                .iter()
+                .any(|(_, s)| s.as_deref().is_some_and(|s| s.contains("potato"))),
+            "the potatoes are back in the inventory: {closed:?}"
+        );
+        assert_eq!(
+            runtime
+                .screen_frame(
+                    &pot,
+                    &empty_hand.uuid,
+                    &inventory,
+                    by_the_pot,
+                    427,
+                    240,
+                    -1,
+                    -1
+                )
+                .expect("asking"),
+            None,
+            "no screen once closed"
+        );
+
+        // Open again, and walk away: the menu closes, as a server closes one its player can no
+        // longer reach.
+        let again = runtime.use_block(&pot, &empty_hand).expect("cooking pot");
+        assert!(again.opened.is_some(), "opens again: {again:?}");
+        assert!(
+            runtime
+                .screen_frame(
+                    &pot,
+                    &empty_hand.uuid,
+                    &inventory,
+                    by_the_pot,
+                    427,
+                    240,
+                    -1,
+                    -1
+                )
+                .expect("asking")
+                .is_some(),
+            "open by the pot"
+        );
+        assert_eq!(
+            runtime
+                .screen_frame(
+                    &pot,
+                    &empty_hand.uuid,
+                    &inventory,
+                    [40.5, 64.0, 40.5],
+                    427,
+                    240,
+                    -1,
+                    -1
+                )
+                .expect("asking"),
+            None,
+            "closed once out of reach"
         );
     } else {
         eprintln!("no Farmer's Delight in HORIZON_120_MODS: the stove is skipped");
@@ -687,6 +941,27 @@ fn right_clicking_a_block_runs_its_1_20_1_code_on_horizons_blocks() {
         "a click asks Horizon a handful of times, not once per block read: {asked}"
     );
     eprintln!("a campfire's click asked Horizon {asked} time(s)");
+
+    // A block placed from the hand. Placing asks the level whether entities are in the way,
+    // and Porting Lib (inside Farmer's Delight Refabricated, Create's ports...) adds its own
+    // entities to that answer from a map its mixin puts on the level -- created by a field
+    // initializer, which an allocated level never ran, so every block placed with Porting Lib
+    // loaded threw. Vanilla's stone, so the case runs with any mod set; with Porting Lib in it,
+    // it is that case.
+    let world = OneBlock::at("minecraft:grass_block[snowy=false]", [20, 64, 0]);
+    let mut stone = on_top_of([20, 64, 0]);
+    stone.item = "minecraft:stone".into();
+    stone.count = 1;
+    let placed = runtime
+        .use_block(&world, &stone)
+        .expect("a block placed from the hand");
+    assert!(
+        placed
+            .set
+            .iter()
+            .any(|s| s.pos == [20, 65, 0] && s.state == "minecraft:stone"),
+        "the stone is placed on top: {placed:?}"
+    );
 
     // A mod telling the player about something must not break the mod. Vanilla's chest is the
     // same shape with no mod needed: its `use` opens a menu, which sends a packet through the
