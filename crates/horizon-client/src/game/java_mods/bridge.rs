@@ -304,12 +304,46 @@ pub(in crate::game) fn java_creative(out: &Path) {
         return;
     };
     let at = out.join(horizon_jvm::content::CREATIVE);
-    // The content root links the prepared file: the link goes, the export takes its place.
+    // The content root's own (the content mods' tabs and search entries: the 1.20.1 mods',
+    // which the 26.3 runtime doesn't know), kept beside it so every start merges with it: the
+    // file at `at` is the merge from the last start, or the content build's fresh one.
+    let kept = out.join(CONTENT_CREATIVE);
+    let read = |p: &Path| -> Option<serde_json::Value> {
+        serde_json::from_slice(&std::fs::read(p).ok()?).ok()
+    };
+    let Some(export) = read(&exported) else {
+        log::warn!("Java mods: their creative tabs were not read");
+        return;
+    };
+    let current = read(&at);
+    let saved = read(&kept);
+    // `at` is ours (the last merge) when merging the saved content with this export gives it.
+    let content = match (&current, &saved) {
+        (Some(now), Some(saved))
+            if *now == horizon_client::creative::merge_inventories(&export, saved) =>
+        {
+            Some(saved.clone())
+        }
+        (Some(now), _) => {
+            // The content build's own, fresh: kept for later starts.
+            let _ = std::fs::write(&kept, serde_json::to_vec(now).unwrap_or_default());
+            Some(now.clone())
+        }
+        (None, saved) => saved.clone(),
+    };
+    let merged = match &content {
+        Some(content) => horizon_client::creative::merge_inventories(&export, content),
+        None => export,
+    };
+    // The content root links the prepared file: the link goes, the merge takes its place.
     let _ = std::fs::remove_file(&at);
-    if let Err(e) = std::fs::copy(&exported, &at) {
+    if let Err(e) = std::fs::write(&at, serde_json::to_vec(&merged).unwrap_or_default()) {
         log::warn!("Java mods: their creative tabs were not added: {e}");
     }
 }
+
+/// The content root's own creative inventory, kept beside the merged one ([`java_creative`]).
+const CONTENT_CREATIVE: &str = "creative-inventory.content.json";
 
 /// Starts the JVM and Fabric (once: again, the running one), then logs what loaded. Runs on
 /// the "Java mods" thread, or before the resources load when the mods' content is made. Whether

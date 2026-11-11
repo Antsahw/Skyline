@@ -828,6 +828,93 @@ fn same_components(a: &ItemStack, b: &ItemStack) -> bool {
 /// tooltip only for a category tab's own grid slots (`CustomCreativeSlot`);
 /// everywhere else in the screen the tab names (and, on the search tab's
 /// grid, the tag lines) follow the item's name.
+/// The creative inventory with both bridges' mods in it: `export` is the 26.3 runtime's
+/// (vanilla's tabs and the 26.3 mods', made by their own code), `content` is the one the game
+/// built from the content mods (the 1.20.1 mods' tabs, and every content mod's items in the
+/// search tab). The export stays as it is; the content's tabs it hasn't got come after its own
+/// mod tabs, ten to a page as the content build pages them, and the search entries it hasn't
+/// got join its search tab.
+pub fn merge_inventories(export: &Value, content: &Value) -> Value {
+    let mut out = export.clone();
+    let Some(tabs) = out.get_mut("tabs").and_then(Value::as_array_mut) else {
+        return out;
+    };
+    let ids: std::collections::HashSet<String> = tabs
+        .iter()
+        .filter_map(|t| t["id"].as_str().map(str::to_owned))
+        .collect();
+    // The export's own mod tabs (past vanilla's page) come first.
+    let mut placed = tabs
+        .iter()
+        .filter(|t| t["page"].as_u64().is_some_and(|p| p >= 1))
+        .count();
+    let content_tabs = content["tabs"].as_array().cloned().unwrap_or_default();
+    for tab in &content_tabs {
+        let Some(id) = tab["id"].as_str() else {
+            continue;
+        };
+        if ids.contains(id) || tab["type"].as_str() != Some("CATEGORY") {
+            continue;
+        }
+        let mut tab = tab.clone();
+        let slot = placed % 10;
+        tab["page"] = Value::from(1 + placed / 10);
+        tab["row"] = Value::from(if slot < 5 { "TOP" } else { "BOTTOM" });
+        tab["column"] = Value::from(slot % 5);
+        tabs.push(tab);
+        placed += 1;
+    }
+    // The search tab: items, their search lines and tags, side by side.
+    let is_search = |t: &Value| t["type"].as_str() == Some("SEARCH");
+    let Some(from) = content_tabs.iter().find(|t| is_search(t)) else {
+        return out;
+    };
+    let Some(into) = tabs.iter_mut().find(|t| is_search(t)) else {
+        return out;
+    };
+    let has: std::collections::HashSet<String> = into["items"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|i| i.as_str().map(str::to_owned))
+        .collect();
+    let column = |t: &Value, key: &str, i: usize| t[key].as_array().and_then(|a| a.get(i)).cloned();
+    let mut added: Vec<(Value, Option<Value>, Option<Value>)> = Vec::new();
+    for (i, item) in from["items"].as_array().into_iter().flatten().enumerate() {
+        let Some(snbt) = item.as_str() else {
+            continue;
+        };
+        if has.contains(snbt) {
+            continue;
+        }
+        added.push((
+            item.clone(),
+            column(from, "lines", i),
+            column(from, "tags", i),
+        ));
+    }
+    for (item, lines, tags) in added {
+        for (key, value) in [
+            ("items", Some(item)),
+            (
+                "lines",
+                Some(lines.unwrap_or_else(|| Value::Array(Vec::new()))),
+            ),
+            (
+                "tags",
+                Some(tags.unwrap_or_else(|| Value::Array(Vec::new()))),
+            ),
+        ] {
+            if let (Some(list), Some(value)) =
+                (into.get_mut(key).and_then(Value::as_array_mut), value)
+            {
+                list.push(value);
+            }
+        }
+    }
+    out
+}
+
 pub fn tooltip_lists_tabs(category_tab: bool, grid_slot: bool) -> bool {
     !(category_tab && grid_slot)
 }
@@ -967,6 +1054,54 @@ pub fn click_display(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_content_mods_join_the_26_3_runtimes_creative_inventory() {
+        let tab = |id: &str, kind: &str, page: u64, items: &[&str]| {
+            serde_json::json!({"id": id, "type": kind, "row": "TOP", "column": 0, "page": page,
+                               "items": items, "lines": items.iter().map(|_| ["x"]).collect::<Vec<_>>(),
+                               "tags": items.iter().map(|_| Vec::<String>::new()).collect::<Vec<_>>()})
+        };
+        // The 26.3 runtime's: vanilla's search and a 26.3 mod's tab.
+        let export = serde_json::json!({"tabs": [
+            tab("minecraft:search", "SEARCH", 0, &["{id:\"minecraft:stone\"}", "{id:\"decorative_blocks:beam\"}"]),
+            tab("decorative_blocks:general", "CATEGORY", 1, &["{id:\"decorative_blocks:beam\"}"]),
+        ]});
+        // The game's content build: the same 26.3 mod's tab, a 1.20.1 mod's, and both mods'
+        // items in search.
+        let content = serde_json::json!({"tabs": [
+            tab("minecraft:search", "SEARCH", 0, &["{id:\"minecraft:stone\"}", "{id:\"decorative_blocks:beam\"}", "{id:\"farmersdelight:stove\"}"]),
+            tab("decorative_blocks:general", "CATEGORY", 1, &["{id:\"decorative_blocks:beam\"}"]),
+            tab("farmersdelight:farmersdelight", "CATEGORY", 1, &["{id:\"farmersdelight:stove\"}"]),
+        ]});
+        let merged = merge_inventories(&export, &content);
+        let tabs = merged["tabs"].as_array().unwrap();
+        let ids: Vec<&str> = tabs.iter().map(|t| t["id"].as_str().unwrap()).collect();
+        assert_eq!(
+            ids,
+            [
+                "minecraft:search",
+                "decorative_blocks:general",
+                "farmersdelight:farmersdelight"
+            ]
+        );
+        // After the export's own mod tab, not on top of it.
+        assert_eq!(
+            (&tabs[2]["page"], &tabs[2]["column"]),
+            (&Value::from(1), &Value::from(1))
+        );
+        let search = tabs[0]["items"].as_array().unwrap();
+        assert_eq!(
+            search.len(),
+            3,
+            "the 1.20.1 stove joins search once: {search:?}"
+        );
+        assert_eq!(
+            tabs[0]["lines"].as_array().unwrap().len(),
+            3,
+            "with its search line"
+        );
+    }
+
     use super::*;
     use horizon_world::nbt::Tag;
 

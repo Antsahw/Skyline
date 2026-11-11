@@ -109,9 +109,12 @@ public final class Mirror120 {
         ((dev.horizonlab.platform120.mixin.PlayerListAccess) playerList).horizon$setPlayersByUUID(new java.util.concurrent.ConcurrentHashMap<>());
         ((dev.horizonlab.platform120.mixin.MinecraftServerAccess) server).horizon$setLevels(SERVER_LEVELS);
         ((dev.horizonlab.platform120.mixin.MinecraftServerAccess) server).horizon$setStorageSource(storage());
-        ((dev.horizonlab.platform120.mixin.DedicatedServerAccess) server).horizon$setSettings(
-                new net.minecraft.server.dedicated.DedicatedServerSettings(
-                        java.nio.file.Path.of("horizon-mirror", "server.properties")));
+        // Made from no file: the constructor reads server.properties, and logs an error when
+        // there is none. Vanilla's defaults are what an empty Properties gives.
+        var settings = Allocate.make(net.minecraft.server.dedicated.DedicatedServerSettings.class);
+        ((dev.horizonlab.platform120.mixin.DedicatedServerSettingsAccess) settings).horizon$setProperties(
+                new net.minecraft.server.dedicated.DedicatedServerProperties(new java.util.Properties()));
+        ((dev.horizonlab.platform120.mixin.DedicatedServerAccess) server).horizon$setSettings(settings);
         // The registries as vanilla's WorldLoader makes them: the built-in ones, then the data
         // packs' worldgen and dimensions (vanilla's and the mods'), then the reloadable data:
         // recipes, loot, tags (bound into the registries: mods ask `state.is(BlockTags.CAMPFIRES)`),
