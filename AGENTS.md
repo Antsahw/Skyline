@@ -1,5 +1,11 @@
 # Horizon: a map for agents
 
+> **You are in Skyline**, a fork that runs real Java mods inside Horizon: Fabric 26.3 mods
+> (`mods-java/`) and Fabric 1.20.1 mods (`mods-java-1.20.1/`), both unmodified. **Read
+> [docs/skyline.md](docs/skyline.md) first** — what the fork is for, how the two bridges work,
+> the mistakes that cost days, and where to start. Who wrote which part, and what may never be
+> committed: [NOTICE.md](NOTICE.md). The rest of this page is Horizon's own map, and still holds.
+
 Minecraft: Java Edition 26.3 rewritten in Rust (wgpu). Vanilla is the specification wherever it has the
 feature. Read [CONTRIBUTING.md](CONTRIBUTING.md) once; this page tells you where things are.
 Feature → files → harness for the most-changed areas: [docs/architecture.md](docs/architecture.md).
