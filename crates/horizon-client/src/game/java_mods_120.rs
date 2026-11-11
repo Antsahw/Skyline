@@ -63,7 +63,7 @@ pub(in crate::game) fn content(base: &Path) -> Vec<PathBuf> {
     }
     let home = super::mods::horizon_cache().join("java-120");
     let cache = home.join("content");
-    if let Some(folders) = horizon_jvm_remote::content120::cached(&jars, &cache) {
+    if let Some(folders) = horizon_jvm_remote::content120::cached(&stamped(&jars), &cache) {
         log::info!(
             "1.20.1 mods: {} content mod(s) from the cache",
             folders.len()
@@ -120,6 +120,14 @@ fn keep(runtime: Runtime120) {
     {
         old.stop();
     }
+}
+
+/// What the content cache is stamped with: the mods' jars and the bridge's own platform jar,
+/// which writes what the mods register. A new build of either makes the content again.
+fn stamped(jars: &[PathBuf]) -> Vec<PathBuf> {
+    let mut all = jars.to_vec();
+    all.push(install().join("horizon/platform120.jar"));
+    all
 }
 
 /// Starts the 1.20.1 runtime with the jars in `dir` and the platform jar: the runtime and its
@@ -180,6 +188,12 @@ fn make(
     // Kept: the mods' code runs in it from now on.
     keep(runtime);
     let folders = built?;
+    // Stamped with the platform jar too: a new bridge build (build120.sh) may write more of
+    // what the mods register (their creative tabs), so it makes the content again.
+    let _ = std::fs::write(
+        cache.join("stamp"),
+        horizon_jvm_remote::content120::stamp(&stamped(jars)),
+    );
     log::info!(
         "1.20.1 mods: {} content mod(s) made in {} ms",
         folders.len(),
