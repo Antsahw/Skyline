@@ -113,6 +113,12 @@ Mojang's files, keep runs away from real player data. Three more belong to the f
 - **Say what is not done.** Every status section in these docs ends with what is still missing.
   Keep that habit: a half-working feature reported as working costs the next person a day.
 
+## What is supported, from the mod's side
+
+[skyline-mod-support.md](skyline-mod-support.md) lists what common mods need and what each gets
+today -- done, partial, not yet, or unverified -- and says what "fully supported" would mean.
+Read it before promising anyone a mod works.
+
 ## Status
 
 What works, what does not, and what is next are kept in the phase sections of
