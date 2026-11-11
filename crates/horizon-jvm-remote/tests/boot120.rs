@@ -394,6 +394,16 @@ fn right_clicking_a_block_runs_its_1_20_1_code_on_horizons_blocks() {
             "{json}"
         );
         assert_eq!(ops[3]["text"], "Cooking Pot", "{json}");
+        // A gradient's colours, top then bottom: 1.20.1 orders the RenderType overload's
+        // arguments differently from fill's, and reading them fill's way shifts both by one.
+        assert_eq!(
+            (&ops[1]["top"], &ops[1]["bottom"]),
+            (
+                &(0xFFFF_FFFF_u32 as i32).into(),
+                &(0xFF00_0000_u32 as i32).into()
+            ),
+            "{json}"
+        );
     }
 
     let world = OneBlock(
@@ -471,6 +481,52 @@ fn right_clicking_a_block_runs_its_1_20_1_code_on_horizons_blocks() {
             opened.title.contains("cooking_pot") || opened.title.contains("Cooking Pot"),
             "the menu has the pot's title: {}",
             opened.title
+        );
+        eprintln!("the cooking pot opened: {opened:?}");
+
+        // And its screen draws: Farmer's Delight's own CookingPotScreen, built on the menu
+        // the click opened and laid out at a GUI-scaled 1280x720, draws one frame into the
+        // recorder. Its background is the pot's own texture, placed where a container screen
+        // centres itself; its labels are the pot's title and the player's inventory.
+        let frame = runtime
+            .screen_frame(&empty_hand.uuid, 427, 240, -1, -1)
+            .expect("the screen draws")
+            .unwrap_or_else(|| panic!("the pot has a screen"));
+        eprintln!("a cooking pot's frame: {frame}");
+        let ops: serde_json::Value = serde_json::from_str(&frame).expect("operations as JSON");
+        let ops = ops.as_array().expect("an array of operations");
+        let background = ops
+            .iter()
+            .find(|o| {
+                o["op"] == "blit"
+                    && o["texture"]
+                        .as_str()
+                        .is_some_and(|t| t.contains("farmersdelight") && t.contains("cooking_pot"))
+            })
+            .unwrap_or_else(|| panic!("the pot's own background is drawn: {frame}"));
+        // 176 by 166, as a container screen is, centred on the 427 by 240 screen.
+        assert_eq!(background["x"], (427 - 176) / 2, "centred: {background}");
+        assert_eq!(background["y"], (240 - 166) / 2, "centred: {background}");
+        // Behind it, the darkened world, in vanilla's own colours.
+        let wash = ops
+            .iter()
+            .find(|o| o["op"] == "gradient")
+            .unwrap_or_else(|| panic!("the world behind is darkened: {frame}"));
+        assert_eq!(
+            (&wash["top"], &wash["bottom"]),
+            (&(-1_072_689_136).into(), &(-804_253_680).into()),
+            "{wash}"
+        );
+        let texts: Vec<&str> = ops
+            .iter()
+            .filter(|o| o["op"] == "text")
+            .filter_map(|o| o["json"].as_str().or(o["text"].as_str()))
+            .collect();
+        assert!(
+            texts
+                .iter()
+                .any(|t| t.contains("cooking_pot") || t.contains("Cooking Pot")),
+            "the pot's title is drawn: {texts:?}"
         );
     } else {
         eprintln!("no Farmer's Delight in HORIZON_120_MODS: the stove is skipped");

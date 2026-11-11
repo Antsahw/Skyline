@@ -30,24 +30,46 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  */
 @Mixin(GuiGraphics.class)
 public abstract class GuiGraphicsMixin {
+    /**
+     * Where (x, y) lands under the pose the screen drew it with: a container screen
+     * translates to its own corner before drawing its slots and labels, so the coordinates a
+     * call is given are not where it goes. Rotation and shear are left out -- screens use
+     * translation and scale.
+     */
+    private int[] horizon$at(float x, float y) {
+        GuiGraphics self = (GuiGraphics) (Object) this;
+        if (self.pose() == null) {
+            return new int[] {Math.round(x), Math.round(y)};
+        }
+        org.joml.Matrix4f m = self.pose().last().pose();
+        return new int[] {
+                Math.round(m.m00() * x + m.m10() * y + m.m30()),
+                Math.round(m.m01() * x + m.m11() * y + m.m31())};
+    }
     @Inject(method = "fill(Lnet/minecraft/client/renderer/RenderType;IIIIII)V",
             at = @At("HEAD"), cancellable = true)
     private void horizon$fill(RenderType type, int x0, int y0, int x1, int y1, int z, int color,
             CallbackInfo ci) {
         Graphics120 to = Graphics120.current();
         if (to != null) {
-            to.fill(x0, y0, x1, y1, color);
+            int[] a = horizon$at(x0, y0), b = horizon$at(x1, y1);
+            to.fill(a[0], a[1], b[0], b[1], color);
             ci.cancel();
         }
     }
 
+    /**
+     * The RenderType overload takes z *last* -- `(type, x0, y0, x1, y1, from, to, z)` -- unlike
+     * `fill`, whose z comes before its colour. Reading it fill's way shifts both colours by one.
+     */
     @Inject(method = "fillGradient(Lnet/minecraft/client/renderer/RenderType;IIIIIII)V",
             at = @At("HEAD"), cancellable = true)
-    private void horizon$fillGradient(RenderType type, int x0, int y0, int x1, int y1, int z,
-            int top, int bottom, CallbackInfo ci) {
+    private void horizon$fillGradient(RenderType type, int x0, int y0, int x1, int y1, int top,
+            int bottom, int z, CallbackInfo ci) {
         Graphics120 to = Graphics120.current();
         if (to != null) {
-            to.gradient(x0, y0, x1, y1, top, bottom);
+            int[] a = horizon$at(x0, y0), b = horizon$at(x1, y1);
+            to.gradient(a[0], a[1], b[0], b[1], top, bottom);
             ci.cancel();
         }
     }
@@ -62,7 +84,28 @@ public abstract class GuiGraphicsMixin {
             float u0, float u1, float v0, float v1, CallbackInfo ci) {
         Graphics120 to = Graphics120.current();
         if (to != null) {
-            to.blitUv(texture, x0, y0, x1 - x0, y1 - y0, u0, v0, u1, v1);
+            int[] a = horizon$at(x0, y0), b = horizon$at(x1, y1);
+            to.blitUv(texture, a[0], a[1], b[0] - a[0], b[1] - a[1], u0, v0, u1, v1);
+            ci.cancel();
+        }
+    }
+
+    /**
+     * A sprite of an atlas (an empty slot's outline): recorded as its texture's name, which
+     * Horizon finds in its own atlas. Stops before vanilla asks the stand-in for its corners.
+     */
+    @Inject(method = "blit(IIIIILnet/minecraft/client/renderer/texture/TextureAtlasSprite;)V",
+            at = @At("HEAD"), cancellable = true)
+    private void horizon$sprite(int x, int y, int z, int width, int height,
+            net.minecraft.client.renderer.texture.TextureAtlasSprite sprite, CallbackInfo ci) {
+        Graphics120 to = Graphics120.current();
+        if (to != null) {
+            String texture = dev.horizonlab.platform120.Sprites120.texture(sprite);
+            if (texture != null) {
+                int[] a = horizon$at(x, y), b = horizon$at(x + width, y + height);
+                to.blitUv(ResourceLocation.tryParse(texture), a[0], a[1], b[0] - a[0],
+                        b[1] - a[1], 0f, 0f, 1f, 1f);
+            }
             ci.cancel();
         }
     }
@@ -75,7 +118,8 @@ public abstract class GuiGraphicsMixin {
             int guiOffset, CallbackInfo ci) {
         Graphics120 to = Graphics120.current();
         if (to != null) {
-            to.item(stack, x, y);
+            int[] a = horizon$at(x, y);
+            to.item(stack, a[0], a[1]);
             ci.cancel();
         }
     }
@@ -87,7 +131,8 @@ public abstract class GuiGraphicsMixin {
             boolean shadow, CallbackInfoReturnable<Integer> cir) {
         Graphics120 to = Graphics120.current();
         if (to != null) {
-            to.text(text, x, y, color, shadow);
+            int[] a = horizon$at(x, y);
+            to.text(text, a[0], a[1], color, shadow);
             cir.setReturnValue(font == null ? 0 : font.width(text));
         }
     }
@@ -100,7 +145,8 @@ public abstract class GuiGraphicsMixin {
             int color, boolean shadow, CallbackInfoReturnable<Integer> cir) {
         Graphics120 to = Graphics120.current();
         if (to != null) {
-            to.text(text, x, y, color, shadow);
+            int[] a = horizon$at(x, y);
+            to.text(text, a[0], a[1], color, shadow);
             cir.setReturnValue(font == null ? 0 : font.width(text));
         }
     }
@@ -111,7 +157,8 @@ public abstract class GuiGraphicsMixin {
             boolean shadow, CallbackInfoReturnable<Integer> cir) {
         Graphics120 to = Graphics120.current();
         if (to != null) {
-            to.text(text, x, y, color, shadow);
+            int[] a = horizon$at(x, y);
+            to.text(text, a[0], a[1], color, shadow);
             cir.setReturnValue(font == null || text == null ? 0 : font.width(text));
         }
     }
@@ -120,7 +167,8 @@ public abstract class GuiGraphicsMixin {
     private void horizon$scissor(int x0, int y0, int x1, int y1, CallbackInfo ci) {
         Graphics120 to = Graphics120.current();
         if (to != null) {
-            to.scissor(x0, y0, x1, y1);
+            int[] a = horizon$at(x0, y0), b = horizon$at(x1, y1);
+            to.scissor(a[0], a[1], b[0], b[1]);
             ci.cancel();
         }
     }

@@ -618,6 +618,18 @@ public final class Mirror120 {
         return new Object[] {ticked};
     }
 
+    /**
+     * One frame of the screen of the menu `uuid`'s player has open (a cooking pot's), drawn at
+     * `width` by `height` with the mouse at (`mouseX`, `mouseY`): the operations Horizon's
+     * screen drawing reads, as JSON. Empty when they have no menu open, or its mod registered
+     * no screen for it.
+     */
+    public static Object[] screenFrame(String uuid, int width, int height, int mouseX, int mouseY) {
+        ServerPlayer player = PLAYERS.get(UUID.fromString(uuid));
+        String frame = player == null ? null : Screens120.frame(player, width, height, mouseX, mouseY);
+        return new Object[] {frame == null ? "" : frame};
+    }
+
     /** What a screen's drawing records: {@link Screens120#probe}. */
     public static Object[] screenProbe() {
         return Screens120.probe();

@@ -22,7 +22,15 @@
     "ServerGamePacketListenerMixin"
   ],
   "client": [
-    "GuiGraphicsMixin"
+    "FontAccess",
+    "GlStateManagerMixin",
+    "GuiGraphicsAccess",
+    "GuiGraphicsMixin",
+    "MenuScreensAccess",
+    "MinecraftAccess",
+    "MinecraftMixin",
+    "RenderSystemMixin",
+    "ScreenMixin"
   ],
   "injectors": {"defaultRequire": 1}
 }

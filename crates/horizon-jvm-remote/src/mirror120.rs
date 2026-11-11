@@ -293,6 +293,30 @@ impl Runtime120 {
         })
     }
 
+    /// One frame of the screen of the menu `player` has open, drawn at `width` by `height`
+    /// with the mouse at (`mouse_x`, `mouse_y`): the operations Horizon's screen drawing reads,
+    /// as JSON. `None` when they have no menu open, or its mod registered no screen for it.
+    pub fn screen_frame(
+        &mut self,
+        player: &str,
+        width: i32,
+        height: i32,
+        mouse_x: i32,
+        mouse_y: i32,
+    ) -> Result<Option<String>, String> {
+        let frame = self.call_with(
+            "screenFrame",
+            &[
+                Value::Str(player.to_owned()),
+                Value::I32(width),
+                Value::I32(height),
+                Value::I32(mouse_x),
+                Value::I32(mouse_y),
+            ],
+        )?;
+        Ok((!frame.is_empty()).then_some(frame))
+    }
+
     /// What a screen's drawing records, as the frame JSON Horizon's screen drawing reads.
     /// Proves the recording works: the mixins on `GuiGraphics` bound, and the operations carry
     /// what the drawing needs. No mod, screen or window is involved.

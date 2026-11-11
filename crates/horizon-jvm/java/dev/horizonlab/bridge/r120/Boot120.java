@@ -103,6 +103,9 @@ public final class Boot120 implements RemoteRuntime {
             case "tickBlockEntities":
                 // One tick of the mods' block entities Horizon knows of (Mirror120).
                 return mirror("tickBlockEntities", args);
+            case "screenFrame":
+                // A frame of the screen of a player's open menu (Mirror120, Screens120).
+                return mirror("screenFrame", args);
             case "screenProbe":
                 // What a screen's drawing records (Screens120): the recording end to end.
                 return mirror("screenProbe", args);

@@ -356,6 +356,46 @@ clicks pass until then). A click on a block of a 1.20.1 mod's namespace, or with
 their items, goes to it at `useItemOn`'s head (`java120_use_block`, beside the 26.3 bridge's
 hook in `lan_actions.rs`); what it set and what it did to the held stack land in Horizon.
 
+## Phase 4 status: a mod's screen draws (2026-11-11)
+
+Right-clicking a Farmer's Delight cooking pot opens its menu, and its own `CookingPotScreen`
+draws a frame -- in the runtime, not yet in the game.
+
+- **The menu opens on the mirror unpatched.** The mirror player is made with vanilla's
+  constructor, so `ServerPlayer.openMenu` runs as on a server: the menu made, its slots
+  listened to. Only the packet telling a client to show it goes nowhere; the title it carried
+  is kept by a mixin at openMenu's return (`ServerPlayerMenuMixin`), and the click reports the
+  menu's type and title (`Used::opened`).
+- **The screen is the mod's own**, built on the server's menu itself through the constructor
+  the mod registered (`MenuScreens.SCREENS`, found by shape because its interface is
+  package-private and every name here is intermediary), then laid out with vanilla's
+  `Screen.init`.
+- **Its drawing is recorded, not drawn.** Mixins on `GuiGraphics` take each call at its head
+  (`GuiGraphicsMixin`, `Graphics120`) and record it as the operations Horizon's screen drawing
+  already reads (`game/java_screen.rs`, shared with the 26.3 bridge). The screen's pose is
+  applied, so slots drawn relative to the screen's corner land where they go.
+
+What a headless 1.20.1 client was missing, found one crash at a time:
+
+| The screen asked for | Answer |
+|---|---|
+| The narrator, on layout | none: `shouldRunNarration()` is false (`ScreenMixin`) |
+| The world behind, for the background | always vanilla's in-world darkening, never the title-screen dirt |
+| The render thread | `RenderSystem`'s checks pass; its queue for that thread is dropped (`RenderSystemMixin`) |
+| OpenGL | every void `GlStateManager` call stopped -- all 80, generated from the mappings (`GlStateManagerMixin`) |
+| The blocks atlas, for an empty slot's outline | stand-in sprites that know only their name, drawn by Horizon from its own atlas (`Sprites120`) |
+| A font, to centre a title | one that measures with 1.20.1's default ASCII widths and draws nothing (`Screens120.font`) |
+
+The frame, checked by the test against real Farmer's Delight jars: the pot's texture at
+(125, 37) on a 427x240 GUI -- exactly where vanilla centres a 176x166 container -- the bowl's
+outline in the container slot, the title in vanilla's label grey, and behind it the darkened
+world in vanilla's own colours.
+
+**Not done here:** the game does not show the frame yet (the Rust side of the click still has
+to open a screen and ask for frames); clicks, keys and slot clicks do not go back; tooltips,
+item counts and durability bars are not recorded; a shader colour set with `setColor` is lost;
+text is laid out with approximate widths. Those are the rest of phase 4.
+
 ## Phase 3d status: the shape only the mod knows (2026-11-10)
 
 A block's shape is one per state in Horizon's registry, exported by asking each state with no
@@ -635,7 +675,8 @@ NeoForge could run beside Fabric 26.3 rather than in its place.
    ejects reaches Horizon, and their block entities tick and stay alive between ticks (all
    above). Next: the chunk mirror and batched deltas ("Measured"), the downgrade tables, the
    Fabric Transfer API on Horizon's containers.
-4. **gui120.** `GuiGraphics` recorder → `screenFrame` JSON, menus, input, slot clicks (its own lane).
+4. **gui120.** Started (Phase 4 status): menus open, a mod's own screen draws a frame. Next:
+   showing it in the game, input and slot clicks back, tooltips and item decorations.
 5. **Events and networking.** Fabric API 1.20.1 events at the bridge's hook points, mod packets.
 6. **Entities and worldgen.** Data-driven registries from a real server load (mods' biomes
    through Fabric's biome API show up only there).

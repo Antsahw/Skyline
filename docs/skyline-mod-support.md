@@ -26,7 +26,7 @@ from the mod's side rather than the bridge's.
 | Block shape for aiming, where the block entity decides it | **done** | phase 3d |
 | Its blocks drawn from the models in its jar | **done** | phase 2 |
 | Its blocks drawn by code (no blockstate file) | **not yet** | phase 7 |
-| **Screens: machines, backpacks, anything you right-click into** | **not yet** | phase 4, in progress |
+| **Screens: machines, backpacks, anything you right-click into** | **partial** | phase 4: the menu opens and the mod's own screen draws a frame; not shown in the game yet, no input back |
 | Items with their own use behaviour (tools, food, wands) | **unverified** | — |
 | Sounds the mod ships | **unverified** | — |
 | Particles the mod spawns | **not yet** | phase 5 |
@@ -70,7 +70,7 @@ A 1.20.1 mod is **fully supported** when all of this is true of it:
 2. Its content is in the game: blocks, items, recipes, tags, creative tabs, names. *(done)*
 3. Its blocks behave: placing, breaking, clicking, ticking, keeping state. *(done)*
 4. Its blocks look right, including ones drawn by code. *(phase 7)*
-5. Its screens open, draw, and respond to clicks and keys. *(phase 4)*
+5. Its screens open, draw, and respond to clicks and keys. *(phase 4: they open and draw)*
 6. Its messages reach the player and back. *(phase 5)*
 7. Its items and fluids move through other mods' and Horizon's containers. *(phase 3 + 5)*
 8. Its mobs spawn, move, fight and are fought. *(phase 6)*
@@ -78,7 +78,8 @@ A 1.20.1 mod is **fully supported** when all of this is true of it:
 10. Its client bits work: keys, HUD, config. *(phase 4 + 5)*
 11. None of the above costs more than a few frames a second. *(measured per phase)*
 
-Points 1–3 are done. Point 5 is the one being built. Points 4 and 6–10 are the rest of the
+Points 1–3 are done. Point 5 is half done: a screen opens and draws, but is not shown in the
+game and takes no input yet. Points 4 and 6–10 are the rest of the
 roadmap.
 
 ## How to find out where a mod stands
