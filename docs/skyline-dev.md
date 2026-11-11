@@ -90,6 +90,25 @@ The 1.20.1 runtime then boots in the background, and says so:
 
 Clicking a 1.20.1 mod's block before that second line does nothing.
 
+### The 26.3 mods without the launcher
+
+Started by hand, a `java-mods` build plays without its 26.3 mods and says to use the launcher.
+That is the 26.3 bridge's ownership check (iaxivers'): before it downloads Fabric and runs mods
+on your Minecraft jar, the game asks Mojang's services whether the signed-in account owns
+Minecraft: Java Edition, and only the launcher can hand it that sign-in. The 1.20.1 mods are
+not affected.
+
+For your own testing, build with `java-mods-dev` instead (everything `java-mods` has, plus a
+developer's switch) and turn the switch on:
+
+```sh
+HORIZON_JAVA_MODS=1 cargo run --profile fast -p horizon-client --features java-mods-dev,java-mods-120 -- \
+    --resources .local/horizon-client/26.3 --world MyWorld
+```
+
+Never hand out a `java-mods-dev` build: the check is how the fork keeps Mojang's game for its
+owners, and release builds don't have the switch at all.
+
 ## 5. The launcher (26.3 only)
 
 ```sh
