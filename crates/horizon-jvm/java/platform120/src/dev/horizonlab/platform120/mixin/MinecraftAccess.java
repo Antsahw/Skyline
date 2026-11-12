@@ -20,4 +20,8 @@ public interface MinecraftAccess {
     @Mutable
     @Accessor("options")
     void horizon$setOptions(net.minecraft.client.Options options);
+
+    @Mutable
+    @Accessor("blockRenderer")
+    void horizon$setBlockRenderer(net.minecraft.client.renderer.block.BlockRenderDispatcher blocks);
 }

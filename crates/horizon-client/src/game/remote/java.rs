@@ -28,6 +28,8 @@ impl Game<'_> {
             super::super::java_screen::CHANNEL => self.remote_java_screen(data),
             super::super::java_screen::KEYS if !own => self.remote_java_keys(data),
             super::super::java_screen::KEYS_120 => self.remote_java120_keys(data),
+            #[cfg(feature = "java-mods-120")]
+            super::super::java_mods_120::mobs::CHANNEL => self.remote_java120_mobs(data),
             super::super::java_screen::KEY_MAPPINGS if !own => self.remote_java_key_mappings(data),
             super::super::java_screen::VIEW if !own => self.remote_java_view(data),
             #[cfg(feature = "java-mods")]

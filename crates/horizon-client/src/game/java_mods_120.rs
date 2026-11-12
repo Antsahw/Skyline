@@ -795,6 +795,7 @@ mod tests {
 
 mod breaking;
 mod drawn;
+pub(in crate::game) mod mobs;
 mod neighbours;
 mod redstone;
 pub(in crate::game) use breaking::Break120;

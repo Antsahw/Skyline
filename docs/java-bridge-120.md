@@ -377,9 +377,23 @@ What a mob needed of a mirror level:
 The runtime test summons a moobloom at 70 over Horizon's grass. It falls and stands at 65, with
 vanilla's fall damage (10 health to 8), and its AI turns its head.
 
-**Next:** 6d.2, its renderer's geometry each tick, drawn by Horizon's entity drawing (the 26.3
-bridge's `java_entities.rs`, which takes raw quads). Then 6d.3, players hitting and using
-them; then saving them with their chunks and natural spawning.
+**6d.2, done: they're drawn by their own renderers.** Each tick, `Render120` runs each mod
+mob's own `EntityRenderer` (made once from `EntityRenderers`' providers, with the client's entity
+models and baked block models) into a capture of its quads: positions relative to the mob, the
+texture each is drawn with (from its `RenderType`), the overlay (the hurt flash). Quads drawn on
+the block atlas (the moobloom's flowers) are split into per-sprite meshes. The server half
+(`game/java_mods_120/mobs.rs`) sends each player of the dimension the mobs and their meshes on
+`horizon:java120_entities`; the window draws them where the mob is between the last two ticks,
+with the GUI atlas' sprites, lit by the light where it stands.
+
+What a renderer needed:
+- `Minecraft.getBlockRenderer()`: Friends & Foes' flower layer asks the client for it when made.
+- `ClientPacketListener.getPlayerInfo`: answers none while the headless client has no players.
+
+Checked in a game: a moobloom from its spawn egg walks on Horizon's grass with its buttercups.
+
+**Next:** 6d.3, players hitting and using them; then saving them with their chunks, natural
+spawning and `/summon` of their types.
 
 ## Phase 7 status: blocks drawn by their mod's code (2026-11-12)
 

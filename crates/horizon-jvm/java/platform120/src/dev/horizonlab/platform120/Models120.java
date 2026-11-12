@@ -48,6 +48,12 @@ final class Models120 {
     private static Map<BlockState, BakedModel> models;
     private static List<BlockState> drawnByCode;
 
+    /** Every state's baked client model (vanilla's and the mods'), baking them first. */
+    static synchronized Map<BlockState, BakedModel> baked() {
+        bake();
+        return models;
+    }
+
     /** The mods' states drawn by code, as Horizon names states. Bakes the models first. */
     static synchronized String[] drawnByCode() {
         bake();
@@ -101,7 +107,7 @@ final class Models120 {
     }
 
     /** Vanilla's and the mods' client resource packs, as a client loads them. */
-    private static MultiPackResourceManager clientResources() {
+    static MultiPackResourceManager clientResources() {
         List<RepositorySource> sources = new ArrayList<>();
         sources.add(new net.minecraft.client.resources.ClientPackSource(java.nio.file.Path.of("assets-index-unused")));
         try {

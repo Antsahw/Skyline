@@ -908,6 +908,16 @@ public final class Mirror120 {
         }
     }
 
+    /** What the mods' entities in `dimension` look like this tick (Render120.render), as JSON. */
+    public static Object[] renderEntities(String dimension) {
+        begin();
+        try {
+            return new Object[] {Render120.render(level(dimension))};
+        } finally {
+            finish();
+        }
+    }
+
     /** The mods' placed features, which Horizon's generator asks this side to place. */
     public static Object[] modFeatures() {
         setUp();

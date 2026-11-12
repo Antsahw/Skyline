@@ -470,6 +470,40 @@ fn a_mods_mob_lives_on_horizons_blocks() {
         "on the grass: {:?}",
         moobloom.pos
     );
+    // Phase 6d.2: its own renderer draws it, with its own texture, within its box (the
+    // quads are relative to where it stands).
+    let drawn: serde_json::Value = serde_json::from_str(
+        &runtime
+            .render_entities(&world, "minecraft:overworld")
+            .expect("its look"),
+    )
+    .unwrap();
+    let meshes = drawn[id.to_string()]
+        .as_array()
+        .expect("a look for the moobloom");
+    let textures: Vec<&str> = meshes.iter().filter_map(|m| m["tex"].as_str()).collect();
+    eprintln!(
+        "the moobloom draws {} vertices of {textures:?}",
+        meshes
+            .iter()
+            .map(|m| m["v"].as_array().map_or(0, Vec::len) / 9)
+            .sum::<usize>()
+    );
+    assert!(
+        textures
+            .iter()
+            .any(|t| t.starts_with("friendsandfoes:textures/entity/moobloom")),
+        "{textures:?}"
+    );
+    for mesh in meshes {
+        for v in mesh["v"].as_array().unwrap().chunks(9) {
+            let [x, y, z] = [0, 1, 2].map(|i| v[i].as_f64().unwrap());
+            assert!(
+                x.abs() < 1.5 && z.abs() < 1.5 && (-0.2..3.0).contains(&y),
+                "{x} {y} {z}"
+            );
+        }
+    }
     // Vanilla's fall damage for five blocks (fallDistance 5 - 3): 10 health down to 8.
     assert_eq!(
         moobloom.health,

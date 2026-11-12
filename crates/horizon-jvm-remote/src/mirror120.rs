@@ -952,6 +952,31 @@ impl Runtime120 {
         })
     }
 
+    /// What the mods' entities in `dimension` look like this tick, as their own renderers draw
+    /// them: JSON `{id: [{"tex", "o", "v"}...]}`, each mesh's vertices nine numbers each (x y z
+    /// relative to the entity, u v in the texture, the normal, ARGB), "o" its packed overlay.
+    pub fn render_entities(
+        &mut self,
+        world: &dyn World120,
+        dimension: &str,
+    ) -> Result<String, String> {
+        let mut handler = InWorld {
+            world,
+            set: Vec::new(),
+            block_entities: Vec::new(),
+            spawned: Vec::new(),
+            log: self.log.clone(),
+        };
+        let args = [Value::Str(dimension.to_owned())];
+        match self
+            .call_values("renderEntities", &args, &mut handler)?
+            .first()
+        {
+            Some(Value::Str(json)) => Ok(json.clone()),
+            other => Err(format!("renderEntities: answer 0 is {other:?}")),
+        }
+    }
+
     /// The mods' placed features (of their own namespaces), which [`Self::place_feature`]
     /// places where Horizon's generator can't.
     pub fn mod_features(&mut self) -> Result<Vec<String>, String> {

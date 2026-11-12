@@ -38,6 +38,7 @@
     "GuiGraphicsMixin",
     "GraphLibClientMixin",
     "InputConstantsMixin",
+    "EntityRenderersAccess",
     "KeyMappingAccess",
     "SpriteContentsMixin",
     "LocalPlayerAccess",
