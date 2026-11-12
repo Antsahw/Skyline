@@ -274,11 +274,18 @@ pub fn upgrade_recipe(recipe: &mut Value) -> bool {
     true
 }
 
-/// Block and item ids vanilla renamed after 1.21.1, as its datafixers
-/// rename them in worlds (DataVersion 4541: the chain became the iron chain
-/// when copper chains came in). A data file naming the old id fails to load
-/// in 26.3: a recipe, a loot entry, a processor's block match.
-const RENAMED_IDS: [(&str, &str); 1] = [("minecraft:chain", "minecraft:iron_chain")];
+/// Block and item ids vanilla renamed, as its datafixers rename them in
+/// worlds: the chain became the iron chain when copper chains came in
+/// (DataVersion 4541); the grass became the short grass (1.20.3, 3692) and
+/// the scute the turtle scute (1.20.5, 3814), which a mod's data for 1.20.1
+/// still names. A data file naming the old id fails to load in 26.3: a
+/// recipe, a loot entry, a processor's block match (Towns and Towers' forest
+/// ruins, whose whole pool was left out).
+const RENAMED_IDS: [(&str, &str); 3] = [
+    ("minecraft:chain", "minecraft:iron_chain"),
+    ("minecraft:grass", "minecraft:short_grass"),
+    ("minecraft:scute", "minecraft:turtle_scute"),
+];
 
 /// Every string of a data file that is a renamed id ([`RENAMED_IDS`]) set to
 /// the new one, in place; whether any was.
@@ -1758,6 +1765,18 @@ mod tests {
             "minecraft:iron_chain"
         ]);
         assert!(!renamed_ids(&mut other));
+        // A 1.20.1 mod's processor (Towns and Towers' forest ruins) naming the grass of then;
+        // the grass block is not the grass.
+        let mut ruins = json!({"input_predicate": {"predicate_type":
+            "minecraft:random_block_match", "block": "minecraft:grass", "probability": 0.5},
+            "location_predicate": {"predicate_type": "minecraft:block_match",
+            "block": "minecraft:grass_block"}});
+        assert!(renamed_ids(&mut ruins));
+        assert_eq!(ruins["input_predicate"]["block"], "minecraft:short_grass");
+        assert_eq!(
+            ruins["location_predicate"]["block"],
+            "minecraft:grass_block"
+        );
     }
 
     #[test]

@@ -16,8 +16,9 @@ use std::path::{Path, PathBuf};
 /// The version of what this module writes: bump it when the facts or the carry-over change.
 /// 3: nested mods are inventoried whether or not they ship textures ([`nested_jars`]), so a
 /// cache built before this holds none of a library mod's blocks. 5: the mods' Fabric biome
-/// changes are written as biome modifiers ([`biome_modifiers`]).
-const FORMAT: u32 = 5;
+/// changes are written as biome modifiers ([`biome_modifiers`]). 6: the carry-over renames the
+/// ids vanilla renamed since 1.20.1 (`minecraft:grass`) in the mods' data.
+const FORMAT: u32 = 6;
 
 /// The stamp of a set of jars: their names, sizes and modification times, and [`FORMAT`].
 pub fn stamp(jars: &[PathBuf]) -> String {

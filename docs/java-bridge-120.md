@@ -356,6 +356,29 @@ clicks pass until then). A click on a block of a 1.20.1 mod's namespace, or with
 their items, goes to it at `useItemOn`'s head (`java120_use_block`, beside the 26.3 bridge's
 hook in `lan_actions.rs`); what it set and what it did to the held stack land in Horizon.
 
+## Phase 6c status: the mods' structures (2026-11-12)
+
+The content build already carries a 1.20.1 mod's data-driven structures: its structures,
+structure sets, template pools, processor lists and `.nbt` templates, from 1.20.1's folders to
+26.3's. Two things kept them from generating whole:
+
+- **1.20.1's names in the data.** A processor rule naming `minecraft:grass` (`short_grass`
+  since 1.20.3) failed its list, and with it every pool that named the list: Towns and Towers'
+  forest ruins were left out. The carry-over renames the ids vanilla renamed (`grass`, `scute`,
+  and `chain` as before) in a mod's data.
+- **Templates read as saved.** Vanilla brings a template from its `DataVersion` up to its own
+  (`StructureTemplateManager.readStructure`): the palettes' states, the blocks' block entities,
+  the entities. Horizon read a template as it was, so a 1.20.1 template's renamed blocks were
+  air. `worldgen::structure::upgrade_template` now runs vanilla's fixes on it first.
+
+Checked in a game with Towns and Towers 1.12 and Cristel Lib:
+- No warnings at load.
+- `/locate` finds its villages and outposts.
+- The forest village at -704 256 stands in mossy cobblestone and stone bricks, with its chests.
+
+Structures written in Java (YUNG's, Repurposed Structures' own piece types) are not
+placed yet.
+
 ## Phase 6b status: the mods' own feature types, placed by their own code (2026-11-12)
 
 A feature of a mod's own type (Farmer's Delight's `wild_crop`, its mushroom colonies, a mod's
@@ -943,7 +966,8 @@ NeoForge could run beside Fabric 26.3 rather than in its place.
    mods' HUD overlays (`HudRenderCallback`).
 6. **Entities and worldgen.** 6a done: the mods' Fabric biome modifications reach Horizon's
    generator as biome modifiers. 6b done: a mod's own feature types run in the runtime on the
-   chunks being decorated (above). Next: the mods' structures, their biomes, and their mobs.
+   chunks being decorated. 6c done: data-driven structures (above). Next: structures with
+   their own Java pieces, the mods' biomes, and their mobs.
 7. **In-world rendering.** `VertexConsumer` capture, then a GL recorder if needed.
 8. **Tracker.** Started with phase 1b (boots: 149 of the top 150). It grows into "works in a
    world" as the phases land: works / partial / broken / needs Java 21 / needs an older loader.

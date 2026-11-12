@@ -383,7 +383,8 @@ impl StructureResources {
                 flate2::read::GzDecoder::new(bytes.as_slice())
                     .read_to_end(&mut raw)
                     .ok()?;
-                let tag = nbt::read_named(&raw, Limits::templates()).ok()?.0.tag;
+                let mut tag = nbt::read_named(&raw, Limits::templates()).ok()?.0.tag;
+                upgrade_template(&mut tag);
                 Some(StructureTemplate::from_nbt(
                     &tag,
                     self.registry,
@@ -413,5 +414,96 @@ impl StructureResources {
     }
     pub fn is_jigsaw(&self, state: BlockStateId) -> bool {
         self.jigsaw_states.contains_key(&state)
+    }
+}
+
+/// `DataFixTypes.STRUCTURE.updateToCurrentVersion`, as `StructureTemplateManager.readStructure`
+/// runs it: a template saved by an older version (a mod's for 1.20.1) has its palettes' states,
+/// its blocks' block entities and its entities brought up from its `DataVersion` (500 when it
+/// has none). A block renamed since (`minecraft:grass`) is then found, not read as air.
+pub(crate) fn upgrade_template(tag: &mut nbt::Tag) {
+    use crate::datafix::{self, schema::Ty};
+    let nbt::Tag::Compound(root) = tag else {
+        return;
+    };
+    let from = match root.get(&nbt::JavaString::from("DataVersion")) {
+        Some(nbt::Tag::Int(v)) => *v,
+        _ => 500,
+    };
+    let to = horizon_core::version::DATA_VERSION;
+    if from >= to {
+        return;
+    }
+    let fix = |ty: Ty, value: &mut nbt::Tag| datafix::update(ty, value, from, to);
+    if let Some(nbt::Tag::List(palette)) = root.get_mut(&nbt::JavaString::from("palette")) {
+        for state in palette.iter_mut() {
+            fix(Ty::BlockState, state);
+        }
+    }
+    if let Some(nbt::Tag::List(palettes)) = root.get_mut(&nbt::JavaString::from("palettes")) {
+        for palette in palettes.iter_mut() {
+            if let nbt::Tag::List(palette) = palette {
+                for state in palette.iter_mut() {
+                    fix(Ty::BlockState, state);
+                }
+            }
+        }
+    }
+    for (key, inner, ty) in [
+        ("blocks", "nbt", Ty::BlockEntity),
+        ("entities", "nbt", Ty::EntityTree),
+    ] {
+        if let Some(nbt::Tag::List(list)) = root.get_mut(&nbt::JavaString::from(key)) {
+            for entry in list.iter_mut() {
+                if let nbt::Tag::Compound(entry) = entry
+                    && let Some(value) = entry.get_mut(&nbt::JavaString::from(inner))
+                {
+                    fix(ty, value);
+                }
+            }
+        }
+    }
+    root.insert(nbt::JavaString::from("DataVersion"), nbt::Tag::Int(to));
+}
+
+#[cfg(test)]
+mod upgrade_tests {
+    use crate::nbt::{JavaString, Tag};
+
+    fn state(name: &str) -> Tag {
+        Tag::Compound([(JavaString::from("Name"), Tag::String(name.into()))].into())
+    }
+
+    /// A 1.20.1 template (DataVersion 3465) naming the grass of then: vanilla's fixes read it as
+    /// the short grass of now; a template of this version is left as it is.
+    #[test]
+    fn an_old_template_names_its_blocks_as_now() {
+        let mut tag = Tag::Compound(
+            [
+                (JavaString::from("DataVersion"), Tag::Int(3465)),
+                (
+                    JavaString::from("palette"),
+                    Tag::List(vec![state("minecraft:grass"), state("minecraft:stone")]),
+                ),
+            ]
+            .into(),
+        );
+        super::upgrade_template(&mut tag);
+        let names: Vec<String> = match tag.get("palette") {
+            Some(Tag::List(p)) => p
+                .iter()
+                // 26.3's shape: `id` (the fixes rename `Name` too).
+                .map(|s| match s.get("id") {
+                    Some(Tag::String(n)) => n.to_string_lossy(),
+                    _ => String::new(),
+                })
+                .collect(),
+            _ => Vec::new(),
+        };
+        assert_eq!(names, ["minecraft:short_grass", "minecraft:stone"]);
+        assert_eq!(
+            tag.get("DataVersion"),
+            Some(&Tag::Int(horizon_core::version::DATA_VERSION))
+        );
     }
 }
