@@ -106,6 +106,9 @@ public final class Boot120 implements RemoteRuntime {
             case "screenFrame":
                 // A frame of the screen of a player's open menu (Mirror120, Screens120).
                 return mirror("screenFrame", args);
+            case "packetProbe":
+                // A round trip through the mods' packets, for the tests (Mirror120, Packets120).
+                return mirror("packetProbe", args);
             case "serverTick":
                 // One server tick: Fabric API's tick and lifecycle events (Mirror120, Events120).
                 return mirror("serverTick", args);

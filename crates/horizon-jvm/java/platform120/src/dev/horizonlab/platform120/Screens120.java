@@ -295,6 +295,31 @@ public final class Screens120 {
         }
     }
 
+    /** The server player the headless client's player stands in for now. */
+    private static volatile net.minecraft.server.level.ServerPlayer standingIn;
+
+    private static final java.util.Set<String> CLIENT_OPENED = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    /**
+     * The client half opened a screen itself (MinecraftMixin). A container screen is the one
+     * {@link #open} makes from the server's menu; any other kind is said once per class: not
+     * shown on Horizon yet.
+     */
+    public static void clientOpened(net.minecraft.client.gui.screens.Screen screen) {
+        if (screen == null || screen instanceof net.minecraft.client.gui.screens.inventory.AbstractContainerScreen<?>) {
+            return;
+        }
+        if (CLIENT_OPENED.add(screen.getClass().getName())) {
+            System.out.println("Screens120: a mod's client opened " + screen.getClass().getName()
+                    + ", which isn't shown on Horizon yet");
+        }
+    }
+
+    /** Who the client half is, for what it sends (Packets120.fromClient). */
+    static net.minecraft.server.level.ServerPlayer standingIn() {
+        return standingIn;
+    }
+
     /** The headless client's player (see {@link #clientPlayer}). */
     private static net.minecraft.client.player.LocalPlayer local;
 
@@ -307,13 +332,18 @@ public final class Screens120 {
      * Horizon doesn't send yet: the book shows none), and the server player's inventory and
      * menus, so it sees what the menu moves.
      */
-    private static synchronized void clientPlayer(net.minecraft.server.level.ServerPlayer player) {
+    static synchronized void clientPlayer(net.minecraft.server.level.ServerPlayer player) {
         var minecraft = net.minecraft.client.Minecraft.getInstance();
         if (local == null) {
             local = Allocate.make(net.minecraft.client.player.LocalPlayer.class);
             ((dev.horizonlab.platform120.mixin.LocalPlayerAccess) local)
                     .horizon$setRecipeBook(new net.minecraft.client.ClientRecipeBook());
+            // Its connection (Minecraft.getConnection): what the client half sends through,
+            // handed to the server half (ClientPacketListenerMixin, Packets120).
+            ((dev.horizonlab.platform120.mixin.LocalPlayerAccess) local).horizon$setConnection(
+                    Allocate.make(net.minecraft.client.multiplayer.ClientPacketListener.class));
         }
+        standingIn = player;
         ((dev.horizonlab.platform120.mixin.PlayerAccess) local).horizon$setInventory(player.getInventory());
         ((dev.horizonlab.platform120.mixin.PlayerAccess) local).horizon$setInventoryMenu(player.inventoryMenu);
         local.containerMenu = player.containerMenu;

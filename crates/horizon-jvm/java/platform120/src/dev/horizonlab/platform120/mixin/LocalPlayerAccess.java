@@ -12,4 +12,8 @@ public interface LocalPlayerAccess {
     @Mutable
     @Accessor("recipeBook")
     void horizon$setRecipeBook(ClientRecipeBook book);
+
+    @org.spongepowered.asm.mixin.Mutable
+    @Accessor("connection")
+    void horizon$setConnection(net.minecraft.client.multiplayer.ClientPacketListener connection);
 }

@@ -12,15 +12,18 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * and tells them about the world itself; a mod sending its own packet here has nobody to send
  * it to, and the listener has no connection behind it, so vanilla's send would throw.
  *
- * <p>Mod packets reaching the player are phase 5. Until then a mod that sends one is not
- * broken by it: WiredRedstone places a cable, tells the watching players about it, and the
- * telling simply goes nowhere.
+ * <p>A mod's own payload goes to its client half, in this same runtime (Packets120): the
+ * headless client's receiver for that channel runs, standing in for this player.
  */
 @Mixin(ServerGamePacketListenerImpl.class)
 public abstract class ServerGamePacketListenerMixin {
+    @org.spongepowered.asm.mixin.Shadow
+    public net.minecraft.server.level.ServerPlayer player;
+
     @Inject(method = "send(Lnet/minecraft/network/protocol/Packet;)V",
             at = @At("HEAD"), cancellable = true)
     private void horizon$send(Packet<?> packet, CallbackInfo ci) {
+        dev.horizonlab.platform120.Packets120.toClient(this.player, packet);
         ci.cancel();
     }
 
@@ -28,6 +31,7 @@ public abstract class ServerGamePacketListenerMixin {
             at = @At("HEAD"), cancellable = true)
     private void horizon$sendWithListener(Packet<?> packet,
             net.minecraft.network.PacketSendListener listener, CallbackInfo ci) {
+        dev.horizonlab.platform120.Packets120.toClient(this.player, packet);
         ci.cancel();
     }
 }

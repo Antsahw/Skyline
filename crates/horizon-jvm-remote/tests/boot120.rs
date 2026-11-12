@@ -1152,6 +1152,24 @@ fn right_clicking_a_block_runs_its_1_20_1_code_on_horizons_blocks() {
         "the stone is placed on top: {placed:?}"
     );
 
+    // Phase 5c: the mods' own packets between their two halves, both in this runtime. The
+    // server sends a player 41; the client half's receiver (on Minecraft.execute, as mods hand
+    // their work on) answers 42; the server's receiver (on the server's execute) gets it.
+    // Fabric's canSend says yes both ways.
+    let probe = runtime
+        .packet_probe(&world, "00000000-0000-0000-0000-00000000c0de", "Prober")
+        .expect("the packet probe");
+    assert_eq!(
+        probe,
+        horizon_jvm_remote::mirror120::PacketProbe {
+            client_got: Some(41),
+            server_got: Some(42),
+            can_send_down: true,
+            can_send_up: true,
+        },
+        "a packet down and its answer up"
+    );
+
     // Phase 5b: a server tick. The mods hear the server start (once) and each tick through
     // Fabric API's ServerTickEvents, each listener on its own; a mod that listens says so.
     // GraphLib (inside Wired Redstone) ticks its graphs at the end of each level tick.

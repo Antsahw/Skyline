@@ -38,8 +38,8 @@ not a working machine, and almost every content mod has at least one screen.
 
 | What the mod does | Status | Where |
 |---|---|---|
-| Mod packets between server and client | **not yet** | phase 5 |
-| Fabric API events (block break, player tick, server start…) | **partial** | phase 5a/5b: block breaks (a mod's block broken by its own code, break events on every block), server start and level load, server and level ticks; players joining and mod packets next |
+| Mod packets between server and client | **done** | phase 5c: both halves in one runtime, each packet handed to the other half's receiver |
+| Fabric API events (block break, player tick, server start…) | **partial** | phase 5a/5b: block breaks (a mod's block broken by its own code, break events on every block), server start and level load, server and level ticks, players joining; players leaving and a client tick next |
 | Items moving between mod blocks and Horizon's (hoppers, pipes) | **partial** | phase 3e: Horizon's hoppers and droppers feed and empty mods' blocks (Transfer API), checked in a real game; mods' own pipes into Horizon's containers unverified |
 | Energy (Team Reborn Energy) and fluids | **not yet** | phase 3 |
 | Mod mobs and their AI | **not yet** | phase 6 |
@@ -71,15 +71,15 @@ A 1.20.1 mod is **fully supported** when all of this is true of it:
 3. Its blocks behave: placing, breaking, clicking, ticking, keeping state. *(done)*
 4. Its blocks look right, including ones drawn by code. *(phase 7)*
 5. Its screens open, draw, and respond to clicks and keys. *(phase 4: done, checked in a real game)*
-6. Its messages reach the player and back. *(phase 5)*
+6. Its messages reach the player and back. *(phase 5c: done)*
 7. Its items and fluids move through other mods' and Horizon's containers. *(phase 3: items through Horizon's hoppers done; fluids, energy and mods' pipes next)*
 8. Its mobs spawn, move, fight and are fought. *(phase 6)*
 9. Its worldgen appears in new chunks. *(phase 6)*
 10. Its client bits work: keys, HUD, config. *(phase 4 + 5)*
 11. None of the above costs more than a few frames a second. *(measured per phase)*
 
-Points 1–3 and 5 are done. Point 7 is partly done (items through Horizon's hoppers). Points 4,
-6 and 8–10 are the rest of the roadmap.
+Points 1–3, 5 and 6 are done. Point 7 is partly done (items through Horizon's hoppers). Points
+4 and 8–10 are the rest of the roadmap.
 
 ## How to find out where a mod stands
 

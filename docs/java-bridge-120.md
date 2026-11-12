@@ -356,6 +356,42 @@ clicks pass until then). A click on a block of a 1.20.1 mod's namespace, or with
 their items, goes to it at `useItemOn`'s head (`java120_use_block`, beside the 26.3 bridge's
 hook in `lan_actions.rs`); what it set and what it did to the held stack land in Horizon.
 
+## Phase 5c status: mods' packets, and players joining (2026-11-12)
+
+- **A mod's two halves talk.** In 1.20.1 a mod's server half and client half exchange custom
+  payloads: a machine's live numbers to its screen, config to a player who joins, a screen's
+  button back to the server. Both halves run in this one runtime (the server half on the
+  mirror, the client half in the headless client), so `Packets120` hands each packet to the
+  other half's receiver, through Fabric API's own registries of them
+  (`ServerNetworkingImpl.PLAY`, `ClientNetworkingImpl.PLAY`), with a copy of its bytes. A
+  packet to a player runs the client receiver with the headless client standing in for that
+  player; a packet the client half sends runs the server receiver as that player.
+- **Where they're caught**: the mirror player's `ServerGamePacketListenerImpl.send` (anything
+  the server half sends a player) and the headless client's `ClientPacketListener.send`
+  (anything the client half sends); Fabric's `canSend` and `getSender` on both sides answer for
+  connections Fabric never set up. Vanilla's own packets to a player stay Horizon's business.
+- **Work handed on runs now.** Nearly every receiver hands its work to `Minecraft.execute` or
+  `MinecraftServer.execute`; neither runs a loop here, so the work runs on the call that asked
+  (`BlockableEventLoopMixin`).
+- **Players joining**: Fabric's `ServerPlayConnectionEvents` INIT and JOIN fire when Horizon's
+  player first reaches the mods' code, with a sender that reaches their client half: what a
+  mod sends a joining player arrives. The mirror player's connection now names its player and
+  has a (channel-less) network connection, which Porting Lib asks about on join.
+- **A screen the client half opens itself** (`Minecraft.setScreen`, as Porting Lib's
+  `open_screen` packet does) is not shown twice: a container's is the one `Screens120` makes
+  from the server's menu; another kind is said once and not shown on Horizon yet.
+
+The runtime test sends a player 41 through `ServerPlayNetworking.send`; the client receiver
+answers 42 through `ClientPlayNetworking.send`; the server receiver gets it; both `canSend`s
+say yes; each receiver hands its work on through `execute`, as mods do. No packet or join
+listener fails on Anthony's mods (Farmer's Delight Refabricated, Wired Redstone). On the
+15-mod set, TechReborn's ore-depth sync (it asks the world generator, phase 6) and one of
+Supplementaries' join listeners still fail, each said once and skipped.
+
+Not done: a mod's own non-container client screens (shown on Horizon), players leaving
+(DISCONNECT), and packets the mods' client half sends from its own tick (there is no client
+tick yet).
+
 ## Phase 5b status: the server starts and ticks for the mods (2026-11-11)
 
 - **Fabric API's server events** fire in the runtime as a real server fires them
@@ -805,8 +841,9 @@ NeoForge could run beside Fabric 26.3 rather than in its place.
 4. **gui120.** Started (Phase 4 status): menus open, a mod's own screen is shown in the game and
    takes clicks and keys, with counts and tooltips. Next: the first check in a real game,
    tooltip images, `setColor` tints, real text widths, a stack's components into the runtime.
-5. **Events and networking.** 5a done: block breaks. 5b done: lifecycle and tick events
-   (above). Next: players joining, mod packets.
+5. **Events and networking.** 5a done: block breaks. 5b done: lifecycle and tick events. 5c
+   done: mods' packets between their halves, players joining (above). Next: players leaving,
+   a client tick, mods' own client screens.
 6. **Entities and worldgen.** Data-driven registries from a real server load (mods' biomes
    through Fabric's biome API show up only there).
 7. **In-world rendering.** `VertexConsumer` capture, then a GL recorder if needed.

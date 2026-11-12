@@ -305,12 +305,18 @@ public final class Mirror120 {
             // connection a mirror player has not got (ServerGamePacketListenerMixin).
             player.connection = Allocate.make(
                     net.minecraft.server.network.ServerGamePacketListenerImpl.class);
+            // Whose connection it is: a packet sent through it goes to this player's client
+            // half (ServerGamePacketListenerMixin, Packets120).
+            player.connection.player = player;
+            ((dev.horizonlab.platform120.mixin.ServerGamePacketListenerAccess) player.connection)
+                    .horizon$setConnection(Allocate.make(net.minecraft.network.Connection.class));
             PLAYERS.put(id, player);
             // On the server's player list, as a player who joined is: a mod's tick looking for
             // the players (getPlayers, getPlayer by UUID) finds Horizon's.
             playerList.getPlayers().add(player);
             ((dev.horizonlab.platform120.mixin.PlayerListAccess) playerList).horizon$setPlayersByUUID(
                     playersByUuid());
+            Events120.joined(server, player);
         }
         if (player.level() != level) player.setServerLevel(level);
         return player;
@@ -319,6 +325,55 @@ public final class Mirror120 {
     private static Map<UUID, ServerPlayer> playersByUuid() {
         var map = new java.util.concurrent.ConcurrentHashMap<UUID, ServerPlayer>(PLAYERS);
         return map;
+    }
+
+    private static volatile int probeClientGot = -1;
+    private static volatile int probeServerGot = -1;
+    private static boolean probeRegistered;
+
+    /**
+     * A round trip through Fabric's networking, for the tests: the server sends `uuid`'s player
+     * 41 on `horizon:probe_down`; the client half's receiver (on Minecraft's execute, as mods
+     * hand their work on) sends back one more on `horizon:probe_up`, which the server's receiver
+     * (on the server's execute) keeps. Gives what each side got (-1: nothing) and whether each
+     * side could say it can send (canSend). The receivers are registered on the first call.
+     */
+    public static Object[] packetProbe(String uuid, String name) {
+        begin();
+        try {
+            ServerLevel level = level("minecraft:overworld");
+            ServerPlayer player = player(uuid, name, level);
+            ResourceLocation down = new ResourceLocation("horizon", "probe_down");
+            ResourceLocation up = new ResourceLocation("horizon", "probe_up");
+            if (!probeRegistered) {
+                probeRegistered = true;
+                net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking.registerGlobalReceiver(down,
+                        (client, handler, buf, sender) -> {
+                            int got = buf.readVarInt();
+                            client.execute(() -> {
+                                probeClientGot = got;
+                                var reply = new net.minecraft.network.FriendlyByteBuf(io.netty.buffer.Unpooled.buffer());
+                                reply.writeVarInt(got + 1);
+                                net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking.send(up, reply);
+                            });
+                        });
+                net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.registerGlobalReceiver(up,
+                        (server, from, handler, buf, sender) -> {
+                            int got = buf.readVarInt();
+                            server.execute(() -> probeServerGot = got);
+                        });
+            }
+            probeClientGot = -1;
+            probeServerGot = -1;
+            boolean canDown = net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.canSend(player, down);
+            var buf = new net.minecraft.network.FriendlyByteBuf(io.netty.buffer.Unpooled.buffer());
+            buf.writeVarInt(41);
+            net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.send(player, down, buf);
+            boolean canUp = net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking.canSend(up);
+            return new Object[] {probeClientGot, probeServerGot, canDown, canUp};
+        } finally {
+            finish();
+        }
     }
 
     /**

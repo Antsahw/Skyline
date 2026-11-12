@@ -85,6 +85,22 @@ final class Events120 {
         fire(ServerWorldEvents.LOAD, "level load", l -> l.onWorldLoad(server, level));
     }
 
+    /**
+     * A player joins, as the 1.20.1 mods know players: when Horizon's player first reaches the
+     * mods' code (their first click, break, screen or tick with them in it). Fabric API's
+     * ServerPlayConnectionEvents INIT then JOIN, with a sender that reaches the player's client
+     * half in this runtime (Packets120): what a mod sends a player who joins (its config, its
+     * synced data) arrives.
+     */
+    static void joined(MinecraftServer server, net.minecraft.server.level.ServerPlayer player) {
+        var connection = player.connection;
+        var sender = Packets120.serverSender(player);
+        fire(net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents.INIT, "player init",
+                l -> l.onPlayInit(connection, server));
+        fire(net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents.JOIN, "player join",
+                l -> l.onPlayReady(connection, sender, server));
+    }
+
     static boolean started() {
         return started;
     }

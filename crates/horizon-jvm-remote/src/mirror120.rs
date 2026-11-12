@@ -113,6 +113,15 @@ fn stance_values(stance: Option<Stance>) -> [Value; 5] {
     }
 }
 
+/// What [`Runtime120::packet_probe`] saw.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PacketProbe {
+    pub client_got: Option<i32>,
+    pub server_got: Option<i32>,
+    pub can_send_down: bool,
+    pub can_send_up: bool,
+}
+
 /// What a server tick's events did ([`Runtime120::server_tick`]).
 #[derive(Clone, Debug, PartialEq)]
 pub struct ServerTicked {
@@ -524,6 +533,40 @@ impl Runtime120 {
             set: handler.set,
             block_entities: handler.block_entities,
             spawned: handler.spawned,
+        })
+    }
+
+    /// A round trip through the mods' own packets, for tests: the server sends `uuid`'s player
+    /// 41, the client half's receiver answers 42, the server's receiver keeps it. What each side
+    /// got (`None`: nothing), and whether each side's `canSend` said yes.
+    pub fn packet_probe(
+        &mut self,
+        world: &dyn World120,
+        uuid: &str,
+        name: &str,
+    ) -> Result<PacketProbe, String> {
+        let mut handler = InWorld {
+            world,
+            set: Vec::new(),
+            block_entities: Vec::new(),
+            spawned: Vec::new(),
+            log: self.log.clone(),
+        };
+        let values = self.call_values(
+            "packetProbe",
+            &[Value::Str(uuid.to_owned()), Value::Str(name.to_owned())],
+            &mut handler,
+        )?;
+        let int = |i: usize| match values.get(i) {
+            Some(Value::I32(n)) if *n >= 0 => Some(*n),
+            _ => None,
+        };
+        let yes = |i: usize| matches!(values.get(i), Some(Value::Bool(true)));
+        Ok(PacketProbe {
+            client_got: int(0),
+            server_got: int(1),
+            can_send_down: yes(2),
+            can_send_up: yes(3),
         })
     }
 
