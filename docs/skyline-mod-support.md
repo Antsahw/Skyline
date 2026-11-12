@@ -43,7 +43,7 @@ not a working machine, and almost every content mod has at least one screen.
 | Items moving between mod blocks and Horizon's (hoppers, pipes) | **partial** | phase 3e: Horizon's hoppers and droppers feed and empty mods' blocks (Transfer API), checked in a real game; mods' own pipes into Horizon's containers unverified |
 | Energy (Team Reborn Energy) and fluids | **not yet** | phase 3 |
 | Mod mobs and their AI | **not yet** | phase 6 |
-| Worldgen: ores, biomes, structures | **not yet** | phase 6 |
+| Worldgen: ores, biomes, structures | **partial** | phase 6a: the features mods add to vanilla's biomes through Fabric's biome API generate when they are of vanilla's types (ores, patches); a mod's own feature types (FD's wild crops) are next (6b); mods' structures and biomes not yet |
 | Mod dimensions | **not yet** | phase 6 |
 | Keybinds and HUD overlays (minimaps, tooltips, info bars) | **partial** | phase 5e: mods' key bindings reach them (pressed in Horizon, clicked in 1.20.1's client tick); HUD overlays not yet |
 | Config screens (Cloth Config and friends) | **not yet** | phase 4 |
@@ -74,7 +74,7 @@ A 1.20.1 mod is **fully supported** when all of this is true of it:
 6. Its messages reach the player and back. *(phase 5c: done)*
 7. Its items and fluids move through other mods' and Horizon's containers. *(phase 3: items through Horizon's hoppers done; fluids, energy and mods' pipes next)*
 8. Its mobs spawn, move, fight and are fought. *(phase 6)*
-9. Its worldgen appears in new chunks. *(phase 6)*
+9. Its worldgen appears in new chunks. *(phase 6a: vanilla-type features; 6b: the mod's own feature types)*
 10. Its client bits work: keys, HUD, config. *(keys: phase 5e, done; HUD and config next)*
 11. None of the above costs more than a few frames a second. *(measured per phase)*
 

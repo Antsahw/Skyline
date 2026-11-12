@@ -786,6 +786,11 @@ public final class Mirror120 {
      * mod registers them: `key.horizon.probe` on K, and a listener counting its clicks
      * (consumeClick) in each client tick. Gives the clicks counted so far.
      */
+    /** The mods' biome modifications as data (Worldgen120.biomeChanges). */
+    public static Object[] biomeChanges() {
+        return new Object[] {Worldgen120.biomeChanges()};
+    }
+
     public static Object[] keyProbe() {
         if (!keyProbeRegistered) {
             keyProbeRegistered = true;

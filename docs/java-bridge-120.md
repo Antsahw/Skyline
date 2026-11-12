@@ -356,6 +356,25 @@ clicks pass until then). A click on a block of a 1.20.1 mod's namespace, or with
 their items, goes to it at `useItemOn`'s head (`java120_use_block`, beside the 26.3 bridge's
 hook in `lan_actions.rs`); what it set and what it did to the held stack land in Horizon.
 
+## Phase 6a status: the mods' features placed in vanilla's biomes (2026-11-12)
+
+A Fabric mod puts its ores and plants into vanilla's biomes in code, through Fabric API's
+`BiomeModifications`, which a real server applies as it starts. Now:
+
+- The runtime applies them to its worldgen registries (vanilla's and the mods' data, loaded as a
+  server does) and compares each biome's feature lists with what they were
+  (`Worldgen120.biomeChanges`).
+- The content build writes what was added and taken away as NeoForge biome modifiers in the
+  carried mods (`content120::biome_modifiers`). Horizon's content build already reads those into
+  its biomes' feature lists, and its generator orders them as vanilla's `FeatureSorter` does.
+- A feature a mod registers in code, so that no carried mod has its file, is written from the
+  runtime's own encoding of it.
+
+Features of vanilla's types (ores, most patches, trees from vanilla's parts) now generate in
+new chunks. Features of a mod's own type (Farmer's Delight's `wild_crop`, its mushroom colonies)
+are skipped by the generator ("placed features cannot run"); 6b runs those in the runtime. In a
+game with Anthony's set: 78 modifications to 41 biomes, 11 modifiers, FD's 9 patches skipped.
+
 ## Phase 5e status: mods' key bindings and the client tick (2026-11-12)
 
 - **The keys the 1.20.1 mods bind** (Fabric's `KeyBindingHelper` registry, read by
@@ -888,8 +907,9 @@ NeoForge could run beside Fabric 26.3 rather than in its place.
    done: mods' packets between their halves, players joining. 5d done: items used, mods' own
    screens, players leaving. 5e done: mods' key bindings and the client tick (above). Left:
    mods' HUD overlays (`HudRenderCallback`).
-6. **Entities and worldgen.** Data-driven registries from a real server load (mods' biomes
-   through Fabric's biome API show up only there).
+6. **Entities and worldgen.** 6a done: the mods' Fabric biome modifications reach Horizon's
+   generator as biome modifiers (above). Next: 6b, a mod's own feature types run in the
+   runtime on the chunk being decorated; then structures, mods' biomes, and mobs.
 7. **In-world rendering.** `VertexConsumer` capture, then a GL recorder if needed.
 8. **Tracker.** Started with phase 1b (boots: 149 of the top 150). It grows into "works in a
    world" as the phases land: works / partial / broken / needs Java 21 / needs an older loader.

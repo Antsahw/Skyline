@@ -15,8 +15,9 @@ use std::path::{Path, PathBuf};
 
 /// The version of what this module writes: bump it when the facts or the carry-over change.
 /// 3: nested mods are inventoried whether or not they ship textures ([`nested_jars`]), so a
-/// cache built before this holds none of a library mod's blocks.
-const FORMAT: u32 = 4;
+/// cache built before this holds none of a library mod's blocks. 5: the mods' Fabric biome
+/// changes are written as biome modifiers ([`biome_modifiers`]).
+const FORMAT: u32 = 5;
 
 /// The stamp of a set of jars: their names, sizes and modification times, and [`FORMAT`].
 pub fn stamp(jars: &[PathBuf]) -> String {
@@ -322,6 +323,13 @@ pub fn build(
     // Every jar is carried: its assets and data under its own namespaces.
     let all: Vec<String> = records.iter().map(|r| r.key.clone()).collect();
     horizon_port_pack::pipeline::carry(&work, Some(resources), &all, &log_line)?;
+    let changes = runtime.call_with("biomeChanges", &[])?;
+    let modifiers = biome_modifiers(&changes, &carried(&work));
+    if modifiers > 0 {
+        log(format!(
+            "1.20.1 mods' content: {modifiers} biome modifier(s) from the mods' Fabric biome changes"
+        ));
+    }
     let tabs = creative_tabs(&facts, &carried(&work));
     if tabs > 0 {
         log(format!(
@@ -333,8 +341,178 @@ pub fn build(
     Ok(carried(&work))
 }
 
+/// The mods' Fabric biome changes (platform120's `Worldgen120.biomeChanges`: what each biome's
+/// feature lists gained and lost, step by step, once Fabric API's biome modifications ran) as
+/// NeoForge biome modifiers in the carried mods, which Horizon's content build reads into the
+/// biomes' feature lists (`mod_content_biomes.rs`). Biomes given the same features in a step
+/// share one modifier, in the order the mods added them. A feature a mod registers in code, so
+/// that no carried mod has its file, is written from the runtime's own encoding of it. How many
+/// modifiers were written.
+fn biome_modifiers(changes: &str, carried: &[PathBuf]) -> usize {
+    use std::collections::BTreeMap;
+    let Ok(changes) = serde_json::from_str::<serde_json::Value>(changes) else {
+        return 0;
+    };
+    let owner = |ns: &str| {
+        carried
+            .iter()
+            .find(|c| c.join("data").join(ns).is_dir() || c.join("assets").join(ns).is_dir())
+            .or_else(|| carried.first())
+    };
+    let has_file = |kind: &str, id: &str| {
+        id.split_once(':').is_some_and(|(ns, path)| {
+            carried.iter().any(|c| {
+                c.join("data")
+                    .join(ns)
+                    .join("worldgen")
+                    .join(kind)
+                    .join(format!("{path}.json"))
+                    .is_file()
+            })
+        })
+    };
+    // Features only the runtime has as data.
+    for (kind, key) in [
+        ("placed_feature", "placed"),
+        ("configured_feature", "configured"),
+    ] {
+        for (id, json) in changes[key].as_object().into_iter().flatten() {
+            let Some((ns, path)) = id.split_once(':') else {
+                continue;
+            };
+            if has_file(kind, id) {
+                continue;
+            }
+            let Some(carry) = owner(ns) else { continue };
+            let file = carry
+                .join("data")
+                .join(ns)
+                .join("worldgen")
+                .join(kind)
+                .join(format!("{path}.json"));
+            if let Some(dir) = file.parent()
+                && std::fs::create_dir_all(dir).is_ok()
+            {
+                let _ = std::fs::write(&file, json.to_string());
+            }
+        }
+    }
+    // (kind, step, features) -> biomes.
+    let mut groups: BTreeMap<(&str, String, Vec<String>), Vec<String>> = BTreeMap::new();
+    for (kind, key) in [("add_features", "added"), ("remove_features", "removed")] {
+        for (biome, steps) in changes[key].as_object().into_iter().flatten() {
+            for (step, features) in steps.as_object().into_iter().flatten() {
+                let features: Vec<String> = features
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|f| f.as_str().map(str::to_owned))
+                    .collect();
+                if !features.is_empty() {
+                    groups
+                        .entry((kind, step.clone(), features))
+                        .or_default()
+                        .push(biome.clone());
+                }
+            }
+        }
+    }
+    let mut written = 0;
+    for ((kind, step, features), biomes) in groups {
+        let Some((ns, _)) = features[0].split_once(':') else {
+            continue;
+        };
+        let Some(carry) = owner(ns) else { continue };
+        let modifier = if kind == "add_features" {
+            serde_json::json!({"type": "neoforge:add_features", "biomes": biomes,
+                "features": features, "step": step})
+        } else {
+            serde_json::json!({"type": "neoforge:remove_features", "biomes": biomes,
+                "features": features, "steps": [step]})
+        };
+        let dir = carry.join("data").join(ns).join("neoforge/biome_modifier");
+        if std::fs::create_dir_all(&dir).is_ok()
+            && std::fs::write(
+                dir.join(format!("horizon_120_{written:03}.json")),
+                serde_json::to_string_pretty(&modifier).unwrap_or_default(),
+            )
+            .is_ok()
+        {
+            written += 1;
+        }
+    }
+    written
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_mods_biome_changes_become_biome_modifiers() {
+        let dir = std::env::temp_dir().join(format!("content120-biomes-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let fd = dir.join("fd/carry");
+        let placed = fd.join("data/fd/worldgen/placed_feature");
+        std::fs::create_dir_all(&placed).unwrap();
+        std::fs::write(placed.join("wild_carrots.json"), "{}").unwrap();
+        let changes = serde_json::json!({
+            "added": {
+                "minecraft:plains": {"vegetal_decoration": ["fd:wild_carrots"],
+                                     "underground_ores": ["fd:ore_salt"]},
+                "minecraft:forest": {"vegetal_decoration": ["fd:wild_carrots"]},
+            },
+            "removed": {"minecraft:desert": {"surface_structures": ["minecraft:desert_well"]}},
+            "placed": {"fd:wild_carrots": {"feature": "x"}, "fd:ore_salt": {"feature": "fd:salt"}},
+            "configured": {"fd:salt": {"type": "minecraft:ore"}},
+        });
+        let carried = vec![fd.clone()];
+        assert_eq!(super::biome_modifiers(&changes.to_string(), &carried), 3);
+        let read = |p: &str| -> serde_json::Value {
+            serde_json::from_slice(&std::fs::read(fd.join(p)).unwrap()).unwrap()
+        };
+        // The carried file stays; the ore only the runtime had is written from its encoding.
+        assert_eq!(
+            std::fs::read(placed.join("wild_carrots.json")).unwrap(),
+            b"{}"
+        );
+        assert_eq!(
+            read("data/fd/worldgen/placed_feature/ore_salt.json")["feature"],
+            "fd:salt"
+        );
+        assert_eq!(
+            read("data/fd/worldgen/configured_feature/salt.json")["type"],
+            "minecraft:ore"
+        );
+        // Each in the namespace of its first feature (a vanilla one's under minecraft).
+        let modifiers: Vec<serde_json::Value> = (0..3)
+            .map(|i| {
+                let name = format!("neoforge/biome_modifier/horizon_120_{i:03}.json");
+                let at = if fd.join("data/fd").join(&name).is_file() {
+                    "data/fd"
+                } else {
+                    "data/minecraft"
+                };
+                read(&format!("{at}/{name}"))
+            })
+            .collect();
+        assert!(
+            modifiers.contains(&serde_json::json!({"type": "neoforge:add_features",
+            "biomes": ["minecraft:forest", "minecraft:plains"],
+            "features": ["fd:wild_carrots"], "step": "vegetal_decoration"}))
+        );
+        assert!(
+            modifiers.contains(&serde_json::json!({"type": "neoforge:add_features",
+            "biomes": ["minecraft:plains"], "features": ["fd:ore_salt"],
+            "step": "underground_ores"}))
+        );
+        // A vanilla feature taken away goes in the carried mod there is.
+        assert!(
+            modifiers.contains(&serde_json::json!({"type": "neoforge:remove_features",
+            "biomes": ["minecraft:desert"], "features": ["minecraft:desert_well"],
+            "steps": ["surface_structures"]}))
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn a_mods_own_creative_tab_becomes_its_content_tab_in_english() {
         let dir = std::env::temp_dir().join(format!("content120-tabs-{}", std::process::id()));

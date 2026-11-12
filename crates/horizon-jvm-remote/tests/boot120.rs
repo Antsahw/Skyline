@@ -1263,6 +1263,39 @@ fn right_clicking_a_block_runs_its_1_20_1_code_on_horizons_blocks() {
         "one click"
     );
 
+    // Phase 6a: the mods' Fabric biome modifications, as data: what each biome's feature lists
+    // gained once Fabric API applied them to the runtime's worldgen registries. Farmer's
+    // Delight puts its wild crops into vanilla's biomes this way, in code.
+    let changes: serde_json::Value = serde_json::from_str(
+        &runtime
+            .call_with("biomeChanges", &[])
+            .expect("the mods' biome changes"),
+    )
+    .unwrap();
+    let added: std::collections::BTreeSet<String> = changes["added"]
+        .as_object()
+        .unwrap()
+        .values()
+        .flat_map(|steps| steps.as_object().unwrap().values())
+        .flat_map(|list| list.as_array().unwrap().iter())
+        .map(|f| f.as_str().unwrap().to_owned())
+        .collect();
+    println!("biome changes: {added:?}");
+    if delight.is_some() {
+        let carrots = "farmersdelight:patch_wild_carrots";
+        assert!(added.contains(carrots), "{added:?}");
+        assert!(
+            changes["added"].as_object().unwrap().values().any(|steps| steps
+                ["vegetal_decoration"]
+                .as_array()
+                .is_some_and(|l| l.iter().any(|f| f == carrots))),
+            "the wild carrots are vegetation"
+        );
+        assert!(changes["placed"][carrots]["feature"].is_string());
+    } else if wired.is_some() {
+        assert!(added.is_empty(), "Wired Redstone adds nothing: {added:?}");
+    }
+
     // A mod telling the player about something must not break the mod. Vanilla's chest is the
     // same shape with no mod needed: its `use` opens a menu, which sends a packet through the
     // player's listener, and asks the piglins nearby to take offence, which asks the level for
