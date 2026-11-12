@@ -36,7 +36,10 @@ that cost time, and `tools/java_bridge/` to test headless with screenshots. The 
   first line `> 🤖 Opened by Ludovic's AI agent (Claude), not by Ludovic himself.`, commits
   `Co-Authored-By: Claude <model> <noreply@anthropic.com>`, last line
   `🤖 Generated with [Claude Code](https://claude.com/claude-code)`.
-- Everything players run is Rust. Python/Java only for dev tools and harness drivers in `tools/`.
+- Everything players run is Rust, **except the Java mod bridges**: the JVM that runs Fabric mods,
+  and the bridges' own Java glue in `crates/horizon-jvm/java/` (kept as thin as it can be).
+  Horizon's own behaviour never moves into Java. Python only for dev tools and harness drivers in
+  `tools/`.
 - Horizon-only features follow [docs/design-system.md](docs/design-system.md) and are off by default where
   they would change the vanilla look.
 - Small PRs (< ~500 lines).
