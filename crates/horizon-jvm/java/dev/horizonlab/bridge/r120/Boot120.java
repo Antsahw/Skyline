@@ -114,6 +114,11 @@ public final class Boot120 implements RemoteRuntime {
                 // Blocks whose look is the mods' code, drawn as their models draw them (Models120).
                 if (game == null) throw new IllegalStateException("not started");
                 return mirror(method, args);
+            case "summon":
+            case "tickEntities":
+                // The mods' own entities (Entities120).
+                if (game == null) throw new IllegalStateException("not started");
+                return mirror(method, args);
             case "modFeatures":
             case "placeFeature":
                 // The mods' own features, placed in the chunks Horizon generates (Worldgen120).

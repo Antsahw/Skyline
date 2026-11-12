@@ -6,6 +6,7 @@ import net.minecraft.world.level.chunk.LevelChunk;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
@@ -35,5 +36,20 @@ public abstract class ServerChunkCacheMixin {
     private void horizon$chunk(int x, int z, net.minecraft.world.level.chunk.ChunkStatus status,
             boolean require, CallbackInfoReturnable<ChunkAccess> cir) {
         cir.setReturnValue(null);
+    }
+
+    /**
+     * Packets about an entity to the players tracking it (a mob hurt, a mob's event): a mirror
+     * level tracks nobody; Horizon draws the mods' entities from their snapshots (Entities120).
+     */
+    @Inject(method = {"broadcast", "broadcastAndSend"}, at = @At("HEAD"), cancellable = true)
+    private void horizon$broadcast(CallbackInfo ci) {
+        ci.cancel();
+    }
+
+    /** A mirror level tracks no entity: one added or removed changes nothing here. */
+    @Inject(method = {"addEntity", "removeEntity"}, at = @At("HEAD"), cancellable = true)
+    private void horizon$track(CallbackInfo ci) {
+        ci.cancel();
     }
 }

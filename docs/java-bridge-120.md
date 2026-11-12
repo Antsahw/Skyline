@@ -356,6 +356,31 @@ clicks pass until then). A click on a block of a 1.20.1 mod's namespace, or with
 their items, goes to it at `useItemOn`'s head (`java120_use_block`, beside the 26.3 bridge's
 hook in `lan_actions.rs`); what it set and what it did to the held stack land in Horizon.
 
+## Phase 6d status: the mods' own mobs (2026-11-12, in progress)
+
+Tested with Friends & Foes 5.0.4 (its moobloom), which uses plain models, no GeckoLib.
+
+**6d.1, done: they live in the runtime.** A mod's entity (not vanilla's, which are Horizon's) put
+into a mirror level lives there (`Entities120`, the level's `LevelEntityGetter`, so mobs see
+each other), with ids of its own range (`0x7ffe0000` and up). `summon` makes one as `/summon`
+does (`finalizeSpawn` with `COMMAND`). `tickEntities` ticks a level's entities with their own
+code and says where each is after.
+
+What a mob needed of a mirror level:
+- A profiler: its goal selector profiles into the level's (the inactive one).
+- Damage sources, for fall damage.
+- Collisions: `Level.getChunkForCollisions` answers with the level itself, so its physics read
+  Horizon's blocks rather than no chunk.
+- Entity tracking: the chunk cache's broadcasts and its entity tracking do nothing, since
+  Horizon draws from snapshots.
+
+The runtime test summons a moobloom at 70 over Horizon's grass. It falls and stands at 65, with
+vanilla's fall damage (10 health to 8), and its AI turns its head.
+
+**Next:** 6d.2, its renderer's geometry each tick, drawn by Horizon's entity drawing (the 26.3
+bridge's `java_entities.rs`, which takes raw quads). Then 6d.3, players hitting and using
+them; then saving them with their chunks and natural spawning.
+
 ## Phase 7 status: blocks drawn by their mod's code (2026-11-12)
 
 A block whose look is code has no model Horizon can read: Wired Redstone's wires and cables

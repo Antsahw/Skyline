@@ -35,4 +35,12 @@ public interface LevelAccess {
     @Mutable
     @Accessor("levelData")
     void horizon$setLevelData(net.minecraft.world.level.storage.WritableLevelData data);
+
+    @Mutable
+    @Accessor("profiler")
+    void horizon$setProfiler(java.util.function.Supplier<net.minecraft.util.profiling.ProfilerFiller> profiler);
+
+    @Mutable
+    @Accessor("damageSources")
+    void horizon$setDamageSources(net.minecraft.world.damagesource.DamageSources sources);
 }

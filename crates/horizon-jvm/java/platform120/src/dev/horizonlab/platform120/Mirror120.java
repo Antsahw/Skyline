@@ -201,6 +201,10 @@ public final class Mirror120 {
             access.horizon$setThreadSafeRandom(RandomSource.createThreadSafe());
             access.horizon$setWorldBorder(new net.minecraft.world.level.border.WorldBorder());
             access.horizon$setLevelData(worldData);
+            // A mob's goals and paths profile themselves, as a quiet server's do: into nothing.
+            access.horizon$setProfiler(() -> net.minecraft.util.profiling.InactiveProfiler.INSTANCE);
+            // What hurts a mob (a fall, a player): the damage types of this world's registries.
+            access.horizon$setDamageSources(new net.minecraft.world.damagesource.DamageSources(registries()));
             ((ServerLevelAccess) level).horizon$setServerLevelData(worldData);
             ServerLevelAccess sl = (ServerLevelAccess) level;
             sl.horizon$setServer(server);
@@ -545,6 +549,8 @@ public final class Mirror120 {
      * @return whether the entity was taken, which is what vanilla's caller reads.
      */
     public static boolean addEntity(Level level, net.minecraft.world.entity.Entity entity) {
+        // A mod's own entity lives in the mirror, with its mod's code (Entities120).
+        if (Entities120.modded(entity)) return Entities120.add(level, entity);
         if (!(entity instanceof net.minecraft.world.entity.item.ItemEntity dropped)) {
             notEntities(entity);
             return false;
@@ -854,6 +860,49 @@ public final class Mirror120 {
         begin();
         try {
             return Models120.render(level(dimension), new BlockPos(x, y, z));
+        } finally {
+            finish();
+        }
+    }
+
+    /**
+     * A mod's entity made at (x, y, z), as `/summon` makes one: its id, or -1 when there is no
+     * such type or it can't be made here.
+     */
+    public static Object[] summon(String dimension, String type, double x, double y, double z) {
+        begin();
+        try {
+            ServerLevel level = level(dimension);
+            var entityType = net.minecraft.world.entity.EntityType.byString(type).orElse(null);
+            if (entityType == null) return new Object[] {-1};
+            var entity = entityType.create(level);
+            if (entity == null) return new Object[] {-1};
+            entity.moveTo(x, y, z, entity.getYRot(), entity.getXRot());
+            if (entity instanceof net.minecraft.world.entity.Mob mob) {
+                mob.finalizeSpawn(level, level.getCurrentDifficultyAt(entity.blockPosition()),
+                        net.minecraft.world.entity.MobSpawnType.COMMAND, null, null);
+            }
+            if (!level.addFreshEntity(entity)) return new Object[] {-1};
+            return new Object[] {entity.getId()};
+        } catch (RuntimeException | LinkageError e) {
+            log("a " + type + " couldn't be made: " + e);
+            for (StackTraceElement at : e.getStackTrace()) log("    at " + at);
+            return new Object[] {-1};
+        } finally {
+            finish();
+        }
+    }
+
+    /**
+     * A tick of the mods' entities in `dimension` (Entities120.tick), and where they are after:
+     * {numbers, types} as Entities120.snapshot gives them.
+     */
+    public static Object[] tickEntities(String dimension) {
+        begin();
+        try {
+            ServerLevel level = level(dimension);
+            Entities120.tick(level);
+            return Entities120.snapshot(level);
         } finally {
             finish();
         }

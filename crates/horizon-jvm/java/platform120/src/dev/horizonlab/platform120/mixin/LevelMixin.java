@@ -110,6 +110,16 @@ public abstract class LevelMixin {
         }
     }
 
+    /**
+     * What an entity moving through a mirror level collides with: the level itself, whose
+     * blocks are Horizon's. The chunk vanilla asks for is none here, which would let it fall
+     * through the world.
+     */
+    @Inject(method = "getChunkForCollisions", at = @At("HEAD"), cancellable = true)
+    private void horizon$collisions(int x, int z, CallbackInfoReturnable<net.minecraft.world.level.BlockGetter> cir) {
+        if (horizon$mirror()) cir.setReturnValue((Level) (Object) this);
+    }
+
     /** Heightmaps are Horizon's (a mod's feature placed on the surface asks them). */
     @Inject(method = "getHeight(Lnet/minecraft/world/level/levelgen/Heightmap$Types;II)I", at = @At("HEAD"), cancellable = true)
     private void horizon$height(net.minecraft.world.level.levelgen.Heightmap.Types type, int x, int z,

@@ -63,6 +63,31 @@ pub struct CodeQuad {
     pub colors: [u32; 4],
 }
 
+/// One of the mods' own entities, as it stands after a tick ([`Runtime120::tick_entities`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ModEntity {
+    /// Its id, in the runtime's own range (`Entities120.FIRST_ID` and up).
+    pub id: i32,
+    /// Its type (`friendsandfoes:moobloom`).
+    pub kind: String,
+    pub pos: [f64; 3],
+    /// Yaw, pitch, head yaw, body yaw, in degrees.
+    pub rot: [f32; 4],
+    /// Its box's width and height.
+    pub size: [f32; 2],
+    /// Its health; `None` for one that has none.
+    pub health: Option<f32>,
+}
+
+/// What a tick of the mods' entities did, and where they are after.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct EntitiesTicked {
+    pub entities: Vec<ModEntity>,
+    pub set: Vec<SetBlock>,
+    pub block_entities: Vec<SetBlockEntity>,
+    pub spawned: Vec<SpawnItem>,
+}
+
 /// Where a mod's placed feature goes ([`Runtime120::place_feature`]): what seeds vanilla's
 /// random for it in `applyBiomeDecoration`, and its origin.
 #[derive(Clone, Debug, PartialEq)]
@@ -855,6 +880,76 @@ impl Runtime120 {
                 colors: std::array::from_fn(|c| colors[q * 4 + c] as u32),
             })
             .collect())
+    }
+
+    /// A mod's entity of type `kind` made at `pos`, as `/summon` makes one: its id, or `None`
+    /// when there is no such type or it couldn't be made.
+    pub fn summon(
+        &mut self,
+        world: &dyn World120,
+        dimension: &str,
+        kind: &str,
+        pos: [f64; 3],
+    ) -> Result<Option<i32>, String> {
+        let mut handler = InWorld {
+            world,
+            set: Vec::new(),
+            block_entities: Vec::new(),
+            spawned: Vec::new(),
+            log: self.log.clone(),
+        };
+        let args = [
+            Value::Str(dimension.to_owned()),
+            Value::Str(kind.to_owned()),
+            Value::F64(pos[0]),
+            Value::F64(pos[1]),
+            Value::F64(pos[2]),
+        ];
+        match self.call_values("summon", &args, &mut handler)?.first() {
+            Some(Value::I32(id)) => Ok((*id >= 0).then_some(*id)),
+            other => Err(format!("summon: answer 0 is {other:?}")),
+        }
+    }
+
+    /// A tick of the mods' own entities in `dimension` (their AI, paths and physics, on
+    /// Horizon's blocks), and where they are after.
+    pub fn tick_entities(
+        &mut self,
+        world: &dyn World120,
+        dimension: &str,
+    ) -> Result<EntitiesTicked, String> {
+        let mut handler = InWorld {
+            world,
+            set: Vec::new(),
+            block_entities: Vec::new(),
+            spawned: Vec::new(),
+            log: self.log.clone(),
+        };
+        let args = [Value::Str(dimension.to_owned())];
+        let values = self.call_values("tickEntities", &args, &mut handler)?;
+        let (Some(Value::F64s(numbers)), Some(Value::Strs(kinds))) =
+            (values.first(), values.get(1))
+        else {
+            return Err(format!("tickEntities: answers {values:?}"));
+        };
+        let entities = numbers
+            .chunks_exact(11)
+            .zip(kinds)
+            .map(|(n, kind)| ModEntity {
+                id: n[0] as i32,
+                kind: kind.clone(),
+                pos: [n[1], n[2], n[3]],
+                rot: [n[4] as f32, n[5] as f32, n[6] as f32, n[7] as f32],
+                size: [n[8] as f32, n[9] as f32],
+                health: (n[10] >= 0.0).then_some(n[10] as f32),
+            })
+            .collect();
+        Ok(EntitiesTicked {
+            entities,
+            set: handler.set,
+            block_entities: handler.block_entities,
+            spawned: handler.spawned,
+        })
     }
 
     /// The mods' placed features (of their own namespaces), which [`Self::place_feature`]

@@ -25,7 +25,7 @@ from the mod's side rather than the bridge's.
 | Block entities: state kept, saved, reloaded, ticked | **done** | phase 3b |
 | Block shape for aiming, where the block entity decides it | **done** | phase 3d |
 | Its blocks drawn from the models in its jar | **done** | phase 2 |
-| Its blocks drawn by code (no blockstate file) | **partial** | phase 7: a Fabric model built per position (LibMultipart parts: Wired Redstone's wires and cables, linked and powered) is drawn by the mod's own model code into Horizon's mesher; block entity renderers and dynamic part renderers not yet |
+| Its blocks drawn by code (no blockstate file) | **partial** | phase 7: a Fabric model built per position (LibMultipart parts: Wired Redstone's wires and cables, linked and powered) is drawn by the mod's own model code into Horizon's mesher; block entity renderers and dynamic part renderers not yet. **Known issue (parked):** in Anthony's own game the wires still can't be broken and drop nothing, though a headless test game breaks them, drops them and lights a lamp from them (2026-11-12) |
 | **Screens: machines, backpacks, anything you right-click into** | **partial** | phase 4: the mod's own screen opens on the player's game and takes clicks, shift-clicks, drags and keys, with counts and tooltips; screens with vanilla's recipe book work (it shows no recipes yet); checked in a real game (Farmer's Delight's cooking pot); tooltip images and shader tints missing |
 | Items with their own use behaviour (tools, food, wands) | **partial** | phase 5d: a right-click at nothing runs the item's own use (wands, guide books, backpacks); food, bows and shields are Horizon's; tools on blocks run with phase 3a's clicks |
 | Sounds the mod ships | **unverified** | — |
@@ -42,7 +42,7 @@ not a working machine, and almost every content mod has at least one screen.
 | Fabric API events (block break, player tick, server start…) | **partial** | phase 5a/5b: block breaks (a mod's block broken by its own code, break events on every block), server start and level load, server and level ticks, players joining and leaving, item use, the client tick (phase 5e) |
 | Items moving between mod blocks and Horizon's (hoppers, pipes) | **partial** | phase 3e: Horizon's hoppers and droppers feed and empty mods' blocks (Transfer API), checked in a real game; mods' own pipes into Horizon's containers unverified |
 | Energy (Team Reborn Energy) and fluids | **not yet** | phase 3 |
-| Mod mobs and their AI | **not yet** | phase 6 |
+| Mod mobs and their AI | **partial** | phase 6d: a mod's mob lives and ticks in the runtime (its AI, physics on Horizon's blocks, fall damage; Friends & Foes' moobloom). Not yet drawn, fought, saved or spawned naturally |
 | Worldgen: ores, biomes, structures | **partial** | phase 6a/6b: the features mods add to vanilla's biomes through Fabric's biome API generate in new chunks, vanilla's types in Horizon's generator and a mod's own types by the mod's code in the runtime (FD's wild crops checked in a real world); data-driven structures generate (phase 6c, Towns and Towers checked in a real world); structures with Java pieces and the mods' biomes not yet |
 | Mod dimensions | **not yet** | phase 6 |
 | Keybinds and HUD overlays (minimaps, tooltips, info bars) | **partial** | phase 5e: mods' key bindings reach them (pressed in Horizon, clicked in 1.20.1's client tick); HUD overlays not yet |
@@ -73,7 +73,7 @@ A 1.20.1 mod is **fully supported** when all of this is true of it:
 5. Its screens open, draw, and respond to clicks and keys. *(phase 4: done, checked in a real game)*
 6. Its messages reach the player and back. *(phase 5c: done)*
 7. Its items and fluids move through other mods' and Horizon's containers. *(phase 3: items through Horizon's hoppers done; fluids, energy and mods' pipes next)*
-8. Its mobs spawn, move, fight and are fought. *(phase 6)*
+8. Its mobs spawn, move, fight and are fought. *(phase 6d: they live and move in the runtime; drawing them next)*
 9. Its worldgen appears in new chunks. *(features: 6a/6b, data-driven structures: 6c, done; Java-built structures and biomes next)*
 10. Its client bits work: keys, HUD, config. *(keys: phase 5e, done; HUD and config next)*
 11. None of the above costs more than a few frames a second. *(measured per phase)*

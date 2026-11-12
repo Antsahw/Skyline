@@ -405,6 +405,79 @@ fn flint_and_steel_on_top() -> horizon_jvm_remote::mirror120::UseBlock {
 /// Phase 3a: a right-click on a block runs the 1.20.1 code of the block and the item, in the
 /// child, on Horizon's blocks; what it sets comes back. Vanilla's campfire, then Farmer's
 /// Delight's stove (a mod's own `use`), both lit with flint and steel, which wears by one.
+/// Phase 6d: a mod's own mob lives in the runtime. Summoned on Horizon's grass, it lands and
+/// stands on it (its physics read Horizon's blocks), ticks its own AI, and keeps its health.
+/// Needs build120.sh's platform jar and Friends & Foes among HORIZON_120_MODS.
+#[test]
+fn a_mods_mob_lives_on_horizons_blocks() {
+    let Some(cache) = cache() else { return };
+    let Some(bridge) = bridge_classes() else {
+        return;
+    };
+    let platform = cache.join("horizon/platform120.jar");
+    let Some(dir) = std::env::var_os("HORIZON_120_MODS") else {
+        return;
+    };
+    let jars: Vec<PathBuf> = std::fs::read_dir(&dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path())
+        .collect();
+    if !platform.exists()
+        || !jars
+            .iter()
+            .any(|p| p.to_string_lossy().contains("friendsandfoes"))
+    {
+        eprintln!("no Friends & Foes in HORIZON_120_MODS (or no platform jar): skipping");
+        return;
+    }
+    let game = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("game120-mobs");
+    let _ = std::fs::remove_dir_all(&game);
+    let mods = game.join("mods");
+    std::fs::create_dir_all(&mods).unwrap();
+    for jar in &jars {
+        std::fs::copy(jar, mods.join(jar.file_name().unwrap())).unwrap();
+    }
+    let lines: Lines = Arc::default();
+    let mut cfg = config(cache, bridge, game.clone(), lines);
+    cfg.platform = Some(platform);
+    let (mut runtime, _) = boot120::start(&cfg).expect("boots");
+    let world = Blocks::new(Vec::new());
+    let id = runtime
+        .summon(
+            &world,
+            "minecraft:overworld",
+            "friendsandfoes:moobloom",
+            [0.5, 70.0, 0.5],
+        )
+        .expect("summon answers")
+        .expect("a moobloom is made");
+    assert!(id >= 0x7ffe_0000, "in the mods' own id range: {id}");
+    let mut last = None;
+    for _ in 0..60 {
+        let ticked = runtime
+            .tick_entities(&world, "minecraft:overworld")
+            .expect("its tick");
+        last = ticked.entities.into_iter().find(|e| e.id == id);
+    }
+    let moobloom = last.expect("it is still there after 3 seconds");
+    eprintln!("the moobloom after 60 ticks: {moobloom:?}");
+    assert_eq!(moobloom.kind, "friendsandfoes:moobloom");
+    // Fallen from 70 onto the grass (whose top is 65), and not through it.
+    assert!(
+        (moobloom.pos[1] - 65.0).abs() < 1e-6,
+        "on the grass: {:?}",
+        moobloom.pos
+    );
+    // Vanilla's fall damage for five blocks (fallDistance 5 - 3): 10 health down to 8.
+    assert_eq!(
+        moobloom.health,
+        Some(8.0),
+        "hurt by the fall, alive: {moobloom:?}"
+    );
+}
+
 /// Needs build120.sh's platform jar, and Farmer's Delight among HORIZON_120_MODS for the stove
 /// (the other mods there are loaded too).
 #[test]

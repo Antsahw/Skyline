@@ -73,14 +73,15 @@ public abstract class ServerLevelMixin {
     }
 
     /**
-     * The entities: none, rather than the entity manager a mirror level never made (which every
-     * asker would throw on). Placing a block asks, through isUnobstructed.
+     * The entities: the mods' own living here (Entities120), rather than the entity manager a
+     * mirror level never made (which every asker would throw on). Placing a block asks, through
+     * isUnobstructed; a mob looking around asks.
      */
     @Inject(method = "getEntities()Lnet/minecraft/world/level/entity/LevelEntityGetter;",
             at = @At("HEAD"), cancellable = true)
     private void horizon$entities(
             CallbackInfoReturnable<net.minecraft.world.level.entity.LevelEntityGetter<
                     net.minecraft.world.entity.Entity>> cir) {
-        cir.setReturnValue(dev.horizonlab.platform120.NoEntities.INSTANCE);
+        cir.setReturnValue(dev.horizonlab.platform120.Entities120.of((net.minecraft.world.level.Level) (Object) this));
     }
 }
