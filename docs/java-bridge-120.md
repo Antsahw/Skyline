@@ -403,6 +403,32 @@ In a game (Anthony's set):
 - A redstone block put beside an unpowered wire powers all four blocks of it, and taking it
   away brings them to 0.
 
+**Found in Anthony's game (2026-11-12, fixed):**
+- **The wires could not be mined: the crosshair went through them.** The server syncs a
+  block's shape as an attachment in the tick it places the block, and the window can get it
+  before the block itself. When the block came, the window dropped the attachments it held
+  for that position as the old block's. There was none (air), so they were the new one's. Now
+  they are only dropped when a block entity is actually replaced (`remote.rs`,
+  `sync_block_entity`).
+- **A wire did not light a lamp.** Horizon's redstone asked the registry, which knows nothing
+  of a mod block's power. Now, whenever a mod's block changes, the server asks the mods what it
+  gives toward each side (`blockSignals`) and which of their states are sources
+  (`signalSources`), keeps it (`java_mods_120/redstone.rs`), and answers Horizon's
+  `adjust_signal` / `adjust_signal_source` from it. A change updates the block's neighbours and
+  theirs, so the lamp looks again.
+- **Collision is the mod's** (`collisionShapes`). It is kept per position with the state it was
+  asked for (`collisions::set_mod_collision`), so the collision scan uses it, and synced as the
+  `horizon:block_collision` attachment. Wired Redstone's ground wires and cables are walked
+  through, as in 1.20.1 (their `getCollisionShape` is empty, like redstone dust); its standing
+  wires are solid.
+- **GraphLib's client half logged a stack trace on every graph merge**, because the headless
+  client has no world. Its storage lookup answers none while there is no world, which GraphLib
+  already handles.
+
+Checked in a game: a redstone block, three wires, a lamp. The lamp lights. The crosshair finds
+the middle wire, and in survival it breaks in a moment and drops. The lamp goes out, and the
+wire past the gap loses its power. No GraphLib warnings.
+
 Not yet: gates' and other parts' animated or dynamic renderers (LibMultipart's dynamic part
 renderers, block entity renderers of 1.20.1 mods), and light from code-drawn blocks.
 

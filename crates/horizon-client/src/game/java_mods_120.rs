@@ -625,36 +625,91 @@ impl super::Game<'_> {
     /// (`mod_block_shape`). Positions without a mod's block entity are left alone: their shape
     /// is the registry's, like every vanilla block's.
     fn refresh_java120_shapes(&mut self, dimension: &str, positions: &[[i32; 3]]) {
+        let is_mod = |g: &Self, [x, y, z]: [i32; 3]| {
+            matches!(
+                g.world.block_entities.get(&(x, y, z)),
+                Some(horizon_client::containers::BlockEntity::Mod(_))
+            )
+        };
+        // A mod's block gone from a position takes what it gave there with it.
+        let gone: Vec<[i32; 3]> = positions
+            .iter()
+            .copied()
+            .filter(|p| !is_mod(self, *p))
+            .collect();
+        for pos in gone {
+            horizon_client::collisions::set_mod_collision(pos, None);
+            if redstone::keep(pos, None) {
+                self.java120_signal_changed(pos);
+            }
+        }
         let asked: Vec<[i32; 3]> = positions
             .iter()
             .copied()
-            .filter(|[x, y, z]| {
-                matches!(
-                    self.world.block_entities.get(&(*x, *y, *z)),
-                    Some(horizon_client::containers::BlockEntity::Mod(_))
-                )
-            })
+            .filter(|p| is_mod(self, *p))
             .collect();
         if asked.is_empty() {
             return;
         }
         let flat: Vec<i32> = asked.iter().flatten().copied().collect();
-        let shapes = {
+        let answers = {
             let Ok(mut guard) = RUNTIME.try_lock() else {
                 return;
             };
             let Some(runtime) = guard.as_mut() else {
                 return;
             };
-            runtime.block_shapes(&Level(self), dimension, &flat)
+            if !redstone::sources_known() {
+                let registry = self.pack.assets.registry;
+                let sources = runtime.signal_sources().unwrap_or_else(|e| {
+                    log::warn!("1.20.1 mods: which of their blocks give redstone: {e}");
+                    Vec::new()
+                });
+                redstone::set_sources(
+                    sources
+                        .iter()
+                        .filter_map(|n| {
+                            super::render_control::parse_state(
+                                registry,
+                                &worldgen::state_from_120(n),
+                            )
+                            .ok()
+                            .map(|s| s.0)
+                        })
+                        .collect(),
+                );
+            }
+            let level = Level(self);
+            runtime
+                .block_shapes(&level, dimension, &flat)
+                .and_then(|shapes| {
+                    let solid = runtime.collision_shapes(&level, dimension, &flat)?;
+                    let signals = runtime.block_signals(&level, dimension, &flat)?;
+                    Ok((shapes, solid, signals))
+                })
         };
-        let shapes = match shapes {
-            Ok(shapes) => shapes,
+        let (shapes, solid, signals) = match answers {
+            Ok(answers) => answers,
             Err(e) => {
                 log::warn!("1.20.1 mods: asking what shape their blocks are: {e}");
                 return;
             }
         };
+        for ((pos, solid), signals) in asked.iter().copied().zip(solid).zip(signals) {
+            let state = self.world.block(pos[0], pos[1], pos[2]);
+            horizon_client::collisions::set_mod_collision(pos, Some((state, &solid)));
+            if let Some(attachments) = self
+                .world
+                .block_entities
+                .attachments_mut((pos[0], pos[1], pos[2]))
+                && let Err(e) = attachments.set(&super::mod_block_shape::BLOCK_COLLISION, solid)
+            {
+                log::warn!("1.20.1 mods: keeping what is solid of a block at {pos:?}: {e:?}");
+            }
+            if redstone::keep(pos, Some((state, signals))) {
+                self.java120_signal_changed(pos);
+            }
+        }
         for ([x, y, z], boxes) in asked.iter().copied().zip(shapes) {
             trace120!("{x} {y} {z}: the mods say its shape is {boxes:?}");
             let Some(attachments) = self.world.block_entities.attachments_mut((x, y, z)) else {
@@ -741,6 +796,7 @@ mod tests {
 mod breaking;
 mod drawn;
 mod neighbours;
+mod redstone;
 pub(in crate::game) use breaking::Break120;
 mod hoppers;
 mod items;

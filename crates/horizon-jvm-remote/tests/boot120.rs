@@ -1675,6 +1675,25 @@ fn right_clicking_a_block_runs_its_1_20_1_code_on_horizons_blocks() {
             sprites.contains("wiredredstone:block/red_alloy_wire_powered"),
             "{sprites:?}"
         );
+        // What Horizon's redstone reads of it: 15 toward a side (a lamp it runs into lights).
+        // And nothing to stand on: Wired Redstone's wires and cables on the ground are walked
+        // through, like redstone dust (`getCollisionShape` is `Shapes.empty()`; only its
+        // standing wires are solid).
+        let signals = runtime
+            .block_signals(&powered, "minecraft:overworld", &wire_at)
+            .expect("the wire's signals");
+        assert_eq!(signals.len(), 1);
+        assert_eq!(signals[0][..6].iter().max(), Some(&15), "{signals:?}");
+        let solid = runtime
+            .collision_shapes(&powered, "minecraft:overworld", &wire_at)
+            .expect("what is solid of the wire");
+        assert_eq!(solid, vec![Vec::<[f64; 6]>::new()], "walked through");
+        let sources = runtime.signal_sources().expect("the sources");
+        assert!(
+            sources.iter().any(|s| s.contains("emits_redstone=true")),
+            "LibMultipart's container is a source when it says so: {} sources",
+            sources.len()
+        );
 
         // Phase 7: its look is its code. The container's model is a Fabric model made per
         // position from the parts in its block entity, so its states are drawn by code; the

@@ -62,6 +62,17 @@ pub static BLOCK_SHAPE: AttachmentType<Boxes> = AttachmentType {
     sync: true,
 };
 
+/// `horizon:block_collision`: what of the block at a block entity's position is solid, as its
+/// mod gives it (`getCollisionShape`): the outline's twin, for walking rather than aiming.
+pub static BLOCK_COLLISION: AttachmentType<Boxes> = AttachmentType {
+    namespace: "horizon",
+    name: "block_collision",
+    default: Vec::new,
+    codec: Some(AttachmentCodec { encode, decode }),
+    copy_on_death: false,
+    sync: true,
+};
+
 /// The boxes a holder carries, or `None` when nothing has asked the mod about it.
 pub fn of(attachments: &Attachments) -> Option<Boxes> {
     attachments.peek(&BLOCK_SHAPE).ok().flatten()

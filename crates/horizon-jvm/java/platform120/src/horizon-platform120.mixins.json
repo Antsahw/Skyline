@@ -36,6 +36,7 @@
     "GlStateManagerMixin",
     "GuiGraphicsAccess",
     "GuiGraphicsMixin",
+    "GraphLibClientMixin",
     "InputConstantsMixin",
     "KeyMappingAccess",
     "SpriteContentsMixin",

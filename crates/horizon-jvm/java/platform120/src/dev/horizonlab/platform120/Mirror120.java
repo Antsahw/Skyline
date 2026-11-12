@@ -1253,6 +1253,70 @@ public final class Mirror120 {
      * aimed at; a block whose outline is empty cannot be looked at or mined.
      */
     public static Object[] blockShapes(String dimension, int[] positions) {
+        return shapes(dimension, positions, false);
+    }
+
+    /**
+     * What the block at each position is to walk into: `getCollisionShape(level, pos)`, as
+     * {@link #blockShapes} gives the outline. A thin Wired Redstone wire is one to step on, as in
+     * 1.20.1, where Horizon's registry has every LibMultipart container shapeless.
+     */
+    public static Object[] collisionShapes(String dimension, int[] positions) {
+        return shapes(dimension, positions, true);
+    }
+
+    /**
+     * The redstone each block at `positions` gives toward each side, twelve numbers a position:
+     * `getSignal(level, pos, side)` then `getDirectSignal`, for the sides in vanilla's order
+     * (down, up, north, south, west, east; `side` as vanilla passes it, from the block reading
+     * toward this one). A wire carrying power lights the lamp it runs into.
+     */
+    public static Object[] blockSignals(String dimension, int[] positions) {
+        begin();
+        try {
+            ServerLevel level = level(dimension);
+            int count = positions.length / 3;
+            int[] out = new int[count * 12];
+            for (int i = 0; i < count; i++) {
+                BlockPos pos = new BlockPos(positions[i * 3], positions[i * 3 + 1], positions[i * 3 + 2]);
+                try {
+                    BlockState state = blockState(level, pos);
+                    for (net.minecraft.core.Direction side : net.minecraft.core.Direction.values()) {
+                        int d = side.get3DDataValue();
+                        out[i * 12 + d] = state.getSignal(level, pos, side);
+                        out[i * 12 + 6 + d] = state.getDirectSignal(level, pos, side);
+                    }
+                } catch (RuntimeException | LinkageError e) {
+                    shapeFailed(pos, e);
+                }
+            }
+            return new Object[] {out};
+        } finally {
+            finish();
+        }
+    }
+
+    /** The mods' block states that are redstone sources (`isSignalSource`), as Horizon names states. */
+    public static Object[] signalSources() {
+        setUp();
+        java.util.List<String> out = new java.util.ArrayList<>();
+        for (var block : net.minecraft.core.registries.BuiltInRegistries.BLOCK) {
+            var id = net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(block);
+            if ("minecraft".equals(id.getNamespace())) continue;
+            for (BlockState state : block.getStateDefinition().getPossibleStates()) {
+                try {
+                    if (state.isSignalSource()) {
+                        out.add(net.minecraft.commands.arguments.blocks.BlockStateParser.serialize(state));
+                    }
+                } catch (RuntimeException | LinkageError e) {
+                    // A block that can't say is not one.
+                }
+            }
+        }
+        return new Object[] {out.toArray(new String[0])};
+    }
+
+    private static Object[] shapes(String dimension, int[] positions, boolean collision) {
         begin();
         ServerLevel level = level(dimension);
         java.util.List<Double> out = new java.util.ArrayList<>();
@@ -1263,7 +1327,7 @@ public final class Mirror120 {
             int boxes = 0;
             try {
                 BlockState state = blockState(level, pos);
-                var shape = state.getShape(level, pos);
+                var shape = collision ? state.getCollisionShape(level, pos) : state.getShape(level, pos);
                 for (net.minecraft.world.phys.AABB box : shape.toAabbs()) {
                     out.add(box.minX);
                     out.add(box.minY);

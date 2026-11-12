@@ -75,6 +75,81 @@ pub fn with_piston_noclip<T>(
     f()
 }
 
+/// Blocks whose collision only their mod knows, by position: a 1.20.1 mod's block whose shape
+/// is its block entity's (LibMultipart's container: a Wired Redstone wire is a thin plate),
+/// which Horizon's registry holds as shapeless. Kept with the state it was asked for, and
+/// used only while that state is still there, so a block broken since collides as what
+/// replaced it. The game's server sets it as the mods answer, and a client from what its
+/// server syncs.
+static MOD_COLLISIONS: std::sync::RwLock<
+    Option<std::collections::HashMap<[i32; 3], (BlockStateId, VoxelShape)>>,
+> = std::sync::RwLock::new(None);
+
+/// Sets (or, with `None`, forgets) the collision boxes (inside the block) a mod gives the
+/// block at `pos` while it is `state`.
+pub fn set_mod_collision(pos: [i32; 3], shape: Option<(BlockStateId, &[[f64; 6]])>) {
+    let mut all = MOD_COLLISIONS.write().unwrap_or_else(|e| e.into_inner());
+    let all = all.get_or_insert_with(Default::default);
+    match shape.and_then(|(state, boxes)| Some((state, shape_of(boxes)?))) {
+        Some(entry) => {
+            all.insert(pos, entry);
+        }
+        None => {
+            all.remove(&pos);
+        }
+    }
+}
+
+/// The shape a mod gave the block at `pos`, while the block there is still `state`.
+fn mod_collision(pos: [i32; 3], state: BlockStateId) -> Option<VoxelShape> {
+    let all = MOD_COLLISIONS.read().unwrap_or_else(|e| e.into_inner());
+    let (at, shape) = all.as_ref()?.get(&pos)?;
+    (*at == state).then(|| shape.clone())
+}
+
+/// Whether a mod gave a shape to any block of the 16-high section at `section` (chunk x,
+/// section y, chunk z).
+fn mod_collision_in(section: [i32; 3]) -> bool {
+    let all = MOD_COLLISIONS.read().unwrap_or_else(|e| e.into_inner());
+    all.as_ref().is_some_and(|all| {
+        all.keys()
+            .any(|p| [p[0] >> 4, p[1] >> 4, p[2] >> 4] == section)
+    })
+}
+
+/// A shape of boxes inside the block: the grid of their edges, each cell full when inside one.
+fn shape_of(boxes: &[[f64; 6]]) -> Option<VoxelShape> {
+    if boxes.is_empty() {
+        return Some(VoxelShape::empty());
+    }
+    let axis = |a: usize| {
+        let mut c: Vec<f64> = boxes.iter().flat_map(|b| [b[a], b[a + 3]]).collect();
+        c.sort_by(f64::total_cmp);
+        c.dedup();
+        c
+    };
+    let coords = [axis(0), axis(1), axis(2)];
+    let sizes = coords.clone().map(|c| c.len().saturating_sub(1));
+    let mut occupied = Vec::with_capacity(sizes.iter().product());
+    for x in 0..sizes[0] {
+        for y in 0..sizes[1] {
+            for z in 0..sizes[2] {
+                let mid = [
+                    (coords[0][x] + coords[0][x + 1]) / 2.0,
+                    (coords[1][y] + coords[1][y + 1]) / 2.0,
+                    (coords[2][z] + coords[2][z + 1]) / 2.0,
+                ];
+                occupied.push(
+                    boxes
+                        .iter()
+                        .any(|b| (0..3).all(|a| b[a] <= mid[a] && mid[a] <= b[a + 3])),
+                );
+            }
+        }
+    }
+    VoxelShape::from_grid(coords, &occupied).ok()
+}
+
 pub struct SceneCollisions<'w, 'r> {
     pub world: &'w World,
     pub binding: &'w BlockCollisionRegistry<'r>,
@@ -427,7 +502,13 @@ impl<'w> BlockCollisionWorld for SceneCollisions<'w, '_> {
         Ok(self.world.chunks.get(&(p.x, p.z)).map(|chunk| &**chunk))
     }
     fn collision_block(&mut self, chunk: Self::Chunk, p: BlockPos) -> io::Result<CollisionBlock> {
-        self.binding.collision_block(chunk.block(p.x, p.y, p.z))
+        let state = chunk.block(p.x, p.y, p.z);
+        let mut block = self.binding.collision_block(state)?;
+        // A mod's shape at this position is asked for, though its state has none.
+        if block.empty_shape && mod_collision([p.x, p.y, p.z], state).is_some() {
+            block.empty_shape = false;
+        }
+        Ok(block)
     }
     /// From the section's palette, without reading its blocks; a palette
     /// of the whole registry reads every cell.
@@ -437,6 +518,9 @@ impl<'w> BlockCollisionWorld for SceneCollisions<'w, '_> {
     /// From the section's palette: every block it can hold has an empty shape (air, plants).
     /// A palette of the whole registry, or a section outside the column, is read cell by cell.
     fn section_is_empty(&mut self, chunk: Self::Chunk, section_y: i32) -> io::Result<bool> {
+        if mod_collision_in([chunk.x, section_y, chunk.z]) {
+            return Ok(false);
+        }
         let blocks = usize::try_from(section_y - (chunk.min_y() >> 4))
             .ok()
             .and_then(|s| chunk.sections.get(s))
@@ -468,6 +552,9 @@ impl<'w> BlockCollisionWorld for SceneCollisions<'w, '_> {
         p: BlockPos,
         context: &CollisionContext<'_>,
     ) -> io::Result<VoxelShape> {
+        if let Some(shape) = mod_collision([p.x, p.y, p.z], block.state) {
+            return Ok(shape);
+        }
         self.binding
             .collision_shape_with_context(self, block.state, p, context)
             .map_err(io::Error::other)

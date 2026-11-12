@@ -2546,7 +2546,12 @@ impl Game<'_> {
                     e.id() == entity.id() && !(other_block && matches!(e, BlockEntity::Mod(_)))
                 });
                 if !same {
-                    if previous.is_some() {
+                    // Attachments go with the block entity they were on. When there was none
+                    // here, what is kept for the position is the new one's: the server can sync
+                    // a block entity's attachments in the same tick it places the block, and
+                    // they may arrive first (a Wired Redstone wire's shape, without which the
+                    // crosshair went through it and it could not be mined).
+                    if previous.is_some() && self.world.block_entities.contains_key(&pos) {
                         self.forget_block_entity_attachments(pos);
                     }
                     self.world.block_entities.insert(pos, entity);

@@ -1174,6 +1174,29 @@ impl Runtime120 {
         dimension: &str,
         positions: &[i32],
     ) -> Result<Vec<Vec<[f64; 6]>>, String> {
+        self.shapes("blockShapes", world, dimension, positions)
+    }
+
+    /// What the block at each of `positions` is to walk into (`getCollisionShape`), as
+    /// [`Self::block_shapes`] gives the outline.
+    pub fn collision_shapes(
+        &mut self,
+        world: &dyn World120,
+        dimension: &str,
+        positions: &[i32],
+    ) -> Result<Vec<Vec<[f64; 6]>>, String> {
+        self.shapes("collisionShapes", world, dimension, positions)
+    }
+
+    /// The redstone the block at each of `positions` gives toward each side: per position
+    /// `getSignal` for the six sides in vanilla's order (down, up, north, south, west, east;
+    /// the side as vanilla passes it), then `getDirectSignal` for the same.
+    pub fn block_signals(
+        &mut self,
+        world: &dyn World120,
+        dimension: &str,
+        positions: &[i32],
+    ) -> Result<Vec<[u8; 12]>, String> {
         let args = [
             Value::Str(dimension.to_owned()),
             Value::I32s(positions.to_vec()),
@@ -1185,7 +1208,43 @@ impl Runtime120 {
             spawned: Vec::new(),
             log: self.log.clone(),
         };
-        let values = self.call_values("blockShapes", &args, &mut handler)?;
+        let values = self.call_values("blockSignals", &args, &mut handler)?;
+        let Some(Value::I32s(flat)) = values.first() else {
+            return Err(format!("blockSignals: answer 0 is {:?}", values.first()));
+        };
+        Ok(flat
+            .chunks_exact(12)
+            .map(|c| std::array::from_fn(|i| c[i].clamp(0, 15) as u8))
+            .collect())
+    }
+
+    /// The mods' block states that are redstone sources (`isSignalSource`).
+    pub fn signal_sources(&mut self) -> Result<Vec<String>, String> {
+        match self.call_answers("signalSources", &[])?.first() {
+            Some(Value::Strs(states)) => Ok(states.clone()),
+            other => Err(format!("signalSources: answer 0 is {other:?}")),
+        }
+    }
+
+    fn shapes(
+        &mut self,
+        call: &str,
+        world: &dyn World120,
+        dimension: &str,
+        positions: &[i32],
+    ) -> Result<Vec<Vec<[f64; 6]>>, String> {
+        let args = [
+            Value::Str(dimension.to_owned()),
+            Value::I32s(positions.to_vec()),
+        ];
+        let mut handler = InWorld {
+            world,
+            set: Vec::new(),
+            block_entities: Vec::new(),
+            spawned: Vec::new(),
+            log: self.log.clone(),
+        };
+        let values = self.call_values(call, &args, &mut handler)?;
         let flat = match values.first() {
             Some(Value::F64s(v)) => v,
             other => return Err(format!("blockShapes: answer 0 is {other:?}")),

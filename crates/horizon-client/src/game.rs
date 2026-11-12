@@ -1388,6 +1388,8 @@ impl LevelAccess for GameLevel<'_> {
         if self.native_authoritative {
             self.native_is_signal_source(state, &mut source);
         }
+        #[cfg(feature = "java-mods-120")]
+        let source = Game::java120_signal_source(state, source);
         source
     }
     fn adjust_signal(
@@ -1403,6 +1405,8 @@ impl LevelAccess for GameLevel<'_> {
             let face = direction.opposite();
             self.native_block_signal(self.dimension, pos, state, face, direct, &mut signal);
         }
+        #[cfg(feature = "java-mods-120")]
+        let signal = Game::java120_signal(pos, state, direction, direct, signal);
         signal.clamp(0, 15)
     }
     fn adjust_has_analog_output(&self, state: BlockStateId, vanilla: bool) -> bool {
