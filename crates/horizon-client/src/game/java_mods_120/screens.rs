@@ -42,6 +42,11 @@ fn open<R>(f: impl FnOnce(&mut HashMap<u32, Open>) -> R) -> R {
     f(guard.get_or_insert_with(HashMap::new))
 }
 
+/// A player's connection went: their screen with it.
+pub(super) fn forget(conn: u32) {
+    open(|screens| screens.remove(&conn));
+}
+
 /// The GUI a screen is laid out in before the player's game has said its own: a 1280x720
 /// window at GUI scale 3, which the next frame corrects.
 const FIRST_SIZE: (i32, i32) = (427, 240);

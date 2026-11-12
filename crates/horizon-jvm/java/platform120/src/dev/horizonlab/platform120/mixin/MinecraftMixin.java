@@ -41,4 +41,14 @@ public abstract class MinecraftMixin {
         dev.horizonlab.platform120.Screens120.clientOpened(screen);
         ci.cancel();
     }
+
+    /**
+     * Whether the account's text filtering is on (a book's screen, a sign's, ask): the headless
+     * client has no Mojang account services behind it, so off, as an offline client's is.
+     * Horizon shows the text; what a player may write is the server's to judge.
+     */
+    @Inject(method = "isTextFilteringEnabled()Z", at = @At("HEAD"), cancellable = true)
+    private void horizon$noFilter(CallbackInfoReturnable<Boolean> cir) {
+        cir.setReturnValue(false);
+    }
 }

@@ -1170,6 +1170,62 @@ fn right_clicking_a_block_runs_its_1_20_1_code_on_horizons_blocks() {
         "a packet down and its answer up"
     );
 
+    // Phase 5d: a right-click with an item at nothing runs 1.20.1's own useItem, and a screen
+    // the client half opens itself becomes the player's screen. Vanilla's written book takes
+    // the path a mod's guide book does: the server opens it with a packet to the player, the
+    // client half shows its own BookViewScreen, and that screen draws the book's page.
+    let reader = horizon_jvm_remote::mirror120::UseItem {
+        uuid: "00000000-0000-0000-0000-0000000b00c5".into(),
+        name: "Reader".into(),
+        dimension: "minecraft:overworld".into(),
+        off_hand: false,
+        held: r#"{id:"minecraft:written_book",Count:1b,tag:{title:"T",author:"A",resolved:1b,pages:['"Hello from 1.20.1"']}}"#.into(),
+        creative: false,
+        stance: None,
+    };
+    let read = runtime.use_item(&world, &reader).expect("reading a book");
+    assert!(read.result > 0, "the book takes the click: {read:?}");
+    let opened = read
+        .opened
+        .as_ref()
+        .map(|o| o.kind.as_str())
+        .unwrap_or_default();
+    assert!(opened.starts_with("screen:"), "its screen opens: {read:?}");
+    let page = runtime
+        .screen_frame(
+            &world,
+            &reader.uuid,
+            &inventory_json(&[]),
+            [0.5, 64.0, 0.5],
+            427,
+            240,
+            -1,
+            -1,
+        )
+        .expect("the book draws")
+        .expect("open");
+    assert!(page.contains("Hello from 1.20.1"), "with its page: {page}");
+    let closed = runtime
+        .screen_input(
+            &world,
+            &reader.uuid,
+            &inventory_json(&[]),
+            &serde_json::json!({"kind": "key", "key": 256, "scancode": 9, "mods": 0}).to_string(),
+        )
+        .expect("Escape");
+    assert!(!closed.open, "Escape closes it: {closed:?}");
+    // The reader leaves: the mods hear it (Fabric's DISCONNECT) and the mirror forgets them.
+    assert!(
+        runtime.player_left(&world, &reader.uuid).expect("leaving"),
+        "they were known"
+    );
+    assert!(
+        !runtime
+            .player_left(&world, &reader.uuid)
+            .expect("leaving again"),
+        "and are forgotten"
+    );
+
     // Phase 5b: a server tick. The mods hear the server start (once) and each tick through
     // Fabric API's ServerTickEvents, each listener on its own; a mod that listens says so.
     // GraphLib (inside Wired Redstone) ticks its graphs at the end of each level tick.

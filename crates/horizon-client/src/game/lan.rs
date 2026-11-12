@@ -2104,6 +2104,9 @@ impl Game<'_> {
                     self.guest_attachments.remove(&guest.uuid);
                     host.play.remove(&guest.conn);
                     self.guest_combat.remove(&guest.conn);
+                    // The 1.20.1 mods hear the player leave (Fabric's DISCONNECT).
+                    #[cfg(feature = "java-mods-120")]
+                    self.java120_player_left(guest.conn, guest.uuid);
                     if self.options.dedicated.is_some() && guest.placed {
                         super::dedicated::events::record(
                             "leave",

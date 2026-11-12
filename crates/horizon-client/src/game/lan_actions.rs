@@ -2251,6 +2251,11 @@ impl Game<'_> {
                     if let Some(swing) = g.java_use_item(hand == Hand::Off, yaw, pitch) {
                         return (swing, None);
                     }
+                    // The same for a 1.20.1 mod's item.
+                    #[cfg(feature = "java-mods-120")]
+                    if let Some(swing) = g.java120_use_item(hand == Hand::Off) {
+                        return (swing, None);
+                    }
                     // A horn's sound, inline instruments included.
                     let horn = g.with_hand(hand, |g| {
                         let held = g.held()?;

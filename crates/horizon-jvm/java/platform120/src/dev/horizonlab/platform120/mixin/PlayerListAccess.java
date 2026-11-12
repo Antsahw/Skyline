@@ -24,4 +24,21 @@ public interface PlayerListAccess {
     @Mutable
     @Accessor("playersByUUID")
     void horizon$setPlayersByUUID(Map<UUID, ServerPlayer> players);
+
+    /** The server's operators, bans and whitelist: empty, as a new server's (nobody is an op). */
+    @Mutable
+    @Accessor("ops")
+    void horizon$setOps(net.minecraft.server.players.ServerOpList ops);
+
+    @Mutable
+    @Accessor("bans")
+    void horizon$setBans(net.minecraft.server.players.UserBanList bans);
+
+    @Mutable
+    @Accessor("ipBans")
+    void horizon$setIpBans(net.minecraft.server.players.IpBanList bans);
+
+    @Mutable
+    @Accessor("whitelist")
+    void horizon$setWhitelist(net.minecraft.server.players.UserWhiteList whitelist);
 }

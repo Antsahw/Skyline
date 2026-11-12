@@ -132,6 +132,33 @@ pub struct ServerTicked {
     pub spawned: Vec<SpawnItem>,
 }
 
+/// A right-click with an item at nothing ([`Runtime120::use_item`]).
+#[derive(Clone, Debug)]
+pub struct UseItem {
+    pub uuid: String,
+    pub name: String,
+    pub dimension: String,
+    pub off_hand: bool,
+    /// The held item as 1.20.1 item NBT.
+    pub held: String,
+    pub creative: bool,
+    pub stance: Option<Stance>,
+}
+
+/// What a right-click with an item did.
+#[derive(Clone, Debug, PartialEq)]
+pub struct UsedItem {
+    /// 0 passed (Horizon goes on), 1 taken, 2 taken with a swing of the arm.
+    pub result: i32,
+    /// The held item after, as 1.20.1 item NBT ("" for nothing).
+    pub held: String,
+    /// A menu, or a screen of the mod's own (`screen:<class>`), opened by it.
+    pub opened: Option<OpenedMenu>,
+    pub set: Vec<SetBlock>,
+    pub block_entities: Vec<SetBlockEntity>,
+    pub spawned: Vec<SpawnItem>,
+}
+
 /// A player's break of a block ([`Runtime120::break_block`]).
 #[derive(Clone, Debug)]
 pub struct BreakBlock {
@@ -595,6 +622,70 @@ impl Runtime120 {
         };
         Ok(ServerTicked {
             listening,
+            set: handler.set,
+            block_entities: handler.block_entities,
+            spawned: handler.spawned,
+        })
+    }
+
+    /// Horizon's player `uuid` left the game: their screen closes, the mods hear Fabric's
+    /// `ServerPlayConnectionEvents.DISCONNECT`, and the mirror forgets them. False when the
+    /// mods never met them.
+    pub fn player_left(&mut self, world: &dyn World120, uuid: &str) -> Result<bool, String> {
+        let mut handler = InWorld {
+            world,
+            set: Vec::new(),
+            block_entities: Vec::new(),
+            spawned: Vec::new(),
+            log: self.log.clone(),
+        };
+        let values =
+            self.call_values("playerLeft", &[Value::Str(uuid.to_owned())], &mut handler)?;
+        Ok(matches!(values.first(), Some(Value::Bool(true))))
+    }
+
+    /// A player right-clicks with a mod's item at nothing ([`UseItem`]): 1.20.1's own
+    /// `ServerPlayerGameMode.useItem`. A use held over many ticks (eating, a bow) is let go and
+    /// passed: Horizon runs those itself.
+    pub fn use_item(&mut self, world: &dyn World120, u: &UseItem) -> Result<UsedItem, String> {
+        let args: Vec<Value> = [
+            Value::Str(u.uuid.clone()),
+            Value::Str(u.name.clone()),
+            Value::Str(u.dimension.clone()),
+            Value::I32(i32::from(u.off_hand)),
+            Value::Str(u.held.clone()),
+            Value::Bool(u.creative),
+        ]
+        .into_iter()
+        .chain(stance_values(u.stance))
+        .collect();
+        let mut handler = InWorld {
+            world,
+            set: Vec::new(),
+            block_entities: Vec::new(),
+            spawned: Vec::new(),
+            log: self.log.clone(),
+        };
+        let values = self.call_values("useItem", &args, &mut handler)?;
+        let result = match values.first() {
+            Some(Value::I32(code)) => *code,
+            other => return Err(format!("useItem: answer 0 is {other:?}")),
+        };
+        let text = |i: usize| {
+            values
+                .get(i)
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned()
+        };
+        let kind = text(2);
+        Ok(UsedItem {
+            result,
+            held: text(1),
+            opened: (!kind.is_empty()).then(|| OpenedMenu {
+                kind,
+                title: text(3),
+            }),
             set: handler.set,
             block_entities: handler.block_entities,
             spawned: handler.spawned,

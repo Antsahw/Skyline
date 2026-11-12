@@ -27,7 +27,7 @@ from the mod's side rather than the bridge's.
 | Its blocks drawn from the models in its jar | **done** | phase 2 |
 | Its blocks drawn by code (no blockstate file) | **not yet** | phase 7 |
 | **Screens: machines, backpacks, anything you right-click into** | **partial** | phase 4: the mod's own screen opens on the player's game and takes clicks, shift-clicks, drags and keys, with counts and tooltips; screens with vanilla's recipe book work (it shows no recipes yet); checked in a real game (Farmer's Delight's cooking pot); tooltip images and shader tints missing |
-| Items with their own use behaviour (tools, food, wands) | **unverified** | — |
+| Items with their own use behaviour (tools, food, wands) | **partial** | phase 5d: a right-click at nothing runs the item's own use (wands, guide books, backpacks); food, bows and shields are Horizon's; tools on blocks run with phase 3a's clicks |
 | Sounds the mod ships | **unverified** | — |
 | Particles the mod spawns | **not yet** | phase 5 |
 
@@ -39,7 +39,7 @@ not a working machine, and almost every content mod has at least one screen.
 | What the mod does | Status | Where |
 |---|---|---|
 | Mod packets between server and client | **done** | phase 5c: both halves in one runtime, each packet handed to the other half's receiver |
-| Fabric API events (block break, player tick, server start…) | **partial** | phase 5a/5b: block breaks (a mod's block broken by its own code, break events on every block), server start and level load, server and level ticks, players joining; players leaving and a client tick next |
+| Fabric API events (block break, player tick, server start…) | **partial** | phase 5a/5b: block breaks (a mod's block broken by its own code, break events on every block), server start and level load, server and level ticks, players joining and leaving, item use; a client tick next |
 | Items moving between mod blocks and Horizon's (hoppers, pipes) | **partial** | phase 3e: Horizon's hoppers and droppers feed and empty mods' blocks (Transfer API), checked in a real game; mods' own pipes into Horizon's containers unverified |
 | Energy (Team Reborn Energy) and fluids | **not yet** | phase 3 |
 | Mod mobs and their AI | **not yet** | phase 6 |

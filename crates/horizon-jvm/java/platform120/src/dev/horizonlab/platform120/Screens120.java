@@ -142,9 +142,24 @@ public final class Screens120 {
     public static boolean open(net.minecraft.server.level.ServerPlayer player, int width, int height) {
         var menu = player.containerMenu;
         if (menu == null || menu == player.inventoryMenu) {
-            SCREENS.remove(player.getUUID());
             MADE_FOR.remove(player.getUUID());
-            return false;
+            var client = CLIENT.get(player.getUUID());
+            if (client == null) {
+                SCREENS.remove(player.getUUID());
+                return false;
+            }
+            // The client half's own screen: laid out once, resized when the size changes.
+            font();
+            options();
+            clientPlayer(player);
+            var minecraft = net.minecraft.client.Minecraft.getInstance();
+            if (CLIENT_LAID_OUT.add(player.getUUID())) {
+                client.init(minecraft, width, height);
+            } else if (client.width != width || client.height != height) {
+                client.resize(minecraft, width, height);
+            }
+            SCREENS.put(player.getUUID(), client);
+            return true;
         }
         if (MADE_FOR.get(player.getUUID()) == menu) {
             var screen = SCREENS.get(player.getUUID());
@@ -306,13 +321,48 @@ public final class Screens120 {
      * shown on Horizon yet.
      */
     public static void clientOpened(net.minecraft.client.gui.screens.Screen screen) {
-        if (screen == null || screen instanceof net.minecraft.client.gui.screens.inventory.AbstractContainerScreen<?>) {
+        var player = standingIn;
+        if (screen == null) {
+            // setScreen(null): the client closes its screen (a screen's own onClose).
+            if (player != null && CLIENT.remove(player.getUUID()) != null) {
+                SCREENS.remove(player.getUUID());
+                closeAsked = true;
+            }
             return;
         }
-        if (CLIENT_OPENED.add(screen.getClass().getName())) {
-            System.out.println("Screens120: a mod's client opened " + screen.getClass().getName()
-                    + ", which isn't shown on Horizon yet");
+        if (screen instanceof net.minecraft.client.gui.screens.inventory.AbstractContainerScreen<?>) {
+            return;
         }
+        if (player == null) {
+            if (CLIENT_OPENED.add(screen.getClass().getName())) {
+                System.out.println("Screens120: a mod's client opened " + screen.getClass().getName()
+                        + " for nobody in particular; not shown");
+            }
+            return;
+        }
+        // A screen of the mod's own (a guide book, a config page, a sign editor): this player's
+        // screen from now on, laid out on the next frame at their size.
+        CLIENT.put(player.getUUID(), screen);
+        CLIENT_LAID_OUT.remove(player.getUUID());
+        CLIENT_NEW.add(player.getUUID());
+    }
+
+    /** The client half's own screens, by player: not a container's, so no menu behind them. */
+    private static final java.util.Map<java.util.UUID, net.minecraft.client.gui.screens.Screen> CLIENT =
+            new java.util.concurrent.ConcurrentHashMap<>();
+    /** Client screens laid out (init) already. */
+    private static final java.util.Set<java.util.UUID> CLIENT_LAID_OUT = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    /** Players a client screen opened for since it was last asked ({@link #clientOpenedSince}). */
+    private static final java.util.Set<java.util.UUID> CLIENT_NEW = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    /**
+     * The class of the client screen opened for `player` since the last asking, or null: for a
+     * click or a use to tell Horizon a screen opened, as it tells it a menu did.
+     */
+    public static String clientOpenedSince(net.minecraft.server.level.ServerPlayer player) {
+        if (!CLIENT_NEW.remove(player.getUUID())) return null;
+        var screen = CLIENT.get(player.getUUID());
+        return screen == null ? null : screen.getClass().getName();
     }
 
     /** Who the client half is, for what it sends (Packets120.fromClient). */
@@ -332,7 +382,7 @@ public final class Screens120 {
      * Horizon doesn't send yet: the book shows none), and the server player's inventory and
      * menus, so it sees what the menu moves.
      */
-    static synchronized void clientPlayer(net.minecraft.server.level.ServerPlayer player) {
+    public static synchronized void clientPlayer(net.minecraft.server.level.ServerPlayer player) {
         var minecraft = net.minecraft.client.Minecraft.getInstance();
         if (local == null) {
             local = Allocate.make(net.minecraft.client.player.LocalPlayer.class);
@@ -380,7 +430,8 @@ public final class Screens120 {
             return false;
         }
         var screen = SCREENS.get(player.getUUID());
-        if (screen == null || MADE_FOR.get(player.getUUID()) != player.containerMenu) {
+        boolean client = screen != null && screen == CLIENT.get(player.getUUID());
+        if (screen == null || (!client && MADE_FOR.get(player.getUUID()) != player.containerMenu)) {
             // No frame drawn for this menu yet: nothing on the player's screen to take it.
             return player.containerMenu != null && player.containerMenu != player.inventoryMenu;
         }
@@ -431,6 +482,15 @@ public final class Screens120 {
     public static void close(net.minecraft.server.level.ServerPlayer player) {
         SCREENS.remove(player.getUUID());
         MADE_FOR.remove(player.getUUID());
+        var client = CLIENT.remove(player.getUUID());
+        CLIENT_LAID_OUT.remove(player.getUUID());
+        if (client != null) {
+            try {
+                client.removed();
+            } catch (RuntimeException | LinkageError e) {
+                // Gone either way.
+            }
+        }
         if (player.containerMenu != null && player.containerMenu != player.inventoryMenu) {
             player.doCloseContainer();
         }

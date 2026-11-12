@@ -106,6 +106,12 @@ public final class Boot120 implements RemoteRuntime {
             case "screenFrame":
                 // A frame of the screen of a player's open menu (Mirror120, Screens120).
                 return mirror("screenFrame", args);
+            case "playerLeft":
+                // A player of Horizon's left the game (Mirror120.playerLeft).
+                return mirror("playerLeft", args);
+            case "useItem":
+                // A right-click with a mod's item at nothing (Mirror120.useItem).
+                return mirror("useItem", args);
             case "packetProbe":
                 // A round trip through the mods' packets, for the tests (Mirror120, Packets120).
                 return mirror("packetProbe", args);

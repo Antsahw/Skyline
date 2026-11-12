@@ -101,6 +101,13 @@ final class Events120 {
                 l -> l.onPlayReady(connection, sender, server));
     }
 
+    /** A player leaves: Fabric API's ServerPlayConnectionEvents.DISCONNECT. */
+    static void left(MinecraftServer server, net.minecraft.server.level.ServerPlayer player) {
+        var connection = player.connection;
+        fire(net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents.DISCONNECT, "player leave",
+                l -> l.onPlayDisconnect(connection, server));
+    }
+
     static boolean started() {
         return started;
     }

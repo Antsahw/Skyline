@@ -738,5 +738,6 @@ mod tests {
 mod breaking;
 pub(in crate::game) use breaking::Break120;
 mod hoppers;
+mod items;
 mod screens;
 mod ticks;

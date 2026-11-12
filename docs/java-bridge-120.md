@@ -356,6 +356,29 @@ clicks pass until then). A click on a block of a 1.20.1 mod's namespace, or with
 their items, goes to it at `useItemOn`'s head (`java120_use_block`, beside the 26.3 bridge's
 hook in `lan_actions.rs`); what it set and what it did to the held stack land in Horizon.
 
+## Phase 5d status: items used, mods' own screens, players leaving (2026-11-12)
+
+- **A right-click with a 1.20.1 mod's item at nothing** runs 1.20.1's own
+  `ServerPlayerGameMode.useItem` (`Mirror120.useItem`, `game/java_mods_120/items.rs`), from
+  the point in Horizon's use where the 26.3 bridge asks too: the item's own use and Fabric's
+  `UseItemCallback`. The stack comes back as the mods left it. A use held over many ticks
+  (eating, drawing a bow, raising a shield) is let go and passed back: Horizon runs those for
+  the content items it knows.
+- **A screen the client half opens itself** (a guide book, a mod's own page) is now the
+  player's screen on Horizon, through the same frames and input as a container's: laid out
+  at the player's size, drawn each tick, taking clicks, keys and typing, closed by its own
+  `onClose`. A click or a use that opened one says so (`screen:<class>`), as for a menu.
+  Vanilla's written book opens this way (the server's `ClientboundOpenBookPacket` shows the
+  client half's `BookViewScreen`), which is also the test's case.
+- **A player leaving** (Horizon dropping a guest) closes their screen there, fires Fabric's
+  `ServerPlayConnectionEvents.DISCONNECT`, and the mirror forgets them.
+- **More of a server and a client for the mods' code**: the player list's operators, bans and
+  whitelist (empty, as a new server's: nobody is an op), and text filtering off, as on an
+  offline client.
+
+The runtime test reads a written book with a right-click: its screen opens, draws its page,
+and Escape closes it; the reader then leaves, once. All three mod sets pass.
+
 ## Phase 5c status: mods' packets, and players joining (2026-11-12)
 
 - **A mod's two halves talk.** In 1.20.1 a mod's server half and client half exchange custom
@@ -842,8 +865,8 @@ NeoForge could run beside Fabric 26.3 rather than in its place.
    takes clicks and keys, with counts and tooltips. Next: the first check in a real game,
    tooltip images, `setColor` tints, real text widths, a stack's components into the runtime.
 5. **Events and networking.** 5a done: block breaks. 5b done: lifecycle and tick events. 5c
-   done: mods' packets between their halves, players joining (above). Next: players leaving,
-   a client tick, mods' own client screens.
+   done: mods' packets between their halves, players joining. 5d done: items used, mods' own
+   screens, players leaving (above). Left: a client tick (keys, HUD).
 6. **Entities and worldgen.** Data-driven registries from a real server load (mods' biomes
    through Fabric's biome API show up only there).
 7. **In-world rendering.** `VertexConsumer` capture, then a GL recorder if needed.

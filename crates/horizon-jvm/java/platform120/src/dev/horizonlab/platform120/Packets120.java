@@ -51,6 +51,18 @@ public final class Packets120 {
 
     /** A packet the server sends `player`: a mod's payload goes to the client half's receiver. */
     public static void toClient(ServerPlayer player, Packet<?> packet) {
+        if (packet instanceof net.minecraft.network.protocol.game.ClientboundOpenBookPacket book && player != null) {
+            // Vanilla's one screen opened by a packet of its own (ServerPlayer.openItemGui): the
+            // client shows the book in that hand, as ClientPacketListener.handleOpenBook does.
+            Screens120.clientPlayer(player);
+            var stack = player.getItemInHand(book.getHand());
+            if (stack.is(net.minecraft.world.item.Items.WRITTEN_BOOK)) {
+                net.minecraft.client.Minecraft.getInstance().setScreen(
+                        new net.minecraft.client.gui.screens.inventory.BookViewScreen(
+                                new net.minecraft.client.gui.screens.inventory.BookViewScreen.WrittenBookAccess(stack)));
+            }
+            return;
+        }
         if (!(packet instanceof ClientboundCustomPayloadPacket payload)) return;
         ResourceLocation channel = payload.getIdentifier();
         var receiver = ClientNetworkingImpl.PLAY.getHandler(channel);

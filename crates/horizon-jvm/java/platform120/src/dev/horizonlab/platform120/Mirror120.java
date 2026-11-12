@@ -107,6 +107,15 @@ public final class Mirror120 {
         ((dev.horizonlab.platform120.mixin.PlayerListAccess) playerList).horizon$setServer(server);
         ((dev.horizonlab.platform120.mixin.PlayerListAccess) playerList).horizon$setPlayers(new java.util.concurrent.CopyOnWriteArrayList<>());
         ((dev.horizonlab.platform120.mixin.PlayerListAccess) playerList).horizon$setPlayersByUUID(new java.util.concurrent.ConcurrentHashMap<>());
+        // Empty, as a new server's, never read from or written to a file: nobody is an op, and
+        // a mod asking (a written book resolving its text asks the reader's permission level)
+        // gets that answer.
+        var access = (dev.horizonlab.platform120.mixin.PlayerListAccess) playerList;
+        var folder = new java.io.File("horizon-mirror");
+        access.horizon$setOps(new net.minecraft.server.players.ServerOpList(new java.io.File(folder, "ops.json")));
+        access.horizon$setBans(new net.minecraft.server.players.UserBanList(new java.io.File(folder, "banned-players.json")));
+        access.horizon$setIpBans(new net.minecraft.server.players.IpBanList(new java.io.File(folder, "banned-ips.json")));
+        access.horizon$setWhitelist(new net.minecraft.server.players.UserWhiteList(new java.io.File(folder, "whitelist.json")));
         ((dev.horizonlab.platform120.mixin.MinecraftServerAccess) server).horizon$setLevels(SERVER_LEVELS);
         ((dev.horizonlab.platform120.mixin.MinecraftServerAccess) server).horizon$setStorageSource(storage());
         // Made from no file: the constructor reads server.properties, and logs an error when
@@ -751,9 +760,81 @@ public final class Mirror120 {
         } catch (RuntimeException e) {
             clicked = null;
         }
-        String[] menu = Screens120.openedSince(player, menuBefore, clicked);
+        String[] menu = opened(player, menuBefore, clicked);
         return new Object[] {code, BuiltInRegistries.ITEM.getKey(after.getItem()).toString(), after.getCount(), after.getDamageValue(),
                 menu == null ? "" : menu[0], menu == null ? "" : menu[1]};
+    }
+
+    /**
+     * What a call opened for `player`: a menu ({kind, title JSON}), or else a screen the
+     * client half opened itself ({"screen:" + its class, ""}), or null.
+     */
+    private static String[] opened(ServerPlayer player, net.minecraft.world.inventory.AbstractContainerMenu before, Object clicked) {
+        String[] menu = Screens120.openedSince(player, before, clicked);
+        if (menu != null) return menu;
+        String screen = Screens120.clientOpenedSince(player);
+        return screen == null ? null : new String[] {"screen:" + screen, ""};
+    }
+
+    /**
+     * Horizon's player `uuid` left the game: their screen closes as a server's closes on
+     * disconnect (what the cursor held goes back first), the mods hear Fabric's
+     * ServerPlayConnectionEvents.DISCONNECT, and the mirror player goes from the server's
+     * list; the next time they reach the mods' code they join again.
+     */
+    public static Object[] playerLeft(String uuid) {
+        ServerPlayer player = PLAYERS.get(UUID.fromString(uuid));
+        if (player == null) return new Object[] {false};
+        begin();
+        try {
+            Screens120.close(player);
+            Events120.left(server, player);
+            PLAYERS.remove(player.getUUID());
+            playerList.getPlayers().remove(player);
+            ((dev.horizonlab.platform120.mixin.PlayerListAccess) playerList).horizon$setPlayersByUUID(playersByUuid());
+            return new Object[] {true};
+        } finally {
+            finish();
+        }
+    }
+
+    /**
+     * A player of Horizon's right-clicks with `held` (1.20.1 item NBT) in `hand` (0 main, 1
+     * off), at nothing or at a block that didn't take the click: 1.20.1's own
+     * ServerPlayerGameMode.useItem, so the item's own use and Fabric's UseItemCallback run --
+     * a wand's spell, a backpack or a guide book opening. Gives {code, the held item after as
+     * 1.20.1 NBT, what opened (as useBlock's)}. The code is useBlock's (0 passed, 1 taken, 2
+     * taken with a swing), except that a use the item holds over many ticks (eating, drawing a bow, raising a
+     * shield) is let go and passed: Horizon runs those itself, for the content items it knows.
+     */
+    public static Object[] useItem(String uuid, String name, String dimension, int hand, String held, boolean creative,
+            double px, double py, double pz, double yaw, double pitch) {
+        begin();
+        try {
+            ServerLevel level = level(dimension);
+            ServerPlayer player = player(uuid, name, level);
+            stand(player, px, py, pz, yaw, pitch, px, py + 1.62, pz);
+            mode(player, creative);
+            InteractionHand which = hand == 1 ? InteractionHand.OFF_HAND : InteractionHand.MAIN_HAND;
+            player.setItemInHand(which, heldStack(held));
+            var menuBefore = player.containerMenu;
+            Screens120.forgetTitle(player);
+            Screens120.clientPlayer(player);
+            ItemStack stack = player.getItemInHand(which);
+            InteractionResult result = player.gameMode.useItem(player, level, stack, which);
+            // As useBlock's: 0 passed, 1 taken, 2 taken with a swing of the arm.
+            int code = !result.consumesAction() ? 0 : result.shouldSwing() ? 2 : 1;
+            if (player.isUsingItem()) {
+                player.stopUsingItem();
+                code = 0;
+            }
+            ItemStack after = player.getItemInHand(which);
+            String[] menu = opened(player, menuBefore, null);
+            return new Object[] {code, after.isEmpty() ? "" : after.save(new net.minecraft.nbt.CompoundTag()).toString(),
+                    menu == null ? "" : menu[0], menu == null ? "" : menu[1]};
+        } finally {
+            finish();
+        }
     }
 
     /**
