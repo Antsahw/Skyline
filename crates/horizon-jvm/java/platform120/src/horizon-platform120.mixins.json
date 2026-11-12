@@ -16,6 +16,7 @@
     "PlayerAccess",
     "ServerGamePacketListenerAccess",
     "ServerPlayNetworkingMixin",
+    "PlayerLookupMixin",
     "ChunkHolderMixin",
     "ServerChunkCacheMixin",
     "GameModeAccess",
@@ -37,12 +38,18 @@
     "GuiGraphicsMixin",
     "InputConstantsMixin",
     "KeyMappingAccess",
+    "SpriteContentsMixin",
     "LocalPlayerAccess",
     "MenuScreensAccess",
     "MinecraftAccess",
     "MinecraftMixin",
+    "ModelManagerAccess",
     "RenderSystemMixin",
-    "ScreenMixin"
+    "ScreenMixin",
+    "SpriteContentsAccess",
+    "TextureAtlasSpriteAccess"
   ],
-  "injectors": {"defaultRequire": 1}
+  "injectors": {
+    "defaultRequire": 1
+  }
 }

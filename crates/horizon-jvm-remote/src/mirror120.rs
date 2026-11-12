@@ -52,6 +52,17 @@ pub trait Region120 {
     fn set_block_entity(&mut self, pos: [i32; 3], snbt: &str);
 }
 
+/// One quad of a block drawn by its mod's code ([`Runtime120::render_block`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct CodeQuad {
+    /// Its sprite (`wiredredstone:block/red_alloy_wire`).
+    pub sprite: String,
+    /// Per corner: x, y, z in the block (0..1), u, v in the sprite (0..1).
+    pub corners: [[f32; 5]; 4],
+    /// Per corner: ARGB, the mod's tint included.
+    pub colors: [u32; 4],
+}
+
 /// Where a mod's placed feature goes ([`Runtime120::place_feature`]): what seeds vanilla's
 /// random for it in `applyBiomeDecoration`, and its origin.
 #[derive(Clone, Debug, PartialEq)]
@@ -161,7 +172,7 @@ pub struct PacketProbe {
 }
 
 /// What a server tick's events did ([`Runtime120::server_tick`]).
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Default)]
 pub struct ServerTicked {
     /// Some mod listens to ticks (Fabric's `ServerTickEvents`).
     pub listening: bool,
@@ -599,6 +610,39 @@ impl Runtime120 {
         })
     }
 
+    /// Horizon updated the neighbours of `positions` (x, y, z each) with a mod's block among
+    /// them: the mods' blocks beside them hear it (their shape for that side, then
+    /// `neighborChanged`), as vanilla's neighbour updater tells them. What they set and
+    /// changed comes back for Horizon to apply.
+    pub fn neighbours(
+        &mut self,
+        world: &dyn World120,
+        dimension: &str,
+        positions: &[i32],
+    ) -> Result<Ticked, String> {
+        let args = [
+            Value::Str(dimension.to_owned()),
+            Value::I32s(positions.to_vec()),
+        ];
+        let mut handler = InWorld {
+            world,
+            set: Vec::new(),
+            block_entities: Vec::new(),
+            spawned: Vec::new(),
+            log: self.log.clone(),
+        };
+        let values = self.call_values("neighbours", &args, &mut handler)?;
+        Ok(Ticked {
+            ticked: match values.first() {
+                Some(Value::I32(v)) => *v,
+                other => return Err(format!("neighbours: answer 0 is {other:?}")),
+            },
+            set: handler.set,
+            block_entities: handler.block_entities,
+            spawned: handler.spawned,
+        })
+    }
+
     /// One frame of the screen of the menu `player` has open, drawn at `width` by `height`
     /// with the mouse at (`mouse_x`, `mouse_y`): the operations Horizon's screen drawing reads,
     /// as JSON. `None` when they have no menu open, or its mod registered no screen for it.
@@ -758,6 +802,59 @@ impl Runtime120 {
             block_entities: handler.block_entities,
             spawned: handler.spawned,
         })
+    }
+
+    /// The mods' block states whose look is their code (a model made per position:
+    /// LibMultipart's container), as Horizon names states. The first call bakes the client's
+    /// block models.
+    pub fn drawn_by_code(&mut self) -> Result<Vec<String>, String> {
+        match self.call_answers("drawnByCode", &[])?.first() {
+            Some(Value::Strs(states)) => Ok(states.clone()),
+            other => Err(format!("drawnByCode: answer 0 is {other:?}")),
+        }
+    }
+
+    /// The quads of the block at `pos` as its model draws it there, its block entity and
+    /// neighbours read from `world`.
+    pub fn render_block(
+        &mut self,
+        world: &dyn World120,
+        dimension: &str,
+        pos: [i32; 3],
+    ) -> Result<Vec<CodeQuad>, String> {
+        let mut handler = InWorld {
+            world,
+            set: Vec::new(),
+            block_entities: Vec::new(),
+            spawned: Vec::new(),
+            log: self.log.clone(),
+        };
+        let args = [
+            Value::Str(dimension.to_owned()),
+            Value::I32(pos[0]),
+            Value::I32(pos[1]),
+            Value::I32(pos[2]),
+        ];
+        let values = self.call_values("renderBlock", &args, &mut handler)?;
+        let (Some(Value::Strs(sprites)), Some(Value::F64s(corners)), Some(Value::I32s(colors))) =
+            (values.first(), values.get(1), values.get(2))
+        else {
+            return Err(format!("renderBlock: answers {values:?}"));
+        };
+        if corners.len() != sprites.len() * 20 || colors.len() != sprites.len() * 4 {
+            return Err("renderBlock: answers of different lengths".into());
+        }
+        Ok(sprites
+            .iter()
+            .enumerate()
+            .map(|(q, sprite)| CodeQuad {
+                sprite: sprite.clone(),
+                corners: std::array::from_fn(|c| {
+                    std::array::from_fn(|k| corners[q * 20 + c * 5 + k] as f32)
+                }),
+                colors: std::array::from_fn(|c| colors[q * 4 + c] as u32),
+            })
+            .collect())
     }
 
     /// The mods' placed features (of their own namespaces), which [`Self::place_feature`]

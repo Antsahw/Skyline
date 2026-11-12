@@ -356,6 +356,56 @@ clicks pass until then). A click on a block of a 1.20.1 mod's namespace, or with
 their items, goes to it at `useItemOn`'s head (`java120_use_block`, beside the 26.3 bridge's
 hook in `lan_actions.rs`); what it set and what it did to the held stack land in Horizon.
 
+## Phase 7 status: blocks drawn by their mod's code (2026-11-12)
+
+A block whose look is code has no model Horizon can read: Wired Redstone's wires and cables
+are LibMultipart containers whose model is built per position from the parts in the block
+entity (the wire, its side, its connections, its power). They drew as stone.
+
+- **The client's models, baked in the runtime** (`Models120`): ModelManager's loaders over
+  vanilla's and the mods' resource packs, with Fabric's model loading (LibMultipart's container
+  model is a plugin), on stand-in sprites (`Sprites120`: each its own slot of UVs, so a quad's
+  UVs say its sprite). A mod's state whose model is a Fabric model, not a plain vanilla one, is
+  drawn by code (3072 states with Wired Redstone).
+- **A block drawn there.** Indigo's own block renderer draws it into a capture, in a view of the
+  mirror level (Horizon's blocks and block entities). The quads come back with their sprite,
+  corners in the block, UVs in the sprite and colour (`Runtime120::render_block`). The server
+  half draws such blocks again when their state or block entity changed
+  (`game/java_mods_120/drawn.rs`). The window puts the quads into the mesher as that
+  position's model, on Horizon's sprite of the same name (the mods' block textures are in the
+  block atlas), and meshes the section again.
+- **LibMultipart's model keys.** The container keeps its parts' model keys and makes them again
+  only in a client world, when the server tells it to redraw. The mirror is the server side,
+  so a cable drew as it was when it loaded. They are made again from the parts before the block
+  is drawn.
+- **The wires link and carry power.** GraphLib links nodes in batches over ticks and tells the
+  players' clients of each merge. Two things a mirror player lacked threw there, every tick,
+  and the wires never linked:
+  - Fabric's `PlayerLookup.tracking` asked the mirror level's chunk map, which was never built.
+    It now answers with the mirror's players in view distance.
+  - LibNetworkStack kept no connection for a handler whose channel isn't open, and a mirror
+    player's never is (packets are handed over in-process). Now it is accepting.
+- **Neighbour updates.** Horizon's neighbour updates beside a mod's block reach it each tick
+  (`LevelAccess::observe_neighbours_updated`, `java_mods_120/neighbours.rs`, the runtime's
+  `neighbours`): a wire takes the power of a redstone block placed beside it, and loses it when
+  the block goes.
+- **No more bake warnings.** Vanilla's item models read their sprite's pixels for their edges.
+  A stand-in sprite has none, which logged ~590 warnings at every start; it now reads as clear.
+
+Runtime test (Wired Redstone): a cable draws only Wired Redstone's sprites, inside its block.
+A second cable beside it links within GraphLib's ticks (its block entity says it), and the
+first then draws its arm to the shared edge. A red alloy wire beside a redstone block carries
+15 and draws the powered sprite. All three mod sets pass.
+
+In a game (Anthony's set):
+- Bundled cables and red alloy wires laid in rows draw as one linked cable and one wire.
+- A wire beside a redstone block draws powered.
+- A redstone block put beside an unpowered wire powers all four blocks of it, and taking it
+  away brings them to 0.
+
+Not yet: gates' and other parts' animated or dynamic renderers (LibMultipart's dynamic part
+renderers, block entity renderers of 1.20.1 mods), and light from code-drawn blocks.
+
 ## Phase 6c status: the mods' structures (2026-11-12)
 
 The content build already carries a 1.20.1 mod's data-driven structures: its structures,
@@ -968,6 +1018,8 @@ NeoForge could run beside Fabric 26.3 rather than in its place.
    generator as biome modifiers. 6b done: a mod's own feature types run in the runtime on the
    chunks being decorated. 6c done: data-driven structures (above). Next: structures with
    their own Java pieces, the mods' biomes, and their mobs.
-7. **In-world rendering.** `VertexConsumer` capture, then a GL recorder if needed.
+7. **In-world rendering.** Blocks drawn by their code done (above: Wired Redstone's wires and
+   cables). Next: block entity renderers and LibMultipart's dynamic part renderers, then a GL
+   recorder if needed.
 8. **Tracker.** Started with phase 1b (boots: 149 of the top 150). It grows into "works in a
    world" as the phases land: works / partial / broken / needs Java 21 / needs an older loader.

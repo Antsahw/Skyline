@@ -253,6 +253,38 @@ fn fabric_1_20_1_boots_in_its_own_jvm_and_reports() {
     runtime.stop();
 }
 
+/// Grass at y 64 everywhere, and some blocks above it with their block entities.
+struct Blocks(Vec<([i32; 3], String, String)>);
+
+impl Blocks {
+    fn new(blocks: Vec<([i32; 3], String, String)>) -> Self {
+        Self(blocks)
+    }
+}
+
+impl horizon_jvm_remote::mirror120::World120 for Blocks {
+    fn block_state(&self, _dimension: &str, x: i32, y: i32, z: i32) -> Option<String> {
+        if let Some((_, state, _)) = self.0.iter().find(|(p, _, _)| *p == [x, y, z]) {
+            return Some(state.clone());
+        }
+        Some(
+            match y {
+                64 => "minecraft:grass_block[snowy=false]",
+                ..64 => "minecraft:dirt",
+                _ => "minecraft:air",
+            }
+            .into(),
+        )
+    }
+    fn block_entity(&self, _dimension: &str, x: i32, y: i32, z: i32) -> Option<String> {
+        self.0
+            .iter()
+            .find(|(p, _, _)| *p == [x, y, z])
+            .map(|(_, _, e)| e.clone())
+            .filter(|e| !e.is_empty())
+    }
+}
+
 /// A flat meadow for features: grass at y 63 over dirt, air above, one biome, and what was set.
 struct Meadow {
     biome: String,
@@ -1501,6 +1533,192 @@ fn right_clicking_a_block_runs_its_1_20_1_code_on_horizons_blocks() {
             .block_shapes(&world, "minecraft:overworld", &[50, 70, 50])
             .expect("an empty position answers");
         assert_eq!(empty.first().map(Vec::len), Some(0), "{empty:?}");
+
+        // Phase 7b: a cable put beside it joins it. Horizon runs the neighbour updates; the
+        // cable already there hears that its neighbour changed (as vanilla's neighbour updater
+        // tells it), and LibMultipart passes it to the part, which connects.
+        let lone = runtime
+            .render_block(&world, "minecraft:overworld", placed.pos)
+            .expect("the lone cable draws");
+        let first = (placed.pos, placed.state.clone(), world.entity.clone());
+        let beside = [placed.pos[0] + 1, placed.pos[1], placed.pos[2]];
+        let ground_and_first = Blocks::new(vec![first.clone()]);
+        let mut second_cable = on_top_of([beside[0], beside[1] - 1, beside[2]]);
+        second_cable.item = "wiredredstone:bundled_cable".into();
+        second_cable.count = 4;
+        let second_used = runtime
+            .use_block(&ground_and_first, &second_cable)
+            .expect("the second cable is placed");
+        let second_state = second_used
+            .set
+            .iter()
+            .find(|s| s.pos == beside)
+            .expect("the second cable set its container")
+            .state
+            .clone();
+        let second_entity = second_used
+            .block_entities
+            .iter()
+            .find(|e| e.pos == beside)
+            .expect("the second cable's parts")
+            .snbt
+            .clone();
+        let both = Blocks::new(vec![first.clone(), (beside, second_state, second_entity)]);
+        let heard = runtime
+            .neighbours(&both, "minecraft:overworld", &beside)
+            .expect("the first cable hears its new neighbour");
+        assert!(heard.ticked > 0, "{heard:?}");
+        // The game ticks the mods' block entities each tick, and the level after them. GraphLib
+        // adds a node a tick (16 for a bundled cable), then links the two graphs.
+        let positions = [placed.pos, beside].concat();
+        let mut entities = horizon_jvm_remote::mirror120::Ticked::default();
+        let mut ticked = horizon_jvm_remote::mirror120::ServerTicked::default();
+        for time in 200..225 {
+            let e = runtime
+                .tick_block_entities(&both, "minecraft:overworld", &positions)
+                .expect("both cables tick");
+            entities.block_entities.extend(e.block_entities);
+            let t = runtime
+                .server_tick(&both, "minecraft:overworld", time)
+                .expect("a tick after");
+            ticked.block_entities.extend(t.block_entities);
+        }
+        let joined = heard
+            .block_entities
+            .iter()
+            .chain(&entities.block_entities)
+            .chain(&ticked.block_entities)
+            .find(|e| e.pos == placed.pos)
+            .unwrap_or_else(|| panic!("the first cable changed: {heard:?} {ticked:?}"));
+        assert!(
+            !joined.snbt.contains("connections:0b"),
+            "it connects now: {}",
+            joined.snbt
+        );
+        // And it draws its arm toward the neighbour (+x): its plate reaches the block's edge.
+        let linked_world = Blocks::new(vec![
+            (placed.pos, placed.state.clone(), joined.snbt.clone()),
+            both.0[1].clone(),
+        ]);
+        let linked = runtime
+            .render_block(&linked_world, "minecraft:overworld", placed.pos)
+            .expect("the linked cable draws");
+        let reach = |quads: &[horizon_jvm_remote::mirror120::CodeQuad]| {
+            quads
+                .iter()
+                .flat_map(|q| q.corners.iter().map(|c| c[0]))
+                .fold(f32::MIN, f32::max)
+        };
+        assert!(
+            reach(&linked) > reach(&lone),
+            "linked reaches x {}, lone {}",
+            reach(&linked),
+            reach(&lone)
+        );
+
+        // A red alloy wire beside a redstone block carries its power, and draws it: its sprite
+        // is the powered one (Wired Redstone picks the sprite by power, in its model key).
+        let wire_at = [placed.pos[0], placed.pos[1], placed.pos[2] + 4];
+        let source = (
+            [wire_at[0] - 1, wire_at[1], wire_at[2]],
+            "minecraft:redstone_block".to_owned(),
+            String::new(),
+        );
+        let mut wire = on_top_of([wire_at[0], wire_at[1] - 1, wire_at[2]]);
+        wire.item = "wiredredstone:red_alloy_wire".into();
+        wire.count = 4;
+        let laid = runtime
+            .use_block(&Blocks::new(vec![source.clone()]), &wire)
+            .expect("the wire is laid");
+        let wire_state = laid
+            .set
+            .iter()
+            .find(|s| s.pos == wire_at)
+            .expect("the wire set its container")
+            .state
+            .clone();
+        let mut wire_entity = laid
+            .block_entities
+            .iter()
+            .find(|e| e.pos == wire_at)
+            .expect("the wire's parts")
+            .snbt
+            .clone();
+        for time in 300..325 {
+            let powered = Blocks::new(vec![
+                source.clone(),
+                (wire_at, wire_state.clone(), wire_entity.clone()),
+            ]);
+            let e = runtime
+                .tick_block_entities(&powered, "minecraft:overworld", &wire_at)
+                .expect("the wire ticks");
+            let t = runtime
+                .server_tick(&powered, "minecraft:overworld", time)
+                .expect("a tick");
+            if let Some(changed) = e
+                .block_entities
+                .iter()
+                .chain(&t.block_entities)
+                .rfind(|b| b.pos == wire_at)
+            {
+                wire_entity = changed.snbt.clone();
+            }
+        }
+        assert!(wire_entity.contains("power:15b"), "{wire_entity}");
+        let powered = Blocks::new(vec![source, (wire_at, wire_state, wire_entity)]);
+        let drawn = runtime
+            .render_block(&powered, "minecraft:overworld", wire_at)
+            .expect("the wire draws");
+        let sprites: std::collections::BTreeSet<&str> =
+            drawn.iter().map(|q| q.sprite.as_str()).collect();
+        assert!(
+            sprites.contains("wiredredstone:block/red_alloy_wire_powered"),
+            "{sprites:?}"
+        );
+
+        // Phase 7: its look is its code. The container's model is a Fabric model made per
+        // position from the parts in its block entity, so its states are drawn by code; the
+        // cable drawn there is a thin plate of Wired Redstone's own sprites, inside the block.
+        let by_code = runtime.drawn_by_code().expect("the states drawn by code");
+        assert!(
+            by_code
+                .iter()
+                .any(|s| s.starts_with("libmultipart:container")),
+            "{} states: {:?}",
+            by_code.len(),
+            by_code.iter().take(5).collect::<Vec<_>>()
+        );
+        let quads = runtime
+            .render_block(&world, "minecraft:overworld", placed.pos)
+            .expect("the cable draws");
+        let sprites: std::collections::BTreeSet<&str> =
+            quads.iter().map(|q| q.sprite.as_str()).collect();
+        eprintln!(
+            "a bundled cable drawn: {} quads of {sprites:?}",
+            quads.len()
+        );
+        assert!(!quads.is_empty(), "the cable draws something");
+        assert!(
+            sprites.iter().all(|s| s.starts_with("wiredredstone:")),
+            "Wired Redstone's own sprites: {sprites:?}"
+        );
+        for q in &quads {
+            for c in &q.corners {
+                assert!(
+                    (0..3).all(|k| (-1e-3..=1.001).contains(&c[k])),
+                    "a corner inside the block: {q:?}"
+                );
+                assert!(
+                    (-1e-3..=1.001).contains(&c[3]) && (-1e-3..=1.001).contains(&c[4]),
+                    "UVs inside the sprite: {q:?}"
+                );
+            }
+        }
+        let top = quads
+            .iter()
+            .flat_map(|q| q.corners.iter().map(|c| c[1]))
+            .fold(0f32, f32::max);
+        assert!(top < 0.5, "a plate on the floor, not a cube: top {top}");
     } else {
         eprintln!("no Wired Redstone in HORIZON_120_MODS: the cable is skipped");
     }

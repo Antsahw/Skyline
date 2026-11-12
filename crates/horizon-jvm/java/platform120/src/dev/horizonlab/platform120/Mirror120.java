@@ -3,7 +3,9 @@ package dev.horizonlab.platform120;
 import com.mojang.authlib.GameProfile;
 import dev.horizonlab.platform120.mixin.LevelAccess;
 import dev.horizonlab.platform120.mixin.ServerLevelAccess;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.function.BiConsumer;
@@ -329,6 +331,21 @@ public final class Mirror120 {
         }
         if (player.level() != level) player.setServerLevel(level);
         return player;
+    }
+
+    /** A server's view distance in chunks, as server.properties has it by default. */
+    private static final int VIEW_DISTANCE = 10;
+
+    /** The mirror's players in `level` who see the chunk at `pos` (PlayerLookupMixin). */
+    public static java.util.Collection<ServerPlayer> tracking(net.minecraft.server.level.ServerLevel level,
+            net.minecraft.world.level.ChunkPos pos) {
+        List<ServerPlayer> out = new ArrayList<>();
+        for (ServerPlayer player : PLAYERS.values()) {
+            if (player.level() != level) continue;
+            var at = player.chunkPosition();
+            if (Math.abs(at.x - pos.x) <= VIEW_DISTANCE && Math.abs(at.z - pos.z) <= VIEW_DISTANCE) out.add(player);
+        }
+        return out;
     }
 
     private static Map<UUID, ServerPlayer> playersByUuid() {
@@ -745,6 +762,7 @@ public final class Mirror120 {
         ServerPlayer player = player(uuid, name, level);
         stand(player, px, py, pz, yaw, pitch, hx, hy, hz);
         mode(player, creative);
+        Events120.around(level, new BlockPos(x, y, z));
         InteractionHand h = hand == 1 ? InteractionHand.OFF_HAND : InteractionHand.MAIN_HAND;
         ItemStack stack = stack(item, count, damage);
         player.setItemInHand(h, stack);
@@ -787,6 +805,60 @@ public final class Mirror120 {
      * mod registers them: `key.horizon.probe` on K, and a listener counting its clicks
      * (consumeClick) in each client tick. Gives the clicks counted so far.
      */
+    /**
+     * Horizon updated the neighbours of these positions (x, y, z each), and a mod's block is
+     * among them: each mod's block beside one hears it as vanilla's neighbour updater tells it,
+     * its shape updated for the side that changed (BlockState.updateShape, the block replaced or
+     * broken when its shape says so) and then its neighborChanged. LibMultipart passes it on to
+     * the parts in a container, so a cable joins the cable put beside it. How many heard.
+     */
+    public static Object[] neighbours(String dimension, int[] positions) {
+        begin();
+        try {
+            ServerLevel level = level(dimension);
+            int heard = 0;
+            for (int i = 0; i + 2 < positions.length; i += 3) {
+                BlockPos source = new BlockPos(positions[i], positions[i + 1], positions[i + 2]);
+                Events120.around(level, source);
+                BlockState from = level.getBlockState(source);
+                for (net.minecraft.core.Direction side : net.minecraft.core.Direction.values()) {
+                    BlockPos at = source.relative(side);
+                    BlockState state = level.getBlockState(at);
+                    if (state.isAir() || "minecraft".equals(BuiltInRegistries.BLOCK.getKey(state.getBlock()).getNamespace())) continue;
+                    try {
+                        BlockState shaped = state.updateShape(side.getOpposite(), from, level, at, source);
+                        if (shaped != state) {
+                            net.minecraft.world.level.block.Block.updateOrDestroy(state, shaped, level, at, 3);
+                        }
+                        level.getBlockState(at).neighborChanged(level, at, from.getBlock(), source, false);
+                        heard++;
+                    } catch (RuntimeException | LinkageError e) {
+                        log("the block at " + at.toShortString() + " (" + state + ") failed hearing its neighbour: " + e);
+                    }
+                }
+            }
+            return new Object[] {heard};
+        } finally {
+            finish();
+        }
+    }
+
+    /** The mods' block states drawn by code (Models120), baking the client's models first. */
+    public static Object[] drawnByCode() {
+        setUp();
+        return new Object[] {Models120.drawnByCode()};
+    }
+
+    /** The quads of the block at a position, as its own model draws it there (Models120.render). */
+    public static Object[] renderBlock(String dimension, int x, int y, int z) {
+        begin();
+        try {
+            return Models120.render(level(dimension), new BlockPos(x, y, z));
+        } finally {
+            finish();
+        }
+    }
+
     /** The mods' placed features, which Horizon's generator asks this side to place. */
     public static Object[] modFeatures() {
         setUp();
@@ -1021,6 +1093,7 @@ public final class Mirror120 {
             mode(player, creative);
             player.setItemInHand(InteractionHand.MAIN_HAND, heldStack(held));
             BlockPos pos = new BlockPos(x, y, z);
+            Events120.around(level, pos);
             boolean goes;
             switch (how) {
                 case BREAK_THEIRS -> goes = player.gameMode.destroyBlock(pos);
@@ -1075,6 +1148,7 @@ public final class Mirror120 {
         int ticked = 0;
         for (int i = 0; i + 2 < positions.length; i += 3) {
             BlockPos pos = new BlockPos(positions[i], positions[i + 1], positions[i + 2]);
+            Events120.around(level, pos);
             if (tickOne(level, pos)) ticked++;
         }
         finish();

@@ -5969,6 +5969,9 @@ impl Game<'_> {
         // The Java mods' fluids' looks, once their models load (this process's server).
         self.java_mod_fluids();
         self.java_mod_item_models();
+        // The 1.20.1 mods' blocks their code drew (this process's server).
+        #[cfg(feature = "java-mods-120")]
+        self.java120_drawn_models();
         self.tick_remote_level()?;
         // The rockets boosting this player tick after it, also while it waits
         // for chunks.

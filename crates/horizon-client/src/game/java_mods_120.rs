@@ -739,6 +739,8 @@ mod tests {
 }
 
 mod breaking;
+mod drawn;
+mod neighbours;
 pub(in crate::game) use breaking::Break120;
 mod hoppers;
 mod items;

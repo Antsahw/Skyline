@@ -1203,6 +1203,8 @@ impl LevelAccess for GameLevel<'_> {
     }
     fn observe_neighbours_updated(&self, source: BlockPos) {
         Game::java_neighbours_updated(source, |p| self.block_state(p));
+        #[cfg(feature = "java-mods-120")]
+        Game::java120_neighbours_updated(source, |p| self.block_state(p));
     }
     fn redstone_experiments(&self) -> bool {
         self.redstone_experiments
@@ -7973,6 +7975,8 @@ impl Game<'_> {
         self.tell_native_now();
         self.tick_java_server();
         #[cfg(feature = "java-mods-120")]
+        self.tick_java120_neighbours();
+        #[cfg(feature = "java-mods-120")]
         self.tick_java120_block_entities();
         #[cfg(feature = "java-mods-120")]
         self.tick_java120_screens();
@@ -7980,6 +7984,8 @@ impl Game<'_> {
         self.tick_java120_events();
         #[cfg(feature = "java-mods-120")]
         self.tell_java120_keys();
+        #[cfg(feature = "java-mods-120")]
+        self.tick_java120_drawn();
         self.tick_world(running)
     }
     /// What the tick runs after the local player's own update: effects, the

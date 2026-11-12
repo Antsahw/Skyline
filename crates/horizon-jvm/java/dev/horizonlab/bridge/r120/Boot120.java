@@ -106,6 +106,14 @@ public final class Boot120 implements RemoteRuntime {
             case "screenFrame":
                 // A frame of the screen of a player's open menu (Mirror120, Screens120).
                 return mirror("screenFrame", args);
+            case "neighbours":
+                // Horizon's neighbour updates beside the mods' blocks (Mirror120.neighbours).
+                return mirror(method, args);
+            case "drawnByCode":
+            case "renderBlock":
+                // Blocks whose look is the mods' code, drawn as their models draw them (Models120).
+                if (game == null) throw new IllegalStateException("not started");
+                return mirror(method, args);
             case "modFeatures":
             case "placeFeature":
                 // The mods' own features, placed in the chunks Horizon generates (Worldgen120).

@@ -25,7 +25,7 @@ from the mod's side rather than the bridge's.
 | Block entities: state kept, saved, reloaded, ticked | **done** | phase 3b |
 | Block shape for aiming, where the block entity decides it | **done** | phase 3d |
 | Its blocks drawn from the models in its jar | **done** | phase 2 |
-| Its blocks drawn by code (no blockstate file) | **not yet** | phase 7 |
+| Its blocks drawn by code (no blockstate file) | **partial** | phase 7: a Fabric model built per position (LibMultipart parts: Wired Redstone's wires and cables, linked and powered) is drawn by the mod's own model code into Horizon's mesher; block entity renderers and dynamic part renderers not yet |
 | **Screens: machines, backpacks, anything you right-click into** | **partial** | phase 4: the mod's own screen opens on the player's game and takes clicks, shift-clicks, drags and keys, with counts and tooltips; screens with vanilla's recipe book work (it shows no recipes yet); checked in a real game (Farmer's Delight's cooking pot); tooltip images and shader tints missing |
 | Items with their own use behaviour (tools, food, wands) | **partial** | phase 5d: a right-click at nothing runs the item's own use (wands, guide books, backpacks); food, bows and shields are Horizon's; tools on blocks run with phase 3a's clicks |
 | Sounds the mod ships | **unverified** | — |
@@ -69,7 +69,7 @@ A 1.20.1 mod is **fully supported** when all of this is true of it:
 1. It loads and its entrypoints run. *(done for 149 of the top 150)*
 2. Its content is in the game: blocks, items, recipes, tags, creative tabs, names. *(done)*
 3. Its blocks behave: placing, breaking, clicking, ticking, keeping state. *(done)*
-4. Its blocks look right, including ones drawn by code. *(phase 7)*
+4. Its blocks look right, including ones drawn by code. *(phase 7: models built in code done; block entity renderers next)*
 5. Its screens open, draw, and respond to clicks and keys. *(phase 4: done, checked in a real game)*
 6. Its messages reach the player and back. *(phase 5c: done)*
 7. Its items and fluids move through other mods' and Horizon's containers. *(phase 3: items through Horizon's hoppers done; fluids, energy and mods' pipes next)*

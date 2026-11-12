@@ -1,5 +1,6 @@
 package dev.horizonlab.platform120;
 
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
@@ -106,6 +107,35 @@ final class Events120 {
         var connection = player.connection;
         fire(net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents.DISCONNECT, "player leave",
                 l -> l.onPlayDisconnect(connection, server));
+    }
+
+    private static final Map<ServerLevel, Set<Long>> CHUNKS = new java.util.IdentityHashMap<>();
+
+    /**
+     * The chunks around a position the mods' code acts at are loaded for them, as a server
+     * loads chunks before anything happens in them: Fabric API's ServerChunkEvents.CHUNK_LOAD,
+     * once a chunk. GraphLib (inside Wired Redstone) keeps its graphs only in chunks it heard
+     * load, so without it a cable was never linked to the one beside it.
+     */
+    static synchronized void around(ServerLevel level, net.minecraft.core.BlockPos pos) {
+        Set<Long> loaded = CHUNKS.computeIfAbsent(level, l -> new java.util.HashSet<>());
+        int cx = pos.getX() >> 4, cz = pos.getZ() >> 4;
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dz = -1; dz <= 1; dz++) {
+                var chunk = new net.minecraft.world.level.ChunkPos(cx + dx, cz + dz);
+                if (!loaded.add(chunk.toLong())) continue;
+                if (listeners(net.fabricmc.fabric.api.event.lifecycle.v1.ServerChunkEvents.CHUNK_LOAD) == 0) continue;
+                net.minecraft.world.level.chunk.LevelChunk made;
+                try {
+                    made = new net.minecraft.world.level.chunk.LevelChunk(level, chunk);
+                } catch (RuntimeException | LinkageError e) {
+                    Mirror120.log("chunk " + chunk + " couldn't be made for the mods: " + e);
+                    continue;
+                }
+                fire(net.fabricmc.fabric.api.event.lifecycle.v1.ServerChunkEvents.CHUNK_LOAD, "a chunk loading",
+                        l -> l.onChunkLoad(level, made));
+            }
+        }
     }
 
     static boolean started() {

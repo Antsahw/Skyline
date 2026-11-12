@@ -6,6 +6,7 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
  * A mirror player's packet listener swallows what is sent to it. Horizon owns the real players
@@ -33,5 +34,16 @@ public abstract class ServerGamePacketListenerMixin {
             net.minecraft.network.PacketSendListener listener, CallbackInfo ci) {
         dev.horizonlab.platform120.Packets120.toClient(this.player, packet);
         ci.cancel();
+    }
+
+    /**
+     * A mirror player's connection is open as long as they play: it has no channel of its own
+     * (packets are handed over in-process), so vanilla's check (the channel is open) said no.
+     * LibNetworkStack keeps no connection for a player whose handler says no, and GraphLib then
+     * failed to tell the players of every graph merge: Wired Redstone's wires never linked.
+     */
+    @Inject(method = "isAcceptingMessages", at = @At("HEAD"), cancellable = true)
+    private void horizon$accepting(CallbackInfoReturnable<Boolean> cir) {
+        cir.setReturnValue(true);
     }
 }

@@ -400,6 +400,13 @@ impl RenderAssets {
         if draws {
             emissive = crate::native_emissive::load_optifine(root, &mut sprites);
         }
+        // Every block texture of the mods: a model a mod's code makes (LibMultipart's container,
+        // drawn per position by the 1.20.1 runtime) names sprites no model file names.
+        if draws {
+            for name in crate::mesher::mod_block_sprites(root) {
+                let _ = sprites.insert(root, &name);
+            }
+        }
         sprites.save_disk_cache();
         if draws {
             sprites.finish();

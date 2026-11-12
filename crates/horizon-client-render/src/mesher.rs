@@ -29,7 +29,8 @@ use horizon_world::{
     registry::BlockStateId,
 };
 pub use mod_blocks::{
-    ModFluidLook, hide_model_drawn_by_block_entity, set_mod_fluids, set_mod_tints,
+    ModFluidLook, clear_code_models, hide_model_drawn_by_block_entity, mod_block_sprites,
+    set_code_model, set_drawn_by_code, set_mod_fluids, set_mod_tints,
 };
 #[cfg(test)]
 pub(crate) use sides::sort_tinted;
@@ -1513,11 +1514,17 @@ impl Mesher<'_> {
                         let own = java.fluid(id);
                         fluid::tesselate(self.tables, shade, pad, water, own, &mut out, [x, y, z]);
                     }
-                    if !state.model || java.drawn_by_block_entity(id) {
+                    let world = BlockPos::new(center.x * 16 + x, base_y + y, center.z * 16 + z);
+                    // A block its mod's code draws per position: the model drawn there (its
+                    // state may have no model of its own).
+                    let code = java.code_model(id, [world.x, world.y, world.z]);
+                    if code.is_none() && (!state.model || java.drawn_by_block_entity(id)) {
                         continue;
                     }
-                    let world = BlockPos::new(center.x * 16 + x, base_y + y, center.z * 16 + z);
-                    if catalog
+                    if let Some(model) = code {
+                        models.clear();
+                        models.push(model);
+                    } else if catalog
                         .models_at(BlockStateId(id), world, &mut models)
                         .is_err()
                     {

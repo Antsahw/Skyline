@@ -37,16 +37,21 @@ public final class Allocate {
      * injections at a constructor's return; this is the other half, the initializers.
      *
      * <p>Only fields a mixin added are touched: their names have a '$' (a mod's prefix, or
-     * Mixin's own renaming of a unique field), which no field of Minecraft's has. Only empty
+     * Mixin's own renaming of a unique field), which no field of Minecraft's has; or, on a
+     * Minecraft class, any name but an intermediary one ({@code field_1234}, which every field
+     * Minecraft declares has at run time): Fabric API's own mixins name theirs plainly
+     * (ServerLevel's {@code loadedChunks}, which its chunk-load listener adds to). Only empty
      * collections are made, of the kind the field's type names -- which is what such an
      * initializer is, nearly always. Anything else stays null.
      */
     static void mixinCollections(Object made) {
         for (Class<?> c = made.getClass(); c != null && c != Object.class; c = c.getSuperclass()) {
             for (var field : c.getDeclaredFields()) {
+                boolean added = field.getName().indexOf('$') >= 0
+                        || (c.getName().startsWith("net.minecraft.") && !field.getName().startsWith("field_"));
                 if (java.lang.reflect.Modifier.isStatic(field.getModifiers())
                         || field.getType().isPrimitive()
-                        || field.getName().indexOf('$') < 0) {
+                        || !added) {
                     continue;
                 }
                 long offset = UNSAFE.objectFieldOffset(field);

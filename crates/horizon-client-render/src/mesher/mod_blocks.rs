@@ -152,6 +152,11 @@ pub(super) struct SectionJava<'a> {
     drawn_by_block_entity: std::sync::Arc<Vec<bool>>,
     mod_fluids: std::sync::Arc<std::collections::HashMap<u32, ModFluidLook>>,
     sprite_layers: &'a std::collections::BTreeMap<String, u32>,
+    drawn_by_code: std::sync::Arc<Vec<bool>>,
+    #[allow(clippy::type_complexity)]
+    code_models: std::sync::Arc<
+        std::collections::HashMap<[i32; 3], std::sync::Arc<crate::models::catalog::BakedModel>>,
+    >,
 }
 
 impl<'a> SectionJava<'a> {
@@ -166,7 +171,29 @@ impl<'a> SectionJava<'a> {
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .clone(),
             sprite_layers,
+            drawn_by_code: DRAWN_BY_CODE
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone(),
+            code_models: CODE_MODELS
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone(),
         }
+    }
+
+    /// The model its mod's code drew the block at `pos` (state `id`) with, when its state is one
+    /// drawn by code and the code has drawn it.
+    #[inline]
+    pub(super) fn code_model(
+        &self,
+        id: u32,
+        pos: [i32; 3],
+    ) -> Option<&crate::models::catalog::BakedModel> {
+        if self.drawn_by_code.get(id as usize) != Some(&true) {
+            return None;
+        }
+        self.code_models.get(&pos).map(|m| &**m)
     }
 
     /// Whether state `id`'s block entity draws its whole block (its chunk model is skipped).
@@ -190,4 +217,91 @@ impl<'a> SectionJava<'a> {
             translucent: look.translucent,
         })
     }
+}
+
+/// Block states a Java mod's code draws per position (a model made from the block entity:
+/// LibMultipart's container), by state id: drawn with the model of their position
+/// ([`set_code_model`]) where there is one.
+static DRAWN_BY_CODE: std::sync::LazyLock<std::sync::RwLock<std::sync::Arc<Vec<bool>>>> =
+    std::sync::LazyLock::new(Default::default);
+
+/// The models those blocks' code drew, by position (in the dimension the game shows).
+#[allow(clippy::type_complexity)]
+static CODE_MODELS: std::sync::LazyLock<
+    std::sync::RwLock<
+        std::sync::Arc<
+            std::collections::HashMap<[i32; 3], std::sync::Arc<crate::models::catalog::BakedModel>>,
+        >,
+    >,
+> = std::sync::LazyLock::new(Default::default);
+
+/// Sets which states their mods' code draws per position.
+pub fn set_drawn_by_code(states: &[u32]) {
+    let mut drawn = Vec::new();
+    for &s in states {
+        let s = s as usize;
+        if drawn.len() <= s {
+            drawn.resize(s + 1, false);
+        }
+        drawn[s] = true;
+    }
+    *DRAWN_BY_CODE
+        .write()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = std::sync::Arc::new(drawn);
+}
+
+/// The model the block at `pos` was drawn with by its mod's code (`None`: none any more).
+pub fn set_code_model(pos: [i32; 3], model: Option<crate::models::catalog::BakedModel>) {
+    let mut models = CODE_MODELS
+        .write()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut next = (**models).clone();
+    match model {
+        Some(model) => next.insert(pos, std::sync::Arc::new(model)),
+        None => next.remove(&pos),
+    };
+    *models = std::sync::Arc::new(next);
+}
+
+/// Forgets every model drawn by code (another world or dimension).
+pub fn clear_code_models() {
+    *CODE_MODELS
+        .write()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Default::default();
+}
+
+/// `ns:block/path` for every block texture of a namespace not vanilla's under a content
+/// root's `assets/<ns>/textures/block/`.
+pub fn mod_block_sprites(root: &std::path::Path) -> Vec<String> {
+    fn walk(dir: &std::path::Path, base: &std::path::Path, ns: &str, out: &mut Vec<String>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                walk(&path, base, ns, out);
+            } else if path.extension().is_some_and(|e| e == "png")
+                && let Ok(rel) = path.strip_prefix(base)
+            {
+                let rel = rel.with_extension("");
+                let rel = rel.to_string_lossy().replace('\\', "/");
+                out.push(format!("{ns}:block/{rel}"));
+            }
+        }
+    }
+    let mut out = Vec::new();
+    let Ok(namespaces) = std::fs::read_dir(root.join("assets")) else {
+        return out;
+    };
+    for ns in namespaces.flatten() {
+        let name = ns.file_name().to_string_lossy().into_owned();
+        if name == "minecraft" {
+            continue;
+        }
+        let base = ns.path().join("textures/block");
+        walk(&base, &base, &name, &mut out);
+    }
+    out.sort();
+    out
 }

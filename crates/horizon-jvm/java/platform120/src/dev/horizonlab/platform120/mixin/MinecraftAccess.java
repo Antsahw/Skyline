@@ -14,6 +14,10 @@ public interface MinecraftAccess {
     void horizon$setFont(Font font);
 
     @Mutable
+    @Accessor("blockColors")
+    void horizon$setBlockColors(net.minecraft.client.color.block.BlockColors colors);
+
+    @Mutable
     @Accessor("options")
     void horizon$setOptions(net.minecraft.client.Options options);
 }
