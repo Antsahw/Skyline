@@ -36,6 +36,7 @@
     "GuiGraphicsAccess",
     "GuiGraphicsMixin",
     "InputConstantsMixin",
+    "KeyMappingAccess",
     "LocalPlayerAccess",
     "MenuScreensAccess",
     "MinecraftAccess",

@@ -39,13 +39,13 @@ not a working machine, and almost every content mod has at least one screen.
 | What the mod does | Status | Where |
 |---|---|---|
 | Mod packets between server and client | **done** | phase 5c: both halves in one runtime, each packet handed to the other half's receiver |
-| Fabric API events (block break, player tick, server start…) | **partial** | phase 5a/5b: block breaks (a mod's block broken by its own code, break events on every block), server start and level load, server and level ticks, players joining and leaving, item use; a client tick next |
+| Fabric API events (block break, player tick, server start…) | **partial** | phase 5a/5b: block breaks (a mod's block broken by its own code, break events on every block), server start and level load, server and level ticks, players joining and leaving, item use, the client tick (phase 5e) |
 | Items moving between mod blocks and Horizon's (hoppers, pipes) | **partial** | phase 3e: Horizon's hoppers and droppers feed and empty mods' blocks (Transfer API), checked in a real game; mods' own pipes into Horizon's containers unverified |
 | Energy (Team Reborn Energy) and fluids | **not yet** | phase 3 |
 | Mod mobs and their AI | **not yet** | phase 6 |
 | Worldgen: ores, biomes, structures | **not yet** | phase 6 |
 | Mod dimensions | **not yet** | phase 6 |
-| Keybinds and HUD overlays (minimaps, tooltips, info bars) | **not yet** | phase 4 + 5 |
+| Keybinds and HUD overlays (minimaps, tooltips, info bars) | **partial** | phase 5e: mods' key bindings reach them (pressed in Horizon, clicked in 1.20.1's client tick); HUD overlays not yet |
 | Config screens (Cloth Config and friends) | **not yet** | phase 4 |
 | Mod commands | **unverified** | — |
 | Enchantments, status effects, attributes | **unverified** | — |
@@ -75,7 +75,7 @@ A 1.20.1 mod is **fully supported** when all of this is true of it:
 7. Its items and fluids move through other mods' and Horizon's containers. *(phase 3: items through Horizon's hoppers done; fluids, energy and mods' pipes next)*
 8. Its mobs spawn, move, fight and are fought. *(phase 6)*
 9. Its worldgen appears in new chunks. *(phase 6)*
-10. Its client bits work: keys, HUD, config. *(phase 4 + 5)*
+10. Its client bits work: keys, HUD, config. *(keys: phase 5e, done; HUD and config next)*
 11. None of the above costs more than a few frames a second. *(measured per phase)*
 
 Points 1–3, 5 and 6 are done. Point 7 is partly done (items through Horizon's hoppers). Points

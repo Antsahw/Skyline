@@ -28,6 +28,9 @@ pub(super) const INPUT: &str = "horizon:java_screen_input";
 /// [`INPUT`] (`{"kind": "bind", "key": scancode, "down": bool}`), as vanilla's keyboard handler
 /// clicks a `KeyMapping` with no screen open.
 pub(super) const KEYS: &str = "horizon:java_keys";
+/// Server to game: the keys the 1.20.1 mods' key bindings are set to, as [`KEYS`] (sent apart,
+/// so the two bridges' lists don't replace each other); pressed, they go on [`INPUT`] the same.
+pub(super) const KEYS_120: &str = "horizon:java120_keys";
 
 /// Game to server, once as it meets a server's Java mods: the player's own skin where no
 /// server knows it (an offline name's, from the launcher): a byte 1 for slim arms (else 0),
@@ -55,6 +58,8 @@ pub(super) const VIEW: &str = "horizon:java_view";
 #[derive(Default)]
 pub(super) struct JavaBinds {
     pub(super) keys: std::collections::HashSet<i32>,
+    /// The 1.20.1 mods' ([`KEYS_120`]).
+    pub(super) keys120: std::collections::HashSet<i32>,
     down: std::collections::HashSet<i32>,
 }
 
@@ -305,6 +310,13 @@ impl Game<'_> {
         }
     }
 
+    /// The keys the server's 1.20.1 mods bind ([`KEYS_120`]).
+    pub(super) fn remote_java120_keys(&mut self, data: &[u8]) {
+        if let Ok(keys) = serde_json::from_slice::<Vec<i32>>(data) {
+            self.java.binds.keys120 = keys.into_iter().collect();
+        }
+    }
+
     /// The server's Java mods' key bindings ([`KEY_MAPPINGS`]): the Controls page's rows.
     pub(super) fn remote_java_key_mappings(&mut self, data: &[u8]) {
         if let Some(mods) = mod_keys(data) {
@@ -361,7 +373,9 @@ impl Game<'_> {
     /// A key of the window, for Java mods' key bindings: pressed while playing (no screen), or
     /// released after it was sent down (KeyboardHandler.keyPress: KeyMapping.set and click).
     pub(super) fn java_bind_key(&mut self, key: KeyCode, pressed: bool) {
-        if (self.java.binds.keys.is_empty() && self.settings.keys.mod_keys().is_empty())
+        if (self.java.binds.keys.is_empty()
+            && self.java.binds.keys120.is_empty()
+            && self.settings.keys.mod_keys().is_empty())
             || self.remote.is_none()
         {
             return;
@@ -374,6 +388,7 @@ impl Game<'_> {
             horizon_client::keybinds::key_name(key).and_then(|name| self.java_mappings_for(name));
         // -1: a mod takes every key (MaLiLib's hotkeys, in KeyboardHandler.keyPress).
         if !self.java.binds.keys.contains(&code)
+            && !self.java.binds.keys120.contains(&code)
             && !self.java.binds.keys.contains(&-1)
             && mappings.as_ref().is_none_or(Vec::is_empty)
         {

@@ -628,6 +628,65 @@ impl Runtime120 {
         })
     }
 
+    /// The keys the 1.20.1 mods' key bindings are set to, as GLFW's key codes.
+    pub fn mod_keys(&mut self, world: &dyn World120) -> Result<Vec<i32>, String> {
+        let mut handler = InWorld {
+            world,
+            set: Vec::new(),
+            block_entities: Vec::new(),
+            spawned: Vec::new(),
+            log: self.log.clone(),
+        };
+        let values = self.call_values("modKeys", &[], &mut handler)?;
+        match values.first() {
+            Some(Value::I32s(keys)) => Ok(keys.clone()),
+            other => Err(format!("modKeys: answer 0 is {other:?}")),
+        }
+    }
+
+    /// `uuid`'s player pressed (`down`) or let go of a key the mods bind (GLFW's code), while
+    /// playing: their next client tick reads it ([`Runtime120::server_tick`]).
+    pub fn key_press(
+        &mut self,
+        world: &dyn World120,
+        uuid: &str,
+        name: &str,
+        key: i32,
+        down: bool,
+    ) -> Result<(), String> {
+        let mut handler = InWorld {
+            world,
+            set: Vec::new(),
+            block_entities: Vec::new(),
+            spawned: Vec::new(),
+            log: self.log.clone(),
+        };
+        let args = [
+            Value::Str(uuid.to_owned()),
+            Value::Str(name.to_owned()),
+            Value::I32(key),
+            Value::Bool(down),
+        ];
+        self.call_values("keyPress", &args, &mut handler)
+            .map(|_| ())
+    }
+
+    /// For tests: registers (once) a key binding on K and a client-tick listener counting its
+    /// clicks, through Fabric's own API; gives the clicks counted so far.
+    pub fn key_probe(&mut self, world: &dyn World120) -> Result<i32, String> {
+        let mut handler = InWorld {
+            world,
+            set: Vec::new(),
+            block_entities: Vec::new(),
+            spawned: Vec::new(),
+            log: self.log.clone(),
+        };
+        match self.call_values("keyProbe", &[], &mut handler)?.first() {
+            Some(Value::I32(n)) => Ok(*n),
+            other => Err(format!("keyProbe: answer 0 is {other:?}")),
+        }
+    }
+
     /// Horizon's player `uuid` left the game: their screen closes, the mods hear Fabric's
     /// `ServerPlayConnectionEvents.DISCONNECT`, and the mirror forgets them. False when the
     /// mods never met them.

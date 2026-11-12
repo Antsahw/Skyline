@@ -356,6 +356,26 @@ clicks pass until then). A click on a block of a 1.20.1 mod's namespace, or with
 their items, goes to it at `useItemOn`'s head (`java120_use_block`, beside the 26.3 bridge's
 hook in `lan_actions.rs`); what it set and what it did to the held stack land in Horizon.
 
+## Phase 5e status: mods' key bindings and the client tick (2026-11-12)
+
+- **The keys the 1.20.1 mods bind** (Fabric's `KeyBindingHelper` registry, read by
+  `Keys120.modKeys`) go to each player's game once, on their own channel
+  (`horizon:java120_keys`, `game/java_mods_120/keys.rs`), so the 26.3 bridge's list and this
+  one don't replace each other. The game sends those keys while playing exactly as it sends
+  the 26.3 mods' (`{"kind": "bind", ...}` on the screen input channel); the server hands each
+  press to the runtime and still passes it on to the 26.3 bridge.
+- **A press** sets the mod's `KeyMapping` and clicks it, as 1.20.1's keyboard handler does
+  (`Keys120.press`). On the next server tick, for each player with a key down or a click
+  waiting, the headless client stands in for that player and runs Fabric's
+  `ClientTickEvents` START and END: the mod's `consumeClick()` loop sees the click and, as
+  mods do, sends its server half a packet (handed over in-process, phase 5c). Keys are
+  released when the player leaves.
+- A mod listening to client ticks now counts as listening for the tick backoff (5b).
+
+The runtime test registers a key binding on K through Fabric's own API, finds K in the list
+sent to players, holds K over a tick, and counts exactly one click in the mod's tick listener.
+All three mod sets pass. HUD overlays drawn by mods (`HudRenderCallback`) are not done yet.
+
 ## Phase 5d status: items used, mods' own screens, players leaving (2026-11-12)
 
 - **A right-click with a 1.20.1 mod's item at nothing** runs 1.20.1's own
@@ -866,7 +886,8 @@ NeoForge could run beside Fabric 26.3 rather than in its place.
    tooltip images, `setColor` tints, real text widths, a stack's components into the runtime.
 5. **Events and networking.** 5a done: block breaks. 5b done: lifecycle and tick events. 5c
    done: mods' packets between their halves, players joining. 5d done: items used, mods' own
-   screens, players leaving (above). Left: a client tick (keys, HUD).
+   screens, players leaving. 5e done: mods' key bindings and the client tick (above). Left:
+   mods' HUD overlays (`HudRenderCallback`).
 6. **Entities and worldgen.** Data-driven registries from a real server load (mods' biomes
    through Fabric's biome API show up only there).
 7. **In-world rendering.** `VertexConsumer` capture, then a GL recorder if needed.

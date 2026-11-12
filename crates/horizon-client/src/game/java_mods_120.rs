@@ -739,5 +739,6 @@ mod breaking;
 pub(in crate::game) use breaking::Break120;
 mod hoppers;
 mod items;
+mod keys;
 mod screens;
 mod ticks;

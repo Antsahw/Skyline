@@ -112,12 +112,14 @@ final class Events120 {
         return started;
     }
 
-    /** Whether any mod listens to a tick: a tick nobody hears costs Horizon nothing. */
+    /** Whether any mod listens to a tick, server or client: a tick nobody hears costs nothing. */
     static boolean anyTickListeners() {
         return listeners(ServerTickEvents.START_SERVER_TICK) != 0
                 || listeners(ServerTickEvents.END_SERVER_TICK) != 0
                 || listeners(ServerTickEvents.START_WORLD_TICK) != 0
-                || listeners(ServerTickEvents.END_WORLD_TICK) != 0;
+                || listeners(ServerTickEvents.END_WORLD_TICK) != 0
+                || listeners(net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents.START_CLIENT_TICK) != 0
+                || listeners(net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents.END_CLIENT_TICK) != 0;
     }
 
     /**

@@ -44,6 +44,7 @@ fn open<R>(f: impl FnOnce(&mut HashMap<u32, Open>) -> R) -> R {
 
 /// A player's connection went: their screen with it.
 pub(super) fn forget(conn: u32) {
+    super::keys::forget(conn);
     open(|screens| screens.remove(&conn));
 }
 
@@ -77,7 +78,7 @@ fn glfw_button(button: i64) -> i32 {
 
 /// GLFW's key code, which 1.20.1 screens read, from the SDL scancode the game sends (26.3's).
 /// -1 (GLFW's unknown key) for one with no GLFW code.
-fn glfw_key(sdl: i64) -> i32 {
+pub(super) fn glfw_key(sdl: i64) -> i32 {
     let sdl = sdl as i32;
     match sdl {
         4..=29 => 65 + (sdl - 4),    // A..Z
@@ -343,6 +344,10 @@ impl super::super::Game<'_> {
         let Ok(input) = serde_json::from_slice::<Value>(data) else {
             return false;
         };
+        if input.get("kind").and_then(Value::as_str) == Some("bind") {
+            self.java120_key(host, conn, &input);
+            return false;
+        }
         let window = input.get("window").and_then(Value::as_i64).unwrap_or(-1) as i32;
         if window != CLIENT_WINDOW {
             return false;

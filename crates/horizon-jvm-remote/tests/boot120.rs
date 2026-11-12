@@ -1238,6 +1238,31 @@ fn right_clicking_a_block_runs_its_1_20_1_code_on_horizons_blocks() {
         }
     }
 
+    // Phase 5e: the mods' key bindings. A binding registered through Fabric's helper is in the
+    // list the players are sent; a press held over a client tick is one click to the mod's
+    // END_CLIENT_TICK listener, as it is in 1.20.1's own client.
+    let prober = "00000000-0000-0000-0000-00000000c0de";
+    assert_eq!(runtime.key_probe(&world).expect("the key probe"), 0);
+    let keys = runtime.mod_keys(&world).expect("the mods' keys");
+    assert!(keys.contains(&75), "K is bound: {keys:?}");
+    runtime
+        .key_press(&world, prober, "Prober", 75, true)
+        .expect("K down");
+    runtime
+        .server_tick(&world, "minecraft:overworld", 103)
+        .expect("a tick with K down");
+    runtime
+        .key_press(&world, prober, "Prober", 75, false)
+        .expect("K up");
+    runtime
+        .server_tick(&world, "minecraft:overworld", 104)
+        .expect("a tick with K up");
+    assert_eq!(
+        runtime.key_probe(&world).expect("the key probe"),
+        1,
+        "one click"
+    );
+
     // A mod telling the player about something must not break the mod. Vanilla's chest is the
     // same shape with no mod needed: its `use` opens a menu, which sends a packet through the
     // player's listener, and asks the piglins nearby to take offence, which asks the level for

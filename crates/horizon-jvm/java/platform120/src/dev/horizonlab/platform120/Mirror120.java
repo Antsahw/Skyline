@@ -399,6 +399,8 @@ public final class Mirror120 {
             worldData.setGameTime(gameTime);
             ((dev.horizonlab.platform120.mixin.MinecraftServerAccess) server).horizon$setTickCount((int) gameTime);
             Events120.start(server, LEVELS.values());
+            // The players' client ticks, where the mods read the keys pressed since the last.
+            Keys120.tick(PLAYERS);
             if (!Events120.anyTickListeners()) return new Object[] {false};
             Events120.tick(server, level, gameTime);
             return new Object[] {true};
@@ -776,6 +778,58 @@ public final class Mirror120 {
         return screen == null ? null : new String[] {"screen:" + screen, ""};
     }
 
+    private static volatile int keyProbeClicks;
+    private static boolean keyProbeRegistered;
+
+    /**
+     * A key binding and a client-tick listener, for the tests, through Fabric's own API as a
+     * mod registers them: `key.horizon.probe` on K, and a listener counting its clicks
+     * (consumeClick) in each client tick. Gives the clicks counted so far.
+     */
+    public static Object[] keyProbe() {
+        if (!keyProbeRegistered) {
+            keyProbeRegistered = true;
+            // Mods register their keys while they load, before the options exist; Fabric refuses
+            // one after. The probe comes later, so it registers with the options set aside.
+            var client = net.minecraft.client.Minecraft.getInstance();
+            var options = client.options;
+            var access = (dev.horizonlab.platform120.mixin.MinecraftAccess) client;
+            access.horizon$setOptions(null);
+            net.minecraft.client.KeyMapping mapping;
+            try {
+                mapping = net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper.registerKeyBinding(
+                        new net.minecraft.client.KeyMapping("key.horizon.probe", 75, "key.categories.misc"));
+            } finally {
+                access.horizon$setOptions(options);
+            }
+            var probe = mapping;
+            net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents.END_CLIENT_TICK.register(ticking -> {
+                while (probe.consumeClick()) keyProbeClicks++;
+            });
+        }
+        return new Object[] {keyProbeClicks};
+    }
+
+    /** The keys the mods' key bindings are set to, as GLFW's codes (Keys120). */
+    public static Object[] modKeys() {
+        return new Object[] {Keys120.modKeys()};
+    }
+
+    /**
+     * `uuid`'s player pressed (or let go of) a key the mods bind, while playing: it is set and
+     * clicked on the mods' mappings, and their next client tick reads it (Keys120).
+     */
+    public static Object[] keyPress(String uuid, String name, int key, boolean down) {
+        begin();
+        try {
+            ServerPlayer player = player(uuid, name, level("minecraft:overworld"));
+            Keys120.press(player, key, down);
+            return new Object[] {true};
+        } finally {
+            finish();
+        }
+    }
+
     /**
      * Horizon's player `uuid` left the game: their screen closes as a server's closes on
      * disconnect (what the cursor held goes back first), the mods hear Fabric's
@@ -788,6 +842,7 @@ public final class Mirror120 {
         begin();
         try {
             Screens120.close(player);
+            Keys120.forget(player.getUUID());
             Events120.left(server, player);
             PLAYERS.remove(player.getUUID());
             playerList.getPlayers().remove(player);

@@ -49,7 +49,7 @@ fi
 # to Mojang's names to compile against, as Loom remaps a mod's dependencies; once, like the
 # compile jar. Compile-only: at run time the loader's own Fabric API is there.
 API_NAMED=$DEV/fabric-api-named
-API_MODULES="fabric-api-base fabric-api-lookup-api-v1 fabric-transfer-api-v1 fabric-events-interaction-v0 fabric-lifecycle-events-v1 fabric-networking-api-v1"
+API_MODULES="fabric-api-base fabric-api-lookup-api-v1 fabric-transfer-api-v1 fabric-events-interaction-v0 fabric-lifecycle-events-v1 fabric-networking-api-v1 fabric-key-binding-api-v1"
 mkdir -p "$API_NAMED"
 for m in $API_MODULES; do
   [ -s "$API_NAMED/$m.jar" ] && continue

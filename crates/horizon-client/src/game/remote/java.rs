@@ -27,6 +27,7 @@ impl Game<'_> {
             super::super::java_screen::HUD_CHANNEL if !own => self.remote_java_hud(data),
             super::super::java_screen::CHANNEL => self.remote_java_screen(data),
             super::super::java_screen::KEYS if !own => self.remote_java_keys(data),
+            super::super::java_screen::KEYS_120 => self.remote_java120_keys(data),
             super::super::java_screen::KEY_MAPPINGS if !own => self.remote_java_key_mappings(data),
             super::super::java_screen::VIEW if !own => self.remote_java_view(data),
             #[cfg(feature = "java-mods")]
