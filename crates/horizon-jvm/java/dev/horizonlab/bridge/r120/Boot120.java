@@ -106,6 +106,11 @@ public final class Boot120 implements RemoteRuntime {
             case "screenFrame":
                 // A frame of the screen of a player's open menu (Mirror120, Screens120).
                 return mirror("screenFrame", args);
+            case "modFeatures":
+            case "placeFeature":
+                // The mods' own features, placed in the chunks Horizon generates (Worldgen120).
+                if (game == null) throw new IllegalStateException("not started");
+                return mirror(method, args);
             case "biomeChanges":
                 // What the mods' Fabric biome modifications add to and take from vanilla's
                 // biomes, as data (Mirror120, Worldgen120).

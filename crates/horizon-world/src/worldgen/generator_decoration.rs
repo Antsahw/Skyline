@@ -481,6 +481,9 @@ impl Decoration {
             [center.x * 16 + 15, min_y + height - 1, center.z * 16 + 15],
         );
         let mut structure_errors = 0;
+        // Features of a type only someone else can run (a mod's), when someone can.
+        let foreign = super::foreign::foreign_features();
+        let registry = data.registry();
         let result = self.plan.decorate(
             &mut world,
             center,
@@ -530,8 +533,24 @@ impl Decoration {
                     return Ok(false);
                 }
                 let Ok(feature) = &self.features[id.0 as usize] else {
+                    let name = &self.names[id.0 as usize];
+                    if let Some(foreign) = foreign.as_deref().filter(|f| f.places(name))
+                        && let Some((index, step)) = self.plan.seed(id)
+                    {
+                        stats.placed += 1;
+                        let placement = super::foreign::ForeignPlacement {
+                            feature: name,
+                            world_seed: seed,
+                            chunk: [center.x, center.z],
+                            index: index as i32,
+                            step: step as i32,
+                            origin,
+                        };
+                        let mut region = ForeignRegion { world, registry };
+                        return Ok(foreign.place(&placement, &mut region));
+                    }
                     stats.unsupported += 1;
-                    stats.skipped.insert(self.names[id.0 as usize].clone());
+                    stats.skipped.insert(name.clone());
                     return Ok(false);
                 };
                 stats.placed += 1;
@@ -709,6 +728,51 @@ impl PlacementContext for OriginWorld<'_> {
 
 /// WorldGenRegion-style view: reads anywhere in the 3×3 region, writes within
 /// the FEATURES step's write radius, biome lookups through the biome zoom.
+/// The region being decorated as a [`super::foreign::ForeignWorld`]: states, biomes and
+/// heightmaps by name, writes inside the region's write zone.
+struct ForeignRegion<'w, 'a> {
+    world: &'w mut World<'a>,
+    registry: &'static crate::registry::BlockRegistry,
+}
+
+impl super::foreign::ForeignWorld for ForeignRegion<'_, '_> {
+    fn block(&mut self, position: [i32; 3]) -> Option<String> {
+        let id = self.world.region.block(position).ok()?;
+        super::foreign::state_string(self.registry, id)
+    }
+    fn biome(&mut self, position: [i32; 3]) -> Option<String> {
+        let id = self.world.biome_identity(position).ok()?;
+        self.world
+            .biome_names
+            .get(id.0 as usize)
+            .map(|n| n.to_string())
+    }
+    fn height(&mut self, heightmap: &str, x: i32, z: i32) -> Option<i32> {
+        let kind = HeightmapType::ALL
+            .into_iter()
+            .find(|k| k.name() == heightmap)?;
+        PlacementContext::height(self.world, kind, x, z).ok()
+    }
+    fn set_block(&mut self, position: [i32; 3], state: &str) -> bool {
+        let Some(id) = super::foreign::parse_state_string(self.registry, state) else {
+            return false;
+        };
+        FeatureWorld::set_block(self.world, position, id, 3).unwrap_or(false)
+    }
+    fn set_block_entity(&mut self, position: [i32; 3], nbt: crate::nbt::Compound) -> bool {
+        if !self
+            .world
+            .zone
+            .contains_block(BlockPos::new(position[0], position[1], position[2]))
+        {
+            return false;
+        }
+        self.world.block_entities.retain(|(p, _)| *p != position);
+        self.world.block_entities.push((position, nbt));
+        true
+    }
+}
+
 struct World<'a> {
     block_entities: Vec<([i32; 3], crate::nbt::Compound)>,
     entities: Vec<crate::nbt::Compound>,

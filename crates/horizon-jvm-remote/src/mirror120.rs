@@ -25,6 +25,44 @@ pub trait World120 {
     fn block_entity(&self, _dimension: &str, _x: i32, _y: i32, _z: i32) -> Option<String> {
         None
     }
+
+    /// A heightmap's height at a column (`MOTION_BLOCKING`, ...): the y above its top block;
+    /// `None` where Horizon doesn't say (the level's bottom, to the mods).
+    fn height(&self, _dimension: &str, _heightmap: &str, _x: i32, _z: i32) -> Option<i32> {
+        None
+    }
+
+    /// The biome at a position, by id; `None` where Horizon doesn't say (plains, to the mods).
+    fn biome(&self, _dimension: &str, _x: i32, _y: i32, _z: i32) -> Option<String> {
+        None
+    }
+}
+
+/// The chunks Horizon's generator is decorating, for a mod's feature placed in them
+/// ([`Runtime120::place_feature`]). Unlike [`World120`], what the feature sets goes in at once:
+/// the feature reads its own blocks and the heightmaps over them as it goes.
+pub trait Region120 {
+    /// The state at a position, by 26.3's name; `None` outside the region (air, to the mods).
+    fn block_state(&mut self, x: i32, y: i32, z: i32) -> Option<String>;
+    fn height(&mut self, heightmap: &str, x: i32, z: i32) -> Option<i32>;
+    fn biome(&mut self, x: i32, y: i32, z: i32) -> Option<String>;
+    /// Sets a state the mod set, by 1.20.1's name.
+    fn set_block(&mut self, pos: [i32; 3], state: &str);
+    /// Keeps a block entity the mod made, as 1.20.1 saves it (SNBT).
+    fn set_block_entity(&mut self, pos: [i32; 3], snbt: &str);
+}
+
+/// Where a mod's placed feature goes ([`Runtime120::place_feature`]): what seeds vanilla's
+/// random for it in `applyBiomeDecoration`, and its origin.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PlaceFeature {
+    pub dimension: String,
+    pub feature: String,
+    pub world_seed: i64,
+    pub chunk: [i32; 2],
+    pub index: i32,
+    pub step: i32,
+    pub origin: [i32; 3],
 }
 
 /// A block the mods' code set, for Horizon to apply.
@@ -300,6 +338,82 @@ pub struct OpenedMenu {
     pub title: String,
 }
 
+/// Horizon's side while the runtime places a feature in the chunks being decorated.
+struct InRegion<'a> {
+    region: &'a mut dyn Region120,
+    log: Log,
+}
+
+impl Handler for InRegion<'_> {
+    fn call(&mut self, _: &mut Peer, method: &str, args: Vec<Value>) -> Result<Vec<Value>, String> {
+        match method {
+            "blockState" => {
+                let (x, y, z) = (int(&args, 1)?, int(&args, 2)?, int(&args, 3)?);
+                Ok(vec![
+                    self.region
+                        .block_state(x, y, z)
+                        .map_or(Value::Null, Value::Str),
+                ])
+            }
+            "blockStates" => {
+                let positions = ints(&args, 1)?;
+                let states = positions
+                    .chunks_exact(3)
+                    .map(|p| {
+                        self.region
+                            .block_state(p[0], p[1], p[2])
+                            .unwrap_or_default()
+                    })
+                    .collect();
+                Ok(vec![Value::Strs(states)])
+            }
+            // A new chunk has none but what the generator put there, which the mods don't read.
+            "blockEntity" => Ok(vec![Value::Null]),
+            "height" => {
+                let heightmap = text(&args, 1)?;
+                let (x, z) = (int(&args, 2)?, int(&args, 3)?);
+                Ok(vec![
+                    self.region
+                        .height(heightmap, x, z)
+                        .map_or(Value::Null, Value::I32),
+                ])
+            }
+            "biome" => {
+                let (x, y, z) = (int(&args, 1)?, int(&args, 2)?, int(&args, 3)?);
+                Ok(vec![
+                    self.region.biome(x, y, z).map_or(Value::Null, Value::Str),
+                ])
+            }
+            _ => Err(format!(
+                "Horizon has no {method} for 1.20.1 mods' world generation yet"
+            )),
+        }
+    }
+
+    fn event(&mut self, _: &mut Peer, method: &str, args: Vec<Value>) {
+        let at = |args: &[Value]| -> Result<[i32; 3], String> {
+            Ok([int(args, 1)?, int(args, 2)?, int(args, 3)?])
+        };
+        match method {
+            "log" => {
+                if let Some(line) = args.first().and_then(Value::as_str) {
+                    (self.log)(&format!("[fabric-1.20.1] {line}"));
+                }
+            }
+            "setBlock" => match (at(&args), text(&args, 4)) {
+                (Ok(pos), Ok(state)) => self.region.set_block(pos, state),
+                _ => (self.log)("[fabric-1.20.1] a feature's setBlock unread"),
+            },
+            "setBlockEntity" => match (at(&args), text(&args, 4)) {
+                (Ok(pos), Ok(snbt)) => self.region.set_block_entity(pos, snbt),
+                _ => (self.log)("[fabric-1.20.1] a feature's setBlockEntity unread"),
+            },
+            // Items and the rest have no place in a chunk being generated.
+            _ => {}
+        }
+    }
+}
+
 /// Horizon's side while the runtime runs a call in the world.
 struct InWorld<'a> {
     world: &'a dyn World120,
@@ -372,6 +486,24 @@ impl Handler for InWorld<'_> {
                 Ok(vec![
                     self.world
                         .block_entity(dimension, x, y, z)
+                        .map_or(Value::Null, Value::Str),
+                ])
+            }
+            "height" => {
+                let (dimension, heightmap) = (text(&args, 0)?, text(&args, 1)?);
+                let (x, z) = (int(&args, 2)?, int(&args, 3)?);
+                Ok(vec![
+                    self.world
+                        .height(dimension, heightmap, x, z)
+                        .map_or(Value::Null, Value::I32),
+                ])
+            }
+            "biome" => {
+                let dimension = text(&args, 0)?;
+                let (x, y, z) = (int(&args, 1)?, int(&args, 2)?, int(&args, 3)?);
+                Ok(vec![
+                    self.world
+                        .biome(dimension, x, y, z)
                         .map_or(Value::Null, Value::Str),
                 ])
             }
@@ -626,6 +758,44 @@ impl Runtime120 {
             block_entities: handler.block_entities,
             spawned: handler.spawned,
         })
+    }
+
+    /// The mods' placed features (of their own namespaces), which [`Self::place_feature`]
+    /// places where Horizon's generator can't.
+    pub fn mod_features(&mut self) -> Result<Vec<String>, String> {
+        match self.call_answers("modFeatures", &[])?.first() {
+            Some(Value::Strs(ids)) => Ok(ids.clone()),
+            other => Err(format!("modFeatures: answer 0 is {other:?}")),
+        }
+    }
+
+    /// Places a mod's placed feature in the chunks Horizon's generator is decorating, as
+    /// vanilla's `applyBiomeDecoration` would (`PlacedFeature.placeWithBiomeCheck`, its random
+    /// seeded as vanilla seeds it): the mod's own feature and placement code. Whether it placed
+    /// anything.
+    pub fn place_feature(
+        &mut self,
+        region: &mut dyn Region120,
+        place: &PlaceFeature,
+    ) -> Result<bool, String> {
+        let mut handler = InRegion {
+            region,
+            log: self.log.clone(),
+        };
+        let args = [
+            Value::Str(place.dimension.clone()),
+            Value::Str(place.feature.clone()),
+            Value::I64(place.world_seed),
+            Value::I32(place.chunk[0]),
+            Value::I32(place.chunk[1]),
+            Value::I32(place.index),
+            Value::I32(place.step),
+            Value::I32(place.origin[0]),
+            Value::I32(place.origin[1]),
+            Value::I32(place.origin[2]),
+        ];
+        let values = self.call_values("placeFeature", &args, &mut handler)?;
+        Ok(matches!(values.first(), Some(Value::Bool(true))))
     }
 
     /// The keys the 1.20.1 mods' key bindings are set to, as GLFW's key codes.

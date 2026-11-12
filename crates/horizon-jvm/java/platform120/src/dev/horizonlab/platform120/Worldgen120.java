@@ -115,6 +115,52 @@ final class Worldgen120 {
         return out.toString();
     }
 
+    /** The mods' placed features: those of a namespace not vanilla's. */
+    static String[] modFeatures() {
+        Registry<PlacedFeature> placed = Mirror120.registries().registryOrThrow(Registries.PLACED_FEATURE);
+        return placed.keySet().stream()
+                .filter(id -> !"minecraft".equals(id.getNamespace()))
+                .map(Object::toString)
+                .sorted()
+                .toArray(String[]::new);
+    }
+
+    private static Generator120 generator;
+
+    /** HORIZON_120_TRACE: each feature placed is said. */
+    private static final boolean TRACE = System.getenv("HORIZON_120_TRACE") != null;
+
+    /**
+     * Places a mod's placed feature where vanilla's {@code ChunkGenerator.applyBiomeDecoration}
+     * would: its random seeded as there (the chunk's decoration seed, then the feature's index
+     * and step), then {@code PlacedFeature.placeWithBiomeCheck} on the level, whose blocks,
+     * heights and biomes are the chunks Horizon is decorating.
+     */
+    static boolean place(net.minecraft.server.level.ServerLevel level, String id, long worldSeed,
+            int chunkX, int chunkZ, int index, int step, net.minecraft.core.BlockPos origin) {
+        biomeChanges();
+        RegistryAccess registries = Mirror120.registries();
+        PlacedFeature feature = registries.registryOrThrow(Registries.PLACED_FEATURE)
+                .get(new net.minecraft.resources.ResourceLocation(id));
+        if (feature == null) return false;
+        if (generator == null) {
+            generator = new Generator120(registries.registryOrThrow(Registries.BIOME)
+                    .getHolderOrThrow(net.minecraft.world.level.biome.Biomes.PLAINS));
+        }
+        var random = new net.minecraft.world.level.levelgen.WorldgenRandom(
+                new net.minecraft.world.level.levelgen.XoroshiroRandomSource(net.minecraft.world.level.levelgen.RandomSupport.generateUniqueSeed()));
+        long seed = random.setDecorationSeed(worldSeed, chunkX << 4, chunkZ << 4);
+        random.setFeatureSeed(seed, index, step);
+        try {
+            boolean placed = feature.placeWithBiomeCheck(level, generator, random, origin);
+            if (placed && TRACE) Mirror120.log("placed " + id + " in chunk " + chunkX + " " + chunkZ);
+            return placed;
+        } catch (RuntimeException | LinkageError e) {
+            Mirror120.log("feature " + id + " failed at " + origin.toShortString() + ": " + e);
+            return false;
+        }
+    }
+
     private static Map<String, ResourceKey<Biome>> keys(Map<ResourceKey<Biome>, ?> map) {
         Map<String, ResourceKey<Biome>> out = new TreeMap<>();
         for (var key : map.keySet()) out.put(key.location().toString(), key);

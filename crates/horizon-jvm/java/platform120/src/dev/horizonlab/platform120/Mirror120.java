@@ -431,6 +431,7 @@ public final class Mirror120 {
      * and the positions found empty (a block can gain a block entity between calls).
      */
     static void begin() {
+        BIOMES.clear();
         WRITES.clear();
         READS.clear();
         NO_ENTITY.clear();
@@ -786,6 +787,62 @@ public final class Mirror120 {
      * mod registers them: `key.horizon.probe` on K, and a listener counting its clicks
      * (consumeClick) in each client tick. Gives the clicks counted so far.
      */
+    /** The mods' placed features, which Horizon's generator asks this side to place. */
+    public static Object[] modFeatures() {
+        setUp();
+        return new Object[] {Worldgen120.modFeatures()};
+    }
+
+    /**
+     * A mod's placed feature in the chunks Horizon is decorating (Worldgen120.place). The
+     * level's blocks, heights and biomes are the region's for this call.
+     */
+    public static Object[] placeFeature(String dimension, String feature, long worldSeed, int chunkX, int chunkZ,
+            int index, int step, int x, int y, int z) {
+        begin();
+        try {
+            return new Object[] {Worldgen120.place(level(dimension), feature, worldSeed, chunkX, chunkZ, index, step,
+                    new BlockPos(x, y, z))};
+        } finally {
+            finish();
+        }
+    }
+
+    /** A heightmap's height at a column of a mirror level: Horizon's, the level's bottom if it can't say. */
+    public static int height(Level level, net.minecraft.world.level.levelgen.Heightmap.Types type, int x, int z) {
+        Object[] answer = call.apply("height", new Object[] {dimension(level), type.name(), x, z});
+        return answer.length > 0 && answer[0] instanceof Integer h ? h : level.getMinBuildHeight();
+    }
+
+    private static final Map<Level, Biomes120> BIOME_MANAGERS = new HashMap<>();
+
+    /** A mirror level's biome manager, which asks Horizon (Biomes120). */
+    public static net.minecraft.world.level.biome.BiomeManager biomeManager(Level level) {
+        return BIOME_MANAGERS.computeIfAbsent(level, Biomes120::new);
+    }
+
+    private static final Map<Long, net.minecraft.core.Holder<net.minecraft.world.level.biome.Biome>> BIOMES = new HashMap<>();
+
+    /** The biome at a position of a mirror level: Horizon's, plains where it can't say. */
+    public static net.minecraft.core.Holder<net.minecraft.world.level.biome.Biome> biome(Level level, BlockPos pos) {
+        // Biomes come in 4x4x4 cells: one ask a cell, kept for the call.
+        long cell = BlockPos.asLong(pos.getX() >> 2, pos.getY() >> 2, pos.getZ() >> 2);
+        var known = BIOMES.get(cell);
+        if (known != null) return known;
+        var biomes = registries().registryOrThrow(Registries.BIOME);
+        Object[] answer = call.apply("biome", new Object[] {dimension(level), pos.getX(), pos.getY(), pos.getZ()});
+        net.minecraft.core.Holder<net.minecraft.world.level.biome.Biome> holder = null;
+        if (answer.length > 0 && answer[0] instanceof String name) {
+            var location = ResourceLocation.tryParse(name);
+            if (location != null) {
+                holder = biomes.getHolder(ResourceKey.create(Registries.BIOME, location)).orElse(null);
+            }
+        }
+        if (holder == null) holder = biomes.getHolderOrThrow(net.minecraft.world.level.biome.Biomes.PLAINS);
+        BIOMES.put(cell, holder);
+        return holder;
+    }
+
     /** The mods' biome modifications as data (Worldgen120.biomeChanges). */
     public static Object[] biomeChanges() {
         return new Object[] {Worldgen120.biomeChanges()};

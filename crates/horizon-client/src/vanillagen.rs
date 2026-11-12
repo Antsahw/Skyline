@@ -277,7 +277,18 @@ impl VanillaTerrain {
             );
         }
         oracle::warn_unsupported_structures(dimension, &generator.unsupported_structures());
-        let unsupported = generator.unsupported_features();
+        let mut unsupported = generator.unsupported_features();
+        // Those a mod's own code places (the 1.20.1 mods' runtime) do run.
+        if let Some(foreign) = horizon_world::worldgen::foreign::foreign_features() {
+            let before = unsupported.len();
+            unsupported.retain(|(name, _)| !foreign.places(name));
+            if unsupported.len() < before {
+                log::info!(
+                    "Horizon: {} placed features are placed by the Java mods' own code",
+                    before - unsupported.len()
+                );
+            }
+        }
         if !unsupported.is_empty() {
             log::warn!(
                 "Horizon: {} placed features cannot run and will be skipped",

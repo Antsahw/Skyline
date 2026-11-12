@@ -253,6 +253,54 @@ fn fabric_1_20_1_boots_in_its_own_jvm_and_reports() {
     runtime.stop();
 }
 
+/// A flat meadow for features: grass at y 63 over dirt, air above, one biome, and what was set.
+struct Meadow {
+    biome: String,
+    set: Vec<([i32; 3], String)>,
+}
+
+impl Meadow {
+    fn new(biome: &str) -> Self {
+        Self {
+            biome: biome.into(),
+            set: Vec::new(),
+        }
+    }
+}
+
+impl horizon_jvm_remote::mirror120::Region120 for Meadow {
+    fn block_state(&mut self, x: i32, y: i32, z: i32) -> Option<String> {
+        if let Some((_, s)) = self.set.iter().rev().find(|(p, _)| *p == [x, y, z]) {
+            return Some(s.clone());
+        }
+        Some(
+            match y {
+                63 => "minecraft:grass_block[snowy=false]",
+                ..63 => "minecraft:dirt",
+                _ => "minecraft:air",
+            }
+            .into(),
+        )
+    }
+    fn height(&mut self, _heightmap: &str, x: i32, z: i32) -> Option<i32> {
+        let top = self
+            .set
+            .iter()
+            .filter(|(p, s)| p[0] == x && p[2] == z && !s.ends_with(":air"))
+            .map(|(p, _)| p[1] + 1)
+            .max()
+            .unwrap_or(64);
+        Some(top.max(64))
+    }
+    fn biome(&mut self, _x: i32, _y: i32, _z: i32) -> Option<String> {
+        Some(self.biome.clone())
+    }
+    fn set_block(&mut self, pos: [i32; 3], state: &str) {
+        self.set.push((pos, state.to_owned()));
+    }
+    fn set_block_entity(&mut self, _pos: [i32; 3], _snbt: &str) {}
+}
+
 /// A world of one block, stone below it, air elsewhere. At 0 64 0 unless `at` says otherwise:
 /// a block entity of the runtime stays alive per position (as a chunk's would), so a case that
 /// wants a fresh one takes a position of its own.
@@ -1285,13 +1333,71 @@ fn right_clicking_a_block_runs_its_1_20_1_code_on_horizons_blocks() {
         let carrots = "farmersdelight:patch_wild_carrots";
         assert!(added.contains(carrots), "{added:?}");
         assert!(
-            changes["added"].as_object().unwrap().values().any(|steps| steps
-                ["vegetal_decoration"]
-                .as_array()
-                .is_some_and(|l| l.iter().any(|f| f == carrots))),
+            changes["added"]
+                .as_object()
+                .unwrap()
+                .values()
+                .any(|steps| steps["vegetal_decoration"]
+                    .as_array()
+                    .is_some_and(|l| l.iter().any(|f| f == carrots))),
             "the wild carrots are vegetation"
         );
         assert!(changes["placed"][carrots]["feature"].is_string());
+        // Phase 6b: the feature is of FD's own type (`wild_crop`), so Horizon's generator
+        // can't run it: the runtime places it, its own code, on the chunks being decorated.
+        let features = runtime.mod_features().expect("the mods' features");
+        assert!(features.iter().any(|f| f == carrots), "{features:?}");
+        let biome = changes["added"]
+            .as_object()
+            .unwrap()
+            .iter()
+            .find(|(_, steps)| {
+                steps["vegetal_decoration"]
+                    .as_array()
+                    .is_some_and(|l| l.iter().any(|f| f == carrots))
+            })
+            .map(|(b, _)| b.clone())
+            .unwrap();
+        let mut placed_in = None;
+        for chunk in 0..2000 {
+            let mut region = Meadow::new(&biome);
+            let place = horizon_jvm_remote::mirror120::PlaceFeature {
+                dimension: "minecraft:overworld".into(),
+                feature: carrots.into(),
+                world_seed: 42,
+                chunk: [chunk, 0],
+                index: 0,
+                step: 9,
+                origin: [chunk * 16, -64, 0],
+            };
+            if runtime
+                .place_feature(&mut region, &place)
+                .expect("placing the wild carrots")
+            {
+                placed_in = Some((chunk, region));
+                break;
+            }
+        }
+        let (chunk, region) = placed_in.expect("the wild carrots placed somewhere in 2000 chunks");
+        let carrots_set: Vec<_> = region
+            .set
+            .iter()
+            .filter(|(_, s)| s == "farmersdelight:wild_carrots")
+            .collect();
+        assert!(!carrots_set.is_empty(), "{:?}", region.set);
+        // On the grass, near the chunk (the patch spreads 6 out from a column in it).
+        for ([x, y, _], _) in &carrots_set {
+            assert_eq!(*y, 64, "on top of the grass");
+            assert!(
+                (chunk * 16 - 8..chunk * 16 + 24).contains(x),
+                "{x} near chunk {chunk}"
+            );
+        }
+        println!(
+            "wild carrots in chunk {chunk}: {} blocks set, {} carrots",
+            region.set.len(),
+            carrots_set.len()
+        );
     } else if wired.is_some() {
         assert!(added.is_empty(), "Wired Redstone adds nothing: {added:?}");
     }

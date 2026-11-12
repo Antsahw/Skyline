@@ -356,6 +356,40 @@ clicks pass until then). A click on a block of a 1.20.1 mod's namespace, or with
 their items, goes to it at `useItemOn`'s head (`java120_use_block`, beside the 26.3 bridge's
 hook in `lan_actions.rs`); what it set and what it did to the held stack land in Horizon.
 
+## Phase 6b status: the mods' own feature types, placed by their own code (2026-11-12)
+
+A feature of a mod's own type (Farmer's Delight's `wild_crop`, its mushroom colonies, a mod's
+custom placement modifier) has no Rust implementation, so Horizon's generator skipped it (6a).
+
+- **The hook.** Horizon's generator now has one for features it can't run
+  (`horizon-world`'s `worldgen::foreign`).
+  - The decoration step hands such a feature to whoever installed the hook, where vanilla's
+    `applyBiomeDecoration` would place it.
+  - It passes what seeds vanilla's random (the chunk's decoration seed, the feature's index and
+    step), and the region being decorated as blocks, biomes and heightmaps by name.
+  - Writes are allowed inside the region's write zone only.
+- **The runtime places them.** With 1.20.1 mods, the game installs the hook as their runtime
+  starts (`game/java_mods_120/worldgen.rs`). The runtime places the mods' features
+  (`Worldgen120.place`):
+  - Seeding: a `WorldgenRandom` seeded as vanilla seeds it.
+  - The call: `PlacedFeature.placeWithBiomeCheck` on the mirror level, with a stand-in chunk
+    generator for the overworld's shape and each biome's generation settings (`Generator120`).
+  - Reads: the level's blocks, heights (`Level.getHeight`) and biomes (its `BiomeManager`,
+    `Biomes120`) are the region's.
+  - Writes: what the feature sets goes into the region at once, so its next reads, and the
+    heightmaps, see it.
+- **Block names.** States come back under 1.20.1's names and go through vanilla's own fixes to
+  26.3's (`minecraft:grass` is `short_grass`). Blocks a mod's code sets in a running game now
+  get the same fix.
+
+The runtime test places FD's wild carrots on a flat meadow, in a biome Fabric gave them to,
+until the rarity filter lets one through. Thirteen carrots land on the grass with their coarse
+dirt and grass around them. All three mod sets pass.
+
+In a game with Anthony's set, the generator hands the runtime FD's 9 features. A patch of wild
+carrots was found in a new chunk: four carrots on coarse dirt, under birches. With
+`HORIZON_120_TRACE=1` the runtime says each feature it placed.
+
 ## Phase 6a status: the mods' features placed in vanilla's biomes (2026-11-12)
 
 A Fabric mod puts its ores and plants into vanilla's biomes in code, through Fabric API's
@@ -908,8 +942,8 @@ NeoForge could run beside Fabric 26.3 rather than in its place.
    screens, players leaving. 5e done: mods' key bindings and the client tick (above). Left:
    mods' HUD overlays (`HudRenderCallback`).
 6. **Entities and worldgen.** 6a done: the mods' Fabric biome modifications reach Horizon's
-   generator as biome modifiers (above). Next: 6b, a mod's own feature types run in the
-   runtime on the chunk being decorated; then structures, mods' biomes, and mobs.
+   generator as biome modifiers. 6b done: a mod's own feature types run in the runtime on the
+   chunks being decorated (above). Next: the mods' structures, their biomes, and their mobs.
 7. **In-world rendering.** `VertexConsumer` capture, then a GL recorder if needed.
 8. **Tracker.** Started with phase 1b (boots: 149 of the top 150). It grows into "works in a
    world" as the phases land: works / partial / broken / needs Java 21 / needs an older loader.

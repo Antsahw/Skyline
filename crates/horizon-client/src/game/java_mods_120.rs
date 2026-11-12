@@ -111,8 +111,9 @@ fn remember_namespaces(folders: &[PathBuf]) {
 }
 
 /// The runtime from now on: the mods' code runs in it.
-fn keep(runtime: Runtime120) {
+fn keep(mut runtime: Runtime120) {
     log::info!("1.20.1 mods: their code runs");
+    worldgen::install(&mut runtime);
     if let Some(old) = RUNTIME
         .lock()
         .unwrap_or_else(|e| e.into_inner())
@@ -575,7 +576,9 @@ impl super::Game<'_> {
             if s.dimension != dimension {
                 continue;
             }
-            match super::render_control::parse_state(registry, &s.state) {
+            // Named as 26.3 names it (`minecraft:grass` is `short_grass` now).
+            match super::render_control::parse_state(registry, &worldgen::state_from_120(&s.state))
+            {
                 Ok(state) => {
                     if let Err(e) = self.place_state(s.pos, state, false) {
                         log::warn!("1.20.1 mods: placing {}: {e:?}", s.state);
@@ -742,3 +745,4 @@ mod items;
 mod keys;
 mod screens;
 mod ticks;
+mod worldgen;

@@ -110,6 +110,19 @@ public abstract class LevelMixin {
         }
     }
 
+    /** Heightmaps are Horizon's (a mod's feature placed on the surface asks them). */
+    @Inject(method = "getHeight(Lnet/minecraft/world/level/levelgen/Heightmap$Types;II)I", at = @At("HEAD"), cancellable = true)
+    private void horizon$height(net.minecraft.world.level.levelgen.Heightmap.Types type, int x, int z,
+            CallbackInfoReturnable<Integer> cir) {
+        if (horizon$mirror()) cir.setReturnValue(Mirror120.height((Level) (Object) this, type, x, z));
+    }
+
+    /** Biomes are Horizon's: a mirror level's biome manager asks it (Biomes120). */
+    @Inject(method = "getBiomeManager", at = @At("HEAD"), cancellable = true)
+    private void horizon$biomes(CallbackInfoReturnable<net.minecraft.world.level.biome.BiomeManager> cir) {
+        if (horizon$mirror()) cir.setReturnValue(Mirror120.biomeManager((Level) (Object) this));
+    }
+
     @Inject(method = "isLoaded", at = @At("HEAD"), cancellable = true)
     private void horizon$isLoaded(BlockPos pos, CallbackInfoReturnable<Boolean> cir) {
         if (horizon$mirror()) cir.setReturnValue(!((Level) (Object) this).isOutsideBuildHeight(pos));

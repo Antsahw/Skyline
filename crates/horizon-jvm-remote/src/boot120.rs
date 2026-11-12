@@ -273,6 +273,18 @@ impl Runtime120 {
             .ok_or_else(|| format!("{command}: no text in the answer"))
     }
 
+    /// A call that asks Horizon nothing back, its answers as they come.
+    pub(crate) fn call_answers(
+        &mut self,
+        command: &str,
+        args: &[Value],
+    ) -> Result<Vec<Value>, String> {
+        let mut handler = Phase1 {
+            log: self.log.clone(),
+        };
+        self.call_values(command, args, &mut handler)
+    }
+
     /// A call with Horizon's side answered by `handler`; its errors carry the runtime's last lines.
     pub(crate) fn call_values(
         &mut self,
