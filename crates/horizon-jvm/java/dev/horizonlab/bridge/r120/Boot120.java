@@ -121,6 +121,7 @@ public final class Boot120 implements RemoteRuntime {
             case "saveEntities":
             case "loadEntities":
             case "clearEntities":
+            case "modEntityTypes":
                 // The mods' own entities (Entities120).
                 if (game == null) throw new IllegalStateException("not started");
                 return mirror(method, args);

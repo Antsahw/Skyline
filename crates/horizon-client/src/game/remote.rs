@@ -5977,6 +5977,9 @@ impl Game<'_> {
         // The 1.20.1 mods' blocks their code drew (this process's server).
         #[cfg(feature = "java-mods-120")]
         self.java120_drawn_models();
+        // Their entity types, for the commands typed here.
+        #[cfg(feature = "java-mods-120")]
+        self.java120_command_types();
         self.tick_remote_level()?;
         // The rockets boosting this player tick after it, also while it waits
         // for chunks.

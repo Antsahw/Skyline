@@ -450,6 +450,7 @@ fn a_mods_mob_lives_on_horizons_blocks() {
             "minecraft:overworld",
             "friendsandfoes:moobloom",
             [0.5, 70.0, 0.5],
+            None,
         )
         .expect("summon answers")
         .expect("a moobloom is made");
@@ -662,6 +663,54 @@ fn a_mods_mob_lives_on_horizons_blocks() {
         health(&mut runtime);
     }
     assert_eq!(health(&mut runtime), None, "gone once its death is played");
+
+    // `/summon`: the mods' types are listed for Horizon's commands, and one made with NBT is
+    // made from it (no finalizeSpawn), as SummonCommand does.
+    let types = runtime.mod_entity_types().expect("the types answer");
+    assert!(
+        types.iter().any(|t| t == "friendsandfoes:moobloom"),
+        "{types:?}"
+    );
+    assert!(types.iter().all(|t| !t.starts_with("minecraft:")));
+    let made = runtime
+        .summon(
+            &world,
+            "minecraft:overworld",
+            "friendsandfoes:moobloom",
+            [4.5, 65.0, 4.5],
+            Some("{Health:4.0f,NoAI:1b}"),
+        )
+        .expect("summon answers")
+        .expect("a moobloom is made");
+    let made = runtime
+        .tick_entities(&world, "minecraft:overworld")
+        .expect("its tick")
+        .entities
+        .into_iter()
+        .find(|e| e.id == made)
+        .expect("it's there");
+    assert_eq!(made.health, Some(4.0), "as its NBT says");
+
+    // Another of the mod's mobs (a copper golem) stays and ticks, as the moobloom does.
+    let golem = runtime
+        .summon(
+            &world,
+            "minecraft:overworld",
+            "friendsandfoes:copper_golem",
+            [-4.5, 65.0, 4.5],
+            None,
+        )
+        .expect("summon answers")
+        .expect("a golem is made");
+    for tick in 0..100 {
+        let ticked = runtime
+            .tick_entities(&world, "minecraft:overworld")
+            .expect("its tick");
+        assert!(
+            ticked.entities.iter().any(|e| e.id == golem),
+            "the golem is there at tick {tick}"
+        );
+    }
 }
 
 /// Needs build120.sh's platform jar, and Farmer's Delight among HORIZON_120_MODS for the stove

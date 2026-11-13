@@ -114,6 +114,7 @@ fn remember_namespaces(folders: &[PathBuf]) {
 fn keep(mut runtime: Runtime120) {
     log::info!("1.20.1 mods: their code runs");
     worldgen::install(&mut runtime);
+    mobs::know_types(&mut runtime);
     if let Some(old) = RUNTIME
         .lock()
         .unwrap_or_else(|e| e.into_inner())
@@ -363,6 +364,14 @@ impl World120 for Level<'_, '_> {
             c.remove(&"keepPacked".into());
         }
         Some(horizon_world::snbt_text::to_snbt(&tag))
+    }
+
+    fn light(&self, dimension: &str, x: i32, y: i32, z: i32) -> Option<u8> {
+        let game = self.0;
+        if dimension != game.dim.id() || !game.world.loaded(x, z) {
+            return None;
+        }
+        Some(game.world.light(x, y, z))
     }
 }
 

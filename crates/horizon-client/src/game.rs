@@ -7989,6 +7989,8 @@ impl Game<'_> {
         #[cfg(feature = "java-mods-120")]
         self.tell_java120_keys();
         #[cfg(feature = "java-mods-120")]
+        self.java120_command_types();
+        #[cfg(feature = "java-mods-120")]
         self.tick_java120_mobs();
         #[cfg(feature = "java-mods-120")]
         self.tick_java120_drawn();

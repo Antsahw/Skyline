@@ -457,6 +457,7 @@ public final class Mirror120 {
         BIOMES.clear();
         WRITES.clear();
         READS.clear();
+        LIGHT_READS.clear();
         NO_ENTITY.clear();
     }
 
@@ -630,6 +631,28 @@ public final class Mirror120 {
         // Where Horizon has no chunk loaded: air, as vanilla reads an unloaded position.
         return known == null ? Blocks.AIR.defaultBlockState() : known;
     }
+
+    /** Each mirror level's light engine (Light120), made when first asked for. */
+    private static final Map<Level, Light120> LIGHTS = new HashMap<>();
+
+    /** A mirror level's light engine: Horizon's light. */
+    public static synchronized net.minecraft.world.level.lighting.LevelLightEngine lightEngine(Level level) {
+        return LIGHTS.computeIfAbsent(level, Light120::new);
+    }
+
+    /** Light Horizon has at `pos` (sky << 4 | block), read once per call; 15 sky where unloaded. */
+    static int light(Level level, BlockPos pos) {
+        Map<Long, Integer> read = LIGHT_READS.computeIfAbsent(level, l -> new HashMap<>());
+        Integer known = read.get(pos.asLong());
+        if (known != null) return known;
+        Object[] answer = call.apply("light", new Object[] {dimension(level), pos.getX(), pos.getY(), pos.getZ()});
+        int light = answer.length > 0 && answer[0] instanceof Integer i ? i : 0xF0;
+        read.put(pos.asLong(), light);
+        return light;
+    }
+
+    /** Light read this call, by level and position (as READS keeps blocks). */
+    private static final Map<Level, Map<Long, Integer>> LIGHT_READS = new HashMap<>();
 
     /**
      * Which of `chunks` (ChunkPos.asLong) Horizon has loaded in `level`, in one call: a
@@ -918,31 +941,49 @@ public final class Mirror120 {
     }
 
     /**
-     * A mod's entity made at (x, y, z), as `/summon` makes one: its id, or -1 when there is no
-     * such type or it can't be made here.
+     * A mod's entity made at (x, y, z), as `/summon` makes one (SummonCommand.createEntity):
+     * from `nbt` (SNBT, "" for none) when given, else made new and finalized as a command's
+     * spawn. Its id, or -1 when there is no such type or it can't be made here.
      */
-    public static Object[] summon(String dimension, String type, double x, double y, double z) {
+    public static Object[] summon(String dimension, String type, double x, double y, double z, String nbt) {
         begin();
         try {
             ServerLevel level = level(dimension);
             var entityType = net.minecraft.world.entity.EntityType.byString(type).orElse(null);
             if (entityType == null) return new Object[] {-1};
-            var entity = entityType.create(level);
+            net.minecraft.world.entity.Entity entity;
+            if (nbt.isEmpty()) {
+                entity = entityType.create(level);
+            } else {
+                var tag = net.minecraft.nbt.TagParser.parseTag(nbt);
+                tag.putString("id", type);
+                entity = net.minecraft.world.entity.EntityType.loadEntityRecursive(tag, level, e -> {
+                    e.moveTo(x, y, z, e.getYRot(), e.getXRot());
+                    return e;
+                });
+            }
             if (entity == null) return new Object[] {-1};
             entity.moveTo(x, y, z, entity.getYRot(), entity.getXRot());
-            if (entity instanceof net.minecraft.world.entity.Mob mob) {
+            if (nbt.isEmpty() && entity instanceof net.minecraft.world.entity.Mob mob) {
                 mob.finalizeSpawn(level, level.getCurrentDifficultyAt(entity.blockPosition()),
                         net.minecraft.world.entity.MobSpawnType.COMMAND, null, null);
             }
             if (!level.addFreshEntity(entity)) return new Object[] {-1};
+            for (var passenger : entity.getPassengers()) level.addFreshEntity(passenger);
             return new Object[] {entity.getId()};
-        } catch (RuntimeException | LinkageError e) {
+        } catch (Exception | LinkageError e) {
             log("a " + type + " couldn't be made: " + e);
-            for (StackTraceElement at : e.getStackTrace()) log("    at " + at);
             return new Object[] {-1};
         } finally {
             finish();
         }
+    }
+
+    /** The mods' entity types (not vanilla's), for Horizon's commands to know. */
+    public static Object[] modEntityTypes() {
+        return new Object[] {net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE.keySet().stream()
+                .filter(id -> !"minecraft".equals(id.getNamespace()))
+                .map(Object::toString).sorted().toArray(String[]::new)};
     }
 
     /**

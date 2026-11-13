@@ -2395,6 +2395,24 @@ impl Game<'_> {
         {
             return Err(err("commands.summon.invalidPosition", &[]));
         }
+        // One of the 1.20.1 mods' own types: their runtime makes it (game/java_mods_120/mobs.rs).
+        #[cfg(feature = "java-mods-120")]
+        {
+            let nbt = match ctx.get("nbt") {
+                Some(Arg::Str(nbt)) => Some(nbt.clone()),
+                _ => None,
+            };
+            if let Some(made) = self.java120_summon(&kind, pos, nbt.as_deref()) {
+                if !made {
+                    return Err(err("commands.summon.failed", &[]));
+                }
+                self.feedback(Text::translate(
+                    "commands.summon.success",
+                    &[Text::translate(&entity_name_key(&kind), &[])],
+                ));
+                return Ok(1);
+            }
+        }
         if self.ui.difficulty == 0 && !horizon_client::mobs::finalize::allowed_in_peaceful(&kind) {
             return Err(err("commands.summon.failed.peaceful", &[]));
         }

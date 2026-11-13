@@ -423,7 +423,22 @@ do in chunks that don't tick, instead of falling through the air such a chunk re
 Checked in a game: a moobloom spawned, the game quit and opened again, and it stood where it
 was with its health.
 
-**Next:** natural spawning (the mods' biome spawn additions), and `/summon` of their types.
+**6d.5, done: `/summon` and light.** Horizon's `/summon` makes the mods' types in the
+runtime, with NBT as vanilla's SummonCommand takes it (no `finalizeSpawn` then): the runtime
+lists its mods' entity types when it starts (`modEntityTypes`) and each game adds them to its
+commands' registries (the export's `minecraft:entity_type` list, which `ids()` reads first, and
+`summonable`), on the tick after, since the runtime may start after the world opened. A mirror
+level's light is Horizon's (`Light120`, a `LevelLightEngine` over no chunks answering from
+`World120::light`): mobs read it (a moobloom choosing where to grow), and without it their tick
+failed on vanilla's engine, which a mirror level never made. The window's drawing of the mobs
+had sky and block light the wrong way round in the lightmap; fixed.
+
+Checked in a game: `/summon` of a moobloom (also with `{Health:3.0f,NoAI:1b}`) and of a copper
+golem, each drawn by its own renderer, ticking with no failures.
+
+**Next:** natural spawning: the mods' biome spawn additions in Horizon's spawn lists, Horizon's
+spawner handing a mod's entry to the runtime (its placement and spawn rules are the mod's), the
+mods' mobs counted toward the mob caps, and despawning far from players.
 
 ## Phase 7 status: blocks drawn by their mod's code (2026-11-12)
 

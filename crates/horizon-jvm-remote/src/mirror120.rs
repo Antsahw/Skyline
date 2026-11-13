@@ -32,6 +32,11 @@ pub trait World120 {
         None
     }
 
+    /// The light at a position, as sky << 4 | block; `None` where Horizon doesn't say (full
+    /// sky light, as an unloaded chunk reads).
+    fn light(&self, _dimension: &str, _x: i32, _y: i32, _z: i32) -> Option<u8> {
+        None
+    }
     /// The biome at a position, by id; `None` where Horizon doesn't say (plains, to the mods).
     fn biome(&self, _dimension: &str, _x: i32, _y: i32, _z: i32) -> Option<String> {
         None
@@ -448,6 +453,8 @@ impl Handler for InRegion<'_> {
                     self.region.biome(x, y, z).map_or(Value::Null, Value::Str),
                 ])
             }
+            // A generating region isn't lit yet: full sky light, as an unlit chunk reads.
+            "light" => Ok(vec![Value::I32(0xF0)]),
             _ => Err(format!(
                 "Horizon has no {method} for 1.20.1 mods' world generation yet"
             )),
@@ -527,6 +534,12 @@ impl Handler for InWorld<'_> {
                         .block_state(dimension, x, y, z)
                         .map_or(Value::Null, Value::Str),
                 ])
+            }
+            "light" => {
+                let dimension = text(&args, 0)?;
+                let (x, y, z) = (int(&args, 1)?, int(&args, 2)?, int(&args, 3)?);
+                let light = self.world.light(dimension, x, y, z).unwrap_or(0xF0);
+                Ok(vec![Value::I32(i32::from(light))])
             }
             // Many positions in one call. A read costs a round trip whatever it carries, so a
             // mod looking at what is around it pays one instead of one each.
@@ -937,6 +950,7 @@ impl Runtime120 {
         dimension: &str,
         kind: &str,
         pos: [f64; 3],
+        nbt: Option<&str>,
     ) -> Result<Option<i32>, String> {
         let mut handler = InWorld {
             world,
@@ -951,6 +965,7 @@ impl Runtime120 {
             Value::F64(pos[0]),
             Value::F64(pos[1]),
             Value::F64(pos[2]),
+            Value::Str(nbt.unwrap_or_default().to_owned()),
         ];
         match self.call_values("summon", &args, &mut handler)?.first() {
             Some(Value::I32(id)) => Ok((*id >= 0).then_some(*id)),
@@ -1023,6 +1038,14 @@ impl Runtime120 {
         };
         self.call_values("clearEntities", &[], &mut handler)
             .map(|_| ())
+    }
+
+    /// The mods' entity types (not vanilla's), by id: what `/summon` may make in the runtime.
+    pub fn mod_entity_types(&mut self) -> Result<Vec<String>, String> {
+        match self.call_answers("modEntityTypes", &[])?.first() {
+            Some(Value::Strs(types)) => Ok(types.clone()),
+            other => Err(format!("modEntityTypes: answer {other:?}")),
+        }
     }
 
     /// A tick of the mods' own entities in `dimension` (their AI, paths and physics, on

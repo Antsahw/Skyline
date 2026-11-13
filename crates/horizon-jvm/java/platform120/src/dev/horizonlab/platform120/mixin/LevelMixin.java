@@ -28,6 +28,12 @@ public abstract class LevelMixin {
         if (horizon$mirror()) cir.setReturnValue(Mirror120.blockState((Level) (Object) this, pos));
     }
 
+    /** Its light is Horizon's (Light120): vanilla's engine lights chunks a mirror level doesn't hold. */
+    @Inject(method = "getLightEngine", at = @At("HEAD"), cancellable = true)
+    private void horizon$light(CallbackInfoReturnable<net.minecraft.world.level.lighting.LevelLightEngine> cir) {
+        if (horizon$mirror()) cir.setReturnValue(Mirror120.lightEngine((Level) (Object) this));
+    }
+
     @Inject(method = "getFluidState", at = @At("HEAD"), cancellable = true)
     private void horizon$fluidState(BlockPos pos, CallbackInfoReturnable<FluidState> cir) {
         if (horizon$mirror()) cir.setReturnValue(Mirror120.blockState((Level) (Object) this, pos).getFluidState());

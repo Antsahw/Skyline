@@ -36,6 +36,17 @@ pub(in crate::game) const IDS: std::ops::Range<i32> = 0x7ffe_0000..0x7fff_0000;
 /// The server half: where each mob stood after the last tick, by id (a click's range check).
 static SEEN: Mutex<Option<HashMap<i32, [f64; 3]>>> = Mutex::new(None);
 
+/// The mods' entity types, from when their runtime started: what `/summon` makes there.
+static TYPES: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// The runtime is up: its mods' entity types, for Horizon's commands.
+pub(super) fn know_types(runtime: &mut horizon_jvm_remote::boot120::Runtime120) {
+    match runtime.mod_entity_types() {
+        Ok(types) => *TYPES.lock().unwrap_or_else(|e| e.into_inner()) = types,
+        Err(e) => log::warn!("1.20.1 mods: their entity types can't be listed: {e}"),
+    }
+}
+
 /// The server half: which world's mobs the runtime holds (its folder), and the dimensions of it
 /// whose saved mobs are in already. A dimension's save is written only once it is in, so a
 /// save before that never writes over the mobs it would have loaded.
@@ -289,6 +300,78 @@ impl Game<'_> {
         }
     }
 
+    /// The mods' entity types into the commands' registries (`/summon`'s argument), once their
+    /// runtime has said them: it may start after the world's registries were made.
+    pub(in crate::game) fn java120_command_types(&mut self) {
+        let types = TYPES.lock().unwrap_or_else(|e| e.into_inner());
+        let reg = &mut self.ui.registries;
+        let Some(first) = types.first() else {
+            return;
+        };
+        if reg.ids("minecraft:entity_type").contains(first) {
+            return;
+        }
+        log::info!(
+            "1.20.1 mods: {} entity type(s) of theirs for the commands ({})",
+            types.len(),
+            if self.remote.is_some() {
+                "window"
+            } else {
+                "server"
+            }
+        );
+        // The registry's ids are read from its export's list when it has one, else the field.
+        let listed = reg
+            .by_registry
+            .get_mut("minecraft:entity_type")
+            .map(|r| &mut r.ids);
+        let mut lists = vec![&mut reg.entity_types, &mut reg.summonable];
+        lists.extend(listed);
+        for kind in types.iter() {
+            for list in lists.iter_mut() {
+                if let Err(at) = list.binary_search(kind) {
+                    list.insert(at, kind.clone());
+                }
+            }
+        }
+    }
+
+    /// The server half of `/summon` for one of the mods' types: made in the runtime, from
+    /// `nbt` when given. None when `kind` isn't theirs (Horizon's summon goes on), else whether
+    /// it was made.
+    pub(in crate::game) fn java120_summon(
+        &mut self,
+        kind: &str,
+        pos: [f64; 3],
+        nbt: Option<&str>,
+    ) -> Option<bool> {
+        if !TYPES
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .any(|t| t == kind)
+        {
+            return None;
+        }
+        let dimension = self.dim.id().to_owned();
+        let made = {
+            let mut guard = wait_for_runtime()?;
+            let runtime = guard.as_mut()?;
+            runtime.summon(&Level(self), &dimension, kind, pos, nbt)
+        };
+        match made {
+            Ok(made) => {
+                // The next tick asks for them, rather than wait out the idle pause.
+                *LAST_COUNT.lock().unwrap_or_else(|e| e.into_inner()) += 1;
+                Some(made.is_some())
+            }
+            Err(e) => {
+                log::warn!("1.20.1 mods: /summon {kind} failed: {e}");
+                Some(false)
+            }
+        }
+    }
+
     /// The window: the mobs a tick of the server's has, in place of the last.
     pub(in crate::game) fn remote_java120_mobs(&mut self, data: &[u8]) {
         let Ok(json) = serde_json::from_slice::<Value>(data) else {
@@ -357,7 +440,8 @@ impl Game<'_> {
                 (at[1] + f64::from(mob.size[1]) * 0.85).floor() as i32,
                 at[2].floor() as i32,
             );
-            let packed = (u32::from(light >> 4) * 16) | ((u32::from(light & 15) * 16) << 8);
+            // The lightmap's (block, sky): Horizon packs them sky << 4 | block.
+            let packed = (u32::from(light & 15) * 16) | ((u32::from(light >> 4) * 16) << 8);
             let base = glam::Mat4::from_translation(d.as_vec3());
             for m in &mob.meshes {
                 let Some(r) = atlas.sprites.get(&m.sprite) else {
