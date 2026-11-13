@@ -2407,4 +2407,88 @@ fn the_mods_machines_pass_energy_between_them() {
         "water in the tank: {}",
         kept.snbt
     );
+
+    // Phase 5h: the mods' settings screens, as Mod Menu lists them, open for a player and draw
+    // as any of their screens.
+    let configs = runtime.config_mods().expect("the settings screens");
+    eprintln!("settings screens: {configs:?}");
+    let (id, _) = configs
+        .iter()
+        .find(|(id, _)| id == "appleskin" || id == "jade" || id == "waystones")
+        .unwrap_or_else(|| panic!("a mod with a settings screen: {configs:?}"));
+    let uuid = "00000000-0000-0000-0000-0000000c0f19";
+    let kind = runtime
+        .open_config(&tank, uuid, "Tester", id)
+        .expect("the screen opens")
+        .unwrap_or_else(|| panic!("{id}'s settings opened"));
+    eprintln!("{id}'s settings: {kind}");
+    assert!(kind.starts_with("screen:"), "{kind}");
+    let no_inventory = horizon_jvm_remote::mirror120::inventory_json(&[]);
+    let frame = runtime
+        .screen_frame(
+            &tank,
+            uuid,
+            &no_inventory,
+            [0.5, 65.0, 0.5],
+            427,
+            240,
+            -1,
+            -1,
+        )
+        .expect("the screen draws")
+        .unwrap_or_else(|| panic!("{id}'s settings draw"));
+    eprintln!("{id}'s settings frame: {}", &frame[..frame.len().min(600)]);
+    let ops: serde_json::Value = serde_json::from_str(&frame).expect("the frame is json");
+    let ops = ops.as_array().expect("a list of drawing operations");
+    // Cloth Config clips its list on GL itself, between the header and the footer: the rows
+    // scrolled past them must not draw over its buttons.
+    if id == "appleskin" {
+        assert!(
+            ops.iter().any(|o| o["op"] == "scissor"
+                && o["y0"].as_i64().unwrap_or(0) > 0
+                && o["y1"].as_i64().unwrap_or(240) < 240),
+            "the list clipped above the footer: {frame}"
+        );
+        // A click on the first option's "Yes" turns it to "No", as in the mod's own screen.
+        let yes = ops
+            .iter()
+            .find(|o| o["op"] == "text" && o["text"] == "Yes")
+            .expect("a Yes button");
+        let (x, y) = (
+            yes["x"].as_f64().unwrap() + 4.0,
+            yes["y"].as_f64().unwrap() + 3.0,
+        );
+        for kind in ["move", "press", "release"] {
+            let input = serde_json::json!({"kind": kind, "x": x, "y": y, "button": 0, "mods": 0});
+            runtime
+                .screen_input(&tank, uuid, &no_inventory, &input.to_string())
+                .expect("the click");
+        }
+        let after = runtime
+            .screen_frame(
+                &tank,
+                uuid,
+                &no_inventory,
+                [0.5, 65.0, 0.5],
+                427,
+                240,
+                x as i32,
+                y as i32,
+            )
+            .expect("the screen draws")
+            .expect("still open");
+        assert!(
+            after.contains("\"text\":\"No\""),
+            "the option turned off: {after}"
+        );
+    }
+    assert!(
+        frame.contains("\"op\":\"text\""),
+        "with its labels: {frame}"
+    );
+    // In the mod's words: the client's language, with the mods' translations.
+    assert!(
+        !frame.contains("\"text\":\"text.autoconfig."),
+        "translated: {frame}"
+    );
 }

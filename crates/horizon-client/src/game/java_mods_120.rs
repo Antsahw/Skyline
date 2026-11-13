@@ -859,6 +859,7 @@ mod tests {
 
 pub(in crate::game) mod block_renders;
 mod breaking;
+pub(in crate::game) mod config;
 mod drawn;
 mod effects;
 pub(in crate::game) mod mobs;

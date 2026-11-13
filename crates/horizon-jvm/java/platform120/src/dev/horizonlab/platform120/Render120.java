@@ -48,6 +48,8 @@ final class Render120 {
         if (renderers != null) return;
         renderers = new HashMap<>();
         var client = net.minecraft.client.Minecraft.getInstance();
+        // The renderers' font (a sign's text measured): the screens' measuring one.
+        Screens120.font();
         var resources = Models120.clientResources();
         var models = new net.minecraft.client.model.geom.EntityModelSet();
         models.onResourceManagerReload(resources);

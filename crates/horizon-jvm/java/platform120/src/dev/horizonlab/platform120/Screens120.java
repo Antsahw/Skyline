@@ -100,7 +100,26 @@ public final class Screens120 {
      * measures and nothing else: 1.20.1's default glyph widths for ASCII, the commonest width
      * for the rest.
      */
+    private static boolean language;
+
+    /**
+     * The client's language (en_us) from vanilla's and the mods' resources, as a client loads
+     * it (ClientLanguage.loadFrom): a screen's labels are the mods' translations rather than
+     * their keys. The server's own has vanilla's alone.
+     */
+    static synchronized void language() {
+        if (language) return;
+        language = true;
+        try {
+            net.minecraft.locale.Language.inject(net.minecraft.client.resources.language.ClientLanguage.loadFrom(
+                    Models120.clientResources(), java.util.List.of("en_us"), false));
+        } catch (RuntimeException | LinkageError e) {
+            Mirror120.log("the client's language didn't load: " + e);
+        }
+    }
+
     static synchronized net.minecraft.client.gui.Font font() {
+        language();
         var minecraft = net.minecraft.client.Minecraft.getInstance();
         if (minecraft.font != null) {
             return minecraft.font;
@@ -236,6 +255,7 @@ public final class Screens120 {
         }
         var screen = SCREENS.get(player.getUUID());
         clientPlayer(player);
+        pointer(width, height, mouseX, mouseY);
         Graphics120 recording = Graphics120.begin();
         try {
             screen.render(recorder(), mouseX, mouseY, 0f);
@@ -405,6 +425,45 @@ public final class Screens120 {
      * Its handle is 0, and the one question asked with it is answered by {@link #keyDown}.
      */
     private static com.mojang.blaze3d.platform.Window window;
+    private static net.minecraft.client.MouseHandler mouse;
+
+    /** The window's height in pixels, as {@link #pointer} last set it. */
+    static int windowHeight() {
+        return window == null ? 0 : window.getHeight();
+    }
+
+    /**
+     * The window as big as the frame (GUI scale 1) and the client's mouse where the frame's
+     * is: screens that ask the client for the mouse rather than take what render is given
+     * (Cloth Config's, through the window's scale) get the same point.
+     */
+    static synchronized void pointer(int width, int height, int mouseX, int mouseY) {
+        var w = (dev.horizonlab.platform120.mixin.WindowAccess) (Object) window();
+        w.horizon$setWidth(width);
+        w.horizon$setHeight(height);
+        w.horizon$setFramebufferWidth(width);
+        w.horizon$setFramebufferHeight(height);
+        w.horizon$setGuiScaledWidth(width);
+        w.horizon$setGuiScaledHeight(height);
+        w.horizon$setGuiScale(1.0);
+        var minecraft = net.minecraft.client.Minecraft.getInstance();
+        if (mouse == null) {
+            mouse = Allocate.make(net.minecraft.client.MouseHandler.class);
+            if (minecraft.mouseHandler == null) {
+                ((dev.horizonlab.platform120.mixin.MinecraftAccess) minecraft).horizon$setMouseHandler(mouse);
+            }
+            // What Minecraft's constructor sets: lists ask it to tell a click from a key press.
+            ((dev.horizonlab.platform120.mixin.MinecraftAccess) minecraft).horizon$setLastInputType(
+                    net.minecraft.client.InputType.MOUSE);
+            if (minecraft.getSoundManager() == null) {
+                ((dev.horizonlab.platform120.mixin.MinecraftAccess) minecraft).horizon$setSoundManager(
+                        Allocate.make(net.minecraft.client.sounds.SoundManager.class));
+            }
+        }
+        var m = (dev.horizonlab.platform120.mixin.MouseHandlerAccess) (Object) minecraft.mouseHandler;
+        m.horizon$setX(mouseX);
+        m.horizon$setY(mouseY);
+    }
 
     public static synchronized com.mojang.blaze3d.platform.Window window() {
         if (window == null) {

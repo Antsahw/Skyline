@@ -1162,6 +1162,28 @@ public final class Mirror120 {
         return new Object[] {blocks.toArray(new String[0]), types.toArray(new String[0])};
     }
 
+    /** {ids, names} of the mods with a settings screen (Config120). */
+    public static Object[] configMods() {
+        return Config120.mods();
+    }
+
+    /**
+     * A mod's settings screen, opened for a player of Horizon's (the client half standing in
+     * for them): {kind} of what opened (`screen:<class>`), or {""}.
+     */
+    public static Object[] openConfig(String uuid, String name, String mod) {
+        begin();
+        try {
+            ServerPlayer player = player(uuid, name, level("minecraft:overworld"));
+            Screens120.clientPlayer(player);
+            if (!Config120.open(mod)) return new Object[] {""};
+            String[] menu = opened(player, player.containerMenu, null);
+            return new Object[] {menu == null ? "" : menu[0]};
+        } finally {
+            finish();
+        }
+    }
+
     /** HORIZON_120_TRACE: why each of the mods' spawns did or didn't happen. */
     private static final boolean SPAWN_TRACE = System.getenv("HORIZON_120_TRACE") != null;
 

@@ -356,6 +356,28 @@ clicks pass until then). A click on a block of a 1.20.1 mod's namespace, or with
 their items, goes to it at `useItemOn`'s head (`java120_use_block`, beside the 26.3 bridge's
 hook in `lan_actions.rs`); what it set and what it did to the held stack land in Horizon.
 
+## Phase 5h status: the mods' settings screens (2026-11-13)
+
+A mod's settings screen opens from Horizon's Mods page (Options, Mods...), listed as
+"<mod>: Settings", and is drawn and used as any screen of the mods' (phase 4). The runtime
+finds them as Mod Menu does, from the mods' `modmenu` entrypoints (`Config120`, through
+FabricLoader by reflection: it isn't on the glue's classpath), and lists every mod with a
+factory (`configMods`); the server sends the list to its players with the keys
+(`game/java_mods_120/config.rs`, channel `horizon:java120_config_mods`) and a click opens the
+mod's screen for that player (`openConfig`). Checked with AppleSkin's (Cloth Config): its
+options drawn with their labels, a tooltip on hover, a toggle clicked to "No", Save & Quit
+writing the mod's `appleskin.json5`, and the screen closing back to Options.
+
+What the client needed that its constructor would have made: the client's language with the
+mods' translations (`Screens120.language`), a window the frame's size at GUI scale 1 and a mouse
+handler where the frame's pointer is (Cloth asks the client, not `render`), the last input type,
+and a sound manager that plays nothing (a button's click; Horizon plays its own). Clipping a
+mod sets straight on GL (`GlStateManager._scissorBox`, Cloth's list) is recorded as a scissor
+of the frame, and text drawn with no alpha is opaque, as `Font` makes it.
+
+The settings files are the runtime's (`.horizon-cache/java-120/game/config/`), one per server:
+a mod's client-only settings (AppleSkin's HUD, Jade's) take effect when its HUD does (not yet).
+
 ## Phase 3f status: energy and fluids between the mods' blocks (2026-11-13)
 
 A tech mod's machines pass energy (Team Reborn Energy's `EnergyStorage.SIDED`) and fluids (the
@@ -1223,8 +1245,9 @@ NeoForge could run beside Fabric 26.3 rather than in its place.
    tooltip images, `setColor` tints, real text widths, a stack's components into the runtime.
 5. **Events and networking.** 5a done: block breaks. 5b done: lifecycle and tick events. 5c
    done: mods' packets between their halves, players joining. 5d done: items used, mods' own
-   screens, players leaving. 5e done: mods' key bindings and the client tick (above). Left:
-   mods' HUD overlays (`HudRenderCallback`).
+   screens, players leaving. 5e done: mods' key bindings and the client tick (above). 5f/5g done:
+   sounds and particles. 5h done: the mods' settings screens. Left: mods' HUD overlays
+   (`HudRenderCallback`).
 6. **Entities and worldgen.** 6a done: the mods' Fabric biome modifications reach Horizon's
    generator as biome modifiers. 6b done: a mod's own feature types run in the runtime on the
    chunks being decorated. 6c done: data-driven structures (above). 6d done: the mods' mobs

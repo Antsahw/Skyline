@@ -1223,6 +1223,44 @@ impl Runtime120 {
         }
     }
 
+    /// The mods with a settings screen (Mod Menu's entrypoints): (id, name) each.
+    pub fn config_mods(&mut self) -> Result<Vec<(String, String)>, String> {
+        let values = self.call_answers("configMods", &[])?;
+        match (values.first(), values.get(1)) {
+            (Some(Value::Strs(ids)), Some(Value::Strs(names))) => {
+                Ok(ids.iter().cloned().zip(names.iter().cloned()).collect())
+            }
+            other => Err(format!("configMods: answers {other:?}")),
+        }
+    }
+
+    /// A mod's settings screen opened for a player (`openConfig`): the kind of what opened
+    /// (`screen:<class>`, as a mod's own screen opened by an item reports it), `None` when it
+    /// didn't. From then on it draws and takes input as any of the player's screens.
+    pub fn open_config(
+        &mut self,
+        world: &dyn World120,
+        uuid: &str,
+        name: &str,
+        id: &str,
+    ) -> Result<Option<String>, String> {
+        let mut handler = InWorld {
+            world,
+            set: Vec::new(),
+            block_entities: Vec::new(),
+            spawned: Vec::new(),
+            log: self.log.clone(),
+        };
+        let args = [
+            Value::Str(uuid.to_owned()),
+            Value::Str(name.to_owned()),
+            Value::Str(id.to_owned()),
+        ];
+        let values = self.call_values("openConfig", &args, &mut handler)?;
+        let kind = values.first().and_then(Value::as_str).unwrap_or_default();
+        Ok((!kind.is_empty()).then(|| kind.to_owned()))
+    }
+
     /// The mods' entity types (not vanilla's), by id: what `/summon` may make in the runtime.
     pub fn mod_entity_types(&mut self) -> Result<Vec<String>, String> {
         match self.call_answers("modEntityTypes", &[])?.first() {

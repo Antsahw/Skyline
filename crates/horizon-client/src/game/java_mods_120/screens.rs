@@ -348,6 +348,9 @@ impl super::super::Game<'_> {
             self.java120_key(host, conn, &input);
             return false;
         }
+        if input.get("kind").and_then(Value::as_str) == Some("modconfig") {
+            return self.java120_open_config(host, conn, &input);
+        }
         let window = input.get("window").and_then(Value::as_i64).unwrap_or(-1) as i32;
         if window != CLIENT_WINDOW {
             return false;

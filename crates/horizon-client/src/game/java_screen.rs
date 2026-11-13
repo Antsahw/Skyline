@@ -958,7 +958,14 @@ impl Game<'_> {
                 }
                 "text" => {
                     let (x, y) = (int(o, "x") + dx, int(o, "y") + dy);
-                    let color = argb(o.get("color").and_then(Value::as_i64).unwrap_or(-1));
+                    // Font.adjustColor: text drawn with no alpha bits is opaque.
+                    let raw = o.get("color").and_then(Value::as_i64).unwrap_or(-1);
+                    let raw = if raw & 0xFC00_0000 == 0 {
+                        raw | 0xFF00_0000
+                    } else {
+                        raw
+                    };
+                    let color = argb(raw);
                     let shadow = o.get("shadow").and_then(Value::as_bool).unwrap_or(false);
                     if let Some(text) = o.get("text").and_then(Value::as_str) {
                         batch.text(atlas, text, x, y, color, shadow);

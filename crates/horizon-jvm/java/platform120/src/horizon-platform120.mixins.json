@@ -47,10 +47,13 @@
     "LocalPlayerAccess",
     "MenuScreensAccess",
     "MinecraftAccess",
+    "MouseHandlerAccess",
+    "WindowAccess",
     "MinecraftMixin",
     "ModelManagerAccess",
     "RenderSystemMixin",
     "ScreenMixin",
+    "SoundManagerMixin",
     "SpriteContentsAccess",
     "TextureAtlasSpriteAccess"
   ],

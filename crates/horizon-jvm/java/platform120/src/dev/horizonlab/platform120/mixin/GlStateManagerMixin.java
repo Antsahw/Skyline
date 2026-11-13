@@ -39,7 +39,6 @@ public abstract class GlStateManagerMixin {
             "_disableCull()V",
             "_disableDepthTest()V",
             "_disablePolygonOffset()V",
-            "_disableScissorTest()V",
             "_disableVertexAttribArray(I)V",
             "_drawElements(IIIJ)V",
             "_enableBlend()V",
@@ -88,7 +87,6 @@ public abstract class GlStateManagerMixin {
             "_polygonOffset(FF)V",
             "_readPixels(IIIIIIJ)V",
             "_readPixels(IIIIIILjava/nio/ByteBuffer;)V",
-            "_scissorBox(IIII)V",
             "_stencilFunc(III)V",
             "_stencilMask(I)V",
             "_stencilOp(III)V",
@@ -102,6 +100,28 @@ public abstract class GlStateManagerMixin {
             "_viewport(IIII)V"
     }, at = @At("HEAD"), cancellable = true, require = 0)
     private static void horizon$noGl(CallbackInfo ci) {
+        ci.cancel();
+    }
+
+    /**
+     * Clipping set straight on GL (Cloth Config's ScissorsHandler, RenderSystem.enableScissor):
+     * window pixels from the bottom left. Recorded into the frame being drawn, if any.
+     */
+    @Inject(method = "_scissorBox(IIII)V", at = @At("HEAD"), cancellable = true, require = 0)
+    private static void horizon$scissorBox(int x, int y, int width, int height, CallbackInfo ci) {
+        dev.horizonlab.platform120.Graphics120 to = dev.horizonlab.platform120.Graphics120.current();
+        if (to != null) {
+            to.glScissor(x, y, width, height);
+        }
+        ci.cancel();
+    }
+
+    @Inject(method = "_disableScissorTest()V", at = @At("HEAD"), cancellable = true, require = 0)
+    private static void horizon$scissorOff(CallbackInfo ci) {
+        dev.horizonlab.platform120.Graphics120 to = dev.horizonlab.platform120.Graphics120.current();
+        if (to != null) {
+            to.glUnscissor();
+        }
         ci.cancel();
     }
 }

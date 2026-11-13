@@ -206,4 +206,26 @@ public final class Graphics120 {
     public void unscissor() {
         op("unscissor");
     }
+
+    /** Whether a GL scissor box is in the frame: GL's is one state, not a stack. */
+    private boolean glScissor;
+
+    /**
+     * A scissor box set on GL, in window pixels from the bottom left: the window is the frame's
+     * size at GUI scale 1 ({@link Screens120#pointer}), so only y turns over.
+     */
+    public void glScissor(int x, int y, int width, int height) {
+        glUnscissor();
+        int top = Screens120.windowHeight() - y - height;
+        scissor(x, top, x + width, top + height);
+        glScissor = true;
+    }
+
+    /** GL's scissor test turned off. */
+    public void glUnscissor() {
+        if (glScissor) {
+            unscissor();
+            glScissor = false;
+        }
+    }
 }

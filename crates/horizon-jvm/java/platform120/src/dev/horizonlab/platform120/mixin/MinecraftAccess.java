@@ -26,6 +26,17 @@ public interface MinecraftAccess {
     void horizon$setBlockRenderer(net.minecraft.client.renderer.block.BlockRenderDispatcher blocks);
 
     @Mutable
+    @Accessor("mouseHandler")
+    void horizon$setMouseHandler(net.minecraft.client.MouseHandler mouse);
+
+    @Mutable
     @Accessor("itemRenderer")
     void horizon$setItemRenderer(net.minecraft.client.renderer.entity.ItemRenderer items);
+
+    @Mutable
+    @Accessor("soundManager")
+    void horizon$setSoundManager(net.minecraft.client.sounds.SoundManager sounds);
+
+    @Accessor("lastInputType")
+    void horizon$setLastInputType(net.minecraft.client.InputType type);
 }
