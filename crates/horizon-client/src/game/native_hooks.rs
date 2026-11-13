@@ -9645,6 +9645,14 @@ impl Game<'_> {
         }
         let mut entity = None;
         self.native_block_entity(name, &mut entity);
+        // A 1.20.1 mod's block: its block entity, empty, for the mod's code to fill as it reads
+        // it (game/java_mods_120.rs).
+        #[cfg(feature = "java-mods-120")]
+        if entity.is_none()
+            && let Some(id) = super::java_mods_120::block_entity_type(name)
+        {
+            entity = Some((id, Default::default()));
+        }
         let (id, nbt) = entity?;
         Some(BlockEntity::Mod(Box::new(
             ModBlockEntityFields {

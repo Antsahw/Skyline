@@ -2302,3 +2302,109 @@ fn right_clicking_a_block_runs_its_1_20_1_code_on_horizons_blocks() {
     }
     runtime.stop();
 }
+
+/// Phase 3f: energy between the mods' own machines (Team Reborn Energy's `EnergyStorage.SIDED`).
+/// Tech Reborn's creative solar panel beside its electric furnace: the panel's tick hands its
+/// energy to the furnace through the lookup, which finds the furnace on Horizon's blocks, and
+/// the furnace smelts with it. Both block entities stay the runtime's between ticks, as a
+/// chunk keeps them, and what they become goes to Horizon. Needs Tech Reborn among
+/// HORIZON_120_MODS.
+#[test]
+fn the_mods_machines_pass_energy_between_them() {
+    let Some(cache) = cache() else { return };
+    let Some(bridge) = bridge_classes() else {
+        return;
+    };
+    let platform = cache.join("horizon/platform120.jar");
+    let Some(dir) = std::env::var_os("HORIZON_120_MODS") else {
+        return;
+    };
+    let jars: Vec<PathBuf> = std::fs::read_dir(&dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path())
+        .collect();
+    if !platform.exists()
+        || !jars
+            .iter()
+            .any(|p| p.to_string_lossy().contains("TechReborn"))
+    {
+        eprintln!("no Tech Reborn in HORIZON_120_MODS (or no platform jar): skipping");
+        return;
+    }
+    let game = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("game120-energy");
+    let _ = std::fs::remove_dir_all(&game);
+    let mods = game.join("mods");
+    std::fs::create_dir_all(&mods).unwrap();
+    for jar in &jars {
+        std::fs::copy(jar, mods.join(jar.file_name().unwrap())).unwrap();
+    }
+    let lines: Lines = Arc::default();
+    let mut cfg = config(cache, bridge, game.clone(), lines);
+    cfg.platform = Some(platform);
+    let (mut runtime, _) = boot120::start(&cfg).expect("boots");
+    let world = Blocks::new(vec![
+        (
+            [0, 65, 0],
+            "techreborn:creative_solar_panel".into(),
+            // None of Horizon's: the runtime makes the block's own, as a chunk would.
+            String::new(),
+        ),
+        (
+            [1, 65, 0],
+            "techreborn:electric_furnace[active=false,facing=north]".into(),
+            "{id:\"techreborn:electric_furnace\",x:1,y:65,z:0,\
+             Items:{Items:[{Slot:0b,id:\"minecraft:raw_iron\",Count:8b}]}}"
+                .into(),
+        ),
+    ]);
+    let mut last = String::new();
+    for _ in 0..400 {
+        let ticked = runtime
+            .tick_block_entities(&world, "minecraft:overworld", &[0, 65, 0, 1, 65, 0])
+            .expect("a tick");
+        if let Some(furnace) = ticked
+            .block_entities
+            .iter()
+            .rev()
+            .find(|e| e.pos == [1, 65, 0])
+        {
+            last = furnace.snbt.clone();
+        }
+        if last.contains("iron_ingot") {
+            break;
+        }
+    }
+    eprintln!("the furnace after: {last}");
+    assert!(
+        last.contains("minecraft:iron_ingot"),
+        "powered by the panel, it smelted: {last}"
+    );
+
+    // Fluids (the Transfer API's `FluidStorage`): a water bucket emptied into Tech Reborn's tank
+    // unit by a right-click goes into the tank, and the bucket comes back empty.
+    let tank = Blocks::new(vec![(
+        [0, 65, 0],
+        "techreborn:basic_tank_unit[facing=north]".into(),
+        String::new(),
+    )]);
+    let mut bucket = flint_and_steel_on_top();
+    bucket.pos = [0, 65, 0];
+    bucket.hit = [0.5, 66.0, 0.5];
+    bucket.item = "minecraft:water_bucket".into();
+    bucket.damage = 0;
+    let used = runtime.use_block(&tank, &bucket).expect("the tank");
+    eprintln!("the bucket on the tank: {used:?}");
+    let kept = used
+        .block_entities
+        .iter()
+        .rev()
+        .find(|e| e.pos == [0, 65, 0])
+        .unwrap_or_else(|| panic!("the tank changed: {used:?}"));
+    assert!(
+        kept.snbt.contains("minecraft:water"),
+        "water in the tank: {}",
+        kept.snbt
+    );
+}

@@ -356,6 +356,29 @@ clicks pass until then). A click on a block of a 1.20.1 mod's namespace, or with
 their items, goes to it at `useItemOn`'s head (`java120_use_block`, beside the 26.3 bridge's
 hook in `lan_actions.rs`); what it set and what it did to the held stack land in Horizon.
 
+## Phase 3f status: energy and fluids between the mods' blocks (2026-11-13)
+
+A tech mod's machines pass energy (Team Reborn Energy's `EnergyStorage.SIDED`) and fluids (the
+Transfer API's `FluidStorage`) through Fabric's block lookups, which run in the runtime on
+Horizon's blocks: the lookup finds the neighbour's block entity there, and both stay the
+runtime's between ticks (as a chunk keeps them), what they become going to Horizon. Checked
+with Tech Reborn: its creative solar panel powers its electric furnace, which smelts; a water
+bucket emptied into its tank unit fills the tank and comes back empty.
+
+What it needed: a mod's block placed by Horizon without the mod's code (`/setblock`, `/fill`, a
+structure) has its block entity. The runtime lists, when it starts, the mods' blocks that have
+one and its type (`modBlockEntityBlocks`: 260 with Tech Reborn's set), and Horizon makes it
+however the block is placed (`new_block_entity`, and the edits `/fill` tracks), empty, for the
+mod's code to fill as it reads it; the runtime also makes one where Horizon has none.
+
+Checked in a game: Tech Reborn's creative solar panel and electric furnace placed by `/setblock`,
+the furnace charged by the panel. (A hopper doesn't feed it there: Tech Reborn's slot config
+takes no automated input until set in the machine's screen, as in 1.20.1.)
+
+Not covered: energy or fluids between a mod's block and Horizon's own (Horizon has no energy;
+vanilla's cauldron through the Transfer API is unverified), and `/data merge` on a mod's block
+entity whose `Items` aren't vanilla's list (the command reads them as one).
+
 ## Phase 5f/5g status: sounds, particles, and vanilla mobs the mods make (2026-11-13)
 
 What the mods' code plays and shows in the world reaches Horizon's players. A sound

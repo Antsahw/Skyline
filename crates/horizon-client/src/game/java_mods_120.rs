@@ -111,10 +111,35 @@ fn remember_namespaces(folders: &[PathBuf]) {
 }
 
 /// The runtime from now on: the mods' code runs in it.
+/// The mods' blocks that have a block entity, and its type, from when their runtime started.
+static BLOCK_ENTITIES: std::sync::RwLock<std::collections::BTreeMap<String, String>> =
+    std::sync::RwLock::new(std::collections::BTreeMap::new());
+
+/// The type of the block entity a mod's block has (`EntityBlock.newBlockEntity`), if it has
+/// one: Horizon makes it however the block is placed, as a chunk does.
+pub(in crate::game) fn block_entity_type(block: &str) -> Option<String> {
+    BLOCK_ENTITIES
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(block)
+        .cloned()
+}
+
 fn keep(mut runtime: Runtime120) {
     log::info!("1.20.1 mods: their code runs");
     worldgen::install(&mut runtime);
     mobs::know_types(&mut runtime);
+    match runtime.mod_block_entity_blocks() {
+        Ok(blocks) => {
+            log::info!(
+                "1.20.1 mods: {} block(s) of theirs with a block entity",
+                blocks.len()
+            );
+            *BLOCK_ENTITIES.write().unwrap_or_else(|e| e.into_inner()) =
+                blocks.into_iter().collect();
+        }
+        Err(e) => log::warn!("1.20.1 mods: their blocks' block entities can't be listed: {e}"),
+    }
     if let Some(old) = RUNTIME
         .lock()
         .unwrap_or_else(|e| e.into_inner())

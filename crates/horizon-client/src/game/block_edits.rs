@@ -82,6 +82,7 @@ impl Game<'_> {
                 watched.get(s as usize).copied().unwrap_or(false)
                     || f.block_entity
                     || BlockEntity::for_block(&f.name).is_some()
+                    || java120_block_entity(&f.name)
             },
         );
         self.world.watched = watched;
@@ -438,6 +439,14 @@ fn replace_block_entities(
         }
     }
     replaced
+}
+
+/// Whether a 1.20.1 mod's block has a block entity (game/java_mods_120.rs).
+fn java120_block_entity(_name: &str) -> bool {
+    #[cfg(feature = "java-mods-120")]
+    return super::java_mods_120::block_entity_type(_name).is_some();
+    #[cfg(not(feature = "java-mods-120"))]
+    false
 }
 
 #[cfg(test)]

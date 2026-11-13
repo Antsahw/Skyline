@@ -1211,6 +1211,18 @@ impl Runtime120 {
         ))
     }
 
+    /// The mods' blocks that have a block entity, each with its block entity's type
+    /// (`modBlockEntityBlocks`): Horizon makes one for such a block however it's placed.
+    pub fn mod_block_entity_blocks(&mut self) -> Result<Vec<(String, String)>, String> {
+        let values = self.call_answers("modBlockEntityBlocks", &[])?;
+        match (values.first(), values.get(1)) {
+            (Some(Value::Strs(blocks)), Some(Value::Strs(types))) => {
+                Ok(blocks.iter().cloned().zip(types.iter().cloned()).collect())
+            }
+            other => Err(format!("modBlockEntityBlocks: answers {other:?}")),
+        }
+    }
+
     /// The mods' entity types (not vanilla's), by id: what `/summon` may make in the runtime.
     pub fn mod_entity_types(&mut self) -> Result<Vec<String>, String> {
         match self.call_answers("modEntityTypes", &[])?.first() {

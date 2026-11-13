@@ -123,6 +123,7 @@ public final class Boot120 implements RemoteRuntime {
             case "loadEntities":
             case "clearEntities":
             case "modEntityTypes":
+            case "modBlockEntityBlocks":
             case "spawnNatural":
             case "spawnGenerated":
             case "animateTicks":

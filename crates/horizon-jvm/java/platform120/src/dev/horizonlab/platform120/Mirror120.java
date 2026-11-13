@@ -1136,6 +1136,32 @@ public final class Mirror120 {
         }
     }
 
+    /**
+     * The mods' blocks that have a block entity (EntityBlock.newBlockEntity of their default
+     * state), and its type: {blocks, types}. Horizon makes one for such a block however it's
+     * placed (a command, a structure), as a chunk does with the block.
+     */
+    public static Object[] modBlockEntityBlocks() {
+        List<String> blocks = new ArrayList<>();
+        List<String> types = new ArrayList<>();
+        for (var block : BuiltInRegistries.BLOCK) {
+            var id = BuiltInRegistries.BLOCK.getKey(block);
+            if ("minecraft".equals(id.getNamespace())) continue;
+            if (!(block instanceof net.minecraft.world.level.block.EntityBlock entityBlock)) continue;
+            try {
+                var made = entityBlock.newBlockEntity(BlockPos.ZERO, block.defaultBlockState());
+                if (made == null) continue;
+                var type = BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(made.getType());
+                if (type == null) continue;
+                blocks.add(id.toString());
+                types.add(type.toString());
+            } catch (RuntimeException | LinkageError e) {
+                // One that can't be made without a level: Horizon leaves it to the mod's code.
+            }
+        }
+        return new Object[] {blocks.toArray(new String[0]), types.toArray(new String[0])};
+    }
+
     /** HORIZON_120_TRACE: why each of the mods' spawns did or didn't happen. */
     private static final boolean SPAWN_TRACE = System.getenv("HORIZON_120_TRACE") != null;
 
