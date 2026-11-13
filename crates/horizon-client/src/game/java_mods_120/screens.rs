@@ -45,6 +45,7 @@ fn open<R>(f: impl FnOnce(&mut HashMap<u32, Open>) -> R) -> R {
 /// A player's connection went: their screen with it.
 pub(super) fn forget(conn: u32) {
     super::keys::forget(conn);
+    super::hud::forget(conn);
     open(|screens| screens.remove(&conn));
 }
 
@@ -350,6 +351,10 @@ impl super::super::Game<'_> {
         }
         if input.get("kind").and_then(Value::as_str) == Some("modconfig") {
             return self.java120_open_config(host, conn, &input);
+        }
+        // The HUD's size: the 1.20.1 mods' HUD is laid out in it, and the 26.3 bridge's too.
+        if super::hud::take_size(conn, &input) {
+            return false;
         }
         let window = input.get("window").and_then(Value::as_i64).unwrap_or(-1) as i32;
         if window != CLIENT_WINDOW {

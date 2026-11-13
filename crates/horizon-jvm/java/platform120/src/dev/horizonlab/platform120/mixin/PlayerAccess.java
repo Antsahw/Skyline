@@ -20,4 +20,12 @@ public interface PlayerAccess {
     @Mutable
     @Accessor("inventoryMenu")
     void horizon$setInventoryMenu(InventoryMenu menu);
+
+    /** The HUD's client player reads its food (AppleSkin): the server player's. */
+    @Accessor("foodData")
+    void horizon$setFoodData(net.minecraft.world.food.FoodData food);
+
+    @Mutable
+    @Accessor("abilities")
+    void horizon$setAbilities(net.minecraft.world.entity.player.Abilities abilities);
 }

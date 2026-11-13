@@ -45,8 +45,8 @@ not a working machine, and almost every content mod has at least one screen.
 | Mod mobs and their AI | **done** | phase 6d: a mod's mob lives and ticks in the runtime (its AI, physics on Horizon's blocks, fall damage; Friends & Foes' moobloom), drawn by its own renderer, hit and used by players with the mod's code (milked, killed, its loot and experience dropped), saved with the world, made by `/summon`, spawned naturally where the mod adds them to biomes and despawned far from players (all checked in a game). Mobs a mod spawns in its own way (structures, raids, custom mob categories) not yet |
 | Worldgen: ores, biomes, structures | **partial** | phase 6a/6b: the features mods add to vanilla's biomes through Fabric's biome API generate in new chunks, vanilla's types in Horizon's generator and a mod's own types by the mod's code in the runtime (FD's wild crops checked in a real world); data-driven structures generate (phase 6c, Towns and Towers checked in a real world); structures with Java pieces and the mods' biomes not yet |
 | Mod dimensions | **not yet** | phase 6 |
-| Keybinds and HUD overlays (minimaps, tooltips, info bars) | **partial** | phase 5e: mods' key bindings reach them (pressed in Horizon, clicked in 1.20.1's client tick); HUD overlays not yet |
-| Config screens (Cloth Config and friends) | **done** | phase 5h: Mod Menu's entrypoints listed on Horizon's Mods page; the screen opens, draws, takes clicks and saves (AppleSkin's, checked in a game). Client-only settings wait for the HUD |
+| Keybinds and HUD overlays (minimaps, tooltips, info bars) | **partial** | phase 5e: mods' key bindings reach them (pressed in Horizon, clicked in 1.20.1's client tick). Phase 5i: what mods draw into vanilla's HUD parts or `HudRenderCallback` is drawn over Horizon's HUD (AppleSkin's saturation, checked in a game); overlays about what the player looks at (Jade) and minimaps, which read the client's world, not yet |
+| Config screens (Cloth Config and friends) | **done** | phase 5h: Mod Menu's entrypoints listed on Horizon's Mods page; the screen opens, draws, takes clicks and saves (AppleSkin's, checked in a game) |
 | Mod commands | **unverified** | — |
 | Enchantments, status effects, attributes | **unverified** | — |
 | Mixins on vanilla behaviour (harvest tweaks, drop changes) | **partial** | phase 3a; only where the hook exists |
@@ -75,7 +75,7 @@ A 1.20.1 mod is **fully supported** when all of this is true of it:
 7. Its items and fluids move through other mods' and Horizon's containers. *(phase 3: items through Horizon's hoppers, energy and fluids between mods' blocks done; mods' pipes into Horizon's containers unverified)*
 8. Its mobs spawn, move, fight and are fought. *(phase 6d: done: they live, move, are drawn, fought, used, saved and spawn naturally)*
 9. Its worldgen appears in new chunks. *(features: 6a/6b, data-driven structures: 6c, done; Java-built structures and biomes next)*
-10. Its client bits work: keys, HUD, config. *(keys: phase 5e, config: phase 5h, done; HUD next)*
+10. Its client bits work: keys, HUD, config. *(keys: phase 5e, config: phase 5h, done; HUD: phase 5i, the mods' own bars and overlays done, the ones that read the client's world next)*
 11. None of the above costs more than a few frames a second. *(measured per phase)*
 
 Points 1–3, 5, 6 and 8 are done. Point 7 is mostly done (items through Horizon's hoppers, energy and fluids between mods' blocks). Points

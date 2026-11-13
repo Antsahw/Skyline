@@ -867,6 +867,7 @@ mod neighbours;
 mod redstone;
 pub(in crate::game) use breaking::Break120;
 mod hoppers;
+mod hud;
 mod items;
 mod keys;
 mod screens;

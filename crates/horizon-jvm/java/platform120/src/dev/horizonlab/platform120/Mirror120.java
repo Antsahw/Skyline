@@ -1184,6 +1184,23 @@ public final class Mirror120 {
         }
     }
 
+    /**
+     * What the mods draw on a player's HUD (Hud120): {frame}, the operations as JSON. `state`
+     * is the player as Horizon has them: `dimension`, `health`, `max_health`, `absorption`,
+     * `food`, `saturation`, `exhaustion`, `air`, `xp_level`, `xp_progress`, `hurtable`.
+     */
+    public static Object[] hud(String uuid, String name, String state, int width, int height) {
+        begin();
+        try {
+            String dimension = com.google.gson.JsonParser.parseString(state).getAsJsonObject()
+                    .get("dimension").getAsString();
+            ServerPlayer player = player(uuid, name, level(dimension));
+            return new Object[] {Hud120.frame(player, state, width, height)};
+        } finally {
+            finish();
+        }
+    }
+
     /** HORIZON_120_TRACE: why each of the mods' spawns did or didn't happen. */
     private static final boolean SPAWN_TRACE = System.getenv("HORIZON_120_TRACE") != null;
 

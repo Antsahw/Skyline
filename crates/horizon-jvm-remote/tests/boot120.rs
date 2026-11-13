@@ -2491,4 +2491,38 @@ fn the_mods_machines_pass_energy_between_them() {
         !frame.contains("\"text\":\"text.autoconfig."),
         "translated: {frame}"
     );
+
+    // Phase 5i: what the mods draw on the HUD, over Horizon's. A hungry player in survival:
+    // AppleSkin's saturation and exhaustion over the food bar, from Horizon's numbers; none
+    // of vanilla's own hearts, bars or hotbar, which are Horizon's to draw.
+    if configs.iter().any(|(id, _)| id == "appleskin") {
+        let state = serde_json::json!({
+            "dimension": "minecraft:overworld", "health": 15.0, "max_health": 20.0,
+            "absorption": 0.0, "food": 12, "saturation": 4.0, "exhaustion": 2.5, "air": 300,
+            "xp_level": 3, "xp_progress": 0.5, "hurtable": true,
+        });
+        let hud = runtime
+            .hud_frame(&tank, uuid, "Tester", &state.to_string(), 427, 240)
+            .expect("the HUD draws");
+        eprintln!("the mods' HUD: {}", &hud[..hud.len().min(800)]);
+        let ops: serde_json::Value = serde_json::from_str(&hud).expect("the HUD is json");
+        let ops = ops.as_array().expect("a list of drawing operations");
+        let textures: Vec<&str> = ops.iter().filter_map(|o| o["texture"].as_str()).collect();
+        assert!(
+            textures.iter().any(|t| t.starts_with("appleskin:")),
+            "AppleSkin's overlay: {hud}"
+        );
+        assert!(
+            !textures.iter().any(|t| t.ends_with("gui/widgets.png")),
+            "not vanilla's hotbar: {hud}"
+        );
+        // Its saturation overlay sits on the food bar: right of the centre, over the hotbar.
+        assert!(
+            ops.iter()
+                .filter(|o| o["texture"].as_str().is_some_and(|t| t.starts_with("appleskin:")))
+                .all(|o| o["x0"].as_i64().unwrap_or(0) >= 427 / 2
+                    && o["y0"].as_i64().unwrap_or(0) > 240 - 50),
+            "on the food bar: {hud}"
+        );
+    }
 }

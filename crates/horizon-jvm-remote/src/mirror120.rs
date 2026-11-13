@@ -870,6 +870,42 @@ impl Runtime120 {
         Ok((!frame.is_empty()).then(|| frame.to_owned()))
     }
 
+    /// What the mods draw on `player`'s HUD at a `width`x`height` GUI (phase 5i): the frame's
+    /// drawing operations as JSON (`[...]`, empty when the mods draw nothing). `state` is the
+    /// player as Horizon has them, a JSON object: `dimension`, `health`, `max_health`,
+    /// `absorption`, `food`, `saturation`, `exhaustion`, `air`, `xp_level`, `xp_progress`
+    /// and `hurtable` (survival or adventure: the hearts and food are shown).
+    pub fn hud_frame(
+        &mut self,
+        world: &dyn World120,
+        player: &str,
+        name: &str,
+        state: &str,
+        width: i32,
+        height: i32,
+    ) -> Result<String, String> {
+        let args = [
+            Value::Str(player.to_owned()),
+            Value::Str(name.to_owned()),
+            Value::Str(state.to_owned()),
+            Value::I32(width),
+            Value::I32(height),
+        ];
+        let mut handler = InWorld {
+            world,
+            set: Vec::new(),
+            block_entities: Vec::new(),
+            spawned: Vec::new(),
+            log: self.log.clone(),
+        };
+        let values = self.call_values("hud", &args, &mut handler)?;
+        Ok(values
+            .first()
+            .and_then(Value::as_str)
+            .unwrap_or("[]")
+            .to_owned())
+    }
+
     /// One input of `player`'s on their open screen: `input` is a JSON object with `kind`
     /// (`press`, `release`, `drag`, `move`, `scroll`, `key`, `char` or `close`), and as the
     /// kind needs, `x`, `y` (the screen's coordinates), `button` (GLFW's: 0 left, 1 right),

@@ -16,14 +16,9 @@ impl Game<'_> {
     }
 
     /// What Java mods draw on a player's HUD, from Java: to their game.
+    /// Sent with the 1.20.1 mods' part, if any (`send_hud_part`).
     pub(in crate::game) fn send_java_hud_frame(host: &mut LanHost, conn: u32, frame: &str) {
-        host.hub.send_to(
-            conn,
-            &C::CustomPayload(CustomPayload {
-                channel: HUD_CHANNEL.into(),
-                data: frame.as_bytes().to_vec(),
-            }),
-        );
+        send_hud_part(host, conn, HudPart::Mods263, frame);
     }
 
     /// What Java mods draw over a player's inventory, from Java: to their game.

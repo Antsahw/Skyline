@@ -38,6 +38,11 @@ public final class Graphics120 {
         return ops;
     }
 
+    /** How many operations were kept so far. */
+    int finishedCount() {
+        return ops.size();
+    }
+
     /** The recorder a mixin writes to, or null when nothing is being recorded. */
     public static Graphics120 current() {
         return current;
@@ -46,8 +51,68 @@ public final class Graphics120 {
     private JsonObject op(String name) {
         JsonObject o = new JsonObject();
         o.addProperty("op", name);
+        // Clipping is kept whoever set it: a mod's drawing inside vanilla's clip stays inside.
+        if (modsOnly && !name.endsWith("scissor") && !drawnByMod()) {
+            dropped++;
+            return o;
+        }
         ops.add(o);
         return o;
+    }
+
+    /**
+     * Only what the mods draw is kept (the HUD: vanilla's parts are Horizon's, and run only for
+     * the mods' drawing injected into them). An operation is a mod's when, going out from the
+     * drawing call, a mod's frame comes before this glue's: a class of a mod, or a mod's mixin
+     * handler merged into a vanilla class. Fabric's own handlers are vanilla's here: its HUD
+     * callback's invoker hands on to the mods' callbacks, which are further up. As the 26.3
+     * bridge's HorizonGraphics does.
+     */
+    boolean modsOnly;
+    /** Operations left out as vanilla's ({@link #modsOnly}). */
+    int dropped;
+
+    private static final java.util.Map<String, Boolean> MOD_FRAMES = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final StackWalker WALKER = StackWalker.getInstance(StackWalker.Option.RETAIN_CLASS_REFERENCE);
+
+    private static boolean drawnByMod() {
+        return WALKER.walk(frames -> {
+            var it = frames.iterator();
+            while (it.hasNext()) {
+                var frame = it.next();
+                Class<?> owner = frame.getDeclaringClass();
+                String name = owner.getName();
+                // The recorder, and GuiGraphics with this glue's handlers merged into it.
+                if (name.startsWith("dev.horizonlab.platform120.Graphics120")
+                        || owner == net.minecraft.client.gui.GuiGraphics.class) {
+                    continue;
+                }
+                if (name.startsWith("dev.horizonlab.")) return false;
+                if (MOD_FRAMES.computeIfAbsent(name + "#" + frame.getMethodName() + frame.getDescriptor(),
+                        k -> isModFrame(owner, frame))) {
+                    return true;
+                }
+            }
+            return false;
+        });
+    }
+
+    private static boolean isModFrame(Class<?> owner, StackWalker.StackFrame frame) {
+        String name = owner.getName();
+        boolean platform = name.startsWith("net.minecraft.") || name.startsWith("com.mojang.")
+                || name.startsWith("net.fabricmc.") || name.startsWith("java.") || name.startsWith("jdk.")
+                || name.startsWith("sun.") || name.startsWith("org.joml.") || name.startsWith("com.google.")
+                || name.startsWith("it.unimi.") || name.startsWith("org.spongepowered.");
+        if (!platform) return true;
+        if (!frame.getMethodName().contains("$")) return false;
+        try {
+            var method = owner.getDeclaredMethod(frame.getMethodName(), frame.getMethodType().parameterArray());
+            var merged = method.getAnnotation(org.spongepowered.asm.mixin.transformer.meta.MixinMerged.class);
+            return merged != null && !merged.mixin().startsWith("net.fabricmc.")
+                    && !merged.mixin().startsWith("dev.horizonlab.");
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError e) {
+            return false;
+        }
     }
 
     /** A rectangle as Horizon's screen drawing reads one: its two corners. */

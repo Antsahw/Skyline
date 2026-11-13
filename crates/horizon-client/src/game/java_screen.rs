@@ -18,6 +18,12 @@ use winit::keyboard::KeyCode;
 
 #[cfg(feature = "java-mods")]
 mod host;
+#[cfg(any(feature = "java-mods", feature = "java-mods-120"))]
+mod hud_parts;
+#[cfg(feature = "java-mods-120")]
+pub(super) use hud_parts::forget_hud;
+#[cfg(any(feature = "java-mods", feature = "java-mods-120"))]
+pub(super) use hud_parts::{HudPart, send_hud_part};
 
 /// A frame, server to client: `{"window": id, "ops": [...]}`.
 pub(super) const CHANNEL: &str = "horizon:java_screen";

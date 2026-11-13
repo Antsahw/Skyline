@@ -7985,6 +7985,8 @@ impl Game<'_> {
         #[cfg(feature = "java-mods-120")]
         self.tick_java120_screens();
         #[cfg(feature = "java-mods-120")]
+        self.tick_java120_hud();
+        #[cfg(feature = "java-mods-120")]
         self.tick_java120_events();
         #[cfg(feature = "java-mods-120")]
         self.tell_java120_keys();

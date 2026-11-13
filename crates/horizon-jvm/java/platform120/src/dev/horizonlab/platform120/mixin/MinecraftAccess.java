@@ -39,4 +39,16 @@ public interface MinecraftAccess {
 
     @Accessor("lastInputType")
     void horizon$setLastInputType(net.minecraft.client.InputType type);
+
+    @Mutable
+    @Accessor("gui")
+    void horizon$setGui(net.minecraft.client.gui.Gui gui);
+
+    @Accessor("profiler")
+    void horizon$setProfiler(net.minecraft.util.profiling.ProfilerFiller profiler);
+
+    /** Its frame timer (Jade's HUD asks the frame's delta). */
+    @Mutable
+    @Accessor("timer")
+    void horizon$setTimer(net.minecraft.client.Timer timer);
 }

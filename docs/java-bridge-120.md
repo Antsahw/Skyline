@@ -356,6 +356,40 @@ clicks pass until then). A click on a block of a 1.20.1 mod's namespace, or with
 their items, goes to it at `useItemOn`'s head (`java120_use_block`, beside the 26.3 bridge's
 hook in `lan_actions.rs`); what it set and what it did to the held stack land in Horizon.
 
+## Phase 5i status: the mods' HUD (2026-11-14)
+
+What the mods draw on the HUD is drawn over Horizon's: AppleSkin's saturation and exhaustion
+over the food bar, Farmer's Delight's nourishment and comfort, any mod's `HudRenderCallback`.
+In 1.20.1 most of it is drawn from mixins into vanilla's `Gui` parts, so the runtime runs the
+parts mods inject into (`Hud120`: the hotbar, the hearts and food where the player can be hurt,
+the experience bar, the effects), then every handler merged into `Gui.render` (Fabric's, which
+fires the callback, and the mods' own), and keeps only what the mods draw: an operation is a
+mod's when, walking out from the drawing call, a mod's class or a mod's merged handler comes
+before the glue (`Graphics120.modsOnly`, as the 26.3 bridge's `HorizonGraphics`). Vanilla's
+hearts and bars are dropped as drawn.
+
+The player is Horizon's: health, max health, absorption, food, saturation, exhaustion, air and
+experience go with each frame and are set on the runtime's player, whose state the client player
+shares (its synced data, food, attributes, effects, abilities). The server draws each player's
+HUD every tick and sends it on the 26.3 bridge's HUD channel when it changed
+(`game/java_mods_120/hud.rs`); the game draws it over its HUD and says its GUI size, which the
+next frame is laid out in. With both bridges' mods in one world, a player gets one frame with
+both parts (`java_screen/hud_parts.rs`).
+
+Checked: in the runtime test, a hungry survival player's frame holds AppleSkin's exhaustion
+underlay (2.5 of 4: 50 of the bar's 81 pixels) and two saturation shanks over the food bar, and
+none of vanilla's 43 operations; in a game, AppleSkin's gold saturation outlines over Horizon's
+food bar. A frame costs about 2.2 ms of the server's tick per player (the runtime's call and the
+stack walks), which suits a few players.
+
+What the client needed: a frame timer (Jade asks the frame's delta), an empty client level while
+a frame draws (the hearts ask whether the world is hardcore), the GUI made without its
+constructor, and raw LWJGL calls answered (`RawGlMixin`): AppleSkin asks `GL11.glIsEnabled`
+before it draws, and with no GL context LWJGL aborts the whole JVM.
+
+Not yet: overlays about the world as the client sees it. Jade's tooltip needs what the player
+looks at (`Minecraft.hitResult`) and a client level with the blocks; minimaps need the chunks.
+
 ## Phase 5h status: the mods' settings screens (2026-11-13)
 
 A mod's settings screen opens from Horizon's Mods page (Options, Mods...), listed as
@@ -376,7 +410,7 @@ mod sets straight on GL (`GlStateManager._scissorBox`, Cloth's list) is recorded
 of the frame, and text drawn with no alpha is opaque, as `Font` makes it.
 
 The settings files are the runtime's (`.horizon-cache/java-120/game/config/`), one per server:
-a mod's client-only settings (AppleSkin's HUD, Jade's) take effect when its HUD does (not yet).
+a mod's client-only settings (AppleSkin's HUD) take effect on its HUD (phase 5i).
 
 ## Phase 3f status: energy and fluids between the mods' blocks (2026-11-13)
 
@@ -1246,8 +1280,8 @@ NeoForge could run beside Fabric 26.3 rather than in its place.
 5. **Events and networking.** 5a done: block breaks. 5b done: lifecycle and tick events. 5c
    done: mods' packets between their halves, players joining. 5d done: items used, mods' own
    screens, players leaving. 5e done: mods' key bindings and the client tick (above). 5f/5g done:
-   sounds and particles. 5h done: the mods' settings screens. Left: mods' HUD overlays
-   (`HudRenderCallback`).
+   sounds and particles. 5h done: the mods' settings screens. 5i done: the mods' HUD (above). Left: the HUD
+   overlays that read the client's world (Jade, minimaps).
 6. **Entities and worldgen.** 6a done: the mods' Fabric biome modifications reach Horizon's
    generator as biome modifiers. 6b done: a mod's own feature types run in the runtime on the
    chunks being decorated. 6c done: data-driven structures (above). 6d done: the mods' mobs
