@@ -175,4 +175,38 @@ public abstract class LevelMixin {
     private void horizon$registries(CallbackInfoReturnable<RegistryAccess> cir) {
         if (horizon$mirror()) cir.setReturnValue(Mirror120.registries());
     }
+
+    /**
+     * Particles and sounds a block's client code makes (Block.animateTick: a stove's smoke, a
+     * cooking pot's steam), run on a mirror level by Mirror120.animateTicks: to Horizon, which
+     * sends them to the players near. A particle added with a velocity is the packet's count 0
+     * (its spread times the speed is the velocity).
+     */
+    @Inject(method = "addParticle(Lnet/minecraft/core/particles/ParticleOptions;DDDDDD)V", at = @At("HEAD"), cancellable = true)
+    private void horizon$particle(net.minecraft.core.particles.ParticleOptions options, double x, double y, double z,
+            double vx, double vy, double vz, CallbackInfo ci) {
+        if (horizon$mirror()) {
+            Mirror120.particles((Level) (Object) this, options, x, y, z, 0, vx, vy, vz, 1.0);
+            ci.cancel();
+        }
+    }
+
+    @Inject(method = "addAlwaysVisibleParticle(Lnet/minecraft/core/particles/ParticleOptions;DDDDDD)V", at = @At("HEAD"), cancellable = true)
+    private void horizon$visibleParticle(net.minecraft.core.particles.ParticleOptions options, double x, double y, double z,
+            double vx, double vy, double vz, CallbackInfo ci) {
+        if (horizon$mirror()) {
+            Mirror120.particles((Level) (Object) this, options, x, y, z, 0, vx, vy, vz, 1.0);
+            ci.cancel();
+        }
+    }
+
+    @Inject(method = "playLocalSound(DDDLnet/minecraft/sounds/SoundEvent;Lnet/minecraft/sounds/SoundSource;FFZ)V", at = @At("HEAD"), cancellable = true)
+    private void horizon$localSound(double x, double y, double z, net.minecraft.sounds.SoundEvent sound,
+            net.minecraft.sounds.SoundSource source, float volume, float pitch, boolean delayed, CallbackInfo ci) {
+        if (horizon$mirror()) {
+            Mirror120.sound((Level) (Object) this, x, y, z,
+                    net.minecraft.core.registries.BuiltInRegistries.SOUND_EVENT.wrapAsHolder(sound), source, volume, pitch);
+            ci.cancel();
+        }
+    }
 }

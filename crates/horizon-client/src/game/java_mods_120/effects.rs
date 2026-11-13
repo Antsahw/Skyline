@@ -1,5 +1,6 @@
-//! What the 1.20.1 mods' code plays and shows in the world (phase 5f): sounds
-//! (`ServerLevel.playSeededSound`) and particles (`ServerLevel.sendParticles`). The runtime hands
+//! What the 1.20.1 mods' code plays and shows in the world (phases 5f, 5g): sounds
+//! (`ServerLevel.playSeededSound`, a client's `playLocalSound`) and particles
+//! (`ServerLevel.sendParticles`, a client's `addParticle`, from the blocks' `animateTick`). The runtime hands
 //! them over as they happen, during any call ([`World120::play_sound`],
 //! [`World120::send_particles`]); they wait here, and the server's next tick sends them to the
 //! players near, as Horizon's own native mods' sounds and particles go.
@@ -81,13 +82,83 @@ fn options(text: &str) -> Option<(ParticleOptions, Option<String>)> {
     Some((options, state))
 }
 
+/// Which blocks are picked: a random of its own, so Horizon's world random is untouched.
+static PICK: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0x9E37_79B9_7F4A_7C15);
+
+/// A number below `bound` (`RandomSource.nextInt`'s use here).
+fn below(bound: i32) -> i32 {
+    use std::sync::atomic::Ordering;
+    // xorshift64*.
+    let mut x = PICK.load(Ordering::Relaxed);
+    x ^= x >> 12;
+    x ^= x << 25;
+    x ^= x >> 27;
+    PICK.store(x, Ordering::Relaxed);
+    ((x.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 33) % bound as u64) as i32
+}
+
 impl Game<'_> {
+    /// The server half, each tick: the mods' blocks around each player run their client code
+    /// (`Block.animateTick`), picked as `ClientLevel.animateTick` picks them -- 667 random
+    /// blocks within 16 of the player and 667 within 32, each `x + nextInt(r) - nextInt(r)` --
+    /// so a lit stove smokes as often as it would in a 1.20.1 client.
+    fn animate_java120_blocks(&mut self) {
+        let Some(host) = self.lan.as_ref() else {
+            return;
+        };
+        let players: Vec<[i32; 3]> = host
+            .hub
+            .guests
+            .iter()
+            .filter(|g| host.hub.here(g) && !g.spectator())
+            .map(|g| g.position.map(|c| c.floor() as i32))
+            .collect();
+        if players.is_empty() {
+            return;
+        }
+        let registry = self.pack.assets.registry;
+        let mut positions = Vec::new();
+        for [px, py, pz] in players {
+            for _ in 0..667 {
+                for r in [16, 32] {
+                    let x = px + below(r) - below(r);
+                    let y = py + below(r) - below(r);
+                    let z = pz + below(r) - below(r);
+                    if !self.world.loaded(x, z) {
+                        continue;
+                    }
+                    let theirs = registry
+                        .state(self.world.block(x, y, z))
+                        .is_some_and(|s| !s.name.starts_with("minecraft:"));
+                    if theirs {
+                        positions.extend([x, y, z]);
+                    }
+                }
+            }
+        }
+        if positions.is_empty() {
+            return;
+        }
+        let dimension = self.dim.id();
+        let Ok(mut guard) = super::RUNTIME.try_lock() else {
+            return;
+        };
+        let Some(runtime) = guard.as_mut() else {
+            return;
+        };
+        if let Err(e) = runtime.animate_ticks(&super::Level(self), dimension, &positions) {
+            super::tick_failed_once(&e);
+        }
+    }
+
     /// The server half, each tick: what the mods' code played and showed in this dimension
     /// goes to the players near (the other dimensions' waits for theirs).
     pub(in crate::game) fn tick_java120_effects(&mut self) {
         if self.remote.is_some() {
             return;
         }
+        self.animate_java120_blocks();
         let dimension = self.dim.id();
         let sounds: Vec<PlayedSound> = {
             let mut all = SOUNDS.lock().unwrap_or_else(|e| e.into_inner());

@@ -1325,6 +1325,30 @@ impl Runtime120 {
         }
     }
 
+    /// `Block.animateTick` of the blocks at `positions` (x, y, z each), as a client calls it on
+    /// the blocks around its player (`Mirror120.animateTicks`): the particles and sounds their
+    /// client code makes come to `world` ([`World120::send_particles`], [`World120::play_sound`]).
+    pub fn animate_ticks(
+        &mut self,
+        world: &dyn World120,
+        dimension: &str,
+        positions: &[i32],
+    ) -> Result<(), String> {
+        let mut handler = InWorld {
+            world,
+            set: Vec::new(),
+            block_entities: Vec::new(),
+            spawned: Vec::new(),
+            log: self.log.clone(),
+        };
+        let args = [
+            Value::Str(dimension.to_owned()),
+            Value::I32s(positions.to_vec()),
+        ];
+        self.call_values("animateTicks", &args, &mut handler)
+            .map(|_| ())
+    }
+
     /// The mods' placed features (of their own namespaces), which [`Self::place_feature`]
     /// places where Horizon's generator can't.
     pub fn mod_features(&mut self) -> Result<Vec<String>, String> {

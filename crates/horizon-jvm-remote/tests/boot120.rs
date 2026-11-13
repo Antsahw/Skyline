@@ -1217,6 +1217,46 @@ fn right_clicking_a_block_runs_its_1_20_1_code_on_horizons_blocks() {
         .unwrap();
         assert!(nothing.get("8,64,8").is_none(), "{nothing}");
 
+        // Phase 5g: a block's client code (animateTick), run as a client runs it on the
+        // blocks around its player: a lit stove smokes, its particles to Horizon.
+        struct Watching {
+            block: OneBlock,
+            seen: std::cell::RefCell<Vec<horizon_jvm_remote::mirror120::SentParticles>>,
+        }
+        impl horizon_jvm_remote::mirror120::World120 for Watching {
+            fn block_state(&self, d: &str, x: i32, y: i32, z: i32) -> Option<String> {
+                self.block.block_state(d, x, y, z)
+            }
+            fn send_particles(&self, p: &horizon_jvm_remote::mirror120::SentParticles) {
+                self.seen.borrow_mut().push(p.clone());
+            }
+        }
+        let stove = Watching {
+            block: OneBlock(
+                "farmersdelight:stove[facing=north,lit=true]".into(),
+                [0, 64, 0],
+            ),
+            seen: Default::default(),
+        };
+        for _ in 0..40 {
+            runtime
+                .animate_ticks(&stove, "minecraft:overworld", &[0, 64, 0])
+                .expect("the stove's animateTick");
+        }
+        let smoke = stove.seen.into_inner();
+        eprintln!(
+            "a lit stove showed {} particle(s): {:?}",
+            smoke.len(),
+            smoke.first()
+        );
+        assert!(!smoke.is_empty(), "a lit stove smokes");
+        assert!(
+            smoke
+                .iter()
+                .all(|p| (0.0..=1.0).contains(&(p.pos[0] - 0.0))),
+            "on the stove: {smoke:?}"
+        );
+
         // Phase 4: a cooking pot opened with an empty hand opens its menu. Vanilla's own
         // openMenu runs on the mirror player -- the menu made, its slots listened to -- and only
         // the packet telling a client to show it goes nowhere; the click reports the menu

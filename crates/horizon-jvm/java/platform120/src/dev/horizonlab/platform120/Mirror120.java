@@ -1108,6 +1108,34 @@ public final class Mirror120 {
         event.accept("particles", new Object[] {dimension(level), options.writeToString(), x, y, z, count, dx, dy, dz, speed});
     }
 
+    private static final net.minecraft.util.RandomSource ANIMATE = net.minecraft.util.RandomSource.create();
+    private static final java.util.Set<String> ANIMATE_FAILED = new java.util.HashSet<>();
+
+    /**
+     * Block.animateTick of the blocks at `positions` (x, y, z each), as a client calls it on the
+     * blocks around its player: the particles and sounds the blocks' client code makes go to
+     * Horizon (LevelMixin). Horizon picks which, as often as ClientLevel.animateTick would.
+     */
+    public static Object[] animateTicks(String dimension, int[] positions) {
+        begin();
+        try {
+            ServerLevel level = level(dimension);
+            for (int i = 0; i + 2 < positions.length; i += 3) {
+                BlockPos pos = new BlockPos(positions[i], positions[i + 1], positions[i + 2]);
+                BlockState state = blockState(level, pos);
+                try {
+                    state.getBlock().animateTick(state, level, pos, ANIMATE);
+                } catch (RuntimeException | LinkageError e) {
+                    String block = BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
+                    if (ANIMATE_FAILED.add(block)) log("a " + block + "'s animateTick failed: " + e);
+                }
+            }
+            return new Object[0];
+        } finally {
+            finish();
+        }
+    }
+
     /** HORIZON_120_TRACE: why each of the mods' spawns did or didn't happen. */
     private static final boolean SPAWN_TRACE = System.getenv("HORIZON_120_TRACE") != null;
 

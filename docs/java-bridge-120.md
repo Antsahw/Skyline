@@ -356,7 +356,7 @@ clicks pass until then). A click on a block of a 1.20.1 mod's namespace, or with
 their items, goes to it at `useItemOn`'s head (`java120_use_block`, beside the 26.3 bridge's
 hook in `lan_actions.rs`); what it set and what it did to the held stack land in Horizon.
 
-## Phase 5f status: sounds, particles, and vanilla mobs the mods make (2026-11-13)
+## Phase 5f/5g status: sounds, particles, and vanilla mobs the mods make (2026-11-13)
 
 What the mods' code plays and shows in the world reaches Horizon's players. A sound
 (`ServerLevel.playSeededSound`, both overloads: where every `Level.playSound` and
@@ -373,12 +373,22 @@ A vanilla mob the mods' code adds to the world (the cow a sheared moobloom turns
 Horizon's, as vanilla's mobs are: handed over as 1.20.1 saves it, upgraded by vanilla's fixes
 (`Ty::EntityTree`) and loaded as Horizon's own.
 
-Not covered: what a mod plays or shows on its client half (a block's `animateTick`: smoke from
-a stove, a cooking pot's steam), and level events.
+**5g, done: the blocks' client effects.** What a block's client code makes (`Block.animateTick`:
+a stove's flames and smoke, a cooking pot's steam) comes too. The server half picks blocks
+around each player as `ClientLevel.animateTick` does (667 random blocks within 16, 667 within
+32, each `x + nextInt(r) - nextInt(r)`, with a random of its own so Horizon's world random is
+untouched), keeps the mods' and has the runtime run their `animateTick` on the mirror
+(`animateTicks`); what they add there (`Level.addParticle`, `addAlwaysVisibleParticle`, a
+velocity being the packet's count 0) and play (`playLocalSound`) goes out as above.
+
+Not covered: sounds and particles a mod makes elsewhere on its client half (ambient loops,
+a screen's), and level events.
 
 Checked in a game: a moobloom sheared turns into Horizon's cow and drops its buttercups; in the
 runtime test, milking plays `minecraft:entity.cow.milk` where the player stands, and shearing
-sends the explosion puff and plays `friendsandfoes:entity.moobloom.shear`.
+sends the explosion puff and plays `friendsandfoes:entity.moobloom.shear`. Lit stoves placed by `/setblock`
+show their flames and smoke; in the runtime test, forty `animateTick`s of a lit stove send
+smoke at its front.
 
 ## Phase 7b status: block entity renderers (2026-11-13)
 
