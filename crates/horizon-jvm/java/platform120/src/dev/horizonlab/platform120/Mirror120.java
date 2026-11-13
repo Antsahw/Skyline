@@ -569,6 +569,15 @@ public final class Mirror120 {
     public static boolean addEntity(Level level, net.minecraft.world.entity.Entity entity) {
         // A mod's own entity lives in the mirror, with its mod's code (Entities120).
         if (Entities120.modded(entity)) return Entities120.add(level, entity);
+        // A vanilla mob the mods' code made (the cow a sheared moobloom turns into): Horizon's,
+        // as vanilla's mobs are, from the entity as 1.20.1 saves it.
+        if (entity instanceof net.minecraft.world.entity.Mob) {
+            var tag = new net.minecraft.nbt.CompoundTag();
+            if (entity.save(tag)) {
+                event.accept("spawnEntity", new Object[] {dimension(level), tag.toString()});
+                return true;
+            }
+        }
         // Experience a kill or a furnace gives: Horizon's own orbs, of the same value.
         if (entity instanceof net.minecraft.world.entity.ExperienceOrb orb) {
             event.accept("spawnXp", new Object[] {dimension(level), orb.getX(), orb.getY(), orb.getZ(), orb.getValue()});
@@ -1071,6 +1080,32 @@ public final class Mirror120 {
         } finally {
             finish();
         }
+    }
+
+    /**
+     * A sound the mods' code played in a level (ServerLevelMixin): to Horizon, which plays it
+     * for its players near, by the sound's name (the mod's own sounds are in its content).
+     * Every player hears it, the one whose action caused it too: vanilla leaves that one out
+     * because their own client played it already, and here no client of theirs did.
+     */
+    public static void sound(Level level, double x, double y, double z,
+            net.minecraft.core.Holder<net.minecraft.sounds.SoundEvent> sound,
+            net.minecraft.sounds.SoundSource source, float volume, float pitch) {
+        if (event == null) return;
+        String id = sound.unwrapKey().map(k -> k.location().toString())
+                .orElseGet(() -> sound.value().getLocation().toString());
+        event.accept("sound", new Object[] {dimension(level), x, y, z, id, source.ordinal(), (double) volume, (double) pitch});
+    }
+
+    /**
+     * Particles the mods' code sent its players (ServerLevelMixin): to Horizon, as vanilla's
+     * own string of them (`minecraft:block minecraft:stone`, `minecraft:dust 1.0 0.0 0.0 1.0`),
+     * with where, how many, the spread and the speed, as the packet carries them.
+     */
+    public static void particles(Level level, net.minecraft.core.particles.ParticleOptions options,
+            double x, double y, double z, int count, double dx, double dy, double dz, double speed) {
+        if (event == null) return;
+        event.accept("particles", new Object[] {dimension(level), options.writeToString(), x, y, z, count, dx, dy, dz, speed});
     }
 
     /** HORIZON_120_TRACE: why each of the mods' spawns did or didn't happen. */

@@ -366,6 +366,18 @@ impl World120 for Level<'_, '_> {
         Some(horizon_world::snbt_text::to_snbt(&tag))
     }
 
+    fn play_sound(&self, sound: &horizon_jvm_remote::mirror120::PlayedSound) {
+        effects::heard(sound);
+    }
+
+    fn send_particles(&self, particles: &horizon_jvm_remote::mirror120::SentParticles) {
+        effects::seen(particles);
+    }
+
+    fn spawn_entity(&self, dimension: &str, snbt: &str) {
+        effects::added(dimension, snbt);
+    }
+
     /// Vanilla's heightmaps, as Horizon's spawner computes them (a mod's mob finding the
     /// surface to spawn on, a flying one its height above ground).
     fn height(&self, dimension: &str, heightmap: &str, x: i32, z: i32) -> Option<i32> {
@@ -823,6 +835,7 @@ mod tests {
 pub(in crate::game) mod block_renders;
 mod breaking;
 mod drawn;
+mod effects;
 pub(in crate::game) mod mobs;
 mod neighbours;
 mod redstone;

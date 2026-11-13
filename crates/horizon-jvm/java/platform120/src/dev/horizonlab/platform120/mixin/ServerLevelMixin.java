@@ -9,17 +9,12 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
- * What a mirror level can't do without a server and chunks behind it: quiet for now. Sounds,
- * particles and level events are Horizon's to play (a later step sends them); neighbour
- * updates and scheduled ticks are Horizon's to run.
+ * What a mirror level can't do without a server and chunks behind it. Sounds and particles go
+ * to Horizon, which sends them to its players; level events are Horizon's to play (a later
+ * step sends them); neighbour updates and scheduled ticks are Horizon's to run.
  */
 @Mixin(ServerLevel.class)
 public abstract class ServerLevelMixin {
-    @Inject(method = "playSeededSound", at = @At("HEAD"), cancellable = true)
-    private void horizon$sound(CallbackInfo ci) {
-        ci.cancel();
-    }
-
     @Inject(method = "levelEvent", at = @At("HEAD"), cancellable = true)
     private void horizon$levelEvent(CallbackInfo ci) {
         ci.cancel();
@@ -55,8 +50,14 @@ public abstract class ServerLevelMixin {
         ci.cancel();
     }
 
+    /**
+     * Particles a mod sends its players (ServerLevel.sendParticles: a cooking pot's steam, a
+     * mob's hearts): Horizon sends them, as the packet vanilla would.
+     */
     @Inject(method = "sendParticles(Lnet/minecraft/core/particles/ParticleOptions;DDDIDDDD)I", at = @At("HEAD"), cancellable = true)
-    private void horizon$particles(CallbackInfoReturnable<Integer> cir) {
+    private void horizon$particles(net.minecraft.core.particles.ParticleOptions options, double x, double y, double z,
+            int count, double dx, double dy, double dz, double speed, CallbackInfoReturnable<Integer> cir) {
+        dev.horizonlab.platform120.Mirror120.particles((ServerLevel) (Object) this, options, x, y, z, count, dx, dy, dz, speed);
         cir.setReturnValue(0);
     }
 
@@ -103,5 +104,28 @@ public abstract class ServerLevelMixin {
     @Inject(method = "isRaided", at = @At("HEAD"), cancellable = true)
     private void horizon$raided(net.minecraft.core.BlockPos pos, CallbackInfoReturnable<Boolean> cir) {
         cir.setReturnValue(false);
+    }
+
+    /**
+     * A sound played in a mirror level (a mod's block or mob, as Level.playSound ends here):
+     * Horizon plays it for its players, by its name, as the packet vanilla would send them.
+     */
+    @Inject(method = "playSeededSound(Lnet/minecraft/world/entity/player/Player;DDDLnet/minecraft/core/Holder;Lnet/minecraft/sounds/SoundSource;FFJ)V",
+            at = @At("HEAD"), cancellable = true)
+    private void horizon$sound(net.minecraft.world.entity.player.Player except, double x, double y, double z,
+            net.minecraft.core.Holder<net.minecraft.sounds.SoundEvent> sound, net.minecraft.sounds.SoundSource source,
+            float volume, float pitch, long seed, CallbackInfo ci) {
+        dev.horizonlab.platform120.Mirror120.sound((ServerLevel) (Object) this, x, y, z, sound, source, volume, pitch);
+        ci.cancel();
+    }
+
+    @Inject(method = "playSeededSound(Lnet/minecraft/world/entity/player/Player;Lnet/minecraft/world/entity/Entity;Lnet/minecraft/core/Holder;Lnet/minecraft/sounds/SoundSource;FFJ)V",
+            at = @At("HEAD"), cancellable = true)
+    private void horizon$entitySound(net.minecraft.world.entity.player.Player except, net.minecraft.world.entity.Entity entity,
+            net.minecraft.core.Holder<net.minecraft.sounds.SoundEvent> sound, net.minecraft.sounds.SoundSource source,
+            float volume, float pitch, long seed, CallbackInfo ci) {
+        dev.horizonlab.platform120.Mirror120.sound((ServerLevel) (Object) this, entity.getX(), entity.getY(), entity.getZ(),
+                sound, source, volume, pitch);
+        ci.cancel();
     }
 }

@@ -28,8 +28,8 @@ from the mod's side rather than the bridge's.
 | Its blocks drawn by code (no blockstate file) | **partial** | phase 7: a Fabric model built per position (LibMultipart parts: Wired Redstone's wires and cables, linked and powered) is drawn by the mod's own model code into Horizon's mesher; block entity renderers draw (phase 7b: Farmer's Delight's cutting board with its item, checked in a game); LibMultipart's dynamic part renderers not yet. **Known issue (parked):** in Anthony's own game the wires still can't be broken and drop nothing, though a headless test game breaks them, drops them and lights a lamp from them (2026-11-12) |
 | **Screens: machines, backpacks, anything you right-click into** | **partial** | phase 4: the mod's own screen opens on the player's game and takes clicks, shift-clicks, drags and keys, with counts and tooltips; screens with vanilla's recipe book work (it shows no recipes yet); checked in a real game (Farmer's Delight's cooking pot); tooltip images and shader tints missing |
 | Items with their own use behaviour (tools, food, wands) | **partial** | phase 5d: a right-click at nothing runs the item's own use (wands, guide books, backpacks); food, bows and shields are Horizon's; tools on blocks run with phase 3a's clicks |
-| Sounds the mod ships | **unverified** | — |
-| Particles the mod spawns | **not yet** | phase 5 |
+| Sounds the mod ships | **done** | phase 5f: what the mod's server code plays reaches the players near, its own sounds by name; sounds its client code plays (ambient loops) not yet |
+| Particles the mod spawns | **partial** | phase 5f: particles its server code sends (vanilla's types, and its own simple ones) reach the players near; those its client code spawns (a block's `animateTick`: a stove's smoke) not yet |
 
 The one that blocks most mods today is **screens**. A machine that cooks but cannot be opened is
 not a working machine, and almost every content mod has at least one screen.

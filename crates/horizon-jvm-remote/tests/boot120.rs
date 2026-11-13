@@ -792,6 +792,85 @@ fn a_mods_mob_lives_on_horizons_blocks() {
     eprintln!("the moobloom spawns in {}: {}", moobloom.0, moobloom.1);
     assert_eq!(moobloom.1["category"], "creature");
     assert!(moobloom.1["weight"].as_i64().unwrap() > 0);
+
+    // Phase 5f: the sounds the mods' code plays reach Horizon, by name, where they are. A
+    // moobloom milked plays the milking sound (the hurt sound is the client's, from 1.19.4's
+    // damage event, so a blow plays none on the server).
+    struct Hearing<'a> {
+        world: &'a dyn horizon_jvm_remote::mirror120::World120,
+        heard: std::cell::RefCell<Vec<horizon_jvm_remote::mirror120::PlayedSound>>,
+        seen: std::cell::RefCell<Vec<horizon_jvm_remote::mirror120::SentParticles>>,
+        added: std::cell::RefCell<Vec<String>>,
+    }
+    impl horizon_jvm_remote::mirror120::World120 for Hearing<'_> {
+        fn block_state(&self, d: &str, x: i32, y: i32, z: i32) -> Option<String> {
+            self.world.block_state(d, x, y, z)
+        }
+        fn play_sound(&self, sound: &horizon_jvm_remote::mirror120::PlayedSound) {
+            self.heard.borrow_mut().push(sound.clone());
+        }
+        fn send_particles(&self, particles: &horizon_jvm_remote::mirror120::SentParticles) {
+            self.seen.borrow_mut().push(particles.clone());
+        }
+        fn spawn_entity(&self, _: &str, snbt: &str) {
+            self.added.borrow_mut().push(snbt.to_owned());
+        }
+    }
+    let hearing = Hearing {
+        world: &world,
+        heard: Default::default(),
+        seen: Default::default(),
+        added: Default::default(),
+    };
+    let target = runtime
+        .summon(
+            &world,
+            "minecraft:overworld",
+            "friendsandfoes:moobloom",
+            [-4.5, 65.0, -4.5],
+            None,
+        )
+        .expect("summon answers")
+        .expect("a moobloom is made");
+    current.set(target);
+    runtime
+        .entity_action(
+            &hearing,
+            &action(false, r#"{id:"minecraft:bucket",Count:1b}"#),
+        )
+        .expect("the use answers");
+    // And particles: shears on a moobloom turn it into a cow with a puff (MushroomCow.shear's
+    // sendParticles of an explosion, which Friends & Foes' moobloom keeps).
+    runtime
+        .entity_action(
+            &hearing,
+            &action(false, r#"{id:"minecraft:shears",Count:1b,tag:{Damage:0}}"#),
+        )
+        .expect("the shears answer");
+    let seen = hearing.seen.borrow().clone();
+    eprintln!("shearing showed: {seen:?}");
+    let puff = seen
+        .iter()
+        .find(|p| p.options.starts_with("minecraft:explosion"))
+        .expect("the shearing's puff");
+    assert!(puff.count >= 1, "{puff:?}");
+    // What it turned into is a vanilla cow: Horizon's to keep, handed over as 1.20.1 saves it.
+    let added = hearing.added.borrow().clone();
+    assert!(
+        added.iter().any(|e| e.contains("id:\"minecraft:cow\"")),
+        "the cow it became: {added:?}"
+    );
+    let heard = hearing.heard.into_inner();
+    eprintln!("milking sounded: {heard:?}");
+    let milk = heard
+        .iter()
+        .find(|s| s.sound == "minecraft:entity.cow.milk")
+        .expect("Cow.mobInteract's milking sound");
+    assert_eq!(milk.dimension, "minecraft:overworld");
+    // Played by the player, where the player stands.
+    let stood = action(false, "").stance.expect("a stance").feet;
+    assert_eq!(milk.pos, stood, "{milk:?}");
+    assert_eq!(milk.source, 7, "SoundSource.PLAYERS");
 }
 
 /// Needs build120.sh's platform jar, and Farmer's Delight among HORIZON_120_MODS for the stove

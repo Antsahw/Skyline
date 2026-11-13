@@ -356,6 +356,30 @@ clicks pass until then). A click on a block of a 1.20.1 mod's namespace, or with
 their items, goes to it at `useItemOn`'s head (`java120_use_block`, beside the 26.3 bridge's
 hook in `lan_actions.rs`); what it set and what it did to the held stack land in Horizon.
 
+## Phase 5f status: sounds, particles, and vanilla mobs the mods make (2026-11-13)
+
+What the mods' code plays and shows in the world reaches Horizon's players. A sound
+(`ServerLevel.playSeededSound`, both overloads: where every `Level.playSound` and
+`Entity.playSound` ends) goes to Horizon by name with its position, source, volume and pitch;
+particles (`ServerLevel.sendParticles`) as vanilla's own string of them with where, how many,
+spread and speed. They wait in `game/java_mods_120/effects.rs` and the server's next tick sends
+them to the players near through the queues Horizon's native mods' sounds and particles use:
+a mod's own sounds by name (they're in its content), vanilla's particle types as Horizon's
+(block particles with their block's state, dust with its colour), a mod's own particle type by
+name when it has no parameters. Every player hears a sound, the one whose action caused it too:
+vanilla leaves that one out because their own client played it, and no client of theirs did.
+
+A vanilla mob the mods' code adds to the world (the cow a sheared moobloom turns into) is
+Horizon's, as vanilla's mobs are: handed over as 1.20.1 saves it, upgraded by vanilla's fixes
+(`Ty::EntityTree`) and loaded as Horizon's own.
+
+Not covered: what a mod plays or shows on its client half (a block's `animateTick`: smoke from
+a stove, a cooking pot's steam), and level events.
+
+Checked in a game: a moobloom sheared turns into Horizon's cow and drops its buttercups; in the
+runtime test, milking plays `minecraft:entity.cow.milk` where the player stands, and shearing
+sends the explosion puff and plays `friendsandfoes:entity.moobloom.shear`.
+
 ## Phase 7b status: block entity renderers (2026-11-13)
 
 What a mod draws on its block in code, through a `BlockEntityRenderer` (Farmer's Delight's

@@ -7995,6 +7995,8 @@ impl Game<'_> {
         #[cfg(feature = "java-mods-120")]
         self.tick_java120_block_renders();
         #[cfg(feature = "java-mods-120")]
+        self.tick_java120_effects();
+        #[cfg(feature = "java-mods-120")]
         self.tick_java120_drawn();
         self.tick_world(running)
     }

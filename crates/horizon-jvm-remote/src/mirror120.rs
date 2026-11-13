@@ -32,6 +32,19 @@ pub trait World120 {
         None
     }
 
+    /// A sound the mods' code played (`ServerLevel.playSeededSound`): its event's name, where,
+    /// its source (`SoundSource` ordinal: blocks 4, hostile 5, neutral 6...), volume and pitch.
+    /// Horizon plays it for the players near.
+    fn play_sound(&self, _sound: &PlayedSound) {}
+
+    /// Particles the mods' code sent its players (`ServerLevel.sendParticles`); Horizon sends
+    /// them to the players near.
+    fn send_particles(&self, _particles: &SentParticles) {}
+
+    /// A vanilla mob the mods' code added to a level (`Level.addFreshEntity`: the cow a sheared
+    /// moobloom becomes), as 1.20.1 saves it (SNBT, with `id`). It is Horizon's to keep.
+    fn spawn_entity(&self, _dimension: &str, _snbt: &str) {}
+
     /// The light at a position, as sky << 4 | block; `None` where Horizon doesn't say (full
     /// sky light, as an unloaded chunk reads).
     fn light(&self, _dimension: &str, _x: i32, _y: i32, _z: i32) -> Option<u8> {
@@ -88,6 +101,32 @@ pub struct ModEntity {
     pub is_mob: bool,
     /// A mob that never despawns (named, holding what it picked up...).
     pub persistent: bool,
+}
+
+/// A sound the mods' code played ([`World120::play_sound`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct PlayedSound {
+    pub dimension: String,
+    pub pos: [f64; 3],
+    /// The sound event's name (`farmersdelight:block.cooking_pot.boil`).
+    pub sound: String,
+    /// `SoundSource`'s ordinal (the same order as 26.3's).
+    pub source: i32,
+    pub volume: f32,
+    pub pitch: f32,
+}
+
+/// Particles the mods' code sent ([`World120::send_particles`]), as the packet carries them.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SentParticles {
+    pub dimension: String,
+    /// Vanilla's string of them: the type, then its parameters (`minecraft:block
+    /// minecraft:stone`, `minecraft:dust 1.0 0.0 0.0 1.0`).
+    pub options: String,
+    pub pos: [f64; 3],
+    pub count: i32,
+    pub spread: [f64; 3],
+    pub speed: f64,
 }
 
 /// A player of Horizon's in a level, for its mobs to see ([`Runtime120::tick_entities`]).
@@ -678,6 +717,42 @@ impl Handler for InWorld<'_> {
                 match parsed {
                     Ok(xp) => self.spawned.push(xp),
                     Err(e) => (self.log)(&format!("[fabric-1.20.1] a spawnXp unread: {e}")),
+                }
+            }
+            "sound" => {
+                let parsed = (|| -> Result<PlayedSound, String> {
+                    Ok(PlayedSound {
+                        dimension: text(&args, 0)?.to_owned(),
+                        pos: [float(&args, 1)?, float(&args, 2)?, float(&args, 3)?],
+                        sound: text(&args, 4)?.to_owned(),
+                        source: int(&args, 5)?,
+                        volume: float(&args, 6)? as f32,
+                        pitch: float(&args, 7)? as f32,
+                    })
+                })();
+                match parsed {
+                    Ok(sound) => self.world.play_sound(&sound),
+                    Err(e) => (self.log)(&format!("[fabric-1.20.1] a sound unread: {e}")),
+                }
+            }
+            "spawnEntity" => match (text(&args, 0), text(&args, 1)) {
+                (Ok(dimension), Ok(snbt)) => self.world.spawn_entity(dimension, snbt),
+                _ => (self.log)("[fabric-1.20.1] a spawnEntity unread"),
+            },
+            "particles" => {
+                let parsed = (|| -> Result<SentParticles, String> {
+                    Ok(SentParticles {
+                        dimension: text(&args, 0)?.to_owned(),
+                        options: text(&args, 1)?.to_owned(),
+                        pos: [float(&args, 2)?, float(&args, 3)?, float(&args, 4)?],
+                        count: int(&args, 5)?,
+                        spread: [float(&args, 6)?, float(&args, 7)?, float(&args, 8)?],
+                        speed: float(&args, 9)?,
+                    })
+                })();
+                match parsed {
+                    Ok(particles) => self.world.send_particles(&particles),
+                    Err(e) => (self.log)(&format!("[fabric-1.20.1] particles unread: {e}")),
                 }
             }
             _ => {}
