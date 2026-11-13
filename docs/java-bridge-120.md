@@ -356,6 +356,28 @@ clicks pass until then). A click on a block of a 1.20.1 mod's namespace, or with
 their items, goes to it at `useItemOn`'s head (`java120_use_block`, beside the 26.3 bridge's
 hook in `lan_actions.rs`); what it set and what it did to the held stack land in Horizon.
 
+## Phase 5j status: the mods' commands and messages (2026-11-14)
+
+The mods' commands (`/waystones`, `/supplementaries`, `/techreborn`...) are in every player's
+command tree and run. The runtime's server has them in its dispatcher (Fabric API's command
+callback registers them as its data loads); Horizon takes the names that aren't its own
+(`commandNames`) and their tree in the commands report's form (`commandTree`: an argument of a
+mod's own type goes as a greedy string), merged after vanilla's and the other mods'
+(`game/java_mods_120/commands.rs`). A player's line for one runs in the runtime as that player,
+at their permission level, in their level (`command`); what it changes lands in Horizon as any
+call's changes do.
+
+What the mods tell a player reaches them: `ServerPlayer.sendSystemMessage` (a command's answer,
+its errors, a mod's notice, `displayClientMessage` over the hotbar) goes to Horizon as the
+1.20.1 JSON text (`World120::tell`), and the server's next tick sends it to that player's chat
+or action bar. Translated text stays translated: the mods' language files are in their content.
+
+Checked: in the runtime test, `/supplementaries roll 6` answers its player with Supplementaries'
+dice message, and a line the dispatcher can't parse gets vanilla's error; in a game, the mods'
+commands are listed when the world opens, and `/supplementaries roll 20` answers in chat. (Its
+English text, `Rolled D%1$d: %2$d`, shows as written: vanilla's translations take only `%s`, so
+1.20.1 shows the same.)
+
 ## Phase 5i status: the mods' HUD (2026-11-14)
 
 What the mods draw on the HUD is drawn over Horizon's: AppleSkin's saturation and exhaustion
@@ -1280,8 +1302,8 @@ NeoForge could run beside Fabric 26.3 rather than in its place.
 5. **Events and networking.** 5a done: block breaks. 5b done: lifecycle and tick events. 5c
    done: mods' packets between their halves, players joining. 5d done: items used, mods' own
    screens, players leaving. 5e done: mods' key bindings and the client tick (above). 5f/5g done:
-   sounds and particles. 5h done: the mods' settings screens. 5i done: the mods' HUD (above). Left: the HUD
-   overlays that read the client's world (Jade, minimaps).
+   sounds and particles. 5h done: the mods' settings screens. 5i done: the mods' HUD (above). 5j done: their
+   commands and messages. Left: the HUD overlays that read the client's world (Jade, minimaps).
 6. **Entities and worldgen.** 6a done: the mods' Fabric biome modifications reach Horizon's
    generator as biome modifiers. 6b done: a mod's own feature types run in the runtime on the
    chunks being decorated. 6c done: data-driven structures (above). 6d done: the mods' mobs

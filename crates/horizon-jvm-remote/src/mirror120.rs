@@ -45,6 +45,11 @@ pub trait World120 {
     /// moobloom becomes), as 1.20.1 saves it (SNBT, with `id`). It is Horizon's to keep.
     fn spawn_entity(&self, _dimension: &str, _snbt: &str) {}
 
+    /// A message the mods' code sent a player (`ServerPlayer.sendSystemMessage`: a command's
+    /// answer, a mod's notice): the player's id (`UUID.toString()`), the message as 1.20.1's
+    /// JSON text, and whether it goes over the hotbar rather than in chat.
+    fn tell(&self, _player: &str, _json: &str, _overlay: bool) {}
+
     /// The light at a position, as sky << 4 | block; `None` where Horizon doesn't say (full
     /// sky light, as an unloaded chunk reads).
     fn light(&self, _dimension: &str, _x: i32, _y: i32, _z: i32) -> Option<u8> {
@@ -437,6 +442,17 @@ fn stacks_json(stacks: &[Option<(&str, i32, i32)>]) -> String {
     .to_string()
 }
 
+/// What a command the mods' server ran changed in the world ([`Runtime120::command`]).
+#[derive(Debug, Default)]
+pub struct CommandRun {
+    /// The blocks set, in order.
+    pub set: Vec<SetBlock>,
+    /// The block entities the command changed, in order.
+    pub block_entities: Vec<SetBlockEntity>,
+    /// The items, experience and mobs it added.
+    pub spawned: Vec<SpawnItem>,
+}
+
 /// What an input on a screen did./// What an input on a screen did.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ScreenInput {
@@ -735,6 +751,10 @@ impl Handler for InWorld<'_> {
                     Err(e) => (self.log)(&format!("[fabric-1.20.1] a sound unread: {e}")),
                 }
             }
+            "message" => match (text(&args, 0), text(&args, 1), int(&args, 2)) {
+                (Ok(player), Ok(json), Ok(overlay)) => self.world.tell(player, json, overlay != 0),
+                _ => (self.log)("[fabric-1.20.1] a message unread"),
+            },
             "spawnEntity" => match (text(&args, 0), text(&args, 1)) {
                 (Ok(dimension), Ok(snbt)) => self.world.spawn_entity(dimension, snbt),
                 _ => (self.log)("[fabric-1.20.1] a spawnEntity unread"),
@@ -1268,6 +1288,60 @@ impl Runtime120 {
             }
             other => Err(format!("configMods: answers {other:?}")),
         }
+    }
+
+    /// Every command the mods' server has, vanilla's included (phase 5j): the caller keeps
+    /// the ones that aren't its own.
+    pub fn command_names(&mut self) -> Result<Vec<String>, String> {
+        match self.call_answers("commandNames", &[])?.first() {
+            Some(Value::Strs(names)) => Ok(names.clone()),
+            other => Err(format!("commandNames: answer {other:?}")),
+        }
+    }
+
+    /// The commands `names` as a root of the data generator's commands report (JSON:
+    /// `{"type": "root", "children": {...}}`), for the players' command trees.
+    pub fn command_tree(&mut self, names: &[String]) -> Result<String, String> {
+        let names = Value::Str(names.join(" "));
+        match self.call_answers("commandTree", &[names])?.first() {
+            Some(Value::Str(tree)) => Ok(tree.clone()),
+            other => Err(format!("commandTree: answer {other:?}")),
+        }
+    }
+
+    /// `line` (no slash) run as a player at `permission` (0 to 4) in `dimension`, as a server
+    /// runs a player's command. What it says comes to [`World120::tell`]; what it changed in
+    /// the world is in the answer, as any call's.
+    #[allow(clippy::too_many_arguments)]
+    pub fn command(
+        &mut self,
+        world: &dyn World120,
+        uuid: &str,
+        name: &str,
+        dimension: &str,
+        permission: i32,
+        line: &str,
+    ) -> Result<CommandRun, String> {
+        let args = [
+            Value::Str(uuid.to_owned()),
+            Value::Str(name.to_owned()),
+            Value::Str(dimension.to_owned()),
+            Value::I32(permission),
+            Value::Str(line.to_owned()),
+        ];
+        let mut handler = InWorld {
+            world,
+            set: Vec::new(),
+            block_entities: Vec::new(),
+            spawned: Vec::new(),
+            log: self.log.clone(),
+        };
+        self.call_values("command", &args, &mut handler)?;
+        Ok(CommandRun {
+            set: handler.set,
+            block_entities: handler.block_entities,
+            spawned: handler.spawned,
+        })
     }
 
     /// A mod's settings screen opened for a player (`openConfig`): the kind of what opened

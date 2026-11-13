@@ -1201,6 +1201,120 @@ public final class Mirror120 {
         }
     }
 
+    /** A message the mods sent a player (ServerPlayerMixin): to Horizon's, as JSON. */
+    public static void message(ServerPlayer player, net.minecraft.network.chat.Component message, boolean overlay) {
+        if (event == null) return;
+        event.accept("message", new Object[] {player.getStringUUID(),
+                net.minecraft.network.chat.Component.Serializer.toJson(message), overlay ? 1 : 0});
+    }
+
+    private static com.mojang.brigadier.CommandDispatcher<net.minecraft.commands.CommandSourceStack> dispatcher() {
+        return data == null ? null : data.getCommands().getDispatcher();
+    }
+
+    /**
+     * Every command the server's dispatcher has, vanilla's and the mods' (Fabric API's command
+     * callback registers the mods' as the server's data loads): {names}. Horizon takes the
+     * ones that aren't its own.
+     */
+    public static Object[] commandNames() {
+        var dispatcher = dispatcher();
+        var names = new java.util.TreeSet<String>();
+        if (dispatcher != null) dispatcher.getRoot().getChildren().forEach(n -> names.add(n.getName()));
+        return new Object[] {names.toArray(new String[0])};
+    }
+
+    /**
+     * These commands as a root of the data generator's commands report, the form Horizon's
+     * command tree is in: {@code {"type": "root", "children": {...}}}. An argument of a mod's
+     * own type is sent as a greedy string: the player's game still parses the line, and the
+     * command checks it when it runs. As the 26.3 bridge's HorizonServer.commandTree.
+     */
+    public static Object[] commandTree(String names) {
+        var dispatcher = dispatcher();
+        com.google.gson.JsonObject root = new com.google.gson.JsonObject();
+        root.addProperty("type", "root");
+        com.google.gson.JsonObject children = new com.google.gson.JsonObject();
+        if (dispatcher != null) {
+            for (String name : names.split(" ")) {
+                var node = dispatcher.getRoot().getChild(name);
+                if (node == null) continue;
+                try {
+                    com.google.gson.JsonObject json =
+                            net.minecraft.commands.synchronization.ArgumentUtils.serializeNodeToJson(dispatcher, node);
+                    vanillaParsers(json);
+                    children.add(name, json);
+                } catch (Throwable t) {
+                    log("command /" + name + " can't be sent to the players: " + t);
+                    children.add(name, anyArguments());
+                }
+            }
+        }
+        root.add("children", children);
+        return new Object[] {root.toString()};
+    }
+
+    /** A literal that runs alone or with anything after it (a greedy string). */
+    private static com.google.gson.JsonObject anyArguments() {
+        var literal = new com.google.gson.JsonObject();
+        literal.addProperty("type", "literal");
+        literal.addProperty("executable", true);
+        var argument = new com.google.gson.JsonObject();
+        argument.addProperty("type", "argument");
+        argument.addProperty("parser", "brigadier:string");
+        var properties = new com.google.gson.JsonObject();
+        properties.addProperty("type", "greedy");
+        argument.add("properties", properties);
+        argument.addProperty("executable", true);
+        var children = new com.google.gson.JsonObject();
+        children.add("arguments", argument);
+        literal.add("children", children);
+        return literal;
+    }
+
+    private static void vanillaParsers(com.google.gson.JsonObject node) {
+        if (node.has("parser")) {
+            String parser = node.get("parser").getAsString();
+            if (!parser.startsWith("minecraft:") && !parser.startsWith("brigadier:")) {
+                node.addProperty("parser", "brigadier:string");
+                com.google.gson.JsonObject properties = new com.google.gson.JsonObject();
+                properties.addProperty("type", "greedy");
+                node.add("properties", properties);
+            }
+        }
+        if (node.has("children")) {
+            for (var entry : node.getAsJsonObject("children").entrySet()) {
+                vanillaParsers(entry.getValue().getAsJsonObject());
+            }
+        }
+    }
+
+    /**
+     * A command line (no slash) run as a player of Horizon's at their permission level, as
+     * vanilla's server runs a player's command: their command source, the dispatcher's parse
+     * and its errors. What it says goes to the player (ServerPlayerMixin), what it does to the
+     * world to Horizon as any call's changes do. {1}.
+     */
+    public static Object[] command(String uuid, String name, String dimension, int permission, String line) {
+        begin();
+        try {
+            ServerPlayer player = player(uuid, name, level(dimension));
+            var source = new net.minecraft.commands.CommandSourceStack(player, player.position(),
+                    player.getRotationVector(), (ServerLevel) player.level(), permission,
+                    player.getName().getString(), player.getDisplayName(), server, player);
+            try {
+                data.getCommands().performPrefixedCommand(source, line);
+            } catch (Throwable t) {
+                message(player, net.minecraft.network.chat.Component.literal(
+                        "An error occurred while running /" + line + ": " + t), false);
+                log("/" + line + " failed: " + t);
+            }
+            return new Object[] {1};
+        } finally {
+            finish();
+        }
+    }
+
     /** HORIZON_120_TRACE: why each of the mods' spawns did or didn't happen. */
     private static final boolean SPAWN_TRACE = System.getenv("HORIZON_120_TRACE") != null;
 

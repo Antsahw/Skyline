@@ -285,6 +285,26 @@ impl horizon_jvm_remote::mirror120::World120 for Blocks {
     }
 }
 
+/// Another world, with what the mods told the players kept (`World120::tell`).
+struct Told<'a> {
+    world: &'a dyn horizon_jvm_remote::mirror120::World120,
+    told: std::cell::RefCell<Vec<(String, String, bool)>>,
+}
+
+impl horizon_jvm_remote::mirror120::World120 for Told<'_> {
+    fn block_state(&self, dimension: &str, x: i32, y: i32, z: i32) -> Option<String> {
+        self.world.block_state(dimension, x, y, z)
+    }
+    fn block_entity(&self, dimension: &str, x: i32, y: i32, z: i32) -> Option<String> {
+        self.world.block_entity(dimension, x, y, z)
+    }
+    fn tell(&self, player: &str, json: &str, overlay: bool) {
+        self.told
+            .borrow_mut()
+            .push((player.to_owned(), json.to_owned(), overlay));
+    }
+}
+
 /// A flat meadow for features: grass at y 63 over dirt, air above, one biome, and what was set.
 struct Meadow {
     biome: String,
@@ -2492,6 +2512,64 @@ fn the_mods_machines_pass_energy_between_them() {
         "translated: {frame}"
     );
 
+    // Phase 5j: the mods' commands, run as a player; what they say goes to that player.
+    let names = runtime.command_names().expect("the commands");
+    assert!(
+        names.iter().any(|n| n == "supplementaries") && names.iter().any(|n| n == "give"),
+        "the mods' commands and vanilla's: {names:?}"
+    );
+    let tree: serde_json::Value = serde_json::from_str(
+        &runtime
+            .command_tree(&["supplementaries".to_owned()])
+            .expect("their tree"),
+    )
+    .expect("the tree is json");
+    assert_eq!(
+        tree["children"]["supplementaries"]["children"]["roll"]["children"]["dice"]["parser"],
+        "brigadier:integer",
+        "the command's arguments, for the players' games: {tree}"
+    );
+    let told = Told {
+        world: &tank,
+        told: Default::default(),
+    };
+    runtime
+        .command(
+            &told,
+            uuid,
+            "Tester",
+            "minecraft:overworld",
+            4,
+            "supplementaries roll 6",
+        )
+        .expect("the command runs");
+    let said = told.told.borrow().clone();
+    eprintln!("the dice: {said:?}");
+    assert!(
+        said.iter()
+            .any(|(player, json, overlay)| player == uuid && !overlay && json.contains("6")),
+        "its answer, to the player who ran it: {said:?}"
+    );
+    // A line the dispatcher can't parse: vanilla's error, to the player.
+    told.told.borrow_mut().clear();
+    runtime
+        .command(
+            &told,
+            uuid,
+            "Tester",
+            "minecraft:overworld",
+            4,
+            "supplementaries roll",
+        )
+        .expect("the command runs");
+    let said = told.told.borrow().clone();
+    assert!(
+        said.iter()
+            .any(|(_, json, _)| json.contains("command.unknown")
+                || json.contains("Unknown or incomplete")),
+        "the dispatcher's error: {said:?}"
+    );
+
     // Phase 5i: what the mods draw on the HUD, over Horizon's. A hungry player in survival:
     // AppleSkin's saturation and exhaustion over the food bar, from Horizon's numbers; none
     // of vanilla's own hearts, bars or hotbar, which are Horizon's to draw.
@@ -2519,7 +2597,9 @@ fn the_mods_machines_pass_energy_between_them() {
         // Its saturation overlay sits on the food bar: right of the centre, over the hotbar.
         assert!(
             ops.iter()
-                .filter(|o| o["texture"].as_str().is_some_and(|t| t.starts_with("appleskin:")))
+                .filter(|o| o["texture"]
+                    .as_str()
+                    .is_some_and(|t| t.starts_with("appleskin:")))
                 .all(|o| o["x0"].as_i64().unwrap_or(0) >= 427 / 2
                     && o["y0"].as_i64().unwrap_or(0) > 240 - 50),
             "on the food bar: {hud}"

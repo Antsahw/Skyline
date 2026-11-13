@@ -3346,6 +3346,11 @@ impl Game<'_> {
             });
             return;
         }
+        // A 1.20.1 mod's command, run as the player at their level (java_mods_120/commands.rs).
+        #[cfg(feature = "java-mods-120")]
+        if self.guest_java120_command(host, conn, command.trim_start_matches('/')) {
+            return;
+        }
         // A Java mod's command, for every player whatever their level (game/java_server.rs).
         if self.guest_java_command(host, conn, command.trim_start_matches('/')) {
             return;

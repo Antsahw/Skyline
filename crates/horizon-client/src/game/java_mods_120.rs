@@ -403,6 +403,10 @@ impl World120 for Level<'_, '_> {
         effects::added(dimension, snbt);
     }
 
+    fn tell(&self, player: &str, json: &str, overlay: bool) {
+        commands::told(player, json, overlay);
+    }
+
     /// Vanilla's heightmaps, as Horizon's spawner computes them (a mod's mob finding the
     /// surface to spawn on, a flying one its height above ground).
     fn height(&self, dimension: &str, heightmap: &str, x: i32, z: i32) -> Option<i32> {
@@ -859,6 +863,7 @@ mod tests {
 
 pub(in crate::game) mod block_renders;
 mod breaking;
+mod commands;
 pub(in crate::game) mod config;
 mod drawn;
 mod effects;

@@ -47,7 +47,7 @@ not a working machine, and almost every content mod has at least one screen.
 | Mod dimensions | **not yet** | phase 6 |
 | Keybinds and HUD overlays (minimaps, tooltips, info bars) | **partial** | phase 5e: mods' key bindings reach them (pressed in Horizon, clicked in 1.20.1's client tick). Phase 5i: what mods draw into vanilla's HUD parts or `HudRenderCallback` is drawn over Horizon's HUD (AppleSkin's saturation, checked in a game); overlays about what the player looks at (Jade) and minimaps, which read the client's world, not yet |
 | Config screens (Cloth Config and friends) | **done** | phase 5h: Mod Menu's entrypoints listed on Horizon's Mods page; the screen opens, draws, takes clicks and saves (AppleSkin's, checked in a game) |
-| Mod commands | **unverified** | — |
+| Mod commands | **done** | phase 5j: in every player's command tree, run as the player at their permission level; what the mods tell a player (answers, errors, notices) reaches their chat |
 | Enchantments, status effects, attributes | **unverified** | — |
 | Mixins on vanilla behaviour (harvest tweaks, drop changes) | **partial** | phase 3a; only where the hook exists |
 

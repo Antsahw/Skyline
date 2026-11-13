@@ -921,6 +921,11 @@ impl Game<'_> {
         if let Some((conn, dimension)) = found {
             // A Java mod's command (its own, or /summon of a Java mod's entity), as
             // the owner typing it: what it says goes to their chat.
+            #[cfg(feature = "java-mods-120")]
+            if self.guest_java120_command(&mut host, conn, command.trim_start_matches('/')) {
+                self.lan = Some(host);
+                return vec![String::from("(run by a server mod)")];
+            }
             if self.guest_java_command(&mut host, conn, command.trim_start_matches('/')) {
                 self.lan = Some(host);
                 return vec![String::from("(run by a server mod)")];
