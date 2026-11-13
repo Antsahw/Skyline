@@ -419,6 +419,46 @@ fn biome_modifiers(changes: &str, carried: &[PathBuf]) -> usize {
         }
     }
     let mut written = 0;
+    // Mobs the mods add to biomes' spawns, as NeoForge's add_spawns; each spawner says its
+    // category (`horizon:category`): Horizon has no row for a mod's own type.
+    let mut spawn_groups: BTreeMap<String, (Vec<serde_json::Value>, Vec<String>)> = BTreeMap::new();
+    for (biome, spawners) in changes["spawns"].as_object().into_iter().flatten() {
+        let Some(list) = spawners.as_array().filter(|l| !l.is_empty()) else {
+            continue;
+        };
+        let key = serde_json::to_string(list).unwrap_or_default();
+        spawn_groups
+            .entry(key)
+            .or_insert_with(|| (list.clone(), Vec::new()))
+            .1
+            .push(biome.clone());
+    }
+    for (spawners, biomes) in spawn_groups.into_values() {
+        let Some((ns, _)) = spawners[0]["type"].as_str().and_then(|t| t.split_once(':')) else {
+            continue;
+        };
+        let Some(carry) = owner(ns) else { continue };
+        let spawners: Vec<serde_json::Value> = spawners
+            .iter()
+            .map(|s| {
+                serde_json::json!({"type": s["type"], "weight": s["weight"],
+                    "minCount": s["minCount"], "maxCount": s["maxCount"],
+                    "horizon:category": s["category"]})
+            })
+            .collect();
+        let modifier = serde_json::json!({"type": "neoforge:add_spawns", "biomes": biomes,
+            "spawners": spawners});
+        let dir = carry.join("data").join(ns).join("neoforge/biome_modifier");
+        if std::fs::create_dir_all(&dir).is_ok()
+            && std::fs::write(
+                dir.join(format!("horizon_120_{written:03}.json")),
+                serde_json::to_string_pretty(&modifier).unwrap_or_default(),
+            )
+            .is_ok()
+        {
+            written += 1;
+        }
+    }
     for ((kind, step, features), biomes) in groups {
         let Some((ns, _)) = features[0].split_once(':') else {
             continue;

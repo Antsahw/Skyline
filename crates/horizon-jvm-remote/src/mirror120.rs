@@ -82,6 +82,29 @@ pub struct ModEntity {
     pub size: [f32; 2],
     /// Its health; `None` for one that has none.
     pub health: Option<f32>,
+    /// Its type's mob category (`creature`, `monster`, ...).
+    pub category: String,
+    /// A mob (`Mob`), which the mob caps count unless it is persistent.
+    pub is_mob: bool,
+    /// A mob that never despawns (named, holding what it picked up...).
+    pub persistent: bool,
+}
+
+/// A player of Horizon's in a level, for its mobs to see ([`Runtime120::tick_entities`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct PlayerHere {
+    pub uuid: String,
+    pub name: String,
+    pub pos: [f64; 3],
+}
+
+/// One of the mods' mobs a natural spawn made ([`Runtime120::spawn_natural`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NaturalSpawn {
+    /// Its box's width and height.
+    pub size: [f32; 2],
+    /// `Mob.getMaxSpawnClusterSize`: how many of a group may spawn around one start.
+    pub max_cluster: u32,
 }
 
 /// What a tick of the mods' entities did, and where they are after.
@@ -1040,6 +1063,79 @@ impl Runtime120 {
             .map(|_| ())
     }
 
+    /// A natural spawn of one of the mods' types, where Horizon's spawner picked it from a
+    /// biome's list (`Mirror120.spawnNatural`): the type's and the mob's own checks, then in.
+    /// `distance` is the squared distance to the nearest player. What spawned, or `None`.
+    pub fn spawn_natural(
+        &mut self,
+        world: &dyn World120,
+        dimension: &str,
+        kind: &str,
+        pos: [f64; 3],
+        yaw: f32,
+        distance: f64,
+    ) -> Result<Option<NaturalSpawn>, String> {
+        let mut handler = InWorld {
+            world,
+            set: Vec::new(),
+            block_entities: Vec::new(),
+            spawned: Vec::new(),
+            log: self.log.clone(),
+        };
+        let args = [
+            Value::Str(dimension.to_owned()),
+            Value::Str(kind.to_owned()),
+            Value::F64(pos[0]),
+            Value::F64(pos[1]),
+            Value::F64(pos[2]),
+            Value::F64(f64::from(yaw)),
+            Value::F64(distance),
+        ];
+        let values = self.call_values("spawnNatural", &args, &mut handler)?;
+        Ok(match values.as_slice() {
+            [Value::F64(w), Value::F64(h), Value::I32(max), ..] => Some(NaturalSpawn {
+                size: [*w as f32, *h as f32],
+                max_cluster: u32::try_from(*max).unwrap_or(4),
+            }),
+            _ => None,
+        })
+    }
+
+    /// A chunk-generation spawn of one of the mods' types from column `column` of `chunk`
+    /// (`Mirror120.spawnGenerated`: `spawnMobsForChunkGeneration`'s attempt). Whether one
+    /// spawned.
+    pub fn spawn_generated(
+        &mut self,
+        world: &dyn World120,
+        dimension: &str,
+        kind: &str,
+        column: [i32; 2],
+        chunk: (i32, i32),
+        yaw: f32,
+    ) -> Result<bool, String> {
+        let mut handler = InWorld {
+            world,
+            set: Vec::new(),
+            block_entities: Vec::new(),
+            spawned: Vec::new(),
+            log: self.log.clone(),
+        };
+        let args = [
+            Value::Str(dimension.to_owned()),
+            Value::Str(kind.to_owned()),
+            Value::I32(column[0]),
+            Value::I32(column[1]),
+            Value::I32(chunk.0),
+            Value::I32(chunk.1),
+            Value::F64(f64::from(yaw)),
+        ];
+        Ok(matches!(
+            self.call_values("spawnGenerated", &args, &mut handler)?
+                .first(),
+            Some(Value::Bool(true))
+        ))
+    }
+
     /// The mods' entity types (not vanilla's), by id: what `/summon` may make in the runtime.
     pub fn mod_entity_types(&mut self) -> Result<Vec<String>, String> {
         match self.call_answers("modEntityTypes", &[])?.first() {
@@ -1054,6 +1150,7 @@ impl Runtime120 {
         &mut self,
         world: &dyn World120,
         dimension: &str,
+        players: &[PlayerHere],
     ) -> Result<EntitiesTicked, String> {
         let mut handler = InWorld {
             world,
@@ -1062,23 +1159,32 @@ impl Runtime120 {
             spawned: Vec::new(),
             log: self.log.clone(),
         };
-        let args = [Value::Str(dimension.to_owned())];
+        let args = [
+            Value::Str(dimension.to_owned()),
+            Value::Strs(players.iter().map(|p| p.uuid.clone()).collect()),
+            Value::Strs(players.iter().map(|p| p.name.clone()).collect()),
+            Value::F64s(players.iter().flat_map(|p| p.pos).collect()),
+        ];
         let values = self.call_values("tickEntities", &args, &mut handler)?;
-        let (Some(Value::F64s(numbers)), Some(Value::Strs(kinds))) =
-            (values.first(), values.get(1))
+        let (Some(Value::F64s(numbers)), Some(Value::Strs(kinds)), Some(Value::Strs(categories))) =
+            (values.first(), values.get(1), values.get(2))
         else {
             return Err(format!("tickEntities: answers {values:?}"));
         };
         let entities = numbers
-            .chunks_exact(11)
+            .chunks_exact(12)
             .zip(kinds)
-            .map(|(n, kind)| ModEntity {
+            .zip(categories)
+            .map(|((n, kind), category)| ModEntity {
                 id: n[0] as i32,
                 kind: kind.clone(),
                 pos: [n[1], n[2], n[3]],
                 rot: [n[4] as f32, n[5] as f32, n[6] as f32, n[7] as f32],
                 size: [n[8] as f32, n[9] as f32],
                 health: (n[10] >= 0.0).then_some(n[10] as f32),
+                category: category.clone(),
+                is_mob: n[11] > 0.0,
+                persistent: n[11] > 1.5,
             })
             .collect();
         Ok(EntitiesTicked {

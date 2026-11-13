@@ -305,6 +305,35 @@ pub trait NaturalLevel: SpawnLevel {
     fn spawn_hooks(&self) -> bool {
         false
     }
+    /// Whether a type this game can't make itself is made by someone who can (a 1.20.1
+    /// mod's, by its runtime), when a biome's list names it.
+    fn foreign(&self, _entity: &str) -> bool {
+        false
+    }
+    /// That someone's natural spawn of a [`foreign`](Self::foreign) type at `position`
+    /// facing `yaw`, `distance` (squared) from the nearest player: its own checks, then the
+    /// spawn. The box it spawned with and `getMaxSpawnClusterSize`, or `None`.
+    fn foreign_spawn(
+        &self,
+        _entity: &str,
+        _position: [f64; 3],
+        _yaw: f32,
+        _distance: f64,
+    ) -> Option<(Aabb, u32)> {
+        None
+    }
+    /// A [`foreign`](Self::foreign) type's spawn in a chunk being generated, from column
+    /// (`x`, `z`) of `chunk` facing `yaw` (`spawnMobsForChunkGeneration`'s attempt: its own
+    /// surface, placement and rules, then the spawn). Whether one spawned.
+    fn foreign_generation_spawn(
+        &self,
+        _entity: &str,
+        _column: [i32; 2],
+        _chunk: (i32, i32),
+        _yaw: f32,
+    ) -> bool {
+        false
+    }
     /// `LevelEvent.PotentialSpawns`: server mods change the possible spawns
     /// at a position.
     fn potential_spawns(
@@ -1134,6 +1163,34 @@ pub fn spawn_category_for_position<L: NaturalLevel, R: RandomSource>(
                 current = Some((entry, kind, [x, y, z]));
             }
             let (entry, kind, picked_at) = current.as_ref().unwrap_or_else(|| unreachable!());
+            // A type only someone else makes: the spawn state's checks here, then theirs
+            // (the type's placement and spawn rules, the mob's) and the spawn.
+            if kind.is_none() && l.foreign(&entry.entity) {
+                let passed = state.can_spawn(l, &entry.entity, [x, y, z]);
+                trace(Event::Test(entry.entity.clone(), [x, y, z], passed));
+                if !passed {
+                    continue;
+                }
+                let yaw = random.next_float() * 360.0;
+                let Some((bounds, most)) =
+                    l.foreign_spawn(&entry.entity, [xx, f64::from(y), zz], yaw, distance)
+                else {
+                    continue;
+                };
+                group_index += 1;
+                spawned.push(bounds);
+                cluster += 1;
+                state.after_spawn(l, &entry.entity, category, [x, y, z]);
+                trace(Event::Spawn(
+                    entry.entity.clone(),
+                    [xx, f64::from(y), zz],
+                    yaw,
+                ));
+                if cluster >= most {
+                    return;
+                }
+                continue;
+            }
             // The list the entry was picked from holds it where it was picked.
             let listed = *picked_at == [x, y, z];
             let valid = valid_position_for_type(
@@ -1366,52 +1423,62 @@ pub fn spawn_mobs_for_chunk_generation<L: NaturalLevel, R: RandomSource, Q: Rand
             let mut attempts = 0;
             while !success && attempts < 4 {
                 attempts += 1;
-                let Some((species, width, height, _)) = kind else {
-                    break;
-                };
-                let pos = top_non_colliding(l, &entry.entity, x, z);
-                trace(GenEvent::Column(x, z));
-                if spawn_rules::is_spawn_position_ok(species, l, pos[0], pos[1], pos[2]) {
-                    let fx = f64::from(x).clamp(
-                        f64::from(xo) + f64::from(width),
-                        f64::from(xo) + 16.0 - f64::from(width),
-                    );
-                    let fz = f64::from(z).clamp(
-                        f64::from(zo) + f64::from(width),
-                        f64::from(zo) + 16.0 - f64::from(width),
-                    );
-                    let fy = f64::from(pos[1]);
-                    let (bx, bz) = (fx.floor() as i32, fz.floor() as i32);
-                    if !l.no_collision(spawn_aabb(species, fx, fy, fz, width, height))
-                        || !spawn_rules::check_spawn_rules(
-                            species,
-                            l,
-                            Reason::ChunkGeneration,
-                            rules,
-                            bx,
-                            pos[1],
-                            bz,
-                        )
-                    {
-                        continue;
-                    }
+                // A type only someone else makes: its attempt is theirs (its surface,
+                // placement and rules); the walk to the next column stays here.
+                if kind.is_none() && l.foreign(&entry.entity) {
                     let yaw = random.next_float() * 360.0;
-                    let bounds = spawn_box(fx, fy, fz, width, height);
-                    if mob_spawn_rules(species, l, bx, pos[1], bz)
-                        && spawn_obstruction(species, l, bounds, None, bx, pos[1], bz)
-                    {
-                        let request = SpawnRequest {
-                            entity: &entry.entity,
-                            species,
-                            position: [fx, fy, fz],
-                            yaw,
-                            group_index,
-                            reason: Reason::ChunkGeneration,
-                        };
-                        if spawn(l, &request, rules) {
-                            group_index += 1;
-                            trace(GenEvent::Spawn(entry.entity.clone(), [fx, fy, fz], yaw));
-                            success = true;
+                    if l.foreign_generation_spawn(&entry.entity, [x, z], chunk, yaw) {
+                        group_index += 1;
+                        success = true;
+                    }
+                } else {
+                    let Some((species, width, height, _)) = kind else {
+                        break;
+                    };
+                    let pos = top_non_colliding(l, &entry.entity, x, z);
+                    trace(GenEvent::Column(x, z));
+                    if spawn_rules::is_spawn_position_ok(species, l, pos[0], pos[1], pos[2]) {
+                        let fx = f64::from(x).clamp(
+                            f64::from(xo) + f64::from(width),
+                            f64::from(xo) + 16.0 - f64::from(width),
+                        );
+                        let fz = f64::from(z).clamp(
+                            f64::from(zo) + f64::from(width),
+                            f64::from(zo) + 16.0 - f64::from(width),
+                        );
+                        let fy = f64::from(pos[1]);
+                        let (bx, bz) = (fx.floor() as i32, fz.floor() as i32);
+                        if !l.no_collision(spawn_aabb(species, fx, fy, fz, width, height))
+                            || !spawn_rules::check_spawn_rules(
+                                species,
+                                l,
+                                Reason::ChunkGeneration,
+                                rules,
+                                bx,
+                                pos[1],
+                                bz,
+                            )
+                        {
+                            continue;
+                        }
+                        let yaw = random.next_float() * 360.0;
+                        let bounds = spawn_box(fx, fy, fz, width, height);
+                        if mob_spawn_rules(species, l, bx, pos[1], bz)
+                            && spawn_obstruction(species, l, bounds, None, bx, pos[1], bz)
+                        {
+                            let request = SpawnRequest {
+                                entity: &entry.entity,
+                                species,
+                                position: [fx, fy, fz],
+                                yaw,
+                                group_index,
+                                reason: Reason::ChunkGeneration,
+                            };
+                            if spawn(l, &request, rules) {
+                                group_index += 1;
+                                trace(GenEvent::Spawn(entry.entity.clone(), [fx, fy, fz], yaw));
+                                success = true;
+                            }
                         }
                     }
                 }

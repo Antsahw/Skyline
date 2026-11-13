@@ -458,7 +458,7 @@ fn a_mods_mob_lives_on_horizons_blocks() {
     let mut last = None;
     for _ in 0..60 {
         let ticked = runtime
-            .tick_entities(&world, "minecraft:overworld")
+            .tick_entities(&world, "minecraft:overworld", &[])
             .expect("its tick");
         last = ticked.entities.into_iter().find(|e| e.id == id);
     }
@@ -548,7 +548,7 @@ fn a_mods_mob_lives_on_horizons_blocks() {
     // further blows away for ten ticks, so a blow lands every eleven.
     let health = |runtime: &mut horizon_jvm_remote::boot120::Runtime120| {
         runtime
-            .tick_entities(&world, "minecraft:overworld")
+            .tick_entities(&world, "minecraft:overworld", &[])
             .expect("its tick")
             .entities
             .into_iter()
@@ -575,7 +575,7 @@ fn a_mods_mob_lives_on_horizons_blocks() {
         1
     );
     let back = runtime
-        .tick_entities(&world, "minecraft:overworld")
+        .tick_entities(&world, "minecraft:overworld", &[])
         .expect("its tick")
         .entities;
     assert_eq!(back.len(), 1);
@@ -592,14 +592,14 @@ fn a_mods_mob_lives_on_horizons_blocks() {
     let still = back[0].pos;
     for _ in 0..20 {
         runtime
-            .tick_entities(&Unloaded, "minecraft:overworld")
+            .tick_entities(&Unloaded, "minecraft:overworld", &[])
             .expect("its tick");
     }
     let after = runtime
         .save_entities(&world, "minecraft:overworld")
         .expect("the save answers");
     let waited = runtime
-        .tick_entities(&world, "minecraft:overworld")
+        .tick_entities(&world, "minecraft:overworld", &[])
         .expect("its tick")
         .entities;
     assert!(
@@ -683,7 +683,7 @@ fn a_mods_mob_lives_on_horizons_blocks() {
         .expect("summon answers")
         .expect("a moobloom is made");
     let made = runtime
-        .tick_entities(&world, "minecraft:overworld")
+        .tick_entities(&world, "minecraft:overworld", &[])
         .expect("its tick")
         .entities
         .into_iter()
@@ -704,13 +704,94 @@ fn a_mods_mob_lives_on_horizons_blocks() {
         .expect("a golem is made");
     for tick in 0..100 {
         let ticked = runtime
-            .tick_entities(&world, "minecraft:overworld")
+            .tick_entities(&world, "minecraft:overworld", &[])
             .expect("its tick");
         assert!(
             ticked.entities.iter().any(|e| e.id == golem),
             "the golem is there at tick {tick}"
         );
     }
+
+    // Phase 6d.6: a natural spawn of the mod's type where Horizon's spawner picked it. On
+    // grass in daylight a moobloom spawns (Animal.checkAnimalSpawnRules); in the air it doesn't
+    // (its ON_GROUND placement).
+    let natural = |runtime: &mut horizon_jvm_remote::boot120::Runtime120, y: f64| {
+        runtime
+            .spawn_natural(
+                &world,
+                "minecraft:overworld",
+                "friendsandfoes:moobloom",
+                [8.5, y, 8.5],
+                90.0,
+                40.0 * 40.0,
+            )
+            .expect("the spawn answers")
+    };
+    let spawned = natural(&mut runtime, 65.0).expect("on grass, it spawns");
+    assert!(
+        spawned.size[0] > 0.5 && spawned.max_cluster >= 1,
+        "{spawned:?}"
+    );
+    assert_eq!(natural(&mut runtime, 70.0), None, "not in the air");
+    // Despawning: a monster (an iceologer) far from every player goes; one near a player stays.
+    let near = horizon_jvm_remote::mirror120::PlayerHere {
+        uuid: "00000000-0000-0000-0000-00000000beef".into(),
+        name: "Tester".into(),
+        pos: [-20.0, 65.0, -20.0],
+    };
+    let iceologer = runtime
+        .summon(
+            &world,
+            "minecraft:overworld",
+            "friendsandfoes:iceologer",
+            [-20.5, 65.0, -12.5],
+            None,
+        )
+        .expect("summon answers")
+        .expect("an iceologer is made");
+    let ticked = runtime
+        .tick_entities(&world, "minecraft:overworld", std::slice::from_ref(&near))
+        .expect("its tick");
+    let it = ticked
+        .entities
+        .iter()
+        .find(|e| e.id == iceologer)
+        .expect("near a player, it stays");
+    assert_eq!(it.category, "monster");
+    assert!(it.is_mob && !it.persistent, "{it:?}");
+    let far = horizon_jvm_remote::mirror120::PlayerHere {
+        pos: [300.0, 65.0, 300.0],
+        ..near
+    };
+    let ticked = runtime
+        .tick_entities(&world, "minecraft:overworld", &[far])
+        .expect("its tick");
+    assert!(
+        ticked.entities.iter().all(|e| e.id != iceologer),
+        "more than 128 blocks from every player, it went"
+    );
+    assert!(
+        ticked.entities.iter().any(|e| e.id == golem),
+        "a golem (persistent as golems are) doesn't"
+    );
+    // Where it spawns: Friends & Foes adds its moobloom to vanilla's biomes in code
+    // (BiomeModifications.addSpawn), reported with its category for Horizon's spawn lists.
+    let changes: serde_json::Value = serde_json::from_str(
+        &runtime
+            .call_with("biomeChanges", &[])
+            .expect("the mods' biome changes"),
+    )
+    .unwrap();
+    let moobloom = changes["spawns"]
+        .as_object()
+        .expect("spawns")
+        .iter()
+        .flat_map(|(biome, list)| list.as_array().unwrap().iter().map(move |s| (biome, s)))
+        .find(|(_, s)| s["type"] == "friendsandfoes:moobloom")
+        .expect("the moobloom is added to a biome's spawns");
+    eprintln!("the moobloom spawns in {}: {}", moobloom.0, moobloom.1);
+    assert_eq!(moobloom.1["category"], "creature");
+    assert!(moobloom.1["weight"].as_i64().unwrap() > 0);
 }
 
 /// Needs build120.sh's platform jar, and Farmer's Delight among HORIZON_120_MODS for the stove

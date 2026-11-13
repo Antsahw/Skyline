@@ -52,12 +52,24 @@ final class Worldgen120 {
         RegistryAccess registries = Mirror120.registries();
         Registry<Biome> biomes = registries.registryOrThrow(Registries.BIOME);
         Map<ResourceKey<Biome>, List<Set<String>>> before = snapshot(biomes);
+        Map<ResourceKey<Biome>, Map<String, JsonObject>> spawnsBefore = spawns(biomes);
         try {
             net.fabricmc.fabric.impl.biome.modification.BiomeModificationImpl.INSTANCE.finalizeWorldGen(registries);
         } catch (RuntimeException | LinkageError e) {
             Mirror120.log("the mods' biome modifications failed: " + e);
         }
         Map<ResourceKey<Biome>, List<Set<String>>> after = snapshot(biomes);
+        // The mobs added to each biome's spawns (BiomeModifications.addSpawn).
+        JsonObject spawnsAdded = new JsonObject();
+        Map<ResourceKey<Biome>, Map<String, JsonObject>> spawnsAfter = spawns(biomes);
+        for (var entry : new TreeMap<String, ResourceKey<Biome>>(keys(spawnsAfter)).entrySet()) {
+            Map<String, JsonObject> was = spawnsBefore.getOrDefault(entry.getValue(), Map.of());
+            JsonArray plus = new JsonArray();
+            for (var spawner : spawnsAfter.get(entry.getValue()).entrySet()) {
+                if (!was.containsKey(spawner.getKey())) plus.add(spawner.getValue());
+            }
+            if (!plus.isEmpty()) spawnsAdded.add(entry.getKey(), plus);
+        }
         JsonObject added = new JsonObject();
         JsonObject removed = new JsonObject();
         Set<String> features = new LinkedHashSet<>();
@@ -112,6 +124,7 @@ final class Worldgen120 {
         out.add("removed", removed);
         out.add("placed", placedJson);
         out.add("configured", configuredJson);
+        out.add("spawns", spawnsAdded);
         return out.toString();
     }
 
@@ -180,6 +193,28 @@ final class Worldgen120 {
                 steps.add(ids);
             }
             out.put(entry.getKey(), steps);
+        }
+        return out;
+    }
+
+    /** Each biome's spawners, keyed by all they are (category, type, weight, counts). */
+    private static Map<ResourceKey<Biome>, Map<String, JsonObject>> spawns(Registry<Biome> biomes) {
+        Map<ResourceKey<Biome>, Map<String, JsonObject>> out = new java.util.HashMap<>();
+        for (var entry : biomes.entrySet()) {
+            Map<String, JsonObject> spawners = new java.util.LinkedHashMap<>();
+            var settings = entry.getValue().getMobSettings();
+            for (var category : net.minecraft.world.entity.MobCategory.values()) {
+                for (var data : settings.getMobs(category).unwrap()) {
+                    JsonObject one = new JsonObject();
+                    one.addProperty("type", net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE.getKey(data.type).toString());
+                    one.addProperty("category", category.getName());
+                    one.addProperty("weight", data.getWeight().asInt());
+                    one.addProperty("minCount", data.minCount);
+                    one.addProperty("maxCount", data.maxCount);
+                    spawners.put(one.toString(), one);
+                }
+            }
+            out.put(entry.getKey(), spawners);
         }
         return out;
     }

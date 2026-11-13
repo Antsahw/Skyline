@@ -34,6 +34,10 @@ struct Spawner {
     weight: i64,
     min_count: i64,
     max_count: i64,
+    /// Its mob category, where the file says it (`horizon:category`): a type the game has no
+    /// row for (a 1.20.1 mod's, made by its runtime) would otherwise be filed under `misc`,
+    /// which never spawns naturally.
+    category: Option<String>,
 }
 
 /// What a modifier does to its biomes.
@@ -115,6 +119,10 @@ fn spawner(v: &Value) -> std::result::Result<Spawner, String> {
         weight,
         min_count,
         max_count,
+        category: o
+            .get("horizon:category")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
     })
 }
 
@@ -354,9 +362,11 @@ pub(super) fn apply(
                     Action::AddFeatures { features, .. }
                     | Action::RemoveFeatures { features, .. } => feature_reg.resolve(features)?,
                     Action::AddSpawns(spawners) => {
+                        // A spawner saying its own category is of a type someone else makes
+                        // (a 1.20.1 mod's, by its runtime), which the game's registry lacks.
                         if let Some(s) = spawners
                             .iter()
-                            .find(|s| !entity_reg.ids.contains(&s.entity))
+                            .find(|s| s.category.is_none() && !entity_reg.ids.contains(&s.entity))
                         {
                             return Err(format!("unknown {} {}", entity_reg.what, s.entity));
                         }
@@ -530,6 +540,7 @@ fn add_spawns(
     for s in spawners {
         let cat = entity_categories
             .get(&s.entity)
+            .or(s.category.as_ref())
             .map_or("misc", String::as_str);
         if by_cat.get(cat).is_none() {
             by_cat.set(cat, J::Arr(Vec::new()));

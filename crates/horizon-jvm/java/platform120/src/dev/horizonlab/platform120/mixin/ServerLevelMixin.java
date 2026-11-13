@@ -84,4 +84,24 @@ public abstract class ServerLevelMixin {
                     net.minecraft.world.entity.Entity>> cir) {
         cir.setReturnValue(dev.horizonlab.platform120.Entities120.of((net.minecraft.world.level.Level) (Object) this));
     }
+
+    /** A mirror level's players are Horizon's in it this tick (Mirror120.tickEntities). */
+    @Inject(method = "players", at = @At("HEAD"), cancellable = true)
+    private void horizon$players(CallbackInfoReturnable<java.util.List<net.minecraft.server.level.ServerPlayer>> cir) {
+        cir.setReturnValue(dev.horizonlab.platform120.Mirror120.present((net.minecraft.server.level.ServerLevel) (Object) this));
+    }
+
+    /**
+     * Raids are Horizon's: a mirror level has none (its raid manager was never made), and an
+     * illager of a mod's asking whether it's in one (Raider.aiStep) is told it isn't.
+     */
+    @Inject(method = "getRaidAt", at = @At("HEAD"), cancellable = true)
+    private void horizon$raidAt(net.minecraft.core.BlockPos pos, CallbackInfoReturnable<net.minecraft.world.entity.raid.Raid> cir) {
+        cir.setReturnValue(null);
+    }
+
+    @Inject(method = "isRaided", at = @At("HEAD"), cancellable = true)
+    private void horizon$raided(net.minecraft.core.BlockPos pos, CallbackInfoReturnable<Boolean> cir) {
+        cir.setReturnValue(false);
+    }
 }

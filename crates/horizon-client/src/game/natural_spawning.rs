@@ -450,6 +450,33 @@ impl NaturalLevel for GameLevel<'_, '_> {
     fn spawn_hooks(&self) -> bool {
         !horizon_client::mod_api::mods().is_empty()
     }
+    /// The 1.20.1 mods' types, which their runtime makes (game/java_mods_120/mobs.rs).
+    #[cfg(feature = "java-mods-120")]
+    fn foreign(&self, entity: &str) -> bool {
+        super::java_mods_120::mobs::theirs(entity)
+    }
+    #[cfg(feature = "java-mods-120")]
+    fn foreign_spawn(
+        &self,
+        entity: &str,
+        position: [f64; 3],
+        yaw: f32,
+        distance: f64,
+    ) -> Option<(Aabb, u32)> {
+        self.game
+            .java120_spawn_natural(entity, position, yaw, distance)
+    }
+    #[cfg(feature = "java-mods-120")]
+    fn foreign_generation_spawn(
+        &self,
+        entity: &str,
+        column: [i32; 2],
+        chunk: (i32, i32),
+        yaw: f32,
+    ) -> bool {
+        self.game
+            .java120_spawn_generated(entity, column, chunk, yaw)
+    }
     fn potential_spawns(&self, category: Category, pos: [i32; 3], entries: &mut Vec<SpawnEntry>) {
         let mut canceled = false;
         self.game.native_potential_spawns(
@@ -765,7 +792,11 @@ impl<'a> Game<'a> {
         let last_state;
         {
             let level = self.natural_level();
-            let counted: Vec<Counted> = self
+            // The 1.20.1 mods' mobs count toward the caps too (their runtime's, last tick).
+            #[cfg(feature = "java-mods-120")]
+            let theirs = super::java_mods_120::mobs::seen_in(self.dim.id());
+            #[allow(unused_mut)]
+            let mut counted: Vec<Counted> = self
                 .mobs
                 .iter()
                 .map(|m| Counted {
@@ -781,6 +812,14 @@ impl<'a> Game<'a> {
                         || horizon_client::mobs::ai::requires_custom_persistence(m),
                 })
                 .collect();
+            #[cfg(feature = "java-mods-120")]
+            counted.extend(theirs.iter().map(|m| Counted {
+                entity: &m.kind,
+                category: Category::from_name(&m.category),
+                block: m.pos.map(|c| c.floor() as i32),
+                is_mob: m.is_mob,
+                persistent: m.persistent,
+            }));
             let players = players
                 .iter()
                 .map(|p| SpawnPlayer {

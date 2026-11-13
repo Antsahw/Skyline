@@ -990,12 +990,128 @@ public final class Mirror120 {
      * A tick of the mods' entities in `dimension` (Entities120.tick), and where they are after:
      * {numbers, types} as Entities120.snapshot gives them.
      */
-    public static Object[] tickEntities(String dimension) {
+    public static Object[] tickEntities(String dimension, String[] uuids, String[] names, double[] at) {
         begin();
         try {
             ServerLevel level = level(dimension);
+            // Horizon's players in this level, where they stand: what a mob's checkDespawn and
+            // its goals (a golem looking for a player, a cow following wheat) ask the level for.
+            List<ServerPlayer> here = new ArrayList<>();
+            for (int i = 0; i < uuids.length && i * 3 + 2 < at.length; i++) {
+                ServerPlayer player = player(uuids[i], names[i], level);
+                player.setPos(at[i * 3], at[i * 3 + 1], at[i * 3 + 2]);
+                here.add(player);
+            }
+            synchronized (PRESENT) {
+                PRESENT.put(level, here);
+            }
             Entities120.tick(level);
             return Entities120.snapshot(level);
+        } finally {
+            finish();
+        }
+    }
+
+    /**
+     * NaturalSpawner.spawnMobsForChunkGeneration's attempt at column (x, z) of a chunk being
+     * generated, for one of the mods' types Horizon picked from the biome's creatures: the
+     * type's surface there, its placement and rules, room for its box, then the mob's own
+     * checks and finalizeSpawn as a chunk generation spawn. {true} when one spawned.
+     */
+    public static Object[] spawnGenerated(String dimension, String type, int x, int z, int chunkX, int chunkZ, double yaw) {
+        begin();
+        try {
+            ServerLevel level = level(dimension);
+            var entityType = net.minecraft.world.entity.EntityType.byString(type).orElse(null);
+            if (entityType == null || !entityType.canSummon()) return new Object[] {false};
+            BlockPos pos = dev.horizonlab.platform120.mixin.NaturalSpawnerAccess.horizon$topNonColliding(level, entityType, x, z);
+            if (!net.minecraft.world.level.NaturalSpawner.isSpawnPositionOk(
+                    net.minecraft.world.entity.SpawnPlacements.getPlacementType(entityType), level, pos, entityType)) {
+                if (SPAWN_TRACE) log("no " + type + " at " + pos.toShortString() + ": not a place for it (on " + level.getBlockState(pos.below()) + ")");
+                return new Object[] {false};
+            }
+            float width = entityType.getWidth();
+            int xo = chunkX << 4;
+            int zo = chunkZ << 4;
+            double fx = net.minecraft.util.Mth.clamp(x, xo + width, xo + 16.0 - width);
+            double fz = net.minecraft.util.Mth.clamp(z, zo + width, zo + 16.0 - width);
+            var reason = net.minecraft.world.entity.MobSpawnType.CHUNK_GENERATION;
+            if (!level.noCollision(entityType.getAABB(fx, pos.getY(), fz))
+                    || !net.minecraft.world.entity.SpawnPlacements.checkSpawnRules(entityType, level, reason,
+                            BlockPos.containing(fx, pos.getY(), fz), level.getRandom())) {
+                if (SPAWN_TRACE) log("no " + type + " at " + pos.toShortString() + ": its rules (light "
+                        + level.getRawBrightness(pos, 0) + ", on " + level.getBlockState(pos.below()) + ")");
+                return new Object[] {false};
+            }
+            if (!(entityType.create(level) instanceof net.minecraft.world.entity.Mob mob)) return new Object[] {false};
+            mob.moveTo(fx, pos.getY(), fz, (float) yaw, 0.0F);
+            if (!mob.checkSpawnRules(level, reason) || !mob.checkSpawnObstruction(level)) return new Object[] {false};
+            mob.finalizeSpawn(level, level.getCurrentDifficultyAt(mob.blockPosition()), reason, null, null);
+            level.addFreshEntityWithPassengers(mob);
+            if (SPAWN_TRACE) log("a " + type + " spawned with its chunk at " + mob.blockPosition().toShortString());
+            return new Object[] {true};
+        } catch (RuntimeException | LinkageError e) {
+            log("a " + type + " didn't spawn with its chunk: " + e);
+            return new Object[] {false};
+        } finally {
+            finish();
+        }
+    }
+
+    /** HORIZON_120_TRACE: why each of the mods' spawns did or didn't happen. */
+    private static final boolean SPAWN_TRACE = System.getenv("HORIZON_120_TRACE") != null;
+
+    /** Each level's players this tick (tickEntities), as ServerLevel.players gives them. */
+    private static final Map<Level, List<ServerPlayer>> PRESENT = new HashMap<>();
+
+    /** ServerLevel.players of a mirror level (ServerLevelMixin). */
+    public static List<ServerPlayer> present(Level level) {
+        synchronized (PRESENT) {
+            return PRESENT.getOrDefault(level, List.of());
+        }
+    }
+
+    /**
+     * NaturalSpawner.spawnCategoryForPosition, from where Horizon's spawner has picked one of
+     * the mods' types in a biome's list, a spot and a yaw: the type's own checks
+     * (isValidSpawnPositionForType: its placement, SpawnPlacements' rules, room for its box),
+     * then the mob's (isValidPositionForMob: too far to stay, its checkSpawnRules and
+     * checkSpawnObstruction), finalizeSpawn as a natural spawn, and in. `distance` is the
+     * squared distance to the nearest player. {width, height, max cluster size} of what
+     * spawned, or {} for nothing.
+     */
+    public static Object[] spawnNatural(String dimension, String type, double x, double y, double z, double yaw, double distance) {
+        begin();
+        try {
+            ServerLevel level = level(dimension);
+            var entityType = net.minecraft.world.entity.EntityType.byString(type).orElse(null);
+            if (entityType == null) return new Object[0];
+            var category = entityType.getCategory();
+            BlockPos pos = BlockPos.containing(x, y, z);
+            int despawn = category.getDespawnDistance();
+            var natural = net.minecraft.world.entity.MobSpawnType.NATURAL;
+            if (category == net.minecraft.world.entity.MobCategory.MISC
+                    || !entityType.canSpawnFarFromPlayer() && distance > (double) despawn * despawn
+                    || !entityType.canSummon()
+                    || !net.minecraft.world.level.NaturalSpawner.isSpawnPositionOk(
+                            net.minecraft.world.entity.SpawnPlacements.getPlacementType(entityType), level, pos, entityType)
+                    || !net.minecraft.world.entity.SpawnPlacements.checkSpawnRules(entityType, level, natural, pos, level.getRandom())
+                    || !level.noCollision(entityType.getAABB(x, y, z))) {
+                return new Object[0];
+            }
+            if (!(entityType.create(level) instanceof net.minecraft.world.entity.Mob mob)) return new Object[0];
+            mob.moveTo(x, y, z, (float) yaw, 0.0F);
+            if (distance > (double) despawn * despawn && mob.removeWhenFarAway(distance)
+                    || !mob.checkSpawnRules(level, natural)
+                    || !mob.checkSpawnObstruction(level)) {
+                return new Object[0];
+            }
+            mob.finalizeSpawn(level, level.getCurrentDifficultyAt(mob.blockPosition()), natural, null, null);
+            level.addFreshEntityWithPassengers(mob);
+            return new Object[] {(double) mob.getBbWidth(), (double) mob.getBbHeight(), mob.getMaxSpawnClusterSize()};
+        } catch (RuntimeException | LinkageError e) {
+            log("a " + type + " didn't spawn: " + e);
+            return new Object[0];
         } finally {
             finish();
         }

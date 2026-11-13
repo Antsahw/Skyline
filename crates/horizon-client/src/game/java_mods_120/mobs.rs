@@ -33,8 +33,38 @@ static LAST_COUNT: Mutex<usize> = Mutex::new(0);
 /// bridge's (`java_entities::FIRST_ID`) above.
 pub(in crate::game) const IDS: std::ops::Range<i32> = 0x7ffe_0000..0x7fff_0000;
 
-/// The server half: where each mob stood after the last tick, by id (a click's range check).
-static SEEN: Mutex<Option<HashMap<i32, [f64; 3]>>> = Mutex::new(None);
+/// The server half: each dimension's mobs after its last tick (a click's range check, the
+/// mob caps' count).
+static SEEN: Mutex<Option<HashMap<String, Vec<Seen>>>> = Mutex::new(None);
+
+/// One of the mods' mobs as the server half last saw it.
+#[derive(Clone)]
+pub(in crate::game) struct Seen {
+    pub(in crate::game) id: i32,
+    pub(in crate::game) kind: String,
+    pub(in crate::game) category: String,
+    pub(in crate::game) pos: [f64; 3],
+    pub(in crate::game) is_mob: bool,
+    pub(in crate::game) persistent: bool,
+}
+
+/// The mods' mobs of a dimension after its last tick, for the mob caps (`natural_spawning`).
+pub(in crate::game) fn seen_in(dimension: &str) -> Vec<Seen> {
+    SEEN.lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+        .and_then(|all| all.get(dimension).cloned())
+        .unwrap_or_default()
+}
+
+/// Whether a type is one of the mods' (their runtime makes it).
+pub(in crate::game) fn theirs(kind: &str) -> bool {
+    TYPES
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .iter()
+        .any(|t| t == kind)
+}
 
 /// The mods' entity types, from when their runtime started: what `/summon` makes there.
 static TYPES: Mutex<Vec<String>> = Mutex::new(Vec::new());
@@ -147,7 +177,7 @@ impl Game<'_> {
                 return;
             }
             runtime
-                .tick_entities(&level, &dimension)
+                .tick_entities(&level, &dimension, &self.java120_players_here())
                 .and_then(|ticked| {
                     let looks = if ticked.entities.is_empty() {
                         String::from("{}")
@@ -174,8 +204,24 @@ impl Game<'_> {
             &ticked.block_entities,
             &ticked.spawned,
         );
-        *SEEN.lock().unwrap_or_else(|e| e.into_inner()) =
-            Some(ticked.entities.iter().map(|e| (e.id, e.pos)).collect());
+        SEEN.lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get_or_insert_with(HashMap::new)
+            .insert(
+                dimension.clone(),
+                ticked
+                    .entities
+                    .iter()
+                    .map(|e| Seen {
+                        id: e.id,
+                        kind: e.kind.clone(),
+                        category: e.category.clone(),
+                        pos: e.pos,
+                        is_mob: e.is_mob,
+                        persistent: e.persistent,
+                    })
+                    .collect(),
+            );
         if ticked.entities.is_empty() && was == 0 {
             return;
         }
@@ -336,6 +382,103 @@ impl Game<'_> {
         }
     }
 
+    /// The server half: the players in this level, for the mods' mobs to see (despawning far
+    /// from them, following them).
+    fn java120_players_here(&self) -> Vec<horizon_jvm_remote::mirror120::PlayerHere> {
+        self.lan
+            .iter()
+            .flat_map(|h| {
+                h.hub
+                    .guests
+                    .iter()
+                    .filter(|g| h.hub.here(g) && !g.spectator() && !g.dead)
+                    .map(|g| horizon_jvm_remote::mirror120::PlayerHere {
+                        uuid: super::uuid_string(g.uuid),
+                        name: g.name.clone(),
+                        pos: g.position,
+                    })
+            })
+            .collect()
+    }
+
+    /// The server half of a natural spawn of one of the mods' types, where Horizon's spawner
+    /// picked it (`NaturalLevel::foreign_spawn`).
+    pub(in crate::game) fn java120_spawn_natural(
+        &self,
+        kind: &str,
+        pos: [f64; 3],
+        yaw: f32,
+        distance: f64,
+    ) -> Option<(Aabb, u32)> {
+        let dimension = self.dim.id().to_owned();
+        let made = {
+            let Ok(mut guard) = RUNTIME.try_lock() else {
+                return None;
+            };
+            let runtime = guard.as_mut()?;
+            runtime.spawn_natural(&Level(self), &dimension, kind, pos, yaw, distance)
+        };
+        let made = match made {
+            Ok(made) => made?,
+            Err(e) => {
+                tick_failed_once(&e);
+                return None;
+            }
+        };
+        *LAST_COUNT.lock().unwrap_or_else(|e| e.into_inner()) += 1;
+        let half = f64::from(made.size[0]) / 2.0;
+        Some((
+            Aabb::new(
+                Vec3::new(pos[0] - half, pos[1], pos[2] - half),
+                Vec3::new(
+                    pos[0] + half,
+                    pos[1] + f64::from(made.size[1]),
+                    pos[2] + half,
+                ),
+            ),
+            made.max_cluster,
+        ))
+    }
+
+    /// The server half of a chunk-generation spawn of one of the mods' types
+    /// (`NaturalLevel::foreign_generation_spawn`).
+    pub(in crate::game) fn java120_spawn_generated(
+        &self,
+        kind: &str,
+        column: [i32; 2],
+        chunk: (i32, i32),
+        yaw: f32,
+    ) -> bool {
+        let dimension = self.dim.id().to_owned();
+        if super::tracing() {
+            log::info!("1.20.1 mods (trace): a chunk-generation spawn of {kind} at {column:?}");
+        }
+        let made = {
+            let Ok(mut guard) = RUNTIME.try_lock() else {
+                if super::tracing() {
+                    log::info!("1.20.1 mods (trace): the runtime was busy");
+                }
+                return false;
+            };
+            let Some(runtime) = guard.as_mut() else {
+                return false;
+            };
+            runtime.spawn_generated(&Level(self), &dimension, kind, column, chunk, yaw)
+        };
+        match made {
+            Ok(made) => {
+                if made {
+                    *LAST_COUNT.lock().unwrap_or_else(|e| e.into_inner()) += 1;
+                }
+                made
+            }
+            Err(e) => {
+                tick_failed_once(&e);
+                false
+            }
+        }
+    }
+
     /// The server half of `/summon` for one of the mods' types: made in the runtime, from
     /// `nbt` when given. None when `kind` isn't theirs (Horizon's summon goes on), else whether
     /// it was made.
@@ -345,12 +488,7 @@ impl Game<'_> {
         pos: [f64; 3],
         nbt: Option<&str>,
     ) -> Option<bool> {
-        if !TYPES
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .iter()
-            .any(|t| t == kind)
-        {
+        if !theirs(kind) {
             return None;
         }
         let dimension = self.dim.id().to_owned();
@@ -538,7 +676,7 @@ impl Game<'_> {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .as_ref()
-            .and_then(|seen| seen.get(&id).copied())
+            .and_then(|all| all.values().flatten().find(|s| s.id == id).map(|s| s.pos))
             .is_some_and(|at| {
                 (0..3)
                     .map(|i| (at[i] - feet[i]) * (at[i] - feet[i]))

@@ -436,9 +436,27 @@ had sky and block light the wrong way round in the lightmap; fixed.
 Checked in a game: `/summon` of a moobloom (also with `{Health:3.0f,NoAI:1b}`) and of a copper
 golem, each drawn by its own renderer, ticking with no failures.
 
-**Next:** natural spawning: the mods' biome spawn additions in Horizon's spawn lists, Horizon's
-spawner handing a mod's entry to the runtime (its placement and spawn rules are the mod's), the
-mods' mobs counted toward the mob caps, and despawning far from players.
+**6d.6, done: natural spawning.** The spawns the mods add to vanilla's biomes in code
+(`BiomeModifications.addSpawn`) come out of `Worldgen120.biomeChanges` with the rest and are
+written as NeoForge `add_spawns` biome modifiers, each spawner saying its category
+(`horizon:category`): Horizon has no row for a mod's own type, and a spawner that says its
+category is let through for it (`mod_content_biomes`). Horizon's spawner, picking a type it
+can't make itself, hands it to the runtime through `NaturalLevel::foreign_spawn` (the 400-tick
+pass) and `foreign_generation_spawn` (`spawnMobsForChunkGeneration`, through vanilla's own
+`getTopNonCollidingPos`): the type's placement and spawn rules and the mob's own checks are the
+mod's code, then `finalizeSpawn` as a natural or chunk-generation spawn. Both are default no-ops,
+so vanilla's path and its random's order are as they were. The mods' mobs count toward the
+mob caps (their category and persistence come with each tick), and the players of a level stand
+in its mirror each tick (`ServerLevel.players`), so vanilla's `checkDespawn` sends away a monster
+far from all of them. What it needed of the runtime's level: Horizon's heightmaps (the surface a
+spawn stands on) and no raids (an illager asking).
+
+Checked in a game: maulers spawned with their savanna chunks, drawn by their own renderer; in
+the runtime test a moobloom spawns on grass and not in the air, and an iceologer goes when every
+player is more than 128 blocks away.
+
+**Next:** the phase-6 rest (structures with Java pieces, the mods' biomes and dimensions), phase
+7's block entity renderers, and the unverified rows of the support page.
 
 ## Phase 7 status: blocks drawn by their mod's code (2026-11-12)
 

@@ -366,6 +366,20 @@ impl World120 for Level<'_, '_> {
         Some(horizon_world::snbt_text::to_snbt(&tag))
     }
 
+    /// Vanilla's heightmaps, as Horizon's spawner computes them (a mod's mob finding the
+    /// surface to spawn on, a flying one its height above ground).
+    fn height(&self, dimension: &str, heightmap: &str, x: i32, z: i32) -> Option<i32> {
+        use horizon_client::mobs::spawn_selection::{Heightmap, NaturalLevel as _};
+        let game = self.0;
+        if dimension != game.dim.id() || !game.world.loaded(x, z) {
+            return None;
+        }
+        Some(
+            game.natural_level()
+                .heightmap(Heightmap::from_name(heightmap), x, z),
+        )
+    }
+
     fn light(&self, dimension: &str, x: i32, y: i32, z: i32) -> Option<u8> {
         let game = self.0;
         if dimension != game.dim.id() || !game.world.loaded(x, z) {

@@ -87,6 +87,9 @@ public final class Entities120 implements LevelEntityGetter<Entity> {
             if (entity.isRemoved()) continue;
             if (!loaded.contains(net.minecraft.world.level.ChunkPos.asLong(entity.blockPosition()))) continue;
             try {
+                // ServerLevel.tick: a mob far from every player may go (Mob.checkDespawn).
+                entity.checkDespawn();
+                if (entity.isRemoved()) continue;
                 entity.setOldPosAndRot();
                 entity.tickCount++;
                 entity.tick();
@@ -104,17 +107,18 @@ public final class Entities120 implements LevelEntityGetter<Entity> {
     }
 
     /**
-     * What Horizon needs of each of a level's entities, eleven numbers each: id, x, y, z, yaw,
-     * pitch, head yaw, body yaw, width, height, health (-1 for one that has none); and its
-     * type, beside.
+     * What Horizon needs of each of a level's entities, twelve numbers each: id, x, y, z, yaw,
+     * pitch, head yaw, body yaw, width, height, health (-1 for one that has none), how the mob
+     * caps count it; and its type and mob category, beside.
      */
     public static synchronized Object[] snapshot(Level level) {
         List<Entity> all = of(level).entities;
-        double[] numbers = new double[all.size() * 11];
+        double[] numbers = new double[all.size() * 12];
         String[] types = new String[all.size()];
+        String[] categories = new String[all.size()];
         for (int i = 0; i < all.size(); i++) {
             Entity e = all.get(i);
-            int at = i * 11;
+            int at = i * 12;
             numbers[at] = e.getId();
             numbers[at + 1] = e.getX();
             numbers[at + 2] = e.getY();
@@ -126,9 +130,14 @@ public final class Entities120 implements LevelEntityGetter<Entity> {
             numbers[at + 8] = e.getBbWidth();
             numbers[at + 9] = e.getBbHeight();
             numbers[at + 10] = e instanceof LivingEntity l ? l.getHealth() : -1;
+            // How the mob caps count it (NaturalSpawner.createState): 0 not a mob, 1 a mob
+            // that may despawn, 2 a persistent one (named, picked up an item...).
+            numbers[at + 11] = !(e instanceof net.minecraft.world.entity.Mob m) ? 0
+                    : m.isPersistenceRequired() || m.requiresCustomPersistence() ? 2 : 1;
             types[i] = BuiltInRegistries.ENTITY_TYPE.getKey(e.getType()).toString();
+            categories[i] = e.getType().getCategory().getName();
         }
-        return new Object[] {numbers, types};
+        return new Object[] {numbers, types, categories};
     }
 
     /**
