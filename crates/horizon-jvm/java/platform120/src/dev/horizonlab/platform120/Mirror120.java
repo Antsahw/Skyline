@@ -5,8 +5,10 @@ import dev.horizonlab.platform120.mixin.LevelAccess;
 import dev.horizonlab.platform120.mixin.ServerLevelAccess;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
@@ -551,6 +553,11 @@ public final class Mirror120 {
     public static boolean addEntity(Level level, net.minecraft.world.entity.Entity entity) {
         // A mod's own entity lives in the mirror, with its mod's code (Entities120).
         if (Entities120.modded(entity)) return Entities120.add(level, entity);
+        // Experience a kill or a furnace gives: Horizon's own orbs, of the same value.
+        if (entity instanceof net.minecraft.world.entity.ExperienceOrb orb) {
+            event.accept("spawnXp", new Object[] {dimension(level), orb.getX(), orb.getY(), orb.getZ(), orb.getValue()});
+            return true;
+        }
         if (!(entity instanceof net.minecraft.world.entity.item.ItemEntity dropped)) {
             notEntities(entity);
             return false;
@@ -622,6 +629,51 @@ public final class Mirror120 {
         known = read.get(pos.asLong());
         // Where Horizon has no chunk loaded: air, as vanilla reads an unloaded position.
         return known == null ? Blocks.AIR.defaultBlockState() : known;
+    }
+
+    /**
+     * Which of `chunks` (ChunkPos.asLong) Horizon has loaded in `level`, in one call: a
+     * position in a chunk it doesn't have reads "" (blockStates).
+     */
+    static Set<Long> loadedChunks(Level level, long[] chunks) {
+        Set<Long> out = new HashSet<>();
+        if (chunks.length == 0) return out;
+        int[] ask = new int[chunks.length * 3];
+        for (int i = 0; i < chunks.length; i++) {
+            ask[i * 3] = net.minecraft.world.level.ChunkPos.getX(chunks[i]) << 4;
+            ask[i * 3 + 1] = level.getMinBuildHeight();
+            ask[i * 3 + 2] = net.minecraft.world.level.ChunkPos.getZ(chunks[i]) << 4;
+        }
+        Object[] answer = call.apply("blockStates", new Object[] {dimension(level), ask});
+        if (answer.length == 0 || !(answer[0] instanceof String[] names)) return out;
+        for (int i = 0; i < chunks.length && i < names.length; i++) if (!names[i].isEmpty()) out.add(chunks[i]);
+        return out;
+    }
+
+    /** The mods' entities of `dimension`, as a save keeps them (Entities120.save). */
+    public static Object[] saveEntities(String dimension) {
+        begin();
+        try {
+            return new Object[] {Entities120.save(level(dimension))};
+        } finally {
+            finish();
+        }
+    }
+
+    /** Entities a save kept, back into `dimension`; how many came. */
+    public static Object[] loadEntities(String dimension, String[] saved) {
+        begin();
+        try {
+            return new Object[] {Entities120.load(level(dimension), saved)};
+        } finally {
+            finish();
+        }
+    }
+
+    /** The world closed: the mods' entities go with it. */
+    public static Object[] clearEntities() {
+        Entities120.clear();
+        return new Object[0];
     }
 
     /** The 3x3x3 around `pos` into `read`, in one call. */

@@ -596,6 +596,10 @@ impl super::Game<'_> {
             if item.dimension != dimension {
                 continue;
             }
+            if item.experience > 0 {
+                self.spawn_orbs(item.pos, item.experience);
+                continue;
+            }
             let Some(stack) = stack_from_120(&item.snbt) else {
                 continue;
             };

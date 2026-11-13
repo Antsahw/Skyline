@@ -513,11 +513,13 @@ fn a_mods_mob_lives_on_horizons_blocks() {
 
     // Phase 6d.3: a player of Horizon's, three blocks east of it and facing it, uses it and
     // hits it with the mods' code.
+    // Which it is now: a world opened again gives it a new id.
+    let current = std::cell::Cell::new(id);
     let action = |attack: bool, held: &str| horizon_jvm_remote::mirror120::EntityAction {
         uuid: "00000000-0000-0000-0000-00000000beef".into(),
         name: "Tester".into(),
         dimension: "minecraft:overworld".into(),
-        id,
+        id: current.get(),
         attack,
         off_hand: false,
         held: held.into(),
@@ -549,13 +551,61 @@ fn a_mods_mob_lives_on_horizons_blocks() {
             .expect("its tick")
             .entities
             .into_iter()
-            .find(|e| e.id == id)
+            .find(|e| e.id == current.get())
             .and_then(|e| e.health)
     };
     runtime
         .entity_action(&world, &action(true, ""))
         .expect("the blow answers");
     assert_eq!(health(&mut runtime), Some(7.0), "one point off");
+    // Phase 6d.4: kept with the world. Saved, gone with a closed world, and back as it was
+    // when the world opens again.
+    let saved = runtime
+        .save_entities(&world, "minecraft:overworld")
+        .expect("the save answers");
+    assert_eq!(saved.len(), 1, "{saved:?}");
+    assert!(saved[0].contains("friendsandfoes:moobloom"), "{}", saved[0]);
+    runtime.clear_entities(&world).expect("the clear answers");
+    assert_eq!(health(&mut runtime), None, "gone with the world");
+    assert_eq!(
+        runtime
+            .load_entities(&world, "minecraft:overworld", &saved)
+            .expect("the load answers"),
+        1
+    );
+    let back = runtime
+        .tick_entities(&world, "minecraft:overworld")
+        .expect("its tick")
+        .entities;
+    assert_eq!(back.len(), 1);
+    assert_eq!(back[0].kind, "friendsandfoes:moobloom");
+    assert_eq!(back[0].health, Some(7.0), "as it was saved");
+    current.set(back[0].id);
+    // A chunk Horizon hasn't loaded reads as air: a mob in one waits rather than fall.
+    struct Unloaded;
+    impl horizon_jvm_remote::mirror120::World120 for Unloaded {
+        fn block_state(&self, _: &str, _: i32, _: i32, _: i32) -> Option<String> {
+            None
+        }
+    }
+    let still = back[0].pos;
+    for _ in 0..20 {
+        runtime
+            .tick_entities(&Unloaded, "minecraft:overworld")
+            .expect("its tick");
+    }
+    let after = runtime
+        .save_entities(&world, "minecraft:overworld")
+        .expect("the save answers");
+    let waited = runtime
+        .tick_entities(&world, "minecraft:overworld")
+        .expect("its tick")
+        .entities;
+    assert!(
+        (waited[0].pos[1] - still[1]).abs() < 0.5,
+        "it waited: {still:?} -> {:?} ({after:?})",
+        waited[0].pos
+    );
     // In creative, ItemUtils.createFilledResult keeps the empty bucket and adds the milk to the
     // inventory: Horizon is handed it, since its player's inventory isn't the runtime's.
     let milked = runtime
@@ -597,9 +647,12 @@ fn a_mods_mob_lives_on_horizons_blocks() {
         hit.spawned, hit.held
     );
     assert!(
-        !hit.spawned.is_empty(),
+        hit.spawned.iter().any(|s| !s.snbt.is_empty()),
         "killed by a player, it drops its loot"
     );
+    // Animal.getExperienceReward: 1 to 3, killed by a player.
+    let xp: u32 = hit.spawned.iter().map(|s| s.experience).sum();
+    assert!((1..=3).contains(&xp), "and its experience: {xp}");
     assert!(
         hit.held.contains("Damage:1"),
         "the sword wears: {}",

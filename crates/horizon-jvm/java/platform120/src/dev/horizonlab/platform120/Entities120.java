@@ -79,8 +79,13 @@ public final class Entities120 implements LevelEntityGetter<Entity> {
         synchronized (Entities120.class) {
             now = new ArrayList<>(of(level).entities);
         }
+        // Those in chunks Horizon hasn't loaded wait, as vanilla's do in chunks that don't
+        // tick: else they'd fall through the air an unloaded chunk reads as.
+        long[] chunks = now.stream().mapToLong(e -> net.minecraft.world.level.ChunkPos.asLong(e.blockPosition())).distinct().toArray();
+        Set<Long> loaded = Mirror120.loadedChunks(level, chunks);
         for (Entity entity : now) {
             if (entity.isRemoved()) continue;
+            if (!loaded.contains(net.minecraft.world.level.ChunkPos.asLong(entity.blockPosition()))) continue;
             try {
                 entity.setOldPosAndRot();
                 entity.tickCount++;
@@ -124,6 +129,55 @@ public final class Entities120 implements LevelEntityGetter<Entity> {
             types[i] = BuiltInRegistries.ENTITY_TYPE.getKey(e.getType()).toString();
         }
         return new Object[] {numbers, types};
+    }
+
+    /**
+     * A level's entities as 1.20.1 saves them (Entity.save: with their type's id), in SNBT, to
+     * be kept with Horizon's world; passengers inside their vehicle, as vanilla keeps them.
+     */
+    public static synchronized String[] save(Level level) {
+        List<String> out = new ArrayList<>();
+        for (Entity e : of(level).entities) {
+            if (e.isRemoved() || e.isPassenger()) continue;
+            var tag = new net.minecraft.nbt.CompoundTag();
+            try {
+                if (e.save(tag)) out.add(tag.toString());
+            } catch (RuntimeException | LinkageError x) {
+                Mirror120.log("a " + BuiltInRegistries.ENTITY_TYPE.getKey(e.getType()) + " failed saving: " + x);
+            }
+        }
+        return out.toArray(new String[0]);
+    }
+
+    /**
+     * Entities a save kept, back into a level (EntityType.loadEntityRecursive, as a chunk's
+     * entities load); one whose UUID is already here is left out. How many came back.
+     */
+    public static int load(Level level, String[] saved) {
+        int loaded = 0;
+        for (String snbt : saved) {
+            try {
+                var tag = net.minecraft.nbt.TagParser.parseTag(snbt);
+                Entity top = net.minecraft.world.entity.EntityType.loadEntityRecursive(tag, level, e -> {
+                    synchronized (Entities120.class) {
+                        if (of(level).get(e.getUUID()) != null) return null;
+                    }
+                    return e;
+                });
+                if (top == null) continue;
+                for (Entity e : top.getSelfAndPassengers().toList()) {
+                    if (add(level, e)) loaded++;
+                }
+            } catch (Exception x) {
+                Mirror120.log("a saved entity didn't load: " + x);
+            }
+        }
+        return loaded;
+    }
+
+    /** Every level's entities gone: the world they lived in closed. */
+    public static synchronized void clear() {
+        LEVELS.clear();
     }
 
     @Override

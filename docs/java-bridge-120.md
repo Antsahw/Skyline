@@ -410,8 +410,20 @@ What a blow needed:
 Checked in a game: a moobloom milked with a bucket, then killed with a netherite sword in two
 blows (8 points each), dropping beef.
 
-**Next:** the experience a kill drops (turned away for now, as every non-item entity is),
-saving the mobs with their chunks, natural spawning and `/summon` of their types.
+**6d.4, done: kept with the world.** A kill's experience comes out as Horizon's own orbs
+(an `ExperienceOrb` the mods' code adds is a `spawnXp`, of its value). Each dimension's mods'
+mobs are saved with it, as 1.20.1's `Entity.save` writes them, to
+`dimensions/<ns>/<name>/data/skyline/entities120.json` (beside `raids.dat`); on the dimension's
+first tick they go back into the runtime (`EntityType.loadEntityRecursive`). A dimension's file
+is written only after its mobs came in, so an early save never writes over them; a different
+world opened in the same game takes the last one's away. Mobs in chunks Horizon hasn't loaded
+wait rather than tick (a batched `blockStates` read of each chunk: "" is unloaded), as vanilla's
+do in chunks that don't tick, instead of falling through the air such a chunk reads as.
+
+Checked in a game: a moobloom spawned, the game quit and opened again, and it stood where it
+was with its health.
+
+**Next:** natural spawning (the mods' biome spawn additions), and `/summon` of their types.
 
 ## Phase 7 status: blocks drawn by their mod's code (2026-11-12)
 

@@ -16041,6 +16041,8 @@ impl Game<'_> {
         // Prepare entities while the chunk writer runs, then use one barrier.
         self.save_entities(false)?;
         self.save_raids();
+        #[cfg(feature = "java-mods-120")]
+        self.save_java120_mobs();
         if wait {
             self.save.flush()?;
         }

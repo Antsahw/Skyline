@@ -112,7 +112,7 @@ pub struct SetBlock {
     pub flags: i32,
 }
 
-/// An item the mods' code dropped into the world, for Horizon to spawn.
+/// An item (or experience) the mods' code dropped into the world, for Horizon to spawn.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SpawnItem {
     pub dimension: String,
@@ -124,6 +124,8 @@ pub struct SpawnItem {
     /// reads it with vanilla's own fixes from 1.20.1's data version to its own, so what a mod
     /// put on the stack (an enchantment, a name) arrives with it.
     pub snbt: String,
+    /// Experience instead of an item (an `ExperienceOrb` of this value; `snbt` is then empty).
+    pub experience: u32,
 }
 
 /// A block entity the mods' code changed, as it saved it, for Horizon to keep.
@@ -616,11 +618,30 @@ impl Handler for InWorld<'_> {
                         pos: [float(&args, 1)?, float(&args, 2)?, float(&args, 3)?],
                         motion: [float(&args, 4)?, float(&args, 5)?, float(&args, 6)?],
                         snbt: text(&args, 7)?.to_owned(),
+                        experience: 0,
                     })
                 })();
                 match parsed {
                     Ok(item) => self.spawned.push(item),
                     Err(e) => (self.log)(&format!("[fabric-1.20.1] a spawnItem unread: {e}")),
+                }
+            }
+            "spawnXp" => {
+                let parsed = (|| -> Result<SpawnItem, String> {
+                    Ok(SpawnItem {
+                        dimension: text(&args, 0)?.to_owned(),
+                        pos: [float(&args, 1)?, float(&args, 2)?, float(&args, 3)?],
+                        motion: [0.0; 3],
+                        snbt: String::new(),
+                        experience: match args.get(4) {
+                            Some(Value::I32(v)) => u32::try_from(*v).unwrap_or(0),
+                            other => return Err(format!("value is {other:?}")),
+                        },
+                    })
+                })();
+                match parsed {
+                    Ok(xp) => self.spawned.push(xp),
+                    Err(e) => (self.log)(&format!("[fabric-1.20.1] a spawnXp unread: {e}")),
                 }
             }
             _ => {}
@@ -935,6 +956,73 @@ impl Runtime120 {
             Some(Value::I32(id)) => Ok((*id >= 0).then_some(*id)),
             other => Err(format!("summon: answer 0 is {other:?}")),
         }
+    }
+
+    /// The mods' entities of `dimension` as 1.20.1 saves them (SNBT, each with its type's
+    /// id), for Horizon to keep with the world (`Entities120.save`).
+    pub fn save_entities(
+        &mut self,
+        world: &dyn World120,
+        dimension: &str,
+    ) -> Result<Vec<String>, String> {
+        let mut handler = InWorld {
+            world,
+            set: Vec::new(),
+            block_entities: Vec::new(),
+            spawned: Vec::new(),
+            log: self.log.clone(),
+        };
+        let args = [Value::Str(dimension.to_owned())];
+        match self
+            .call_values("saveEntities", &args, &mut handler)?
+            .into_iter()
+            .next()
+        {
+            Some(Value::Strs(saved)) => Ok(saved),
+            Some(Value::Null) | None => Ok(Vec::new()),
+            other => Err(format!("saveEntities: answer {other:?}")),
+        }
+    }
+
+    /// Entities [`Self::save_entities`] gave, back into `dimension`; how many came back
+    /// (one whose UUID is there already is left out).
+    pub fn load_entities(
+        &mut self,
+        world: &dyn World120,
+        dimension: &str,
+        saved: &[String],
+    ) -> Result<usize, String> {
+        let mut handler = InWorld {
+            world,
+            set: Vec::new(),
+            block_entities: Vec::new(),
+            spawned: Vec::new(),
+            log: self.log.clone(),
+        };
+        let args = [
+            Value::Str(dimension.to_owned()),
+            Value::Strs(saved.to_vec()),
+        ];
+        match self
+            .call_values("loadEntities", &args, &mut handler)?
+            .first()
+        {
+            Some(Value::I32(n)) => Ok(usize::try_from(*n).unwrap_or(0)),
+            other => Err(format!("loadEntities: answer {other:?}")),
+        }
+    }
+
+    /// The world closed: every dimension's mod entities go (the next world brings its own).
+    pub fn clear_entities(&mut self, world: &dyn World120) -> Result<(), String> {
+        let mut handler = InWorld {
+            world,
+            set: Vec::new(),
+            block_entities: Vec::new(),
+            spawned: Vec::new(),
+            log: self.log.clone(),
+        };
+        self.call_values("clearEntities", &[], &mut handler)
+            .map(|_| ())
     }
 
     /// A tick of the mods' own entities in `dimension` (their AI, paths and physics, on

@@ -13,7 +13,8 @@ use horizon_jvm_remote::mirror120::EntityAction;
 use horizon_protocol::packets::configuration::CustomPayload;
 use horizon_protocol::packets::play::Interact;
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 /// Server to game, each tick there are mobs: `{"e": [{"id", "kind", "p", "r", "s", "h", "m"}]}`:
@@ -34,6 +35,16 @@ pub(in crate::game) const IDS: std::ops::Range<i32> = 0x7ffe_0000..0x7fff_0000;
 
 /// The server half: where each mob stood after the last tick, by id (a click's range check).
 static SEEN: Mutex<Option<HashMap<i32, [f64; 3]>>> = Mutex::new(None);
+
+/// The server half: which world's mobs the runtime holds (its folder), and the dimensions of it
+/// whose saved mobs are in already. A dimension's save is written only once it is in, so a
+/// save before that never writes over the mobs it would have loaded.
+static HELD: Mutex<Option<(PathBuf, HashSet<String>)>> = Mutex::new(None);
+
+/// Where a dimension's mobs are kept, beside its other data (`raids.dat`).
+fn kept_at(root: &Path, dimension: &str) -> PathBuf {
+    horizon_client::save::dimension_dir(root, dimension).join("data/skyline/entities120.json")
+}
 
 /// 1.20.1's `ServerGamePacketListenerImpl.MAX_INTERACTION_DISTANCE`: a player further than six
 /// blocks from an entity can't hit or use it.
@@ -110,10 +121,6 @@ impl Game<'_> {
         if self.remote.is_some() {
             return;
         }
-        let idle = *LAST_COUNT.lock().unwrap_or_else(|e| e.into_inner()) == 0;
-        if idle && !self.ticks.is_multiple_of(IDLE_EVERY) {
-            return;
-        }
         let dimension = self.dim.id().to_owned();
         let answer = {
             let Ok(mut guard) = RUNTIME.try_lock() else {
@@ -123,6 +130,11 @@ impl Game<'_> {
                 return;
             };
             let level = Level(self);
+            self.java120_bring_mobs(runtime, &level, &dimension);
+            let idle = *LAST_COUNT.lock().unwrap_or_else(|e| e.into_inner()) == 0;
+            if idle && !self.ticks.is_multiple_of(IDLE_EVERY) {
+                return;
+            }
             runtime
                 .tick_entities(&level, &dimension)
                 .and_then(|ticked| {
@@ -187,6 +199,93 @@ impl Game<'_> {
                     data: data.clone(),
                 }),
             );
+        }
+    }
+
+    /// The server half, before a dimension's first tick: the mobs its save kept go back into
+    /// the runtime (and those of another world, opened before in this game, go).
+    fn java120_bring_mobs(
+        &self,
+        runtime: &mut horizon_jvm_remote::boot120::Runtime120,
+        level: &Level<'_, '_>,
+        dimension: &str,
+    ) {
+        let mut held = HELD.lock().unwrap_or_else(|e| e.into_inner());
+        if held
+            .as_ref()
+            .is_some_and(|(root, _)| root != &self.world_root)
+        {
+            if let Err(e) = runtime.clear_entities(level) {
+                log::warn!("1.20.1 mods: the last world's mobs didn't go: {e}");
+            }
+            *LAST_COUNT.lock().unwrap_or_else(|e| e.into_inner()) = 0;
+            *held = None;
+        }
+        let (_, loaded) = held.get_or_insert_with(|| (self.world_root.clone(), HashSet::new()));
+        if !loaded.insert(dimension.to_owned()) {
+            return;
+        }
+        let path = kept_at(&self.world_root, dimension);
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            return;
+        };
+        let saved: Vec<String> = match serde_json::from_str(&text) {
+            Ok(saved) => saved,
+            Err(e) => {
+                log::warn!("1.20.1 mods: {} unread: {e}", path.display());
+                return;
+            }
+        };
+        match runtime.load_entities(level, dimension, &saved) {
+            Ok(n) => log::info!("1.20.1 mods: {n} of their mobs back in {dimension}"),
+            Err(e) => log::warn!("1.20.1 mods: their mobs in {dimension} didn't load: {e}"),
+        }
+    }
+
+    /// The server half, as a dimension saves (`save_level`): its mobs as the mods' code saves
+    /// them, beside its other data. Not before they were brought in from there.
+    pub(in crate::game) fn save_java120_mobs(&mut self) {
+        if self.remote.is_some() {
+            return;
+        }
+        let dimension = self.dim.id().to_owned();
+        let in_already = HELD
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .is_some_and(|(root, loaded)| root == &self.world_root && loaded.contains(&dimension));
+        if !in_already {
+            return;
+        }
+        let saved = {
+            let mut guard = RUNTIME.lock().unwrap_or_else(|e| e.into_inner());
+            let Some(runtime) = guard.as_mut() else {
+                return;
+            };
+            runtime.save_entities(&Level(self), &dimension)
+        };
+        let saved = match saved {
+            Ok(saved) => saved,
+            Err(e) => {
+                log::warn!("1.20.1 mods: their mobs in {dimension} weren't saved: {e}");
+                return;
+            }
+        };
+        let path = kept_at(&self.world_root, &dimension);
+        let written = (|| -> std::io::Result<()> {
+            if saved.is_empty() && !path.exists() {
+                return Ok(());
+            }
+            if let Some(dir) = path.parent() {
+                std::fs::create_dir_all(dir)?;
+            }
+            // Whole or not at all: a save cut short leaves the last one.
+            let part = path.with_extension("json.part");
+            std::fs::write(&part, serde_json::to_vec(&saved).unwrap_or_default())?;
+            std::fs::rename(&part, &path)
+        })();
+        if let Err(e) = written {
+            log::warn!("1.20.1 mods: {} not written: {e}", path.display());
         }
     }
 
