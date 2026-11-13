@@ -1220,6 +1220,36 @@ impl Runtime120 {
         }
     }
 
+    /// What the mods' block entities at `positions` (x, y, z each) look like, as their own
+    /// block entity renderers draw them (`Render120.renderBlockEntities`): JSON
+    /// `{"x,y,z": [{"tex", "o", "v"}...]}`, vertices as [`Self::render_entities`]' but relative
+    /// to the block's corner; those without a renderer are left out.
+    pub fn render_block_entities(
+        &mut self,
+        world: &dyn World120,
+        dimension: &str,
+        positions: &[i32],
+    ) -> Result<String, String> {
+        let mut handler = InWorld {
+            world,
+            set: Vec::new(),
+            block_entities: Vec::new(),
+            spawned: Vec::new(),
+            log: self.log.clone(),
+        };
+        let args = [
+            Value::Str(dimension.to_owned()),
+            Value::I32s(positions.to_vec()),
+        ];
+        match self
+            .call_values("renderBlockEntities", &args, &mut handler)?
+            .first()
+        {
+            Some(Value::Str(json)) => Ok(json.clone()),
+            other => Err(format!("renderBlockEntities: answer 0 is {other:?}")),
+        }
+    }
+
     /// The mods' placed features (of their own namespaces), which [`Self::place_feature`]
     /// places where Horizon's generator can't.
     pub fn mod_features(&mut self) -> Result<Vec<String>, String> {

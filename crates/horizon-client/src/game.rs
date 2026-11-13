@@ -7993,6 +7993,8 @@ impl Game<'_> {
         #[cfg(feature = "java-mods-120")]
         self.tick_java120_mobs();
         #[cfg(feature = "java-mods-120")]
+        self.tick_java120_block_renders();
+        #[cfg(feature = "java-mods-120")]
         self.tick_java120_drawn();
         self.tick_world(running)
     }
@@ -11429,6 +11431,8 @@ impl Game<'_> {
         self.java_entity_geometry(camera, alpha, &mut out);
         #[cfg(feature = "java-mods-120")]
         self.java120_mob_geometry(camera, alpha, &mut out);
+        #[cfg(feature = "java-mods-120")]
+        self.java120_block_render_geometry(camera, &mut out);
         self.mark_motion(out.len(), 0);
         laps.lap("eg_mobs");
         // In first person only a shader pack's shadow pass draws the player.

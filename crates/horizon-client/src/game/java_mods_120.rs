@@ -820,6 +820,7 @@ mod tests {
     }
 }
 
+pub(in crate::game) mod block_renders;
 mod breaking;
 mod drawn;
 pub(in crate::game) mod mobs;

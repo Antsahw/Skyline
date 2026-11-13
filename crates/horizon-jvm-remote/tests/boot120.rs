@@ -1087,6 +1087,57 @@ fn right_clicking_a_block_runs_its_1_20_1_code_on_horizons_blocks() {
             "a stove takes no carrots from a hopper: {stove_storage:?}"
         );
 
+        // Phase 7b: a block entity drawn by its mod's renderer. A carrot put on a cutting board
+        // (its own `use`) is drawn by the board's renderer, through the client's item models.
+        let board = OneBlock(
+            "farmersdelight:cutting_board[facing=north,waterlogged=false]".into(),
+            [0, 64, 0],
+        );
+        let empty = WithEntity {
+            block: OneBlock(board.0.clone(), board.1),
+            entity: "{id:\"farmersdelight:cutting_board\",x:0,y:64,z:0}".into(),
+        };
+        let mut carrot = flint_and_steel_on_top();
+        carrot.item = "minecraft:carrot".into();
+        carrot.damage = 0;
+        let used = runtime
+            .use_block(&empty, &carrot)
+            .expect("the cutting board");
+        let on_board = used
+            .block_entities
+            .iter()
+            .find(|e| e.pos == [0, 64, 0])
+            .unwrap_or_else(|| panic!("the board keeps the carrot: {used:?}"));
+        let with_carrot = WithEntity {
+            block: board,
+            entity: on_board.snbt.clone(),
+        };
+        let drawn: serde_json::Value = serde_json::from_str(
+            &runtime
+                .render_block_entities(&with_carrot, "minecraft:overworld", &[0, 64, 0])
+                .expect("the board draws"),
+        )
+        .unwrap();
+        let meshes = drawn["0,64,0"].as_array().expect("the board is drawn");
+        let textures: Vec<&str> = meshes.iter().filter_map(|m| m["tex"].as_str()).collect();
+        eprintln!("the board draws {textures:?}");
+        assert!(
+            textures.iter().any(|t| t.contains("carrot")),
+            "the carrot, with its own texture: {textures:?}"
+        );
+        // And an empty board (another one) draws nothing of its own.
+        let bare = WithEntity {
+            block: OneBlock(with_carrot.block.0.clone(), [8, 64, 8]),
+            entity: "{id:\"farmersdelight:cutting_board\",x:8,y:64,z:8}".into(),
+        };
+        let nothing: serde_json::Value = serde_json::from_str(
+            &runtime
+                .render_block_entities(&bare, "minecraft:overworld", &[8, 64, 8])
+                .expect("the board draws"),
+        )
+        .unwrap();
+        assert!(nothing.get("8,64,8").is_none(), "{nothing}");
+
         // Phase 4: a cooking pot opened with an empty hand opens its menu. Vanilla's own
         // openMenu runs on the mirror player -- the menu made, its slots listened to -- and only
         // the packet telling a client to show it goes nowhere; the click reports the menu

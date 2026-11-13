@@ -34,6 +34,11 @@ final class Render120 {
     private Render120() {}
 
     private static Map<EntityType<?>, EntityRenderer<?>> renderers;
+    /** The mods' block entity renderers, by their type. */
+    private static Map<net.minecraft.world.level.block.entity.BlockEntityType<?>,
+            net.minecraft.client.renderer.blockentity.BlockEntityRenderer<?>> blockRenderers;
+    private static net.minecraft.client.renderer.blockentity.BlockEntityRenderDispatcher blockDispatcher;
+    private static net.minecraft.client.Camera camera;
     private static final Set<String> FAILED = new HashSet<>();
     /** A texture's name in a render type's description: `ns:textures/....png`. */
     private static final Pattern TEXTURE = Pattern.compile("([a-z0-9_.-]+:[a-z0-9_./-]+\\.png)");
@@ -69,6 +74,75 @@ final class Render120 {
             }
         }
         Mirror120.log(renderers.size() + " mod entity renderer(s) made");
+
+        // Block entity renderers (phase 7b): a cutting board's item, a skillet's food. They draw
+        // items through an ItemRenderer over the client's baked item models (Models120).
+        var modelManager = Allocate.make(net.minecraft.client.resources.model.ModelManager.class);
+        var topLevel = Models120.topLevel();
+        ((dev.horizonlab.platform120.mixin.ModelManagerAccess) modelManager).horizon$setBakedRegistry(topLevel);
+        ((dev.horizonlab.platform120.mixin.ModelManagerAccess) modelManager).horizon$setMissingModel(
+                topLevel.get(net.minecraft.client.resources.model.ModelBakery.MISSING_MODEL_LOCATION));
+        var itemColors = net.minecraft.client.color.item.ItemColors.createDefault(client.getBlockColors());
+        var holder = new net.minecraft.client.renderer.entity.ItemRenderer[1];
+        blockDispatcher = new net.minecraft.client.renderer.blockentity.BlockEntityRenderDispatcher(
+                client.font, models, () -> blocks, () -> holder[0], () -> dispatcher);
+        var withoutLevel = new net.minecraft.client.renderer.BlockEntityWithoutLevelRenderer(blockDispatcher, models);
+        holder[0] = new net.minecraft.client.renderer.entity.ItemRenderer(client, null, modelManager, itemColors, withoutLevel);
+        holder[0].getItemModelShaper().rebuildCache();
+        // Renderers ask the client for it as they draw (Farmer's Delight's cutting board).
+        if (client.getItemRenderer() == null) {
+            ((dev.horizonlab.platform120.mixin.MinecraftAccess) client).horizon$setItemRenderer(holder[0]);
+        }
+        camera = dispatcher.camera;
+        var blockContext = new net.minecraft.client.renderer.blockentity.BlockEntityRendererProvider.Context(
+                blockDispatcher, blocks, holder[0], dispatcher, models, client.font);
+        blockRenderers = new HashMap<>();
+        for (var entry : dev.horizonlab.platform120.mixin.BlockEntityRenderersAccess.horizon$providers().entrySet()) {
+            var id = BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(entry.getKey());
+            if (id == null || "minecraft".equals(id.getNamespace())) continue;
+            try {
+                blockRenderers.put(entry.getKey(), entry.getValue().create(blockContext));
+            } catch (RuntimeException | LinkageError e) {
+                Mirror120.log("the renderer of " + id + " can't be made: " + e);
+            }
+        }
+        Mirror120.log(blockRenderers.size() + " mod block entity renderer(s) made");
+    }
+
+    /**
+     * What the mods' block entities at `positions` (x, y, z each) look like, as their own
+     * renderers draw them: JSON {"x,y,z": [{"tex", "o", "v"}...]}, positions relative to the
+     * block's corner; those with no renderer (or nothing drawn) left out.
+     */
+    static String renderBlockEntities(Level level, int[] positions) {
+        setUp();
+        JsonObject out = new JsonObject();
+        if (blockRenderers.isEmpty()) return out.toString();
+        blockDispatcher.prepare(level, camera, null);
+        for (int i = 0; i + 2 < positions.length; i += 3) {
+            var pos = new net.minecraft.core.BlockPos(positions[i], positions[i + 1], positions[i + 2]);
+            var entity = level.getBlockEntity(pos);
+            if (entity == null) continue;
+            @SuppressWarnings("unchecked")
+            var renderer = (net.minecraft.client.renderer.blockentity.BlockEntityRenderer<net.minecraft.world.level.block.entity.BlockEntity>)
+                    blockRenderers.get(entity.getType());
+            if (renderer == null) continue;
+            Capture capture = new Capture();
+            try {
+                renderer.render(entity, 1.0f, new PoseStack(), capture, 0xF000F0,
+                        net.minecraft.client.renderer.texture.OverlayTexture.NO_OVERLAY);
+            } catch (RuntimeException | LinkageError e) {
+                String type = String.valueOf(BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(entity.getType()));
+                if (FAILED.add(type)) {
+                    Mirror120.log("a " + type + " didn't draw: " + e);
+                    for (StackTraceElement at : e.getStackTrace()) Mirror120.log("    at " + at);
+                }
+                continue;
+            }
+            JsonArray meshes = capture.meshes();
+            if (!meshes.isEmpty()) out.add(pos.getX() + "," + pos.getY() + "," + pos.getZ(), meshes);
+        }
+        return out.toString();
     }
 
     /**

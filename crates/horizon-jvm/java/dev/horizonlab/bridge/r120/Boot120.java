@@ -117,6 +117,7 @@ public final class Boot120 implements RemoteRuntime {
             case "summon":
             case "tickEntities":
             case "renderEntities":
+            case "renderBlockEntities":
             case "entityAction":
             case "saveEntities":
             case "loadEntities":

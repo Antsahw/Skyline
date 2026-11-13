@@ -26,4 +26,11 @@ public interface ModelManagerAccess {
             ResourceManager resources, Executor executor) {
         throw new AssertionError();
     }
+
+    /** A ModelManager made without its constructor gets its models here (Render120's items). */
+    @org.spongepowered.asm.mixin.gen.Accessor("bakedRegistry")
+    void horizon$setBakedRegistry(Map<ResourceLocation, net.minecraft.client.resources.model.BakedModel> models);
+
+    @org.spongepowered.asm.mixin.gen.Accessor("missingModel")
+    void horizon$setMissingModel(net.minecraft.client.resources.model.BakedModel model);
 }

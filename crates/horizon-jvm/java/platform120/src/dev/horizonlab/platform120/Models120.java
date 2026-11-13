@@ -49,6 +49,14 @@ final class Models120 {
     private static List<BlockState> drawnByCode;
 
     /** Every state's baked client model (vanilla's and the mods'), baking them first. */
+    private static Map<ResourceLocation, BakedModel> topLevel;
+
+    /** Every model baked, by location: the items' too (`ns:item#inventory`). */
+    static synchronized Map<ResourceLocation, BakedModel> topLevel() {
+        bake();
+        return topLevel;
+    }
+
     static synchronized Map<BlockState, BakedModel> baked() {
         bake();
         return models;
@@ -88,6 +96,7 @@ final class Models120 {
             plugins.remove();
         }
         Map<ResourceLocation, BakedModel> baked = bakery.getBakedTopLevelModels();
+        topLevel = baked;
         models = new IdentityHashMap<>();
         drawnByCode = new ArrayList<>();
         for (var block : BuiltInRegistries.BLOCK) {

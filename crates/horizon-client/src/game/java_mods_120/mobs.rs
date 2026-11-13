@@ -102,7 +102,7 @@ struct Mob {
 }
 
 #[derive(Clone)]
-struct Mesh {
+pub(super) struct Mesh {
     /// Its texture's key in the GUI atlas (`friendsandfoes:entity/moobloom/moobloom`).
     sprite: String,
     overlay: u32,
@@ -152,6 +152,59 @@ fn overlay_code(packed: u32) -> u32 {
         0
     } else {
         horizon_client::overlay::WHITE + u.min(15)
+    }
+}
+
+/// Meshes as the runtime writes them (`[{"tex", "o", "v"}...]`).
+pub(super) fn parse_meshes(json: &Value) -> Vec<Mesh> {
+    json.as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|m| {
+            let raw = m["v"].as_array()?;
+            Some(Mesh {
+                sprite: sprite_key(m["tex"].as_str()?),
+                overlay: m["o"].as_u64().unwrap_or(0) as u32,
+                vertices: raw
+                    .chunks_exact(9)
+                    .map(|c| std::array::from_fn(|i| c[i].as_f64().unwrap_or(0.0) as f32))
+                    .collect(),
+            })
+        })
+        .collect()
+}
+
+/// `meshes` drawn with their origin at `at` (relative to the camera), lit by `light` (Horizon's
+/// sky << 4 | block), with the GUI atlas' sprites.
+pub(super) fn push_meshes(
+    atlas: &horizon_client::hud::HudAtlas,
+    meshes: &[Mesh],
+    at: glam::Vec3,
+    light: u8,
+    out: &mut Vec<Vertex>,
+) {
+    // The lightmap's (block, sky): Horizon packs them sky << 4 | block.
+    let packed = (u32::from(light & 15) * 16) | ((u32::from(light >> 4) * 16) << 8);
+    let base = glam::Mat4::from_translation(at);
+    for m in meshes {
+        let Some(r) = atlas.sprites.get(&m.sprite) else {
+            continue;
+        };
+        let overlay = overlay_code(m.overlay);
+        for v in &m.vertices {
+            let n = [v[5], v[6], v[7]].map(|c| (c.clamp(-1.0, 1.0) * 127.0) as i8);
+            out.push(Vertex {
+                pos: base
+                    .transform_point3(glam::Vec3::new(v[0], v[1], v[2]))
+                    .to_array(),
+                uv: [r.u0 + (r.u1 - r.u0) * v[3], r.v0 + (r.v1 - r.v0) * v[4]],
+                layer: overlay,
+                color: abgr(v[8] as u32),
+                light: packed,
+                normal: [n[0], n[1], n[2], -127],
+                glint_uv: [0.0, 0.0],
+            });
+        }
     }
 }
 
@@ -519,22 +572,7 @@ impl Game<'_> {
         for e in json["e"].as_array().into_iter().flatten() {
             let Some(id) = e["id"].as_i64() else { continue };
             let f = |v: &Value, i: usize| v.get(i).and_then(Value::as_f64).unwrap_or(0.0);
-            let meshes = e["m"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter_map(|m| {
-                    let raw = m["v"].as_array()?;
-                    Some(Mesh {
-                        sprite: sprite_key(m["tex"].as_str()?),
-                        overlay: m["o"].as_u64().unwrap_or(0) as u32,
-                        vertices: raw
-                            .chunks_exact(9)
-                            .map(|c| std::array::from_fn(|i| c[i].as_f64().unwrap_or(0.0) as f32))
-                            .collect(),
-                    })
-                })
-                .collect();
+            let meshes = parse_meshes(&e["m"]);
             now.insert(
                 id as i32,
                 Mob {
@@ -579,28 +617,7 @@ impl Game<'_> {
                 at[2].floor() as i32,
             );
             // The lightmap's (block, sky): Horizon packs them sky << 4 | block.
-            let packed = (u32::from(light & 15) * 16) | ((u32::from(light >> 4) * 16) << 8);
-            let base = glam::Mat4::from_translation(d.as_vec3());
-            for m in &mob.meshes {
-                let Some(r) = atlas.sprites.get(&m.sprite) else {
-                    continue;
-                };
-                let overlay = overlay_code(m.overlay);
-                for v in &m.vertices {
-                    let n = [v[5], v[6], v[7]].map(|c| (c.clamp(-1.0, 1.0) * 127.0) as i8);
-                    out.push(Vertex {
-                        pos: base
-                            .transform_point3(glam::Vec3::new(v[0], v[1], v[2]))
-                            .to_array(),
-                        uv: [r.u0 + (r.u1 - r.u0) * v[3], r.v0 + (r.v1 - r.v0) * v[4]],
-                        layer: overlay,
-                        color: abgr(v[8] as u32),
-                        light: packed,
-                        normal: [n[0], n[1], n[2], -127],
-                        glint_uv: [0.0, 0.0],
-                    });
-                }
-            }
+            push_meshes(atlas, &mob.meshes, d.as_vec3(), light, out);
         }
     }
 

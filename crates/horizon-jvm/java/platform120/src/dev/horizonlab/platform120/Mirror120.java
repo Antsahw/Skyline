@@ -438,7 +438,7 @@ public final class Mirror120 {
     }
 
     /** A line for Horizon's log. */
-    static void log(String line) {
+    public static void log(String line) {
         var e = event;
         if (e != null) e.accept("log", new Object[] {line});
         else System.out.println("[horizon-platform120] " + line);
@@ -517,6 +517,21 @@ public final class Mirror120 {
                 new Object[] {dimension(level), pos.getX(), pos.getY(), pos.getZ()});
         String snbt = answer.length > 0 && answer[0] instanceof String s ? s : null;
         BlockEntity entity = snbt == null ? null : load(level, pos, snbt);
+        if (entity == null && snbt == null) {
+            // A mod's block that has one, where Horizon has none (placed by a command, or by a
+            // structure): a chunk makes it with the block (LevelChunk.setBlockState), so it is
+            // made here, and goes to Horizon with what the call changed. Vanilla's blocks'
+            // are Horizon's to make.
+            BlockState state = blockState(level, pos);
+            if (state.getBlock() instanceof net.minecraft.world.level.block.EntityBlock block
+                    && !"minecraft".equals(BuiltInRegistries.BLOCK.getKey(state.getBlock()).getNamespace())) {
+                BlockEntity fresh = block.newBlockEntity(pos.immutable(), state);
+                if (fresh != null) {
+                    addBlockEntity(level, fresh);
+                    return fresh;
+                }
+            }
+        }
         if (entity == null) {
             NO_ENTITY.computeIfAbsent(level, l -> new java.util.HashSet<>()).add(key);
             return null;
@@ -1060,6 +1075,16 @@ public final class Mirror120 {
 
     /** HORIZON_120_TRACE: why each of the mods' spawns did or didn't happen. */
     private static final boolean SPAWN_TRACE = System.getenv("HORIZON_120_TRACE") != null;
+
+    /** What the mods' block entities at `positions` look like (Render120.renderBlockEntities). */
+    public static Object[] renderBlockEntities(String dimension, int[] positions) {
+        begin();
+        try {
+            return new Object[] {Render120.renderBlockEntities(level(dimension), positions)};
+        } finally {
+            finish();
+        }
+    }
 
     /** Each level's players this tick (tickEntities), as ServerLevel.players gives them. */
     private static final Map<Level, List<ServerPlayer>> PRESENT = new HashMap<>();

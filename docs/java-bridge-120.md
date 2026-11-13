@@ -356,7 +356,33 @@ clicks pass until then). A click on a block of a 1.20.1 mod's namespace, or with
 their items, goes to it at `useItemOn`'s head (`java120_use_block`, beside the 26.3 bridge's
 hook in `lan_actions.rs`); what it set and what it did to the held stack land in Horizon.
 
-## Phase 6d status: the mods' own mobs (2026-11-12, in progress)
+## Phase 7b status: block entity renderers (2026-11-13)
+
+What a mod draws on its block in code, through a `BlockEntityRenderer` (Farmer's Delight's
+cutting board showing its item, a skillet its food), is drawn by that renderer. `Render120`
+makes the mods' renderers from `BlockEntityRenderers`' providers with a context as the client's
+(an `ItemRenderer` over the client's baked item models: a `ModelManager` given `Models120`'s
+top-level bake; the client is handed it, and renderers that ask it, as FD's does, get it). The
+server half (`game/java_mods_120/block_renders.rs`) asks the runtime, every other tick, to draw
+the mods' block entities within 48 blocks of a player (`renderBlockEntities`: the meshes of each,
+relative to the block's corner, as the mobs' are) and sends them on
+`horizon:java120_block_renders` when they changed (and every five seconds for a player who joined);
+the window draws them on their blocks with the mobs' mesh code, lit by the light there.
+
+What it needed of the runtime:
+- A mod's block placed without its block entity (`/setblock`, a structure) gets one, as a chunk
+  makes it with the block, sent back to Horizon with the rest of the call.
+- Work handed to the client or server "to do on its thread" while other work runs waits for it,
+  bounded: Porting Lib's tool-tier sync answered itself between the two halves (the server sends
+  them, the client half asks it to send them again) and recursed until the stack ran out.
+
+Checked in a game: a carrot put on a cutting board placed by `/setblock` lies on it, drawn by the
+board's own renderer; the runtime test draws it from the board's NBT, with the carrot's texture.
+
+**Next:** LibMultipart's dynamic part renderers, then the phase-6 rest (structures with Java
+pieces, the mods' biomes and dimensions) and the unverified rows of the support page.
+
+## Phase 6d status: the mods' own mobs (2026-11-13, done)
 
 Tested with Friends & Foes 5.0.4 (its moobloom), which uses plain models, no GeckoLib.
 
@@ -1144,10 +1170,10 @@ NeoForge could run beside Fabric 26.3 rather than in its place.
    mods' HUD overlays (`HudRenderCallback`).
 6. **Entities and worldgen.** 6a done: the mods' Fabric biome modifications reach Horizon's
    generator as biome modifiers. 6b done: a mod's own feature types run in the runtime on the
-   chunks being decorated. 6c done: data-driven structures (above). Next: structures with
-   their own Java pieces, the mods' biomes, and their mobs.
+   chunks being decorated. 6c done: data-driven structures (above). 6d done: the mods' mobs
+   (above). Next: structures with their own Java pieces and the mods' biomes.
 7. **In-world rendering.** Blocks drawn by their code done (above: Wired Redstone's wires and
-   cables). Next: block entity renderers and LibMultipart's dynamic part renderers, then a GL
-   recorder if needed.
+   cables); block entity renderers done (7b: Farmer's Delight's cutting board). Next:
+   LibMultipart's dynamic part renderers, then a GL recorder if needed.
 8. **Tracker.** Started with phase 1b (boots: 149 of the top 150). It grows into "works in a
    world" as the phases land: works / partial / broken / needs Java 21 / needs an older loader.

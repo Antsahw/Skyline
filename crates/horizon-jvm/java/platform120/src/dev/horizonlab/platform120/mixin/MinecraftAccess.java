@@ -24,4 +24,8 @@ public interface MinecraftAccess {
     @Mutable
     @Accessor("blockRenderer")
     void horizon$setBlockRenderer(net.minecraft.client.renderer.block.BlockRenderDispatcher blocks);
+
+    @Mutable
+    @Accessor("itemRenderer")
+    void horizon$setItemRenderer(net.minecraft.client.renderer.entity.ItemRenderer items);
 }

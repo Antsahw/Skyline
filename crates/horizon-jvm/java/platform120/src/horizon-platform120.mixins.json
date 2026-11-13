@@ -41,6 +41,7 @@
     "GraphLibClientMixin",
     "InputConstantsMixin",
     "EntityRenderersAccess",
+    "BlockEntityRenderersAccess",
     "KeyMappingAccess",
     "SpriteContentsMixin",
     "LocalPlayerAccess",
