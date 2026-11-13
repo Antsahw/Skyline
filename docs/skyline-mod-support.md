@@ -42,7 +42,7 @@ not a working machine, and almost every content mod has at least one screen.
 | Fabric API events (block break, player tick, server start…) | **partial** | phase 5a/5b: block breaks (a mod's block broken by its own code, break events on every block), server start and level load, server and level ticks, players joining and leaving, item use, the client tick (phase 5e) |
 | Items moving between mod blocks and Horizon's (hoppers, pipes) | **partial** | phase 3e: Horizon's hoppers and droppers feed and empty mods' blocks (Transfer API), checked in a real game; mods' own pipes into Horizon's containers unverified |
 | Energy (Team Reborn Energy) and fluids | **not yet** | phase 3 |
-| Mod mobs and their AI | **partial** | phase 6d: a mod's mob lives and ticks in the runtime (its AI, physics on Horizon's blocks, fall damage; Friends & Foes' moobloom), drawn by its own renderer (checked in a game). Not yet fought, saved or spawned naturally |
+| Mod mobs and their AI | **partial** | phase 6d: a mod's mob lives and ticks in the runtime (its AI, physics on Horizon's blocks, fall damage; Friends & Foes' moobloom), drawn by its own renderer, hit and used by players with the mod's code (milked, killed, its loot dropped; checked in a game). Not yet saved or spawned naturally, and a kill's experience is lost |
 | Worldgen: ores, biomes, structures | **partial** | phase 6a/6b: the features mods add to vanilla's biomes through Fabric's biome API generate in new chunks, vanilla's types in Horizon's generator and a mod's own types by the mod's code in the runtime (FD's wild crops checked in a real world); data-driven structures generate (phase 6c, Towns and Towers checked in a real world); structures with Java pieces and the mods' biomes not yet |
 | Mod dimensions | **not yet** | phase 6 |
 | Keybinds and HUD overlays (minimaps, tooltips, info bars) | **partial** | phase 5e: mods' key bindings reach them (pressed in Horizon, clicked in 1.20.1's client tick); HUD overlays not yet |
@@ -73,7 +73,7 @@ A 1.20.1 mod is **fully supported** when all of this is true of it:
 5. Its screens open, draw, and respond to clicks and keys. *(phase 4: done, checked in a real game)*
 6. Its messages reach the player and back. *(phase 5c: done)*
 7. Its items and fluids move through other mods' and Horizon's containers. *(phase 3: items through Horizon's hoppers done; fluids, energy and mods' pipes next)*
-8. Its mobs spawn, move, fight and are fought. *(phase 6d: they live, move and are drawn by their own renderers; fighting them next)*
+8. Its mobs spawn, move, fight and are fought. *(phase 6d: they live, move, are drawn by their own renderers and are fought and used; saving and natural spawning next)*
 9. Its worldgen appears in new chunks. *(features: 6a/6b, data-driven structures: 6c, done; Java-built structures and biomes next)*
 10. Its client bits work: keys, HUD, config. *(keys: phase 5e, done; HUD and config next)*
 11. None of the above costs more than a few frames a second. *(measured per phase)*

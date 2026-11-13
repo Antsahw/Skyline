@@ -14,6 +14,7 @@
     "DedicatedServerSettingsAccess",
     "LevelStorageAccessAccess",
     "PlayerAccess",
+    "LivingEntityAccess",
     "ServerGamePacketListenerAccess",
     "ServerPlayNetworkingMixin",
     "PlayerLookupMixin",

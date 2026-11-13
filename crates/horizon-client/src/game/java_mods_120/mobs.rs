@@ -4,10 +4,14 @@
 //! each player those in its dimension on [`CHANNEL`]. The window draws the quads where the mob
 //! is, moving between the last two ticks as vanilla's renderer does.
 
-use super::super::Game;
-use super::{Level, RUNTIME, tick_failed_once};
+use super::super::{Game, lan::LanHost};
+use super::breaking::stack_to_120;
+use super::{Level, RUNTIME, tick_failed_once, wait_for_runtime};
 use horizon_client::mesher::Vertex;
+use horizon_core::geometry::{Aabb, Vec3};
+use horizon_jvm_remote::mirror120::EntityAction;
 use horizon_protocol::packets::configuration::CustomPayload;
+use horizon_protocol::packets::play::Interact;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -24,9 +28,22 @@ const IDLE_EVERY: u64 = 20;
 /// The server half: how many mobs the last tick had.
 static LAST_COUNT: Mutex<usize> = Mutex::new(0);
 
+/// The mods' entities' ids (`Entities120.FIRST_ID` and up): Horizon's own are below, the 26.3
+/// bridge's (`java_entities::FIRST_ID`) above.
+pub(in crate::game) const IDS: std::ops::Range<i32> = 0x7ffe_0000..0x7fff_0000;
+
+/// The server half: where each mob stood after the last tick, by id (a click's range check).
+static SEEN: Mutex<Option<HashMap<i32, [f64; 3]>>> = Mutex::new(None);
+
+/// 1.20.1's `ServerGamePacketListenerImpl.MAX_INTERACTION_DISTANCE`: a player further than six
+/// blocks from an entity can't hit or use it.
+const REACH_SQUARED: f64 = 36.0;
+
 /// One mob as the window has it.
 #[derive(Clone)]
 struct Mob {
+    kind: String,
+    health: Option<f64>,
     pos: [f64; 3],
     size: [f32; 2],
     meshes: Vec<Mesh>,
@@ -134,6 +151,8 @@ impl Game<'_> {
             &ticked.block_entities,
             &ticked.spawned,
         );
+        *SEEN.lock().unwrap_or_else(|e| e.into_inner()) =
+            Some(ticked.entities.iter().map(|e| (e.id, e.pos)).collect());
         if ticked.entities.is_empty() && was == 0 {
             return;
         }
@@ -199,6 +218,8 @@ impl Game<'_> {
             now.insert(
                 id as i32,
                 Mob {
+                    kind: e["kind"].as_str().unwrap_or_default().to_owned(),
+                    health: e["h"].as_f64(),
                     pos: [f(&e["p"], 0), f(&e["p"], 1), f(&e["p"], 2)],
                     size: [f(&e["s"], 0) as f32, f(&e["s"], 1) as f32],
                     meshes,
@@ -260,5 +281,152 @@ impl Game<'_> {
                 }
             }
         }
+    }
+
+    /// The window: its mobs for the agent's entity list (id, type, position, health).
+    pub(in crate::game) fn java120_mob_list(&self) -> Vec<(i32, String, [f64; 3], Option<f64>)> {
+        let window = WINDOW.lock().unwrap_or_else(|e| e.into_inner());
+        window.as_ref().map_or_else(Vec::new, |w| {
+            w.now
+                .iter()
+                .map(|(&id, m)| (id, m.kind.clone(), m.pos, m.health))
+                .collect()
+        })
+    }
+
+    /// The window: the mods' mob the crosshair is on, nearest first, within reach, and how far
+    /// along the look it is (as `ProjectileUtil.getEntityHitResult` picks).
+    pub(in crate::game) fn java120_mob_hit(&self) -> Option<(i32, f64)> {
+        let eye = self.eye_position()?;
+        let dir = super::super::view_vector(self.yaw, self.pitch);
+        let reach: f64 = if self.creative { 5.0 } else { 3.0 };
+        let window = WINDOW.lock().unwrap_or_else(|e| e.into_inner());
+        window
+            .as_ref()?
+            .now
+            .iter()
+            .filter_map(|(&id, mob)| {
+                let half = f64::from(mob.size[0]) / 2.0;
+                let [x, y, z] = mob.pos;
+                let bounds = Aabb::new(
+                    Vec3::new(x - half, y, z - half),
+                    Vec3::new(x + half, y + f64::from(mob.size[1]), z + half),
+                );
+                Some((id, super::super::ray_box(eye, dir, reach, bounds)?))
+            })
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+    }
+
+    /// The window: where on mob `id` the crosshair is, relative to it (the use's location).
+    pub(in crate::game) fn java120_mob_location(&self, id: i32, distance: f64) -> [f64; 3] {
+        let window = WINDOW.lock().unwrap_or_else(|e| e.into_inner());
+        let (Some(eye), Some(mob)) = (
+            self.eye_position(),
+            window.as_ref().and_then(|w| w.now.get(&id)),
+        ) else {
+            return [0.0; 3];
+        };
+        let dir = super::super::view_vector(self.yaw, self.pitch);
+        std::array::from_fn(|i| eye[i] + dir[i] * distance - mob.pos[i])
+    }
+
+    /// The server half: a connection's player attacks (`used` None) or uses one of the mods'
+    /// entities. False when `id` isn't theirs, for Horizon to go on; else it was handled here,
+    /// as 1.20.1's handleInteract does: nothing for a spectator or from over six blocks away,
+    /// else the mods' code runs it (`Runtime120::entity_action`).
+    pub(in crate::game) fn java120_entity_action(
+        &mut self,
+        host: &mut LanHost,
+        conn: u32,
+        id: i32,
+        used: Option<&Interact>,
+    ) -> bool {
+        if !IDS.contains(&id) {
+            return false;
+        }
+        let Some(guest) = host.hub.guest(conn) else {
+            return true;
+        };
+        if guest.spectator() {
+            return true;
+        }
+        let feet = guest.position;
+        let near = SEEN
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .and_then(|seen| seen.get(&id).copied())
+            .is_some_and(|at| {
+                (0..3)
+                    .map(|i| (at[i] - feet[i]) * (at[i] - feet[i]))
+                    .sum::<f64>()
+                    < REACH_SQUARED
+            });
+        if !near {
+            return true;
+        }
+        let swung = self
+            .as_guest(host, conn, |g| g.java120_act_on(id, used))
+            .flatten();
+        if used.is_some() {
+            self.lan_swing_back(host, conn, swung);
+        }
+        true
+    }
+
+    /// The player acting now hits or uses mod entity `id` with what's in that hand; whether
+    /// the arm swings (None when it couldn't be asked).
+    fn java120_act_on(&mut self, id: i32, used: Option<&Interact>) -> Option<bool> {
+        let off_hand = used.is_some_and(|p| p.hand == 1);
+        let held = if off_hand {
+            self.offhand.as_ref()
+        } else {
+            self.inventory.get(self.selected).and_then(Option::as_ref)
+        };
+        let action = EntityAction {
+            uuid: self.java120_actor(),
+            name: self.acting_player_name().to_owned(),
+            dimension: self.dim.id().to_owned(),
+            id,
+            attack: used.is_none(),
+            off_hand,
+            held: held.map(stack_to_120).unwrap_or_default(),
+            creative: self.mode == horizon_client::command::args::GameMode::Creative,
+            sneaking: used.is_some_and(|p| p.secondary),
+            ticks: i32::try_from(self.attack_ticks).unwrap_or(i32::MAX),
+            location: used.map_or([0.0; 3], |p| p.location),
+            stance: self.java120_stance(),
+        };
+        let done = {
+            let mut guard = wait_for_runtime()?;
+            let runtime = guard.as_mut()?;
+            runtime.entity_action(&Level(self), &action)
+        };
+        let done = match done {
+            Ok(done) => done,
+            Err(e) => {
+                log::warn!("1.20.1 mods: acting on entity {id} failed: {e}");
+                return None;
+            }
+        };
+        if action.attack {
+            self.attack_ticks = 0;
+        }
+        self.apply_java120(
+            &action.dimension,
+            &done.set,
+            &done.block_entities,
+            &done.spawned,
+        );
+        if let Some(opened) = &done.opened {
+            self.java120_opened(&action.uuid, &opened.kind);
+        }
+        self.java120_held_after(off_hand, &action.held, &done.held);
+        for given in &done.given {
+            if let Some(stack) = super::stack_from_120(given) {
+                self.give_or_drop(stack);
+            }
+        }
+        Some(done.result == 2)
     }
 }

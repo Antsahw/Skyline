@@ -64,6 +64,8 @@ pub static BLOCK_SHAPE: AttachmentType<Boxes> = AttachmentType {
 
 /// `horizon:block_collision`: what of the block at a block entity's position is solid, as its
 /// mod gives it (`getCollisionShape`): the outline's twin, for walking rather than aiming.
+/// Set only by the 1.20.1 bridge (`java-mods-120`), read wherever block shapes are.
+#[cfg_attr(not(feature = "java-mods-120"), allow(dead_code))]
 pub static BLOCK_COLLISION: AttachmentType<Boxes> = AttachmentType {
     namespace: "horizon",
     name: "block_collision",

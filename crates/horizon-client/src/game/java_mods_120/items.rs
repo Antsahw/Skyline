@@ -68,24 +68,28 @@ impl super::super::Game<'_> {
         if let Some(opened) = &used.opened {
             self.java120_opened(&request.uuid, &opened.kind);
         }
-        // The stack as the mods' code left it (one used up, one worn); one that doesn't read
-        // back stays as it was rather than vanish.
-        let before = request.held;
-        if used.held != before {
-            let after = if used.held.is_empty() {
-                Some(None)
-            } else {
-                stack_from_120(&used.held).map(Some)
-            };
-            if let Some(after) = after {
-                if off_hand {
-                    self.offhand = after;
-                } else if let Some(slot) = self.inventory.get_mut(self.selected) {
-                    *slot = after;
-                }
+        self.java120_held_after(off_hand, &request.held, &used.held);
+        Some(used.result == 2)
+    }
+
+    /// The stack in that hand as the mods' code left it (one used up, one worn, a bucket
+    /// filled); one that doesn't read back stays as it was rather than vanish.
+    pub(super) fn java120_held_after(&mut self, off_hand: bool, before: &str, after: &str) {
+        if after == before {
+            return;
+        }
+        let after = if after.is_empty() {
+            Some(None)
+        } else {
+            stack_from_120(after).map(Some)
+        };
+        if let Some(after) = after {
+            if off_hand {
+                self.offhand = after;
+            } else if let Some(slot) = self.inventory.get_mut(self.selected) {
+                *slot = after;
             }
         }
-        Some(used.result == 2)
     }
 
     /// Player `uuid` left the game: the 1.20.1 mods hear it, their screen there closes.

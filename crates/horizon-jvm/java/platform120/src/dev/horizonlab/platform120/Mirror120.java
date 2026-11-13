@@ -908,6 +908,103 @@ public final class Mirror120 {
         }
     }
 
+    /**
+     * A player of Horizon's attacks (`attack`) or uses one of the mods' entities, with `held`
+     * (1.20.1 item NBT, "" for nothing) in that hand, standing and looking as {@link #stand}
+     * says, `ticks` since their last blow (how charged it is).
+     *
+     * <ul>
+     *   <li>An attack is ServerPlayer.attack, whose head is Fabric's AttackEntityCallback: the
+     *       damage of the held item, its enchantments, knockback, a sweep over the mods' mobs
+     *       around, the item's wear. A mob it kills drops its loot as any call's drops go.
+     *   <li>A use is what ServerGamePacketListenerImpl.handleInteract does with an INTERACT_AT:
+     *       Fabric's UseEntityCallback first, then the entity's interactAt at `(lx, ly, lz)`
+     *       (relative to it), then Player.interactOn (the mob's own interact: milking, shearing,
+     *       feeding, a spawn egg on its kind).
+     * </ul>
+     *
+     * Gives as useItem: 0 passed, 1 taken, 2 taken with a swing; the held item after; a menu it
+     * opened (kind, title).
+     */
+    public static Object[] entityAction(String uuid, String name, String dimension, int id, boolean attack, int hand,
+            String held, boolean creative, boolean sneaking, int ticks, double lx, double ly, double lz,
+            double px, double py, double pz, double yaw, double pitch) {
+        begin();
+        try {
+            ServerLevel level = level(dimension);
+            ServerPlayer player = player(uuid, name, level);
+            stand(player, px, py, pz, yaw, pitch, px, py + 1.62, pz);
+            mode(player, creative);
+            player.setShiftKeyDown(sneaking);
+            InteractionHand which = hand == 1 ? InteractionHand.OFF_HAND : InteractionHand.MAIN_HAND;
+            player.setItemInHand(which, heldStack(held));
+            net.minecraft.world.entity.Entity target = Entities120.of(level).get(id);
+            if (target == null || target.isRemoved()) return new Object[] {0, held, "", "", new String[0]};
+            var menuBefore = player.containerMenu;
+            Screens120.forgetTitle(player);
+            Screens120.clientPlayer(player);
+            var inventory = player.getInventory();
+            int heldSlot = which == InteractionHand.OFF_HAND ? 40 : inventory.selected;
+            ItemStack[] before = new ItemStack[inventory.getContainerSize()];
+            for (int slot = 0; slot < before.length; slot++) before[slot] = inventory.getItem(slot).copy();
+            int code;
+            if (attack) {
+                ((dev.horizonlab.platform120.mixin.LivingEntityAccess) player).horizon$setAttackStrengthTicker(ticks);
+                // The held item's damage and speed: LivingEntity.tick puts its modifiers on as
+                // it notices the hand change, and this player never ticks.
+                var modifiers = player.getMainHandItem().getAttributeModifiers(net.minecraft.world.entity.EquipmentSlot.MAINHAND);
+                player.getAttributes().addTransientAttributeModifiers(modifiers);
+                try {
+                    player.attack(target);
+                } finally {
+                    player.getAttributes().removeAttributeModifiers(modifiers);
+                }
+                code = 1;
+            } else {
+                Vec3 at = new Vec3(lx, ly, lz);
+                InteractionResult result = net.fabricmc.fabric.api.event.player.UseEntityCallback.EVENT.invoker()
+                        .interact(player, level, which, target,
+                                new net.minecraft.world.phys.EntityHitResult(target, at.add(target.position())));
+                if (result == InteractionResult.PASS) {
+                    result = target.interactAt(player, at, which);
+                    if (!result.consumesAction()) result = player.interactOn(target, which);
+                }
+                code = !result.consumesAction() ? 0 : result.shouldSwing() ? 2 : 1;
+            }
+            ItemStack after = player.getItemInHand(which);
+            String[] menu = opened(player, menuBefore, null);
+            return new Object[] {code, after.isEmpty() ? "" : after.save(new net.minecraft.nbt.CompoundTag()).toString(),
+                    menu == null ? "" : menu[0], menu == null ? "" : menu[1], given(inventory, before, heldSlot)};
+        } catch (RuntimeException | LinkageError e) {
+            log("a player's " + (attack ? "attack on" : "use of") + " entity " + id + " failed: " + e);
+            for (StackTraceElement at : e.getStackTrace()) log("    at " + at);
+            return new Object[] {0, held, "", "", new String[0]};
+        } finally {
+            player(uuid, name, level(dimension)).setShiftKeyDown(false);
+            finish();
+        }
+    }
+
+    /**
+     * What a call put into the player's inventory beside the held stack, as 1.20.1 item NBT:
+     * a mob's milk in creative (ItemUtils.createFilledResult keeps the empty bucket there and
+     * adds the full one), a mod's gift. Horizon gives it to its player, whose inventory this
+     * one isn't; the copy here goes back as it was.
+     */
+    private static String[] given(net.minecraft.world.entity.player.Inventory inventory, ItemStack[] before, int heldSlot) {
+        List<String> out = new ArrayList<>();
+        for (int slot = 0; slot < before.length; slot++) {
+            if (slot == heldSlot) continue;
+            ItemStack now = inventory.getItem(slot);
+            ItemStack was = before[slot];
+            int added = ItemStack.isSameItemSameTags(now, was) ? now.getCount() - was.getCount()
+                    : now.isEmpty() ? 0 : now.getCount();
+            if (added > 0) out.add(now.copyWithCount(added).save(new net.minecraft.nbt.CompoundTag()).toString());
+            inventory.setItem(slot, was);
+        }
+        return out.toArray(new String[0]);
+    }
+
     /** What the mods' entities in `dimension` look like this tick (Render120.render), as JSON. */
     public static Object[] renderEntities(String dimension) {
         begin();

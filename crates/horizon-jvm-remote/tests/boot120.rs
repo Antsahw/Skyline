@@ -510,6 +510,105 @@ fn a_mods_mob_lives_on_horizons_blocks() {
         Some(8.0),
         "hurt by the fall, alive: {moobloom:?}"
     );
+
+    // Phase 6d.3: a player of Horizon's, three blocks east of it and facing it, uses it and
+    // hits it with the mods' code.
+    let action = |attack: bool, held: &str| horizon_jvm_remote::mirror120::EntityAction {
+        uuid: "00000000-0000-0000-0000-00000000beef".into(),
+        name: "Tester".into(),
+        dimension: "minecraft:overworld".into(),
+        id,
+        attack,
+        off_hand: false,
+        held: held.into(),
+        creative: false,
+        sneaking: false,
+        ticks: 100,
+        location: [0.0, 1.0, 0.0],
+        stance: Some(horizon_jvm_remote::mirror120::Stance {
+            feet: [moobloom.pos[0] + 2.0, 65.0, moobloom.pos[2]],
+            yaw: 90.0,
+            pitch: 20.0,
+        }),
+    };
+    // Cow.mobInteract, which the moobloom keeps: a bucket comes back full of milk.
+    let milked = runtime
+        .entity_action(
+            &world,
+            &action(false, r#"{id:"minecraft:bucket",Count:1b}"#),
+        )
+        .expect("the use answers");
+    eprintln!("milking: {milked:?}");
+    assert_ne!(milked.result, 0, "the moobloom took the use");
+    assert!(milked.held.contains("milk_bucket"), "{}", milked.held);
+    // A bare hand's full blow is one point (Player.attack); its invulnerability then keeps
+    // further blows away for ten ticks, so a blow lands every eleven.
+    let health = |runtime: &mut horizon_jvm_remote::boot120::Runtime120| {
+        runtime
+            .tick_entities(&world, "minecraft:overworld")
+            .expect("its tick")
+            .entities
+            .into_iter()
+            .find(|e| e.id == id)
+            .and_then(|e| e.health)
+    };
+    runtime
+        .entity_action(&world, &action(true, ""))
+        .expect("the blow answers");
+    assert_eq!(health(&mut runtime), Some(7.0), "one point off");
+    // In creative, ItemUtils.createFilledResult keeps the empty bucket and adds the milk to the
+    // inventory: Horizon is handed it, since its player's inventory isn't the runtime's.
+    let milked = runtime
+        .entity_action(
+            &world,
+            &horizon_jvm_remote::mirror120::EntityAction {
+                creative: true,
+                ..action(false, r#"{id:"minecraft:bucket",Count:1b}"#)
+            },
+        )
+        .expect("the use answers");
+    eprintln!("milking in creative: {milked:?}");
+    assert!(
+        milked.held.contains("minecraft:bucket\""),
+        "{}",
+        milked.held
+    );
+    assert!(
+        milked.given.iter().any(|g| g.contains("milk_bucket")),
+        "{:?}",
+        milked.given
+    );
+    // Its invulnerability keeps further blows away for ten ticks; then a diamond sword's
+    // full blow, seven points (1 + its 6), kills it, and it drops its loot.
+    for _ in 0..11 {
+        health(&mut runtime);
+    }
+    let hit = runtime
+        .entity_action(
+            &world,
+            &action(
+                true,
+                r#"{id:"minecraft:diamond_sword",Count:1b,tag:{Damage:0}}"#,
+            ),
+        )
+        .expect("the blow answers");
+    eprintln!(
+        "its drops: {:?}; the sword after: {}",
+        hit.spawned, hit.held
+    );
+    assert!(
+        !hit.spawned.is_empty(),
+        "killed by a player, it drops its loot"
+    );
+    assert!(
+        hit.held.contains("Damage:1"),
+        "the sword wears: {}",
+        hit.held
+    );
+    for _ in 0..25 {
+        health(&mut runtime);
+    }
+    assert_eq!(health(&mut runtime), None, "gone once its death is played");
 }
 
 /// Needs build120.sh's platform jar, and Farmer's Delight among HORIZON_120_MODS for the stove

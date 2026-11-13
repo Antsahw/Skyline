@@ -219,6 +219,29 @@ pub struct UseItem {
     pub stance: Option<Stance>,
 }
 
+/// A player's attack on, or use of, one of the mods' own entities
+/// ([`Runtime120::entity_action`]).
+#[derive(Clone, Debug)]
+pub struct EntityAction {
+    pub uuid: String,
+    pub name: String,
+    pub dimension: String,
+    /// The entity's id (the mods' range, `Entities120.FIRST_ID` and up).
+    pub id: i32,
+    /// An attack (left click); else a use (right click).
+    pub attack: bool,
+    pub off_hand: bool,
+    /// The item in that hand as 1.20.1 item NBT.
+    pub held: String,
+    pub creative: bool,
+    pub sneaking: bool,
+    /// Ticks since the player's last blow (how charged this one is).
+    pub ticks: i32,
+    /// Where on the entity a use is aimed, relative to its position.
+    pub location: [f64; 3],
+    pub stance: Option<Stance>,
+}
+
 /// What a right-click with an item did.
 #[derive(Clone, Debug, PartialEq)]
 pub struct UsedItem {
@@ -228,6 +251,9 @@ pub struct UsedItem {
     pub held: String,
     /// A menu, or a screen of the mod's own (`screen:<class>`), opened by it.
     pub opened: Option<OpenedMenu>,
+    /// Stacks it put into the player's inventory beside the held one (1.20.1 item NBT): a
+    /// mob's milk in creative, a mod's gift. Horizon gives them to its player.
+    pub given: Vec<String>,
     pub set: Vec<SetBlock>,
     pub block_entities: Vec<SetBlockEntity>,
     pub spawned: Vec<SpawnItem>,
@@ -1090,6 +1116,36 @@ impl Runtime120 {
         Ok(matches!(values.first(), Some(Value::Bool(true))))
     }
 
+    /// A player attacks or uses one of the mods' entities (`Mirror120.entityAction`): the
+    /// mods' code runs it as 1.20.1's `ServerPlayer.attack` / `handleInteract` would. The
+    /// answer is as a use of an item's: taken or not, the held stack after, what it set and
+    /// dropped (a mob's loot, a sheared moobloom's flowers).
+    pub fn entity_action(
+        &mut self,
+        world: &dyn World120,
+        a: &EntityAction,
+    ) -> Result<UsedItem, String> {
+        let args: Vec<Value> = [
+            Value::Str(a.uuid.clone()),
+            Value::Str(a.name.clone()),
+            Value::Str(a.dimension.clone()),
+            Value::I32(a.id),
+            Value::Bool(a.attack),
+            Value::I32(i32::from(a.off_hand)),
+            Value::Str(a.held.clone()),
+            Value::Bool(a.creative),
+            Value::Bool(a.sneaking),
+            Value::I32(a.ticks),
+            Value::F64(a.location[0]),
+            Value::F64(a.location[1]),
+            Value::F64(a.location[2]),
+        ]
+        .into_iter()
+        .chain(stance_values(a.stance))
+        .collect();
+        self.used("entityAction", &args, world)
+    }
+
     /// A player right-clicks with a mod's item at nothing ([`UseItem`]): 1.20.1's own
     /// `ServerPlayerGameMode.useItem`. A use held over many ticks (eating, a bow) is let go and
     /// passed: Horizon runs those itself.
@@ -1105,6 +1161,16 @@ impl Runtime120 {
         .into_iter()
         .chain(stance_values(u.stance))
         .collect();
+        self.used("useItem", &args, world)
+    }
+
+    /// A call answered as useItem answers: the result code, the held item after, a menu opened.
+    fn used(
+        &mut self,
+        method: &str,
+        args: &[Value],
+        world: &dyn World120,
+    ) -> Result<UsedItem, String> {
         let mut handler = InWorld {
             world,
             set: Vec::new(),
@@ -1112,10 +1178,10 @@ impl Runtime120 {
             spawned: Vec::new(),
             log: self.log.clone(),
         };
-        let values = self.call_values("useItem", &args, &mut handler)?;
+        let values = self.call_values(method, args, &mut handler)?;
         let result = match values.first() {
             Some(Value::I32(code)) => *code,
-            other => return Err(format!("useItem: answer 0 is {other:?}")),
+            other => return Err(format!("{method}: answer 0 is {other:?}")),
         };
         let text = |i: usize| {
             values
@@ -1132,6 +1198,10 @@ impl Runtime120 {
                 kind,
                 title: text(3),
             }),
+            given: match values.get(4) {
+                Some(Value::Strs(given)) => given.clone(),
+                _ => Vec::new(),
+            },
             set: handler.set,
             block_entities: handler.block_entities,
             spawned: handler.spawned,

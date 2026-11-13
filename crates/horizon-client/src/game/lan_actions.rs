@@ -2274,6 +2274,11 @@ impl Game<'_> {
                 self.lan_swing_back(host, conn, swung);
                 self.guest_instrument_sound(host, conn, heard, horn);
             }
+            // The 1.20.1 mods' own entities (game/java_mods_120/mobs.rs).
+            #[cfg(feature = "java-mods-120")]
+            S::Attack(p) if self.java120_entity_action(host, conn, p.id, None) => {}
+            #[cfg(feature = "java-mods-120")]
+            S::Interact(p) if self.java120_entity_action(host, conn, p.id, Some(&p)) => {}
             S::Attack(p) if self.java_entity_attack(host, conn, p.id) => {}
             S::Attack(p) => self.guest_attack(host, conn, p.id),
             S::Interact(p) if self.java_entity_interact(host, conn, &p) => {}
@@ -5541,7 +5546,7 @@ impl Game<'_> {
     /// client does not run uses itself, so it does not predict the swing; a
     /// client that did (a block placed) is still in the first half of its
     /// swing and ignores it (`SwingState.startIfAble`).
-    fn lan_swing_back(&mut self, host: &mut LanHost, conn: u32, swung: Option<bool>) {
+    pub(super) fn lan_swing_back(&mut self, host: &mut LanHost, conn: u32, swung: Option<bool>) {
         if swung != Some(true) {
             return;
         }

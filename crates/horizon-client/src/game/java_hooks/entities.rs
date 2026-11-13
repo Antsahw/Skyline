@@ -31,10 +31,17 @@ impl Game<'_> {
     ) -> Vec<(i32, glam::DVec3, f64, horizon_client::text::Text, bool)> {
         Vec::new()
     }
+    /// The 1.20.1 mods' mobs are aimed at the same way, when that bridge is built.
     pub(in crate::game) fn java_entity_hit(&self) -> Option<(i32, f64)> {
+        #[cfg(feature = "java-mods-120")]
+        return self.java120_mob_hit();
+        #[cfg(not(feature = "java-mods-120"))]
         None
     }
     pub(in crate::game) fn java_entity_location(&self, _id: i32, _distance: f64) -> [f64; 3] {
+        #[cfg(feature = "java-mods-120")]
+        return self.java120_mob_location(_id, _distance);
+        #[cfg(not(feature = "java-mods-120"))]
         [0.0; 3]
     }
     pub(in crate::game) fn java_use_item(

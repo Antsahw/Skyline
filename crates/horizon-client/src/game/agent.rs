@@ -751,6 +751,15 @@ impl Game<'_> {
         for (id, ty, pos) in self.java_entity_list() {
             push(pos, ty, json!({ "id": id, "kind": "java" }));
         }
+        // The 1.20.1 mods' mobs (game/java_mods_120/mobs.rs), as the server last sent them.
+        #[cfg(feature = "java-mods-120")]
+        for (id, ty, pos, health) in self.java120_mob_list() {
+            push(
+                pos,
+                &ty,
+                json!({ "id": id, "kind": "java120", "health": health }),
+            );
+        }
         list.sort_by(|a, b| a.0.total_cmp(&b.0));
         json!({ "entities": list.into_iter().map(|(_, v)| v).collect::<Vec<_>>() })
     }

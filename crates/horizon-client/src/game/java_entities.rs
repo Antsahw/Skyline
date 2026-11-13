@@ -899,12 +899,25 @@ impl Game<'_> {
             .iter()
             .filter(|s| !s.block && Some(s.id) != riding)
             .filter_map(|s| Some((s.id, super::ray_box(eye, dir, reach, java.bounds(s, 1.0))?)))
+            .chain(self.java120_mob_hit_if_built())
             .min_by(|a, b| a.1.total_cmp(&b.1))
+    }
+
+    /// The 1.20.1 bridge's mobs, when it is built too.
+    fn java120_mob_hit_if_built(&self) -> Option<(i32, f64)> {
+        #[cfg(feature = "java-mods-120")]
+        return self.java120_mob_hit();
+        #[cfg(not(feature = "java-mods-120"))]
+        None
     }
 
     /// Where on the Java entity with this id the crosshair is, relative to its position (the
     /// interact packet's location).
     pub(super) fn java_entity_location(&self, id: i32, distance: f64) -> [f64; 3] {
+        #[cfg(feature = "java-mods-120")]
+        if super::java_mods_120::mobs::IDS.contains(&id) {
+            return self.java120_mob_location(id, distance);
+        }
         let (Some(eye), Some(s)) = (
             self.eye_position(),
             self.java.entities.now.iter().find(|s| s.id == id),

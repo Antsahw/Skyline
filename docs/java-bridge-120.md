@@ -392,8 +392,26 @@ What a renderer needed:
 
 Checked in a game: a moobloom from its spawn egg walks on Horizon's grass with its buttercups.
 
-**Next:** 6d.3, players hitting and using them; then saving them with their chunks, natural
-spawning and `/summon` of their types.
+**6d.3, done: players hit and use them.** The window aims at the mobs it draws (their boxes,
+among Horizon's entities, `java120_mob_hit`) and sends vanilla's attack and interact packets
+with their ids. The server hands those in the mods' range (`0x7ffe0000` to `0x7fff0000`) to
+the runtime, as 1.20.1's `handleInteract` would (nothing from more than six blocks away):
+`Mirror120.entityAction` stands the player there with the held item and runs
+`ServerPlayer.attack` (Fabric's `AttackEntityCallback` at its head) or Fabric's
+`UseEntityCallback`, then `interactAt`, then `Player.interactOn`. A kill drops the mob's loot
+in Horizon's world, the held item wears or changes (a bucket milked), and what the click put
+into the player's inventory (the milk, in creative) is given to Horizon's player.
+
+What a blow needed:
+- The held item's attribute modifiers, which `LivingEntity.tick` would put on: the runtime
+  player never ticks.
+- How charged it is: Horizon's ticks since the player's last blow.
+
+Checked in a game: a moobloom milked with a bucket, then killed with a netherite sword in two
+blows (8 points each), dropping beef.
+
+**Next:** the experience a kill drops (turned away for now, as every non-item entity is),
+saving the mobs with their chunks, natural spawning and `/summon` of their types.
 
 ## Phase 7 status: blocks drawn by their mod's code (2026-11-12)
 
