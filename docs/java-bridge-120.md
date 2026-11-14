@@ -393,8 +393,14 @@ code, as phase 6b's.
 
 Checked: a Terralith world generates its biomes (`/locate biome terralith:yosemite_cliffs`
 finds one 2,557 blocks from spawn, and its white cliffs and forest look as Terralith's), with
-the runtime placing Terralith's features. Not yet: biomes added by code (TerraBlender: Biomes
-O' Plenty), and the pack's dimension types (the level shapes still read only the world's packs).
+the runtime placing Terralith's features. Not yet: the pack's dimension types (the level shapes
+still read only the world's packs).
+
+Not planned for now: biomes added by code through TerraBlender (Biomes O' Plenty, Regions
+Unexplored, Oh The Biomes We've Gone). It is the common way for 1.20.1 biome mods, but those
+mods have 26.3 releases, and the 26.3 bridge already generates Biomes O' Plenty's overworld
+(`java-bridge-perf.md`). On the 1.20.1 side it would need TerraBlender's regions exported from
+the runtime and a hook in Horizon's biome source.
 
 ## Phase 6e status: the mods' fluids in the world (2026-11-14)
 
@@ -1452,7 +1458,8 @@ NeoForge could run beside Fabric 26.3 rather than in its place.
    generator as biome modifiers. 6b done: a mod's own feature types run in the runtime on the
    chunks being decorated. 6c done: data-driven structures (above). 6d done: the mods' mobs
    (above). 6g done: mods that replace vanilla's world generation as data (Terralith, above).
-   Next: biomes added by code (TerraBlender), structures with their own Java pieces.
+   Next: the mods' dimensions (6f), structures with their own Java pieces. Biomes added by code
+   (TerraBlender) are left to the 26.3 bridge (above).
 7. **In-world rendering.** Blocks drawn by their code done (above: Wired Redstone's wires and
    cables); block entity renderers done (7b: Farmer's Delight's cutting board). Next:
    LibMultipart's dynamic part renderers, then a GL recorder if needed.
