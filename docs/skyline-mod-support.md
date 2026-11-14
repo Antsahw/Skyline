@@ -48,7 +48,7 @@ not a working machine, and almost every content mod has at least one screen.
 | Keybinds and HUD overlays (minimaps, tooltips, info bars) | **partial** | phase 5e: mods' key bindings reach them (pressed in Horizon, clicked in 1.20.1's client tick). Phase 5i: what mods draw into vanilla's HUD parts or `HudRenderCallback` is drawn over Horizon's HUD (AppleSkin's saturation, checked in a game); overlays about what the player looks at (Jade) and minimaps, which read the client's world, not yet |
 | Config screens (Cloth Config and friends) | **done** | phase 5h: Mod Menu's entrypoints listed on Horizon's Mods page; the screen opens, draws, takes clicks and saves (AppleSkin's, checked in a game) |
 | Mod commands | **done** | phase 5j: in every player's command tree, run as the player at their permission level; what the mods tell a player (answers, errors, notices) reaches their chat |
-| Enchantments, status effects, attributes | **unverified** | — |
+| Enchantments, status effects, attributes | **partial** | phase 5k: the mods' effects are Horizon's (icon, colour, `/effect`, saved) and act through their own code (Farmer's Delight's Comfort heals, Nourishment holds hunger: checked in a game); their food gives them and leaves its bowl. Enchantments and attributes of the mods' own: not yet checked, none of the test mods adds one |
 | Mixins on vanilla behaviour (harvest tweaks, drop changes) | **partial** | phase 3a; only where the hook exists |
 
 ## Tier 3 — common enough to matter, not blocking

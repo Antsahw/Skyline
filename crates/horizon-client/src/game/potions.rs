@@ -1003,8 +1003,17 @@ impl Game<'_> {
             .as_ref()
             .is_some_and(|p| p.health.absorption() <= 0.0);
         let mut effects = std::mem::take(&mut self.potions.effects);
+        // The 1.20.1 mods' effects due this tick: their own code runs them, once the
+        // effects have ticked (java_mods_120/effects.rs).
+        #[cfg(feature = "java-mods-120")]
+        let mut due_120: Vec<(&'static str, i32, i32)> = Vec::new();
         let (actions, raid_omen_added) = effects.tick_with(
             &mut |e, t| {
+                #[cfg(feature = "java-mods-120")]
+                if super::java_mods_120::is_effect(e.id) {
+                    due_120.push((e.id, t, e.amplifier));
+                    return OmenTick::Continue;
+                }
                 if !brewing::is_mod_effect(e.id) {
                     self.omen_tick(e)
                 } else if self.mod_effect_tick(e.id, None, t, e.amplifier) {
@@ -1016,6 +1025,10 @@ impl Game<'_> {
             absorption_empty,
         );
         self.potions.effects = effects;
+        #[cfg(feature = "java-mods-120")]
+        if !due_120.is_empty() {
+            self.java120_effect_ticks(&due_120);
+        }
         if raid_omen_added {
             self.raid_omen_added();
         }

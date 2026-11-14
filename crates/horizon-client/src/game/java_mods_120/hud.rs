@@ -66,7 +66,7 @@ pub(super) fn take_size(conn: u32, input: &Value) -> bool {
 }
 
 /// What the runtime is told of a player (Hud120's `state`): Horizon's numbers.
-fn state(
+pub(super) fn state(
     dimension: &str,
     player: &mut horizon_client::motion::PlayerMotion,
     mode: GameMode,

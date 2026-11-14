@@ -115,6 +115,19 @@ fn remember_namespaces(folders: &[PathBuf]) {
 static BLOCK_ENTITIES: std::sync::RwLock<std::collections::BTreeMap<String, String>> =
     std::sync::RwLock::new(std::collections::BTreeMap::new());
 
+/// Whether an effect is one of the 1.20.1 mods' own (its namespace is theirs): their code runs
+/// it (`effects.rs`).
+pub(in crate::game) fn is_effect(id: &str) -> bool {
+    id.split_once(':').is_some_and(|(ns, _)| {
+        ns != "minecraft"
+            && NAMESPACES
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .as_ref()
+                .is_some_and(|n| n.contains(ns))
+    })
+}
+
 /// The type of the block entity a mod's block has (`EntityBlock.newBlockEntity`), if it has
 /// one: Horizon makes it however the block is placed, as a chunk does.
 pub(in crate::game) fn block_entity_type(block: &str) -> Option<String> {

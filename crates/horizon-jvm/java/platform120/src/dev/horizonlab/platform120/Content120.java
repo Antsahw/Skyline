@@ -100,6 +100,7 @@ public final class Content120 {
             json.endArray();
             items();
             creativeTabs();
+            mobEffects();
             json.name("tags");
             json.beginObject();
             Tags120.Loaded tags = Tags120.load();
@@ -115,6 +116,25 @@ public final class Content120 {
          * (CreativeModeTabs.tryRebuildTabContents, with the server's registries). A tab whose
          * contents can't be made here is left out: its items are still in the search tab.
          */
+        /**
+         * The mods' own effects (Farmer's Delight's Comfort and Nourishment): as Horizon's content
+         * declares one, `{"id", "category", "color"}`.
+         */
+        void mobEffects() throws IOException {
+            json.name("mob_effects");
+            json.beginArray();
+            for (net.minecraft.world.effect.MobEffect effect : BuiltInRegistries.MOB_EFFECT) {
+                ResourceLocation id = BuiltInRegistries.MOB_EFFECT.getKey(effect);
+                if (id == null || !ours(id)) continue;
+                json.beginObject();
+                json.name("id").value(id.toString());
+                json.name("category").value(effect.getCategory().name().toLowerCase(java.util.Locale.ROOT));
+                json.name("color").value(effect.getColor() & 0xFFFFFF);
+                json.endObject();
+            }
+            json.endArray();
+        }
+
         void creativeTabs() throws IOException {
             json.name("creative_tabs");
             json.beginArray();
@@ -300,6 +320,34 @@ public final class Content120 {
                     json.beginObject();
                     json.name("nutrition").value(food.getNutrition());
                     json.name("saturation").value(saturation);
+                    json.endObject();
+                    // Eating it as 26.3's consumable: how long, eaten or drunk, and the effects
+                    // its food gives (FoodProperties.effects: an instance and its chance).
+                    json.name("consume");
+                    json.beginObject();
+                    json.name("seconds").value(stack.getUseDuration() / 20.0f);
+                    json.name("animation").value(stack.getUseAnimation().name().toLowerCase(java.util.Locale.ROOT));
+                    // What eating leaves: Farmer's Delight's stews their bowl (the crafting
+                    // remainder its ConsumableItem hands back), a BowlFoodItem its bowl.
+                    Item left = item.getCraftingRemainingItem();
+                    if (left == null && item instanceof net.minecraft.world.item.BowlFoodItem) {
+                        left = net.minecraft.world.item.Items.BOWL;
+                    }
+                    if (left != null) json.name("remainder").value(BuiltInRegistries.ITEM.getKey(left).toString());
+                    json.name("effects");
+                    json.beginArray();
+                    for (var pair : food.getEffects()) {
+                        var instance = pair.getFirst();
+                        ResourceLocation effect = BuiltInRegistries.MOB_EFFECT.getKey(instance.getEffect());
+                        if (effect == null) continue;
+                        json.beginObject();
+                        json.name("id").value(effect.toString());
+                        json.name("duration").value(instance.getDuration());
+                        json.name("amplifier").value(instance.getAmplifier());
+                        json.name("probability").value(pair.getSecond());
+                        json.endObject();
+                    }
+                    json.endArray();
                     json.endObject();
                 }
                 // The item's own numbers as 1.21.1's default components.

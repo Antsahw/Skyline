@@ -9,4 +9,7 @@ import org.spongepowered.asm.mixin.gen.Accessor;
 public interface FoodDataAccess {
     @Accessor("exhaustionLevel")
     void horizon$setExhaustion(float exhaustion);
+
+    @Accessor("exhaustionLevel")
+    float horizon$exhaustion();
 }

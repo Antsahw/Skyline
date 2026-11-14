@@ -247,3 +247,81 @@ impl Game<'_> {
         }
     }
 }
+
+impl Game<'_> {
+    /// The 1.20.1 mods' effects due this tick on the player acting (phase 5k: `due` as the
+    /// effect tick found them, `(id, ticks, amplifier)`), run by the mods' own code on the
+    /// runtime's player with Horizon's numbers; what they changed (Comfort's healing,
+    /// Nourishment's exhaustion taken back) comes back to Horizon's player.
+    pub(in crate::game) fn java120_effect_ticks(&mut self, due: &[(&'static str, i32, i32)]) {
+        let uuid = self.java120_actor();
+        let name = self.acting_player_name().to_owned();
+        let dimension = self.dim.id().to_owned();
+        let (mode, experience) = (self.mode, (self.experience.level, self.experience.progress));
+        let all: Vec<serde_json::Value> = self
+            .potions
+            .effects
+            .list
+            .iter()
+            .map(|e| {
+                serde_json::json!({
+                    "id": horizon_client_core::potions::namespaced(e.id),
+                    "duration": e.duration,
+                    "amplifier": e.amplifier,
+                })
+            })
+            .collect();
+        let Some(player) = self.player.as_mut() else {
+            return;
+        };
+        let mut state = super::hud::state(&dimension, player, mode, experience);
+        state["effects"] = serde_json::Value::Array(all);
+        state["tick"] = due
+            .iter()
+            .map(|(id, ticks, amplifier)| {
+                serde_json::json!({"id": id, "ticks": ticks, "amplifier": amplifier})
+            })
+            .collect();
+        let after = {
+            let Some(mut guard) = super::wait_for_runtime() else {
+                return;
+            };
+            let Some(runtime) = guard.as_mut() else {
+                return;
+            };
+            runtime.effect_ticks(&super::Level(self), &uuid, &name, &state.to_string())
+        };
+        let after: serde_json::Value = match after.map(|a| serde_json::from_str(&a)) {
+            Ok(Ok(after)) => after,
+            Ok(Err(e)) => return log::warn!("1.20.1 mods: their effects' answer: {e}"),
+            Err(e) => return log::warn!("1.20.1 mods: their effects failed: {e}"),
+        };
+        let Some(player) = self.player.as_mut() else {
+            return;
+        };
+        let number = |key: &str| after[key].as_f64();
+        if let Some(health) = number("health").map(|h| h as f32)
+            && health != player.health.health()
+        {
+            let _ = player.set_health(health, false);
+        }
+        if let Some(absorption) = number("absorption").map(|a| a as f32)
+            && absorption != player.health.absorption()
+        {
+            let _ = player.set_health(absorption, true);
+        }
+        let food = &mut player.health.food;
+        if let Some(level) = number("food") {
+            food.food = level as i32;
+        }
+        if let Some(saturation) = number("saturation") {
+            food.saturation = saturation as f32;
+        }
+        if let Some(exhaustion) = number("exhaustion") {
+            food.exhaustion = exhaustion as f32;
+        }
+        if let Some(air) = number("air") {
+            player.air = air as i32;
+        }
+    }
+}

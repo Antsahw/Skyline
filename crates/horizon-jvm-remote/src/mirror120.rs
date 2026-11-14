@@ -1290,6 +1290,38 @@ impl Runtime120 {
         }
     }
 
+    /// The mods' effects due this tick on a player (phase 5k: `applyEffectTick` where
+    /// `isDurationEffectTick` says). `state` is as [`Runtime120::hud_frame`]'s, with `effects`
+    /// (all the player's: `[{id, duration, amplifier}]`) and `tick` (the mods' ones due:
+    /// `[{id, ticks, amplifier}]`). The player's numbers after them, as JSON: `health`,
+    /// `absorption`, `food`, `saturation`, `exhaustion`, `air`.
+    pub fn effect_ticks(
+        &mut self,
+        world: &dyn World120,
+        player: &str,
+        name: &str,
+        state: &str,
+    ) -> Result<String, String> {
+        let args = [
+            Value::Str(player.to_owned()),
+            Value::Str(name.to_owned()),
+            Value::Str(state.to_owned()),
+        ];
+        let mut handler = InWorld {
+            world,
+            set: Vec::new(),
+            block_entities: Vec::new(),
+            spawned: Vec::new(),
+            log: self.log.clone(),
+        };
+        let values = self.call_values("effectTicks", &args, &mut handler)?;
+        values
+            .first()
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .ok_or_else(|| "effectTicks: no answer".to_owned())
+    }
+
     /// Every command the mods' server has, vanilla's included (phase 5j): the caller keeps
     /// the ones that aren't its own.
     pub fn command_names(&mut self) -> Result<Vec<String>, String> {

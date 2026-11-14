@@ -83,7 +83,7 @@ public final class Hud120 {
     }
 
     /** Horizon's numbers on the runtime's player, which the client player reads. */
-    private static void stats(ServerPlayer player, JsonObject s) {
+    static void stats(ServerPlayer player, JsonObject s) {
         var maxHealth = player.getAttribute(net.minecraft.world.entity.ai.attributes.Attributes.MAX_HEALTH);
         if (maxHealth != null && s.has("max_health")) maxHealth.setBaseValue(s.get("max_health").getAsDouble());
         if (s.has("health")) player.setHealth(s.get("health").getAsFloat());

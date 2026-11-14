@@ -356,6 +356,27 @@ clicks pass until then). A click on a block of a 1.20.1 mod's namespace, or with
 their items, goes to it at `useItemOn`'s head (`java120_use_block`, beside the 26.3 bridge's
 hook in `lan_actions.rs`); what it set and what it did to the held stack land in Horizon.
 
+## Phase 5k status: the mods' effects and food (2026-11-14)
+
+The mods' effects are Horizon's: the content build writes each (its category and colour) as a
+content effect (`data/<ns>/horizon/mob_effect/`), so food gives them, `/effect` knows them, the
+HUD shows the mod's icon and the save keeps them. Their foods are eaten as in 1.20.1: each food's
+eating time, eaten or drunk, its effects with their chances and what it leaves (Farmer's
+Delight's stews their bowl: its crafting remainder) become the item's `minecraft:consumable` and
+`minecraft:use_remainder` (`content120.rs`: `mob_effects`, `foods`; the facts' `mob_effects`
+and each food's `consume`). Before, a mod's food gave none of its effects, not even vanilla's.
+
+What an effect does is the mod's code: as the player's effects tick, the 1.20.1 ones due are
+collected (`potions.rs`), then run in the runtime on the player with Horizon's numbers
+(`effectTicks`: `isDurationEffectTick`, then `applyEffectTick`, with the player's effects as
+Horizon has them), and the health, absorption, food, saturation, exhaustion and air they leave
+come back (`java_mods_120/effects.rs`). On mobs they don't act yet.
+
+Checked: in the runtime test, Comfort heals a hurt player with no saturation on its 80th tick
+only, and not with Regeneration on; Nourishment takes the exhaustion back. In a game, beef stew
+leaves its bowl and gives 13 food and Comfort for 3600 ticks, whose icon is on the HUD; with the
+saturation gone, Comfort heals one point every four seconds.
+
 ## Phase 5j status: the mods' commands and messages (2026-11-14)
 
 The mods' commands (`/waystones`, `/supplementaries`, `/techreborn`...) are in every player's
@@ -1303,7 +1324,7 @@ NeoForge could run beside Fabric 26.3 rather than in its place.
    done: mods' packets between their halves, players joining. 5d done: items used, mods' own
    screens, players leaving. 5e done: mods' key bindings and the client tick (above). 5f/5g done:
    sounds and particles. 5h done: the mods' settings screens. 5i done: the mods' HUD (above). 5j done: their
-   commands and messages. Left: the HUD overlays that read the client's world (Jade, minimaps).
+   commands and messages. 5k done: their effects and food. Left: the HUD overlays that read the client's world (Jade, minimaps).
 6. **Entities and worldgen.** 6a done: the mods' Fabric biome modifications reach Horizon's
    generator as biome modifiers. 6b done: a mod's own feature types run in the runtime on the
    chunks being decorated. 6c done: data-driven structures (above). 6d done: the mods' mobs

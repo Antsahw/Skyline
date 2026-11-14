@@ -207,6 +207,133 @@ fn creative_tabs(facts: &Path, carried: &[PathBuf]) -> usize {
     written
 }
 
+/// The carried mod whose files hold namespace `ns`.
+fn carrying<'a>(carried: &'a [PathBuf], ns: &str) -> Option<&'a PathBuf> {
+    carried
+        .iter()
+        .find(|c| c.join("assets").join(ns).is_dir() || c.join("data").join(ns).is_dir())
+}
+
+/// The mods' own effects (the facts' `mob_effects`: Farmer's Delight's Comfort, Nourishment) as
+/// content effects (`data/<ns>/horizon/mob_effect/<path>.json`: a category and a colour), so
+/// Horizon has them: given by food and `/effect`, shown on the HUD with the mod's icon, saved.
+/// What each does runs in the runtime (`game/java_mods_120/effects.rs`). How many were written.
+fn mob_effects(facts: &serde_json::Value, carried: &[PathBuf]) -> usize {
+    let mut written = 0;
+    for effect in facts["mob_effects"].as_array().into_iter().flatten() {
+        let Some((ns, path)) = effect["id"].as_str().and_then(|id| id.split_once(':')) else {
+            continue;
+        };
+        let (Some(category), Some(color)) = (effect["category"].as_str(), effect["color"].as_u64())
+        else {
+            continue;
+        };
+        let Some(carry) = carrying(carried, ns) else {
+            continue;
+        };
+        let file = carry
+            .join("data")
+            .join(ns)
+            .join("horizon/mob_effect")
+            .join(format!("{path}.json"));
+        let json = serde_json::json!({"category": category, "color": color & 0xFF_FFFF});
+        if file
+            .parent()
+            .is_some_and(|d| std::fs::create_dir_all(d).is_ok())
+            && std::fs::write(&file, json.to_string()).is_ok()
+        {
+            written += 1;
+        }
+    }
+    written
+}
+
+/// A food of the mods' as 26.3 eats it: its `consume` facts (how long, eaten or drunk, the
+/// effects its food gives with their chances, what it leaves) as the `minecraft:consumable` and
+/// `minecraft:use_remainder` components, as 1.21.2's datafix turns 1.21.1's food into them.
+fn consumable(consume: &serde_json::Value) -> (serde_json::Value, Option<serde_json::Value>) {
+    let drink = consume["animation"] == "drink";
+    let effects: Vec<serde_json::Value> = consume["effects"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|e| {
+            Some(serde_json::json!({
+                "type": "minecraft:apply_effects",
+                "effects": [{
+                    "id": e["id"].as_str()?,
+                    "duration": e["duration"].as_i64().unwrap_or(0),
+                    "amplifier": e["amplifier"].as_i64().unwrap_or(0),
+                }],
+                "probability": e["probability"].as_f64().unwrap_or(1.0),
+            }))
+        })
+        .collect();
+    let component = serde_json::json!({
+        "consume_seconds": consume["seconds"].as_f64().unwrap_or(1.6),
+        "animation": if drink { "drink" } else { "eat" },
+        "sound": if drink { "minecraft:entity.generic.drink" } else { "minecraft:entity.generic.eat" },
+        "has_consume_particles": !drink,
+        "on_consume_effects": effects,
+    });
+    let remainder = consume["remainder"]
+        .as_str()
+        .map(|id| serde_json::json!({"id": id, "count": 1}));
+    (component, remainder)
+}
+
+/// Every food of the mods' eaten as in 1.20.1 ([`consumable`]): written over its carried item
+/// declaration's components. How many foods.
+fn foods(facts: &serde_json::Value, carried: &[PathBuf]) -> usize {
+    let mut written = 0;
+    for (id, item) in facts["items"].as_object().into_iter().flatten() {
+        let Some(consume) = item.get("consume") else {
+            continue;
+        };
+        let Some((ns, path)) = id.split_once(':') else {
+            continue;
+        };
+        let Some(carry) = carrying(carried, ns) else {
+            continue;
+        };
+        let file = carry
+            .join("data")
+            .join(ns)
+            .join("horizon/item")
+            .join(format!("{path}.json"));
+        let Ok(text) = std::fs::read_to_string(&file) else {
+            continue;
+        };
+        let Ok(mut decl) = serde_json::from_str::<serde_json::Value>(&text) else {
+            continue;
+        };
+        let (component, remainder) = consumable(consume);
+        let Some(components) = decl
+            .as_object_mut()
+            .map(|d| {
+                d.entry("components")
+                    .or_insert_with(|| serde_json::json!({}))
+            })
+            .and_then(|c| c.as_object_mut())
+        else {
+            continue;
+        };
+        components.insert("minecraft:consumable".into(), component);
+        if let Some(remainder) = remainder {
+            components.insert("minecraft:use_remainder".into(), remainder);
+        }
+        if std::fs::write(
+            &file,
+            serde_json::to_string_pretty(&decl).unwrap_or_default(),
+        )
+        .is_ok()
+        {
+            written += 1;
+        }
+    }
+    written
+}
+
 /// Vanilla's blocks in the facts as 26.3 has them. The facts are 1.20.1's, and the carry-over
 /// borrows vanilla states for mods' shapes (`"shape": "minecraft:piglin_head[rotation=0]"`): a
 /// state 26.3 doesn't have (its heads gained `powered`) makes the game refuse every content mod.
@@ -329,6 +456,17 @@ pub fn build(
     if modifiers > 0 {
         log(format!(
             "1.20.1 mods' content: {modifiers} biome modifier(s) from the mods' Fabric biome changes"
+        ));
+    }
+    let facts_json: serde_json::Value = std::fs::read_to_string(&facts)
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or_default();
+    let effects = mob_effects(&facts_json, &carried(&work));
+    let eaten = foods(&facts_json, &carried(&work));
+    if effects + eaten > 0 {
+        log(format!(
+            "1.20.1 mods' content: {effects} effect(s) of their own, {eaten} food(s) eaten as in 1.20.1"
         ));
     }
     let tabs = creative_tabs(&facts, &carried(&work));
@@ -551,6 +689,67 @@ mod tests {
             "biomes": ["minecraft:desert"], "features": ["minecraft:desert_well"],
             "steps": ["surface_structures"]}))
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_mods_food_gives_its_own_effects_and_leaves_its_bowl() {
+        let dir = std::env::temp_dir().join(format!("content120-foods-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let carry = dir.join("mods/fd/carry");
+        let items = carry.join("data/farmersdelight/horizon/item");
+        std::fs::create_dir_all(&items).unwrap();
+        // As the carry-over declares it: food on bread, its effects left out.
+        std::fs::write(
+            items.join("beef_stew.json"),
+            r#"{"components": {"minecraft:food": {"nutrition": 12, "saturation": 19.2}},
+                "max_stack_size": 16, "template": "minecraft:bread"}"#,
+        )
+        .unwrap();
+        let facts = serde_json::json!({
+            "mob_effects": [
+                {"id": "farmersdelight:comfort", "category": "beneficial", "color": 0x00CD_9A4F},
+            ],
+            "items": {"farmersdelight:beef_stew": {"consume": {
+                "seconds": 1.6, "animation": "eat", "remainder": "minecraft:bowl",
+                "effects": [
+                    {"id": "farmersdelight:comfort", "duration": 6000, "amplifier": 0, "probability": 1.0},
+                    {"id": "minecraft:regeneration", "duration": 100, "amplifier": 1, "probability": 0.3},
+                ],
+            }}},
+        });
+        let carried = std::slice::from_ref(&carry);
+        assert_eq!(mob_effects(&facts, carried), 1);
+        let effect: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(carry.join("data/farmersdelight/horizon/mob_effect/comfort.json"))
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            effect,
+            serde_json::json!({"category": "beneficial", "color": 0x00CD_9A4F})
+        );
+        assert_eq!(foods(&facts, carried), 1);
+        let stew: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(items.join("beef_stew.json")).unwrap()).unwrap();
+        let components = &stew["components"];
+        assert_eq!(
+            components["minecraft:food"]["nutrition"], 12,
+            "its food stays"
+        );
+        assert_eq!(
+            components["minecraft:use_remainder"]["id"],
+            "minecraft:bowl"
+        );
+        let effects = components["minecraft:consumable"]["on_consume_effects"]
+            .as_array()
+            .unwrap();
+        // One apply_effects per effect, each with its own chance.
+        assert_eq!(effects.len(), 2);
+        assert_eq!(effects[0]["effects"][0]["id"], "farmersdelight:comfort");
+        assert_eq!(effects[0]["effects"][0]["duration"], 6000);
+        assert_eq!(effects[1]["probability"], 0.3);
+        assert_eq!(components["minecraft:consumable"]["animation"], "eat");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

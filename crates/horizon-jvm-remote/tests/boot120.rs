@@ -2570,6 +2570,54 @@ fn the_mods_machines_pass_energy_between_them() {
         "the dispatcher's error: {said:?}"
     );
 
+    // Phase 5k: the mods' effects act on Horizon's numbers. Farmer's Delight's Comfort heals
+    // a hurt player with no saturation every 80 ticks, unless Regeneration does; its
+    // Nourishment takes the exhaustion back from a player who isn't healing.
+    let mut ticks = |health: f32, effects: serde_json::Value, tick: serde_json::Value| {
+        let state = serde_json::json!({
+            "dimension": "minecraft:overworld", "health": health, "max_health": 20.0,
+            "absorption": 0.0, "food": 10, "saturation": 0.0, "exhaustion": 2.0, "air": 300,
+            "effects": effects, "tick": tick,
+        });
+        let after: serde_json::Value = serde_json::from_str(
+            &runtime
+                .effect_ticks(&tank, uuid, "Tester", &state.to_string())
+                .expect("the effects tick"),
+        )
+        .expect("json");
+        after
+    };
+    let comfort =
+        serde_json::json!([{"id": "farmersdelight:comfort", "duration": 1600, "amplifier": 0}]);
+    let due = serde_json::json!([{"id": "farmersdelight:comfort", "ticks": 1600, "amplifier": 0}]);
+    let healed = ticks(10.0, comfort.clone(), due.clone());
+    assert_eq!(healed["health"], 11.0, "comfort heals: {healed}");
+    let not_due =
+        serde_json::json!([{"id": "farmersdelight:comfort", "ticks": 1601, "amplifier": 0}]);
+    assert_eq!(
+        ticks(10.0, comfort.clone(), not_due)["health"],
+        10.0,
+        "between its ticks"
+    );
+    let regenerating = serde_json::json!([
+        {"id": "farmersdelight:comfort", "duration": 1600, "amplifier": 0},
+        {"id": "minecraft:regeneration", "duration": 100, "amplifier": 0},
+    ]);
+    assert_eq!(
+        ticks(10.0, regenerating, due)["health"],
+        10.0,
+        "Regeneration heals instead"
+    );
+    let nourished = ticks(
+        20.0,
+        serde_json::json!([{"id": "farmersdelight:nourishment", "duration": 1600, "amplifier": 0}]),
+        serde_json::json!([{"id": "farmersdelight:nourishment", "ticks": 1600, "amplifier": 0}]),
+    );
+    assert_eq!(
+        nourished["exhaustion"], 0.0,
+        "nourishment takes the exhaustion back: {nourished}"
+    );
+
     // Phase 5i: what the mods draw on the HUD, over Horizon's. A hungry player in survival:
     // AppleSkin's saturation and exhaustion over the food bar, from Horizon's numbers; none
     // of vanilla's own hearts, bars or hotbar, which are Horizon's to draw.

@@ -1201,6 +1201,57 @@ public final class Mirror120 {
         }
     }
 
+    /**
+     * The mods' effects on a player acting this tick (phase 5k): `MobEffect.applyEffectTick`
+     * where `isDurationEffectTick` says, as `MobEffectInstance.tick` runs it, on the runtime's
+     * player with Horizon's numbers. Farmer's Delight's Nourishment takes back exhaustion, its
+     * Comfort heals. `state` is the HUD's (Hud120: health, food...) with `effects`, all the
+     * player's (`{id, duration, amplifier}`: Comfort asks for Regeneration), and `tick`, the
+     * mods' ones due (`{id, ticks, amplifier}`, ticks as `tickServer` hands them). {state}: the
+     * player's health, absorption, food, saturation, exhaustion and air after them.
+     */
+    public static Object[] effectTicks(String uuid, String name, String state) {
+        begin();
+        try {
+            var s = com.google.gson.JsonParser.parseString(state).getAsJsonObject();
+            ServerPlayer player = player(uuid, name, level(s.get("dimension").getAsString()));
+            Hud120.stats(player, s);
+            var active = new java.util.HashMap<net.minecraft.world.effect.MobEffect, net.minecraft.world.effect.MobEffectInstance>();
+            for (var e : s.getAsJsonArray("effects")) {
+                var o = e.getAsJsonObject();
+                var effect = BuiltInRegistries.MOB_EFFECT.get(new ResourceLocation(o.get("id").getAsString()));
+                if (effect == null) continue;
+                active.put(effect, new net.minecraft.world.effect.MobEffectInstance(effect,
+                        o.get("duration").getAsInt(), o.get("amplifier").getAsInt()));
+            }
+            ((dev.horizonlab.platform120.mixin.LivingEntityAccess) (Object) player).horizon$setActiveEffects(active);
+            for (var e : s.getAsJsonArray("tick")) {
+                var o = e.getAsJsonObject();
+                var effect = BuiltInRegistries.MOB_EFFECT.get(new ResourceLocation(o.get("id").getAsString()));
+                if (effect == null) continue;
+                int amplifier = o.get("amplifier").getAsInt();
+                try {
+                    if (effect.isDurationEffectTick(o.get("ticks").getAsInt(), amplifier)) {
+                        effect.applyEffectTick(player, amplifier);
+                    }
+                } catch (Throwable t) {
+                    log("effect " + o.get("id").getAsString() + " failed: " + t);
+                }
+            }
+            var food = player.getFoodData();
+            var after = new com.google.gson.JsonObject();
+            after.addProperty("health", player.getHealth());
+            after.addProperty("absorption", player.getAbsorptionAmount());
+            after.addProperty("food", food.getFoodLevel());
+            after.addProperty("saturation", food.getSaturationLevel());
+            after.addProperty("exhaustion", ((dev.horizonlab.platform120.mixin.FoodDataAccess) food).horizon$exhaustion());
+            after.addProperty("air", player.getAirSupply());
+            return new Object[] {after.toString()};
+        } finally {
+            finish();
+        }
+    }
+
     /** A message the mods sent a player (ServerPlayerMixin): to Horizon's, as JSON. */
     public static void message(ServerPlayer player, net.minecraft.network.chat.Component message, boolean overlay) {
         if (event == null) return;
