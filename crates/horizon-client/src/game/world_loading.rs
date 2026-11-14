@@ -547,6 +547,8 @@ pub(super) fn packed_biomes(
         .iter()
         .filter_map(|id| packs.iter().find(|p| &p.id == id))
         .collect();
+    let mods = mod_worldgen_packs();
+    let enabled: Vec<_> = mods.iter().chain(enabled).collect();
     let (overrides, _) = horizon_client::datapack::worldgen_overrides(&enabled, |_| true);
     let packed: Vec<(String, serde_json::Value)> = overrides
         .entries("biomes")
@@ -613,8 +615,17 @@ fn worldgen_overrides_of(
         .collect();
     // The Java mods' data under the world's packs (world_loading/java.rs).
     let mods = Game::java_structure_packs();
-    let enabled: Vec<_> = mods.iter().chain(enabled).collect();
+    let mods_120 = mod_worldgen_packs();
+    let enabled: Vec<_> = mods.iter().chain(&mods_120).chain(enabled).collect();
     horizon_client::datapack::worldgen_overrides(&enabled, |b| biomes.contains(b))
+}
+
+/// The 1.20.1 mods' world generation as a data pack, below the world's packs.
+fn mod_worldgen_packs() -> Vec<horizon_client::datapack::DataPack> {
+    #[cfg(feature = "java-mods-120")]
+    return super::java_mods_120::worldgen_packs();
+    #[cfg(not(feature = "java-mods-120"))]
+    Vec::new()
 }
 
 /// The shapes of the world's levels: their dimension types, the world's

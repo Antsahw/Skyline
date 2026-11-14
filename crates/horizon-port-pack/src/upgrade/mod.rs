@@ -430,6 +430,33 @@ mod tests {
         );
     }
 
+    /// 26.3's vanilla `overworld/caves/entrances` writes 26.2's spaghetti sampler so.
+    #[test]
+    fn a_weird_scaled_sampler_is_an_interval_selection_of_scaled_noises() {
+        let rarity = json!({"type": "minecraft:noise", "noise": "minecraft:spaghetti_3d_rarity",
+            "xz_scale": 2.0, "y_scale": 1.0});
+        let (v, report) = up(
+            "data/x/worldgen/density_function/f.json",
+            json!({"type": "minecraft:weird_scaled_sampler", "rarity_value_mapper": "type_1",
+                "noise": "minecraft:spaghetti_3d_1",
+                "input": {"type": "minecraft:cache_once", "argument": rarity.clone()}}),
+        );
+        let scaled = |scale: f64, r: f64| {
+            json!({"type": "minecraft:mul", "left": {"type": "minecraft:noise",
+                "noise": "minecraft:spaghetti_3d_1", "xz_scale": scale, "y_scale": scale},
+                "right": r})
+        };
+        assert_eq!(
+            v,
+            json!({"type": "minecraft:abs", "input": {"type": "minecraft:interval_select",
+                "functions": [scaled(1.3333333333333333, 0.75), scaled(1.0, 1.0),
+                    scaled(0.6666666666666666, 1.5), scaled(0.5, 2.0)],
+                "input": {"type": "minecraft:cache", "input": rarity},
+                "thresholds": [-0.5, 0.0, 0.5]}})
+        );
+        assert!(report.unknown.is_empty(), "{:?}", report.unknown);
+    }
+
     #[test]
     fn flat_cache_slices_at_y_zero_only_what_depends_on_y() {
         let flat = |argument: Value| {
@@ -561,6 +588,114 @@ mod tests {
             v,
             json!({"feature": "x:f", "placement": [{"type": "minecraft:offset", "x": 0, "y": -1, "z": 0}]})
         );
+    }
+
+    /// 26.3's vanilla wrote its patches so (`bamboo_vegetation`'s default, which 1.21's
+    /// `patch_grass_jungle` placed): the patch's tries and spread before the inner placement.
+    #[test]
+    fn a_random_patch_becomes_placement_under_a_selector() {
+        let filter = json!({"type": "minecraft:block_predicate_filter", "predicate":
+            {"type": "minecraft:matching_block_tag", "tag": "minecraft:air"}});
+        let (v, _) = up(
+            "data/x/worldgen/configured_feature/patch.json",
+            json!({"type": "minecraft:random_patch", "config": {"tries": 32, "xz_spread": 7,
+                "y_spread": 3, "feature": {"feature": {"type": "minecraft:simple_block", "config":
+                {"to_place": {"type": "minecraft:simple_state_provider", "state":
+                {"Name": "minecraft:short_grass"}}}}, "placement": [filter.clone()]}}}),
+        );
+        let spread =
+            |s: i64| json!({"type": "minecraft:trapezoid", "min": -s, "max": s, "plateau": 0});
+        assert_eq!(
+            v,
+            json!({"type": "minecraft:random_selector", "features": [], "default": {
+                "feature": {"type": "minecraft:simple_block", "to_place": "minecraft:short_grass"},
+                "placement": [{"type": "minecraft:count", "count": 32},
+                    {"type": "minecraft:offset", "x": spread(7), "y": spread(3), "z": spread(7)},
+                    filter]}})
+        );
+        // A placed feature by id keeps its own placement, a selector further in; the
+        // defaults are 1.20's (128 tries, 7 and 3).
+        let (v, _) = up(
+            "data/x/worldgen/configured_feature/patch.json",
+            json!({"type": "random_patch", "config": {"feature": "x:flower"}}),
+        );
+        assert_eq!(
+            v["default"],
+            json!({"feature": {"type": "minecraft:random_selector", "features": [],
+                "default": "x:flower"}, "placement": [{"type": "minecraft:count", "count": 128},
+                {"type": "minecraft:offset", "x": spread(7), "y": spread(3), "z": spread(7)}]})
+        );
+    }
+
+    /// As 26.3's vanilla `dripstone_cluster` and `forest_rock` write 26.2's.
+    #[test]
+    fn renamed_features_take_26_3s_type_and_names() {
+        let (v, _) = up(
+            "data/x/worldgen/configured_feature/c.json",
+            json!({"type": "minecraft:dripstone_cluster", "config": {
+                "floor_to_ceiling_search_range": 12, "height_deviation": 3,
+                "dripstone_block_layer_thickness": 2,
+                "chance_of_dripstone_column_at_max_distance_from_center": 0.1,
+                "max_distance_from_edge_affecting_chance_of_dripstone_column": 3}}),
+        );
+        assert_eq!(
+            v,
+            json!({"type": "minecraft:speleothem_cluster", "floor_to_ceiling_search_range": 12,
+                "height_deviation": 3, "speleothem_block_layer_thickness": 2,
+                "chance_of_speleothem_at_max_distance_from_center": 0.1,
+                "max_distance_from_edge_affecting_chance_of_speleothem": 3,
+                "base_block": "minecraft:dripstone_block",
+                "pointed_block": "minecraft:pointed_dripstone",
+                "replaceable_blocks": "#minecraft:dripstone_replaceable_blocks"})
+        );
+        let (v, _) = up(
+            "data/x/worldgen/configured_feature/d.json",
+            json!({"type": "minecraft:disk", "config": {"state_provider": {"fallback":
+                {"type": "minecraft:simple_state_provider", "state": {"Name": "minecraft:sand"}},
+                "rules": []}}}),
+        );
+        assert_eq!(
+            v["state_provider"],
+            json!({"type": "minecraft:rule_based", "fallback": "minecraft:sand", "rules": []})
+        );
+        let (v, _) = up(
+            "data/x/worldgen/configured_feature/r.json",
+            json!({"type": "minecraft:forest_rock", "config": {"state":
+                {"Name": "minecraft:mossy_cobblestone"}}}),
+        );
+        assert_eq!(
+            v,
+            json!({"type": "minecraft:block_blob", "can_place_on": {"type":
+                "minecraft:matching_block_tag", "tag": "minecraft:forest_rock_can_place_on"},
+                "state": "minecraft:mossy_cobblestone"})
+        );
+    }
+
+    /// 26.2's warped forest vegetation (spread 8 by 4) is 26.3's vanilla placement of it.
+    #[test]
+    fn nether_forest_vegetation_becomes_placement_on_nylium() {
+        let (v, report) = up(
+            "data/x/worldgen/configured_feature/v.json",
+            json!({"type": "minecraft:nether_forest_vegetation", "config": {"spread_width": 8,
+                "spread_height": 4, "state_provider": {"type": "minecraft:weighted_state_provider",
+                "entries": [{"data": {"Name": "minecraft:warped_roots"}, "weight": 85}]}}}),
+        );
+        let spread =
+            |s: i64| json!({"type": "minecraft:trapezoid", "min": -s, "max": s, "plateau": 0});
+        assert_eq!(
+            v["default"],
+            json!({"feature": {"type": "minecraft:simple_block", "to_place": {"type":
+                "minecraft:weighted", "entries": [{"data": "minecraft:warped_roots", "weight": 85}]}},
+                "placement": [
+                    {"type": "minecraft:block_predicate_filter", "predicate": {"type":
+                        "minecraft:matching_block_tag", "offset": [0, -1, 0],
+                        "tag": "minecraft:nylium"}},
+                    {"type": "minecraft:count", "count": 64},
+                    {"type": "minecraft:offset", "x": spread(7), "y": spread(3), "z": spread(7)},
+                    {"type": "minecraft:block_predicate_filter", "predicate": {"type":
+                        "minecraft:matching_block_tag", "tag": "minecraft:air"}}]})
+        );
+        assert!(report.unknown.is_empty(), "{:?}", report.unknown);
     }
 
     #[test]

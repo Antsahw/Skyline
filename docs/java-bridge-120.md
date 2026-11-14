@@ -356,6 +356,46 @@ clicks pass until then). A click on a block of a 1.20.1 mod's namespace, or with
 their items, goes to it at `useItemOn`'s head (`java120_use_block`, beside the 26.3 bridge's
 hook in `lan_actions.rs`); what it set and what it did to the held stack land in Horizon.
 
+## Phase 6g status: the mods' world generation over vanilla's (2026-11-14)
+
+Terralith (data only, no code) puts its 101 biomes into the overworld by replacing vanilla's
+files: `data/minecraft/dimension/overworld.json`, the overworld's noise settings and density
+functions, and 35 of vanilla's biomes. The carry-over keeps a mod's files under its own
+namespaces, so all 137 of those stayed out (`outside/`) and the world was vanilla's.
+
+Now a mod whose jar has world generation under `minecraft` (a level stem or a worldgen file)
+has all its world generation, its own namespaces' too, written as one 26.3 data pack at
+content-build time (`content120::worldgen_pack`, `<cache>/java-120/content/worldgen`). Horizon's
+generator and the world's biome table read that pack under the world's own packs
+(`java_mods_120::worldgen_packs`, chained in `world_loading.rs` beside the 26.3 bridge's
+structure packs), as Fabric adds a mod's data as a pack. The files go through the 26.2 to 26.3
+pack upgrade (`upgrade::upgrade_pack`) after what 1.20.x wrote differently (`legacy120.rs`):
+
+- int and float providers with their bounds in a `value` object (1.20.5 flattened them);
+- a biome's `effects` (sky, fog and underwater fog colours, particle, sounds, music) as
+  environment attributes, and its carvers by step as one list;
+- surface rules naming biomes nothing registers (Terralith names a few it never made): 26.3
+  reads `biome_is` as a biome list and refuses the whole rule, so those names are dropped;
+- the biomes' feature lists in 26.3's vanilla order: 26.3 reordered some of vanilla's (sugar
+  cane after pumpkins), and Terralith's oceans in 1.20.1's order beside 26.3's own oceans made
+  the feature sorter find a cycle.
+
+The pack upgrade itself learned what 26.3 replaced with data: `random_patch` and the flower
+features as count and offset placement under a selector (as 26.3's vanilla writes its
+patches), `nether_forest_vegetation` the same on nylium, `weird_scaled_sampler` as an interval
+selection of scaled noises (as 26.3's vanilla caves), `dripstone_cluster` as a dripstone
+`speleothem_cluster`, `forest_rock` as a `block_blob`, and a disk's untyped rule-based provider.
+Horizon's generator reads a noise settings' default block or fluid in 26.3's `{"id",
+"properties"}` form too (it read only the older `Name` form or a bare id).
+
+The mods' own placed features (Terralith's 552) are placed by the runtime with their 1.20.1
+code, as phase 6b's.
+
+Checked: a Terralith world generates its biomes (`/locate biome terralith:yosemite_cliffs`
+finds one 2,557 blocks from spawn, and its white cliffs and forest look as Terralith's), with
+the runtime placing Terralith's features. Not yet: biomes added by code (TerraBlender: Biomes
+O' Plenty), and the pack's dimension types (the level shapes still read only the world's packs).
+
 ## Phase 6e status: the mods' fluids in the world (2026-11-14)
 
 A mod's fluid block (Tech Reborn's 35: oil, diesel...) is carried on water's or lava's
@@ -1411,7 +1451,8 @@ NeoForge could run beside Fabric 26.3 rather than in its place.
 6. **Entities and worldgen.** 6a done: the mods' Fabric biome modifications reach Horizon's
    generator as biome modifiers. 6b done: a mod's own feature types run in the runtime on the
    chunks being decorated. 6c done: data-driven structures (above). 6d done: the mods' mobs
-   (above). Next: structures with their own Java pieces and the mods' biomes.
+   (above). 6g done: mods that replace vanilla's world generation as data (Terralith, above).
+   Next: biomes added by code (TerraBlender), structures with their own Java pieces.
 7. **In-world rendering.** Blocks drawn by their code done (above: Wired Redstone's wires and
    cables); block entity renderers done (7b: Farmer's Delight's cutting board). Next:
    LibMultipart's dynamic part renderers, then a GL recorder if needed.

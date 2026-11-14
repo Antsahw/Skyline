@@ -151,6 +151,256 @@ fn item_predicate(p: &mut Value) {
     }
 }
 
+/// 1.20.x's int and float providers in 1.20.5's shape, everywhere in a worldgen file, in place:
+/// 1.20.x put a provider's bounds in a `value` object (`{"type": "uniform", "value":
+/// {"min_inclusive": 1, "max_inclusive": 3}}`), 1.20.5 beside its type. A constant's `value` is
+/// a number and stays. Whether anything changed.
+pub fn providers(v: &mut Value) -> bool {
+    const NESTED: [&str; 5] = [
+        "uniform",
+        "biased_to_bottom",
+        "clamped",
+        "clamped_normal",
+        "trapezoid",
+    ];
+    match v {
+        Value::Array(a) => a.iter_mut().fold(false, |c, x| providers(x) | c),
+        Value::Object(o) => {
+            let mut changed = false;
+            let nested = o
+                .get("type")
+                .and_then(Value::as_str)
+                .is_some_and(|t| NESTED.contains(&t.strip_prefix("minecraft:").unwrap_or(t)));
+            if nested
+                && o.len() == 2
+                && let Some(Value::Object(inner)) = o.remove("value")
+            {
+                o.extend(inner);
+                changed = true;
+            }
+            o.values_mut().fold(changed, |c, x| providers(x) | c)
+        }
+        _ => false,
+    }
+}
+
+/// A 1.20.x biome's look and sound in 26.3's place, in place: 1.21.2 to 26.1 moved what
+/// `effects` held but the water and plant colours into environment attributes (the sky, fog and
+/// underwater fog colours as `#rrggbb`, the ambient particle, sounds and music). A colour equal to
+/// the overworld's default is left out, as vanilla's own biomes leave it to the dimension.
+/// 1.20.x's carvers by carving step are 1.21.2's one list, the air step's: the liquid step was
+/// gone. Whether anything changed.
+pub fn biome(v: &mut Value) -> bool {
+    let mut carved = false;
+    if let Some(Value::Object(steps)) = v.get("carvers") {
+        let air = steps.get("air").cloned().unwrap_or(json!([]));
+        v["carvers"] = match air {
+            Value::String(one) => json!([one]),
+            air => air,
+        };
+        carved = true;
+    }
+    let Some(effects) = v.get_mut("effects").and_then(Value::as_object_mut) else {
+        return carved;
+    };
+    let mut attributes = Map::new();
+    let hex = |c: &Value| c.as_i64().map(|c| json!(format!("#{:06x}", c & 0xFF_FFFF)));
+    for (key, attribute, default) in [
+        ("sky_color", "minecraft:visual/sky_color", None),
+        ("fog_color", "minecraft:visual/fog_color", Some(0xC0D8FF)),
+        (
+            "water_fog_color",
+            "minecraft:visual/water_fog_color",
+            Some(0x050533),
+        ),
+    ] {
+        if let Some(color) = effects.remove(key)
+            && color.as_i64() != default
+            && let Some(color) = hex(&color).or(Some(color).filter(Value::is_string))
+        {
+            attributes.insert(attribute.into(), color);
+        }
+    }
+    if let Some(Value::Object(particle)) = effects.remove("particle") {
+        let entry = json!({"particle": particle.get("options").cloned().unwrap_or_default(),
+            "probability": particle.get("probability").cloned().unwrap_or(json!(0.0))});
+        attributes.insert(
+            "minecraft:visual/ambient_particles".into(),
+            json!({"modifier": "append", "argument": [entry]}),
+        );
+    }
+    let mut sounds = Map::new();
+    if let Some(sound) = effects.remove("ambient_sound") {
+        sounds.insert("loop".into(), sound);
+    }
+    if let Some(mood) = effects.remove("mood_sound") {
+        sounds.insert("mood".into(), mood);
+    }
+    if let Some(additions) = effects.remove("additions_sound") {
+        sounds.insert("additions".into(), additions);
+    }
+    if !sounds.is_empty() {
+        attributes.insert(
+            "minecraft:audio/ambient_sounds".into(),
+            Value::Object(sounds),
+        );
+    }
+    if let Some(Value::Object(mut music)) = effects.remove("music") {
+        if music.get("replace_current_music") == Some(&json!(false)) {
+            music.remove("replace_current_music");
+        }
+        attributes.insert(
+            "minecraft:audio/background_music".into(),
+            json!({"default": music}),
+        );
+    }
+    if attributes.is_empty() {
+        return carved;
+    }
+    let Some(o) = v.as_object_mut() else {
+        return carved;
+    };
+    match o.entry("attributes").or_insert_with(|| json!({})) {
+        Value::Object(existing) => {
+            for (k, x) in attributes {
+                existing.entry(k).or_insert(x);
+            }
+        }
+        other => *other = Value::Object(attributes),
+    }
+    true
+}
+
+/// A surface rule's biome conditions with only the biomes that exist, in place: 1.20.x read
+/// `biome_is` as biome keys and let one name a biome nothing registers (Terralith names some it
+/// never made), where 26.3 reads a biome list and refuses the whole surface rule over it. An id
+/// without a namespace is vanilla's. Whether anything changed.
+pub fn biome_conditions(v: &mut Value, exists: &dyn Fn(&str) -> bool) -> bool {
+    match v {
+        Value::Array(a) => a
+            .iter_mut()
+            .fold(false, |c, x| biome_conditions(x, exists) | c),
+        Value::Object(o) => {
+            let mut changed = false;
+            let biome = o
+                .get("type")
+                .and_then(Value::as_str)
+                .is_some_and(|t| t.strip_prefix("minecraft:").unwrap_or(t) == "biome");
+            if biome && let Some(Value::Array(names)) = o.get_mut("biome_is") {
+                let before = names.clone();
+                names.retain_mut(|n| match n.as_str() {
+                    Some(id) => {
+                        let full = if id.contains(':') {
+                            id.to_owned()
+                        } else {
+                            format!("minecraft:{id}")
+                        };
+                        let keep = exists(&full);
+                        *n = Value::String(full);
+                        keep
+                    }
+                    None => false,
+                });
+                changed = *names != before;
+            }
+            o.values_mut()
+                .fold(changed, |c, x| biome_conditions(x, exists) | c)
+        }
+        _ => false,
+    }
+}
+
+/// Where each feature comes in its generation step, by the order `biomes` (biome files, in
+/// order) give their features: the order vanilla's feature sorter settles on, for 26.3's own
+/// biomes. A feature found in no biome has none. Empty when their lists contradict each other.
+pub fn feature_order(biomes: &[Value]) -> std::collections::HashMap<(usize, String), usize> {
+    use std::collections::{BTreeMap, BTreeSet, HashMap};
+    type Node = (usize, String);
+    let mut after: BTreeMap<Node, BTreeSet<Node>> = BTreeMap::new();
+    let mut before: BTreeMap<Node, usize> = BTreeMap::new();
+    for biome in biomes {
+        let mut previous: Option<Node> = None;
+        let steps = biome["features"].as_array().into_iter().flatten();
+        for (step, features) in steps.enumerate() {
+            for id in features
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+            {
+                let node = (step, id.to_owned());
+                before.entry(node.clone()).or_default();
+                after.entry(node.clone()).or_default();
+                if let Some(previous) = previous.take()
+                    && previous != node
+                    && after.entry(previous).or_default().insert(node.clone())
+                {
+                    *before.entry(node.clone()).or_default() += 1;
+                }
+                previous = Some(node);
+            }
+        }
+    }
+    // Kahn's, smallest first: the same order for the same lists.
+    let mut ready: BTreeSet<Node> = before
+        .iter()
+        .filter(|(_, n)| **n == 0)
+        .map(|(k, _)| k.clone())
+        .collect();
+    let mut order = HashMap::new();
+    while let Some(node) = ready.pop_first() {
+        for next in after.get(&node).into_iter().flatten() {
+            let n = before.get_mut(next).expect("counted");
+            *n -= 1;
+            if *n == 0 {
+                ready.insert(next.clone());
+            }
+        }
+        let rank = order.len();
+        order.insert(node, rank);
+    }
+    if order.len() != before.len() {
+        return HashMap::new();
+    }
+    order
+}
+
+/// A 1.20.x biome's features put in `order`'s order ([`feature_order`]: 26.3's vanilla biomes'),
+/// in place: 26.3 reordered some of vanilla's (sugar cane after pumpkins), and a biome that keeps
+/// 1.20.1's order beside 26.3's own biomes makes the feature sorter find a cycle and the world
+/// fail to generate. The features `order` has keep their slots among the others, sorted. Whether
+/// anything changed.
+pub fn order_features(
+    biome: &mut Value,
+    order: &std::collections::HashMap<(usize, String), usize>,
+) -> bool {
+    let mut changed = false;
+    let Some(steps) = biome.get_mut("features").and_then(Value::as_array_mut) else {
+        return false;
+    };
+    for (step, features) in steps.iter_mut().enumerate() {
+        let Some(features) = features.as_array_mut() else {
+            continue;
+        };
+        let rank = |f: &Value| {
+            f.as_str()
+                .and_then(|id| order.get(&(step, id.to_owned())).copied())
+        };
+        let slots: Vec<usize> = (0..features.len())
+            .filter(|&i| rank(&features[i]).is_some())
+            .collect();
+        let mut known: Vec<Value> = slots.iter().map(|&i| features[i].clone()).collect();
+        known.sort_by_key(|f| rank(f));
+        for (slot, feature) in slots.into_iter().zip(known) {
+            if features[slot] != feature {
+                features[slot] = feature;
+                changed = true;
+            }
+        }
+    }
+    changed
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -258,5 +508,130 @@ mod tests {
             json!("minecraft:tool/can_silk_touch")
         );
         assert_eq!(children[2]["condition"], json!("minecraft:tool/can_shear"));
+    }
+
+    #[test]
+    fn a_providers_bounds_come_out_of_its_value() {
+        let mut feature = json!({"type": "minecraft:tree", "config": {
+            "foliage_placer": {"radius": {"type": "minecraft:uniform",
+                "value": {"min_inclusive": 1, "max_inclusive": 3}}, "offset": 0},
+            "count": {"type": "clamped", "value": {"min_inclusive": 0, "max_inclusive": 6,
+                "source": {"type": "minecraft:biased_to_bottom",
+                    "value": {"min_inclusive": 1, "max_inclusive": 1}}}},
+            "height": {"type": "minecraft:constant", "value": 4}}});
+        assert!(providers(&mut feature));
+        let config = &feature["config"];
+        assert_eq!(
+            config["foliage_placer"]["radius"],
+            json!({"type": "minecraft:uniform", "min_inclusive": 1, "max_inclusive": 3})
+        );
+        assert_eq!(
+            config["count"],
+            json!({"type": "clamped", "min_inclusive": 0, "max_inclusive": 6,
+                "source": {"type": "minecraft:biased_to_bottom",
+                    "min_inclusive": 1, "max_inclusive": 1}})
+        );
+        // A constant keeps its value, and 1.20.5's shape is left as it is.
+        assert_eq!(
+            config["height"],
+            json!({"type": "minecraft:constant", "value": 4})
+        );
+        assert!(!providers(&mut feature));
+    }
+
+    /// As 26.3's vanilla writes its biomes: swamp's sky and underwater fog, basalt deltas'
+    /// particles and sounds; the overworld's default fog left to the dimension.
+    #[test]
+    fn a_biomes_look_and_sound_become_attributes() {
+        let mut swamp = json!({"temperature": 0.8, "carvers": {"air": ["minecraft:cave"]},
+            "effects": {
+            "sky_color": 7907327, "fog_color": 12638463, "water_color": 6388580,
+            "water_fog_color": 2302743, "grass_color_modifier": "swamp",
+            "music": {"sound": "minecraft:music.overworld.swamp", "min_delay": 12000,
+                "max_delay": 24000, "replace_current_music": false}}});
+        assert!(biome(&mut swamp));
+        assert_eq!(swamp["carvers"], json!(["minecraft:cave"]));
+        assert_eq!(
+            swamp["effects"],
+            json!({"water_color": 6388580, "grass_color_modifier": "swamp"})
+        );
+        assert_eq!(
+            swamp["attributes"],
+            json!({"minecraft:visual/sky_color": "#78a7ff",
+                "minecraft:visual/water_fog_color": "#232317",
+                "minecraft:audio/background_music": {"default": {
+                    "sound": "minecraft:music.overworld.swamp", "min_delay": 12000,
+                    "max_delay": 24000}}})
+        );
+        let mut deltas = json!({"effects": {"fog_color": 6840176,
+            "particle": {"options": {"type": "minecraft:white_ash"}, "probability": 0.118093334},
+            "ambient_sound": "minecraft:ambient.basalt_deltas.loop",
+            "mood_sound": {"sound": "minecraft:ambient.basalt_deltas.mood", "tick_delay": 6000,
+                "block_search_extent": 8, "offset": 2.0},
+            "additions_sound": {"sound": "minecraft:ambient.basalt_deltas.additions",
+                "tick_chance": 0.0111}}});
+        assert!(biome(&mut deltas));
+        let attributes = &deltas["attributes"];
+        assert_eq!(attributes["minecraft:visual/fog_color"], json!("#685f70"));
+        assert_eq!(
+            attributes["minecraft:visual/ambient_particles"],
+            json!({"modifier": "append", "argument": [{"particle": {"type": "minecraft:white_ash"},
+                "probability": 0.118093334}]})
+        );
+        assert_eq!(
+            attributes["minecraft:audio/ambient_sounds"],
+            json!({"loop": "minecraft:ambient.basalt_deltas.loop",
+                "mood": {"sound": "minecraft:ambient.basalt_deltas.mood", "tick_delay": 6000,
+                    "block_search_extent": 8, "offset": 2.0},
+                "additions": {"sound": "minecraft:ambient.basalt_deltas.additions",
+                    "tick_chance": 0.0111}})
+        );
+        assert!(!biome(&mut deltas), "once");
+    }
+
+    #[test]
+    fn a_surface_rule_names_only_biomes_that_exist() {
+        let mut rule = json!({"type": "minecraft:condition", "if_true": {"type": "minecraft:biome",
+            "biome_is": ["terralith:icy_spires", "deep_frozen_ocean", "terralith:yosemite_cliffs"]},
+            "then_run": {"type": "minecraft:block", "result_state": {"Name": "minecraft:ice"}}});
+        let exists = |id: &str| id != "terralith:icy_spires";
+        assert!(biome_conditions(&mut rule, &exists));
+        assert_eq!(
+            rule["if_true"]["biome_is"],
+            json!(["minecraft:deep_frozen_ocean", "terralith:yosemite_cliffs"])
+        );
+        assert!(!biome_conditions(&mut rule, &exists));
+    }
+
+    #[test]
+    fn a_biome_takes_vanillas_feature_order_around_its_own() {
+        // 26.3's own: pumpkins before sugar cane.
+        let vanilla = [
+            json!({"features": [[], ["minecraft:patch_pumpkin", "minecraft:patch_sugar_cane"]]}),
+            json!({"features": [[], ["minecraft:trees", "minecraft:patch_pumpkin"]]}),
+        ];
+        let order = feature_order(&vanilla);
+        let mut biome = json!({"features": [["mod:rock"], ["minecraft:patch_sugar_cane",
+            "mod:flowers", "minecraft:patch_pumpkin", "minecraft:trees"]]});
+        assert!(order_features(&mut biome, &order));
+        assert_eq!(
+            biome["features"],
+            json!([
+                ["mod:rock"],
+                [
+                    "minecraft:trees",
+                    "mod:flowers",
+                    "minecraft:patch_pumpkin",
+                    "minecraft:patch_sugar_cane"
+                ]
+            ])
+        );
+        assert!(!order_features(&mut biome, &order));
+        // Lists that contradict each other give no order.
+        let cycle = [
+            json!({"features": [["a", "b"]]}),
+            json!({"features": [["b", "a"]]}),
+        ];
+        assert!(feature_order(&cycle).is_empty());
     }
 }

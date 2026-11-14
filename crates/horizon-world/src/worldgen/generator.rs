@@ -1013,13 +1013,19 @@ impl ChunkWork {
 
 type BiomeCache = Mutex<HashMap<(i32, i32), Arc<BiomeChunk<BiomeId>>>>;
 
+/// A block state as 26.3's codec reads one: an id, or `{"id", "properties"}` (and the older
+/// `{"Name", "Properties"}`).
 fn state(registry: &BlockRegistry, raw: &Value) -> Result<BlockStateId, GeneratorError> {
     let name = raw
-        .get("Name")
+        .get("id")
+        .or_else(|| raw.get("Name"))
         .and_then(Value::as_str)
         .or_else(|| raw.as_str())
         .ok_or_else(|| resource("block state"))?;
-    let properties = raw.get("Properties").and_then(Value::as_object);
+    let properties = raw
+        .get("properties")
+        .or_else(|| raw.get("Properties"))
+        .and_then(Value::as_object);
     match properties {
         Some(properties) if !properties.is_empty() => {
             let descriptor = crate::chunk::BlockState {
@@ -3878,6 +3884,28 @@ impl GeneratorWorker {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// A noise settings' default fluid as 26.3 writes a state with properties, as older packs
+    /// wrote it, and as a bare id.
+    #[test]
+    fn a_settings_block_state_reads_in_each_form() {
+        let row = |level: &str| {
+            serde_json::json!(["minecraft:water", false, false, "",
+                {"id": "minecraft:water", "properties": {"level": level}}])
+        };
+        let facts = serde_json::json!({"defaults": {"minecraft:air": 0, "minecraft:water": 1},
+            "states": [["minecraft:air", false, false, "", "minecraft:air"], row("0"), row("1")]});
+        let registry = BlockRegistry::from_facts_json(facts.to_string().as_bytes()).unwrap();
+        let read = |raw: Value| state(&registry, &raw).unwrap().0;
+        assert_eq!(
+            read(serde_json::json!({"id": "minecraft:water", "properties": {"level": "1"}})),
+            2
+        );
+        assert_eq!(
+            read(serde_json::json!({"Name": "minecraft:water", "Properties": {"level": "1"}})),
+            2
+        );
+        assert_eq!(read(serde_json::json!("minecraft:water")), 1);
+    }
     #[test]
     fn pack_tags_join_the_prepared_ones_and_broken_ones_are_dropped() {
         let raw = Bundle::from([(

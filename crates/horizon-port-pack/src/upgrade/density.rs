@@ -196,6 +196,30 @@ impl<'a> Context<'a> {
                 json!({"type": format!("minecraft:{t}"), "noise": noise_holder(&arg("argument"), report)})
             }
             "end_islands" => json!({"type": "minecraft:end_outer_islands"}),
+            // `rarity * |noise(p / rarity)|`, the rarity picked from the input in steps:
+            // 26.3's vanilla caves write it as an interval selection of scaled noises.
+            "weird_scaled_sampler" => {
+                let (rarities, thresholds): (&[f64], &[f64]) =
+                    match arg("rarity_value_mapper").as_str() {
+                        Some("type_1") => (&[0.75, 1.0, 1.5, 2.0], &[-0.5, 0.0, 0.5]),
+                        Some("type_2") => (&[0.5, 0.75, 1.0, 2.0, 3.0], &[-0.75, -0.5, 0.5, 0.75]),
+                        _ => {
+                            report.unknown("density function weird_scaled_sampler mapper");
+                            return v.clone();
+                        }
+                    };
+                let input = self.density(&arg("input"), report);
+                let noise = noise_holder(&arg("noise"), report);
+                let functions: Vec<Value> = rarities
+                    .iter()
+                    .map(|r| {
+                        json!({"type": "minecraft:mul", "left": {"type": "minecraft:noise",
+                            "noise": noise, "xz_scale": 1.0 / r, "y_scale": 1.0 / r}, "right": r})
+                    })
+                    .collect();
+                json!({"type": "minecraft:abs", "input": {"type": "minecraft:interval_select",
+                    "functions": functions, "input": input, "thresholds": thresholds}})
+            }
             "constant" => arg("argument"),
             "clamp" | "range_choice" | "find_top_surface" | "interval_select" => {
                 let mut n = o.clone();

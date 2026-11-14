@@ -17,8 +17,12 @@ use std::path::{Path, PathBuf};
 /// 3: nested mods are inventoried whether or not they ship textures ([`nested_jars`]), so a
 /// cache built before this holds none of a library mod's blocks. 5: the mods' Fabric biome
 /// changes are written as biome modifiers ([`biome_modifiers`]). 6: the carry-over renames the
-/// ids vanilla renamed since 1.20.1 (`minecraft:grass`) in the mods' data.
-const FORMAT: u32 = 6;
+/// ids vanilla renamed since 1.20.1 (`minecraft:grass`) in the mods' data. 7: the mods that
+/// change vanilla's world generation (Terralith) get it as a data pack ([`worldgen_pack`]).
+const FORMAT: u32 = 7;
+
+/// The folder under the cache holding the mods' world generation as a 26.3 data pack.
+pub const WORLDGEN_PACK: &str = "worldgen";
 
 /// The stamp of a set of jars: their names, sizes and modification times, and [`FORMAT`].
 pub fn stamp(jars: &[PathBuf]) -> String {
@@ -533,6 +537,12 @@ pub fn build(
             "1.20.1 mods' content: {effects} effect(s) of their own, {eaten} food(s) eaten as in 1.20.1"
         ));
     }
+    let worldgen = worldgen_pack(&mods, resources, &cache.join(WORLDGEN_PACK), log)?;
+    if worldgen > 0 {
+        log(format!(
+            "1.20.1 mods' content: {worldgen} world generation file(s) as a data pack"
+        ));
+    }
     let tabs = creative_tabs(&facts, &carried(&work));
     if tabs > 0 {
         log(format!(
@@ -542,6 +552,152 @@ pub fn build(
     let _ = std::fs::remove_dir_all(&instance);
     std::fs::write(cache.join("stamp"), stamp(jars)).map_err(|e| format!("stamp: {e}"))?;
     Ok(carried(&work))
+}
+
+/// Whether a jar's data file is world generation: a level stem, a dimension type, a worldgen
+/// registry's file or a worldgen tag (1.20.1's folder names).
+fn is_worldgen(name: &str) -> bool {
+    let Some((_, path)) = name.strip_prefix("data/").and_then(|r| r.split_once('/')) else {
+        return false;
+    };
+    name.ends_with(".json")
+        && [
+            "dimension/",
+            "dimension_type/",
+            "worldgen/",
+            "tags/worldgen/",
+        ]
+        .iter()
+        .any(|k| path.starts_with(k))
+}
+
+/// The world generation of the mods that change vanilla's (a level stem or worldgen file under
+/// `minecraft`: Terralith's overworld and its noise), as a 26.3 data pack in `out`. The carry-over
+/// keeps a mod's files under its own namespaces, so these changes never reached the game; as
+/// Fabric adds a mod's data as a pack, Horizon's generator reads this pack under the world's
+/// (`java_mods_120::worldgen_packs`). Such a mod's own worldgen comes along (the biomes its
+/// overworld names). What 1.20.x wrote differently comes first (`legacy120`: providers, biome
+/// effects and carvers, surface rules' unknown biomes, 26.3's feature order, renamed ids), then
+/// every file is upgraded as a 26.2 pack is (`upgrade::upgrade_pack`: 26.3's folder names, block
+/// states, the noise router). How many files were written; none, and no pack, when no mod
+/// changes vanilla's.
+fn worldgen_pack(
+    mods: &Path,
+    resources: &Path,
+    out: &Path,
+    log: &dyn Fn(String),
+) -> Result<usize, String> {
+    use std::collections::BTreeMap;
+    use std::io::Read;
+    let _ = std::fs::remove_dir_all(out);
+    let mut jars: Vec<PathBuf> = std::fs::read_dir(mods)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|e| e == "jar"))
+        .collect();
+    jars.sort();
+    let mut files: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+    for jar in jars {
+        let Ok(file) = std::fs::File::open(&jar) else {
+            continue;
+        };
+        let Ok(mut zip) = zip::ZipArchive::new(file) else {
+            continue;
+        };
+        let names: Vec<String> = zip
+            .file_names()
+            .filter(|n| is_worldgen(n))
+            .map(str::to_owned)
+            .collect();
+        if !names
+            .iter()
+            .any(|n| n.starts_with("data/minecraft/") && !n.starts_with("data/minecraft/tags/"))
+        {
+            continue;
+        }
+        for name in names {
+            let mut bytes = Vec::new();
+            let read = zip.by_name(&name).map(|mut e| e.read_to_end(&mut bytes));
+            if !matches!(read, Ok(Ok(_))) {
+                continue;
+            }
+            if let Ok(mut v) = serde_json::from_slice::<serde_json::Value>(&bytes)
+                && (horizon_port_pack::legacy120::providers(&mut v)
+                    | horizon_port_pack::carry::renamed_ids(&mut v)
+                    | (name.contains("/worldgen/biome/")
+                        && horizon_port_pack::legacy120::biome(&mut v)))
+            {
+                bytes = serde_json::to_vec(&v).unwrap_or(bytes);
+            }
+            files.insert(name, bytes);
+        }
+    }
+    if files.is_empty() {
+        return Ok(0);
+    }
+    // The biomes that exist: vanilla's (26.3's, prepared) and the pack's.
+    let biomes: std::collections::HashSet<String> = files
+        .keys()
+        .filter_map(|n| {
+            let (ns, rest) = n.strip_prefix("data/")?.split_once('/')?;
+            let path = rest
+                .strip_prefix("worldgen/biome/")?
+                .strip_suffix(".json")?;
+            Some(format!("{ns}:{path}"))
+        })
+        .collect();
+    let vanilla = resources.join("data/minecraft/worldgen/biome");
+    let exists = |id: &str| {
+        biomes.contains(id)
+            || id
+                .strip_prefix("minecraft:")
+                .is_some_and(|p| vanilla.join(format!("{p}.json")).is_file())
+    };
+    // 26.3's vanilla biomes' feature order, which the mods' biomes take.
+    let vanilla_biomes: Vec<serde_json::Value> = std::fs::read_dir(&vanilla)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| serde_json::from_slice(&std::fs::read(e.path()).ok()?).ok())
+        .collect();
+    let order = horizon_port_pack::legacy120::feature_order(&vanilla_biomes);
+    for (name, bytes) in files.iter_mut() {
+        let Ok(mut v) = serde_json::from_slice::<serde_json::Value>(bytes) else {
+            continue;
+        };
+        let biome = name.contains("/worldgen/biome/")
+            && horizon_port_pack::legacy120::order_features(&mut v, &order);
+        if horizon_port_pack::legacy120::biome_conditions(&mut v, &exists) | biome {
+            *bytes = serde_json::to_vec(&v).unwrap_or_default();
+        }
+    }
+    let meta = serde_json::json!({"pack": {
+        "pack_format": horizon_port_pack::upgrade::PACK_FORMAT,
+        "description": "The 1.20.1 mods' world generation",
+    }});
+    files.insert("pack.mcmeta".into(), meta.to_string().into_bytes());
+    let (upgraded, report) = horizon_port_pack::upgrade::upgrade_pack(&files);
+    if !report.lossy.is_empty() || !report.unknown.is_empty() {
+        log(format!(
+            "1.20.1 mods' content: their world generation upgraded with losses {:?}, unknown {:?}",
+            report.lossy, report.unknown
+        ));
+    }
+    let mut written = 0;
+    for (path, bytes) in upgraded {
+        if path.split('/').any(|p| p == ".." || p.is_empty()) || path.contains(['\\', ':']) {
+            continue;
+        }
+        let to = out.join(&path);
+        if let Some(dir) = to.parent() {
+            std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        }
+        std::fs::write(&to, bytes).map_err(|e| format!("{}: {e}", to.display()))?;
+        written += usize::from(path != "pack.mcmeta");
+    }
+    Ok(written)
 }
 
 /// The mods' Fabric biome changes (platform120's `Worldgen120.biomeChanges`: what each biome's

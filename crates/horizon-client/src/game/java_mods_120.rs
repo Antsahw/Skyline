@@ -94,6 +94,22 @@ pub(in crate::game) fn content(base: &Path) -> Vec<PathBuf> {
     }
 }
 
+/// The mods' changes to vanilla's world generation as a data pack (`content120::worldgen_pack`:
+/// Terralith's overworld), which Horizon's generator and the world's biome table read under the
+/// world's own packs, as Fabric adds a mod's data. None when no mod changes it.
+pub(in crate::game) fn worldgen_packs() -> Vec<horizon_client::datapack::DataPack> {
+    let dir = super::mods::horizon_cache()
+        .join("java-120/content")
+        .join(horizon_jvm_remote::content120::WORLDGEN_PACK);
+    if !dir.join("pack.mcmeta").is_file() {
+        return Vec::new();
+    }
+    vec![horizon_client::datapack::DataPack::folder(
+        "mod/fabric-1.20.1",
+        &dir,
+    )]
+}
+
 /// The namespaces under the content mods' `assets/`, but vanilla's.
 fn remember_namespaces(folders: &[PathBuf]) {
     let names: HashSet<String> = folders

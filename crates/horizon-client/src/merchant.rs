@@ -1004,7 +1004,10 @@ mod tests {
             std::fs::write(file, v.to_string()).unwrap();
         };
         let trade = json!({"wants": {"id": "minecraft:emerald"}, "gives": {"id": "ruby:gem"}});
-        put("data/minecraft/villager_trade/farmer/1/a.json", trade.clone());
+        put(
+            "data/minecraft/villager_trade/farmer/1/a.json",
+            trade.clone(),
+        );
         put("data/ruby/villager_trade/farmer/level_1/1.json", trade);
         put(
             "data/minecraft/tags/villager_trade/farmer/level_1.json",
