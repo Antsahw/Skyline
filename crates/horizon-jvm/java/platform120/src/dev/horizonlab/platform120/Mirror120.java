@@ -1830,6 +1830,34 @@ public final class Mirror120 {
         }
     }
 
+    /**
+     * The mods' spawn eggs drawn as 1.20.1 draws them (vanilla's tinted egg and spots, which
+     * 26.3 no longer has): {json} `{item: [egg colour, spots colour]}`, with the two textures
+     * from the game's own jar written into `dir` (`spawn_egg.png`, `spawn_egg_overlay.png`).
+     */
+    public static Object[] spawnEggs(String dir) throws java.io.IOException {
+        setUp();
+        var out = new com.google.gson.JsonObject();
+        for (var item : net.minecraft.core.registries.BuiltInRegistries.ITEM) {
+            if (!(item instanceof net.minecraft.world.item.SpawnEggItem egg)) continue;
+            var id = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(item);
+            if ("minecraft".equals(id.getNamespace())) continue;
+            var colours = new com.google.gson.JsonArray();
+            colours.add(egg.getColor(0) & 0xFFFFFF);
+            colours.add(egg.getColor(1) & 0xFFFFFF);
+            out.add(id.toString(), colours);
+        }
+        var folder = java.nio.file.Path.of(dir);
+        java.nio.file.Files.createDirectories(folder);
+        for (String name : new String[] {"spawn_egg.png", "spawn_egg_overlay.png"}) {
+            try (var in = net.minecraft.world.item.Item.class.getClassLoader()
+                    .getResourceAsStream("assets/minecraft/textures/item/" + name)) {
+                if (in != null) java.nio.file.Files.write(folder.resolve(name), in.readAllBytes());
+            }
+        }
+        return new Object[] {out.toString()};
+    }
+
     /** The pools the mods add to loot tables in code (Loot120.added): {json}. */
     public static Object[] lootAdded() {
         setUp();

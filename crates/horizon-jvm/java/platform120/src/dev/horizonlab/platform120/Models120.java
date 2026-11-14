@@ -97,6 +97,15 @@ final class Models120 {
         }
         Map<ResourceLocation, BakedModel> baked = bakery.getBakedTopLevelModels();
         topLevel = baked;
+        // The client's model manager over them: a mod's model fetches its extra parts from it
+        // as it draws (Wired Redstone's gates, through Fabric's BakedModelManagerHelper).
+        if (client.getModelManager() == null) {
+            var manager = Allocate.make(net.minecraft.client.resources.model.ModelManager.class);
+            var access = (dev.horizonlab.platform120.mixin.ModelManagerAccess) manager;
+            access.horizon$setBakedRegistry(baked);
+            access.horizon$setMissingModel(baked.get(ModelBakery.MISSING_MODEL_LOCATION));
+            ((dev.horizonlab.platform120.mixin.MinecraftAccess) client).horizon$setModelManager(manager);
+        }
         models = new IdentityHashMap<>();
         drawnByCode = new ArrayList<>();
         for (var block : BuiltInRegistries.BLOCK) {
@@ -165,7 +174,11 @@ final class Models120 {
                 context.render(new View(level), model, state, pos, new PoseStack(), capture, false,
                         RandomSource.create(), state.getSeed(pos), net.minecraft.client.renderer.texture.OverlayTexture.NO_OVERLAY);
             } catch (RuntimeException | LinkageError e) {
-                Mirror120.log("the block at " + pos.toShortString() + " (" + state + ") didn't draw: " + e);
+                // A crash report wraps the mod's own failure: say that, and where it was.
+                Throwable cause = e;
+                while (cause.getCause() != null && cause.getCause() != cause) cause = cause.getCause();
+                var at = cause.getStackTrace().length > 0 ? " at " + cause.getStackTrace()[0] : "";
+                Mirror120.log("the block at " + pos.toShortString() + " (" + state + ") didn't draw: " + cause + at);
             } finally {
                 if (options != null && ao != null) options.ambientOcclusion().set(ao);
             }

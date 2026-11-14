@@ -65,6 +65,7 @@ pub(in crate::game) fn content(base: &Path) -> Vec<PathBuf> {
     let cache = home.join("content");
     if let Some(folders) = horizon_jvm_remote::content120::cached(&stamped(&jars), &cache) {
         remember_loot(&cache);
+        remember_blocks(&cache);
         levels::register(&cache.join(horizon_jvm_remote::content120::WORLDGEN_PACK));
         log::info!(
             "1.20.1 mods: {} content mod(s) from the cache",
@@ -87,6 +88,7 @@ pub(in crate::game) fn content(base: &Path) -> Vec<PathBuf> {
     match make(&dir, &jars, base, &home, &cache) {
         Ok(folders) => {
             remember_loot(&cache);
+            remember_blocks(&cache);
             levels::register(&cache.join(horizon_jvm_remote::content120::WORLDGEN_PACK));
             remember_namespaces(&folders);
             folders
@@ -338,6 +340,25 @@ fn wait_for_runtime() -> Option<std::sync::MutexGuard<'static, Option<Runtime120
     }
 }
 
+/// The runtime, waiting for it at most `wait`: a tick's work that would rather wait a little
+/// than skip the tick (the mods' mobs: a skipped tick freezes them for one on every player's
+/// screen) while a chunk worker places a feature with it.
+fn runtime_within(wait: Duration) -> Option<std::sync::MutexGuard<'static, Option<Runtime120>>> {
+    let until = std::time::Instant::now() + wait;
+    loop {
+        match RUNTIME.try_lock() {
+            Ok(guard) => return Some(guard),
+            Err(std::sync::TryLockError::Poisoned(e)) => return Some(e.into_inner()),
+            Err(std::sync::TryLockError::WouldBlock) => {
+                if std::time::Instant::now() >= until {
+                    return None;
+                }
+                std::thread::sleep(Duration::from_micros(200));
+            }
+        }
+    }
+}
+
 /// Said once: a tick of the mods' block entities that failed. A tick runs twenty times a
 /// second, so the same failure would otherwise fill the log.
 fn tick_failed_once(e: &str) {
@@ -392,6 +413,53 @@ fn stack_from_120(snbt: &str) -> Option<horizon_client::items::ItemStack> {
 }
 
 /// `minecraft:oak_log[axis=y]`: a state's name as both versions write it.
+/// The blocks 1.20.1 has, its own and the mods' (the content build's facts), once read.
+static BLOCKS_120: std::sync::OnceLock<HashSet<String>> = std::sync::OnceLock::new();
+
+/// Reads the blocks 1.20.1 has from the content cache's facts.
+fn remember_blocks(cache: &Path) {
+    let blocks = std::fs::read(cache.join("work/oracle/facts.json"))
+        .ok()
+        .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
+        .and_then(|f| f["blocks"].as_object().map(|b| b.keys().cloned().collect()))
+        .unwrap_or_default();
+    let _ = BLOCKS_120.set(blocks);
+}
+
+/// A block of 26.3's that 1.20.1 doesn't have (leaf litter, dry grass, pale moss carpet), as a
+/// 1.20.1 block of the same collision for the mods' code: it read as stone, and the mods' mobs
+/// stood on leaf litter as on a full block. None for a block 1.20.1 has, or whose shape depends
+/// on the world (it stays a full block).
+fn stand_in_120(
+    name: &str,
+    shape: Option<&horizon_core::geometry::VoxelShape>,
+) -> Option<&'static str> {
+    stand_in_among(BLOCKS_120.get().filter(|b| !b.is_empty())?, name, shape)
+}
+
+fn stand_in_among(
+    known: &HashSet<String>,
+    name: &str,
+    shape: Option<&horizon_core::geometry::VoxelShape>,
+) -> Option<&'static str> {
+    let id = name.split('[').next().unwrap_or(name);
+    if known.contains(id) {
+        return None;
+    }
+    let shape = shape?;
+    Some(if shape.is_empty() {
+        "minecraft:air"
+    } else if shape.is_block() {
+        "minecraft:stone"
+    } else {
+        match shape.max(horizon_core::geometry::Axis::Y) {
+            top if top <= 0.0625 + 1e-6 => "minecraft:moss_carpet",
+            top if top <= 0.5 + 1e-6 => "minecraft:smooth_stone_slab[type=bottom]",
+            _ => "minecraft:stone",
+        }
+    })
+}
+
 fn state_name(
     registry: &horizon_world::registry::BlockRegistry,
     state: horizon_world::registry::BlockStateId,
@@ -432,10 +500,14 @@ impl World120 for Level<'_, '_> {
         if dimension != game.dim.id() || !game.world.loaded(x, z) {
             return None;
         }
-        Some(state_name(
-            game.pack.assets.registry,
-            game.world.block(x, y, z),
-        ))
+        let state = game.world.block(x, y, z);
+        let name = state_name(game.pack.assets.registry, state);
+        Some(
+            match stand_in_120(&name, game.res.behaviours().collision_shape(state)) {
+                Some(stand_in) => stand_in.to_owned(),
+                None => name,
+            },
+        )
     }
 
     fn block_entity(&self, dimension: &str, x: i32, y: i32, z: i32) -> Option<String> {
@@ -884,6 +956,40 @@ impl super::Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::stack_from_120;
+
+    /// Leaf litter (no collision) is air to the mods' mobs, a carpet's height a carpet, a full
+    /// block stone; a block 1.20.1 has is itself.
+    #[test]
+    fn a_block_1_20_1_lacks_stands_in_by_its_collision() {
+        use horizon_core::geometry::VoxelShape;
+        let known: std::collections::HashSet<String> = ["minecraft:stone".to_owned()].into();
+        let among = |name, shape: &VoxelShape| super::stand_in_among(&known, name, Some(shape));
+        assert_eq!(
+            among(
+                "minecraft:leaf_litter[facing=north,segment_amount=4]",
+                &VoxelShape::empty()
+            ),
+            Some("minecraft:air")
+        );
+        assert_eq!(
+            among("minecraft:crafter", &VoxelShape::block()),
+            Some("minecraft:stone")
+        );
+        // A sixteenth of a block high: the bottom of a 16-high grid.
+        let carpet =
+            VoxelShape::from_cube([1, 16, 1], &(0..16).map(|y| y == 0).collect::<Vec<_>>())
+                .unwrap();
+        assert_eq!(
+            among("minecraft:pale_moss_carpet", &carpet),
+            Some("minecraft:moss_carpet")
+        );
+        assert_eq!(among("minecraft:stone", &VoxelShape::block()), None);
+        assert_eq!(
+            super::stand_in_among(&known, "minecraft:vault", None),
+            None,
+            "a shape of the world's"
+        );
+    }
 
     /// A stack the 1.20.1 runtime saved arrives with what is on it, not just its name: the
     /// chain from 1.20.1's data version runs 1.20.5's componentization, so `tag.Enchantments`

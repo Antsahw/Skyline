@@ -356,6 +356,33 @@ clicks pass until then). A click on a block of a 1.20.1 mod's namespace, or with
 their items, goes to it at `useItemOn`'s head (`java120_use_block`, beside the 26.3 bridge's
 hook in `lan_actions.rs`); what it set and what it did to the held stack land in Horizon.
 
+## Fixes from a player's report (2026-11-14)
+
+- **Spawn eggs drew as nothing.** A 1.20.1 egg's model is vanilla's `item/template_spawn_egg`,
+  two tinted layers whose colours are code (`SpawnEggItem.getColor`); 26.3 has neither that
+  model nor its textures. The content build now gives each such egg a model of the two layers
+  (the textures copied from 1.20.1's own jar into the content cache, never into the repository)
+  and an item definition tinting them with its colours (`content120::spawn_eggs`, the runtime's
+  `spawnEggs`). Checked in a game: Friends & Foes' moobloom and glare eggs draw tinted beside
+  vanilla's pig egg.
+- **The mods' mobs moved jerkily.** Their quads came once a tick and only the position was
+  interpolated, so limbs and heads moved at 20 frames a second. The window now moves the quads
+  of the last two ticks part of the way, as vanilla poses a mob at the partial tick
+  (`mobs::lerp_meshes`), when they are the same quads. The server also waits up to 25 ms for a
+  runtime that a chunk worker holds, instead of skipping that tick's update and freezing every
+  mob for a tick.
+- **Mobs stood on top of leaf litter.** A block 1.20.1 doesn't have reached the mods' code as
+  stone. It now reaches them as a 1.20.1 block of the same collision (`stand_in_120`): air for
+  none (leaf litter, dry grass), a carpet for a sixteenth of a block, a bottom slab for half,
+  stone for a full block. Checked in a game: a moobloom summoned on leaf litter stands at the
+  grass's top.
+- **Wired Redstone's gates drew as nothing.** Their model fetches its parts from the client's
+  model manager (Fabric's `BakedModelManagerHelper`), which the runtime's client didn't have:
+  it now gets one over the baked models (`Models120`). The client also gets its entity model
+  layers (Deeper and Darker's skull renderer asked for them). A block that fails to draw now
+  logs the mod's own exception and where it was thrown, not the crash report around it.
+  Checked in a game: an AND gate draws, is targeted, and breaks in survival, dropping itself.
+
 ## Phase 5o status: what the mods add to loot tables (2026-11-14)
 
 Many mods put their items into vanilla's loot in code, through Fabric's

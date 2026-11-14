@@ -152,6 +152,7 @@ public final class Boot120 implements RemoteRuntime {
                 if (game == null) throw new IllegalStateException("not started");
                 return mirror(method, args);
             case "lootAdded":
+            case "spawnEggs":
             case "biomeChanges":
                 // What the mods' Fabric biome modifications add to and take from vanilla's
                 // biomes, as data (Mirror120, Worldgen120).

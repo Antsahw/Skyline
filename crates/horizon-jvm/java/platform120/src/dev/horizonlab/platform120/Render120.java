@@ -53,6 +53,10 @@ final class Render120 {
         var resources = Models120.clientResources();
         var models = new net.minecraft.client.model.geom.EntityModelSet();
         models.onResourceManagerReload(resources);
+        // Some renderers ask the client for them as they're made (Deeper and Darker's skull).
+        if (client.getEntityModels() == null) {
+            ((dev.horizonlab.platform120.mixin.MinecraftAccess) client).horizon$setEntityModels(models);
+        }
         var dispatcher = new EntityRenderDispatcher(client, null, null, null, null, client.options, models);
         dispatcher.camera = new net.minecraft.client.Camera();
         // Blocks a renderer draws (a moobloom's flowers on its back) through the client's baked

@@ -20,7 +20,8 @@ use std::path::{Path, PathBuf};
 /// ids vanilla renamed since 1.20.1 (`minecraft:grass`) in the mods' data. 7: the mods that
 /// change vanilla's world generation (Terralith) get it as a data pack ([`worldgen_pack`]). 8: so
 /// do the mods with dimensions of their own. 9: the pools they add to loot tables ([`loot_added`]).
-const FORMAT: u32 = 9;
+/// 10: their spawn eggs drawn as in 1.20.1 ([`spawn_eggs`]).
+const FORMAT: u32 = 10;
 
 /// The file under the cache holding the pools the mods add to loot tables ([`loot_added`]).
 pub const LOOT_ADDED: &str = "loot_added.json";
@@ -561,6 +562,17 @@ pub fn build(
             "1.20.1 mods' content: {worldgen} world generation file(s) as a data pack"
         ));
     }
+    let textures = cache.join("spawn_egg");
+    let eggs = runtime.call_with(
+        "spawnEggs",
+        &[Value::Str(textures.to_string_lossy().into_owned())],
+    )?;
+    let eggs = spawn_eggs(&eggs, &textures, &carried(&work));
+    if eggs > 0 {
+        log(format!(
+            "1.20.1 mods' content: {eggs} spawn egg(s) drawn as 1.20.1 draws them"
+        ));
+    }
     let tabs = creative_tabs(&facts, &carried(&work));
     if tabs > 0 {
         log(format!(
@@ -587,6 +599,72 @@ fn is_worldgen(name: &str) -> bool {
         ]
         .iter()
         .any(|k| path.starts_with(k))
+}
+
+/// The mods' spawn eggs as 1.20.1 draws them. A 1.20.1 egg's model is vanilla's
+/// `item/template_spawn_egg`: one egg texture and one of spots, tinted with the egg's two colours
+/// in code (`SpawnEggItem.getColor`). 26.3 gives each egg a texture of its own and has neither
+/// that model nor its textures, so the eggs drew as nothing. Each such egg gets a model of the two
+/// layers (the textures from 1.20.1's own jar, which the runtime wrote into `textures`, copied
+/// beside the mod's) and an item definition tinting them with its colours (`eggs`: the runtime's
+/// `spawnEggs`, `{item: [egg, spots]}`). An egg with a model of its own keeps it. How many eggs.
+fn spawn_eggs(eggs: &str, textures: &Path, carried: &[PathBuf]) -> usize {
+    let Ok(serde_json::Value::Object(eggs)) = serde_json::from_str(eggs) else {
+        return 0;
+    };
+    let mut written = 0;
+    for (id, colours) in eggs {
+        let (Some((ns, path)), Some(egg), Some(spots)) =
+            (id.split_once(':'), colours[0].as_i64(), colours[1].as_i64())
+        else {
+            continue;
+        };
+        let Some(carry) = carrying(carried, ns) else {
+            continue;
+        };
+        let assets = carry.join("assets").join(ns);
+        let model = assets.join("models/item").join(format!("{path}.json"));
+        let parent = std::fs::read(&model)
+            .ok()
+            .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
+            .map(|m| m["parent"].as_str().unwrap_or_default().to_owned());
+        if parent
+            .as_deref()
+            .is_some_and(|p| !p.ends_with("template_spawn_egg"))
+        {
+            continue;
+        }
+        let item_textures = assets.join("textures/item");
+        let copied = ["spawn_egg", "spawn_egg_overlay"].iter().all(|name| {
+            let to = item_textures.join(format!("horizon_{name}.png"));
+            to.is_file()
+                || (std::fs::create_dir_all(&item_textures).is_ok()
+                    && std::fs::copy(textures.join(format!("{name}.png")), &to).is_ok())
+        });
+        if !copied {
+            continue;
+        }
+        let model_json = serde_json::json!({"parent": "minecraft:item/generated", "textures": {
+            "layer0": format!("{ns}:item/horizon_spawn_egg"),
+            "layer1": format!("{ns}:item/horizon_spawn_egg_overlay")}});
+        let tint = |rgb: i64| {
+            serde_json::json!({"type": "minecraft:constant",
+            "value": (0xFF00_0000_u32 | (rgb as u32 & 0xFF_FFFF)) as i32})
+        };
+        let definition = serde_json::json!({"model": {"type": "minecraft:model",
+            "model": format!("{ns}:item/{path}"), "tints": [tint(egg), tint(spots)]}});
+        let definition_file = assets.join("items").join(format!("{path}.json"));
+        let ok = model
+            .parent()
+            .is_some_and(|d| std::fs::create_dir_all(d).is_ok())
+            && std::fs::write(&model, model_json.to_string()).is_ok()
+            && definition_file
+                .parent()
+                .is_some_and(|d| std::fs::create_dir_all(d).is_ok())
+            && std::fs::write(&definition_file, definition.to_string()).is_ok();
+        written += usize::from(ok);
+    }
+    written
 }
 
 /// The pools the mods add to loot tables in code (the runtime's `lootAdded`: Fabric's
@@ -980,6 +1058,59 @@ mod tests {
                 "predicate": {"items": "farmersdelight:flint_knife"}}),
             "1.20.1's item list is a holder set, its condition list 26.3's one condition"
         );
+    }
+
+    #[test]
+    fn a_spawn_egg_of_vanillas_template_gets_its_two_tinted_layers() {
+        let dir = std::env::temp_dir().join(format!("hz-eggs120-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let carry = dir.join("mods/sup/carry");
+        let models = carry.join("assets/sup/models/item");
+        std::fs::create_dir_all(&models).unwrap();
+        std::fs::write(
+            models.join("merchant_spawn_egg.json"),
+            r#"{"parent": "item/template_spawn_egg"}"#,
+        )
+        .unwrap();
+        // One with a texture of its own keeps its model.
+        std::fs::write(
+            models.join("own_spawn_egg.json"),
+            r#"{"parent": "item/generated"}"#,
+        )
+        .unwrap();
+        let textures = dir.join("textures");
+        std::fs::create_dir_all(&textures).unwrap();
+        std::fs::write(textures.join("spawn_egg.png"), b"egg").unwrap();
+        std::fs::write(textures.join("spawn_egg_overlay.png"), b"spots").unwrap();
+        let eggs =
+            r#"{"sup:merchant_spawn_egg": [1981306, 16766720], "sup:own_spawn_egg": [0, 0]}"#;
+        assert_eq!(spawn_eggs(eggs, &textures, std::slice::from_ref(&carry)), 1);
+        let read = |p: &str| -> serde_json::Value {
+            serde_json::from_slice(&std::fs::read(carry.join(p)).unwrap()).unwrap()
+        };
+        let definition = read("assets/sup/items/merchant_spawn_egg.json");
+        assert_eq!(
+            definition["model"]["tints"][0]["value"],
+            serde_json::json!(0xFF1E_3B7A_u32 as i32)
+        );
+        assert_eq!(
+            definition["model"]["tints"][1]["value"],
+            serde_json::json!(0xFFFF_D700_u32 as i32)
+        );
+        assert_eq!(
+            read("assets/sup/models/item/merchant_spawn_egg.json")["textures"]["layer1"],
+            "sup:item/horizon_spawn_egg_overlay"
+        );
+        assert!(
+            carry
+                .join("assets/sup/textures/item/horizon_spawn_egg.png")
+                .is_file()
+        );
+        assert_eq!(
+            read("assets/sup/models/item/own_spawn_egg.json")["parent"],
+            "item/generated"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

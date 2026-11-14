@@ -6,7 +6,7 @@
 
 use super::super::{Game, lan::LanHost};
 use super::breaking::stack_to_120;
-use super::{Level, RUNTIME, tick_failed_once, wait_for_runtime};
+use super::{Level, RUNTIME, runtime_within, tick_failed_once, wait_for_runtime};
 use horizon_client::mesher::Vertex;
 use horizon_core::geometry::{Aabb, Vec3};
 use horizon_jvm_remote::mirror120::EntityAction;
@@ -174,6 +174,42 @@ pub(super) fn parse_meshes(json: &Value) -> Vec<Mesh> {
         .collect()
 }
 
+/// The quads of two ticks' meshes part of the way from `from` to `to` (`t`: 0 to 1), when they
+/// are the same quads (each mesh's sprite and vertex count): a mob's limbs and head move
+/// smoothly between ticks, as vanilla's renderer poses them at the partial tick. `None` when the
+/// mob's quads changed (a part shown or hidden), to draw `to` as it is.
+pub(super) fn lerp_meshes(from: &[Mesh], to: &[Mesh], t: f32) -> Option<Vec<Mesh>> {
+    if from.len() != to.len()
+        || from
+            .iter()
+            .zip(to)
+            .any(|(a, b)| a.sprite != b.sprite || a.vertices.len() != b.vertices.len())
+    {
+        return None;
+    }
+    Some(
+        from.iter()
+            .zip(to)
+            .map(|(a, b)| Mesh {
+                sprite: b.sprite.clone(),
+                overlay: b.overlay,
+                vertices: a
+                    .vertices
+                    .iter()
+                    .zip(&b.vertices)
+                    .map(|(va, vb)| {
+                        let mut v = *vb;
+                        for i in 0..3 {
+                            v[i] = va[i] + (vb[i] - va[i]) * t;
+                        }
+                        v
+                    })
+                    .collect(),
+            })
+            .collect(),
+    )
+}
+
 /// `meshes` drawn with their origin at `at` (relative to the camera), lit by `light` (Horizon's
 /// sky << 4 | block), with the GUI atlas' sprites.
 pub(super) fn push_meshes(
@@ -217,7 +253,9 @@ impl Game<'_> {
         }
         let dimension = self.dim.id().to_owned();
         let answer = {
-            let Ok(mut guard) = RUNTIME.try_lock() else {
+            // A chunk worker placing a feature holds the runtime for a moment: wait for it
+            // rather than freeze the mobs for a tick.
+            let Some(mut guard) = runtime_within(std::time::Duration::from_millis(25)) else {
                 return;
             };
             let Some(runtime) = guard.as_mut() else {
@@ -616,8 +654,19 @@ impl Game<'_> {
                 (at[1] + f64::from(mob.size[1]) * 0.85).floor() as i32,
                 at[2].floor() as i32,
             );
-            // The lightmap's (block, sky): Horizon packs them sky << 4 | block.
-            push_meshes(atlas, &mob.meshes, d.as_vec3(), light, out);
+            // Its pose between the last two ticks too, as vanilla renders with the partial
+            // tick: the same quads, moved part of the way.
+            let meshes = window
+                .before
+                .get(id)
+                .and_then(|b| lerp_meshes(&b.meshes, &mob.meshes, alpha as f32));
+            push_meshes(
+                atlas,
+                meshes.as_deref().unwrap_or(&mob.meshes),
+                d.as_vec3(),
+                light,
+                out,
+            );
         }
     }
 
@@ -766,5 +815,31 @@ impl Game<'_> {
             }
         }
         Some(done.result == 2)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn mesh(sprite: &str, x: f32) -> Mesh {
+        Mesh {
+            sprite: sprite.into(),
+            overlay: 0,
+            vertices: vec![[x, 1.0, 0.0, 0.5, 0.5, 0.0, 1.0, 0.0, -1.0]],
+        }
+    }
+
+    #[test]
+    fn a_pose_between_two_ticks_moves_the_quads_part_of_the_way() {
+        let now = lerp_meshes(&[mesh("a", 0.0)], &[mesh("a", 2.0)], 0.25).expect("same quads");
+        assert_eq!(now[0].vertices[0][0], 0.5, "a quarter of the way");
+        assert_eq!(
+            now[0].vertices[0][3], 0.5,
+            "texture coordinates are the tick's own"
+        );
+        // A part shown or hidden since: drawn as the tick has it.
+        assert!(lerp_meshes(&[mesh("a", 0.0)], &[mesh("b", 2.0)], 0.5).is_none());
+        assert!(lerp_meshes(&[], &[mesh("a", 2.0)], 0.5).is_none());
     }
 }

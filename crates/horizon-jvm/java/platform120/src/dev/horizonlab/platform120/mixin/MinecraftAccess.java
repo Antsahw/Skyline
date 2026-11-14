@@ -51,4 +51,14 @@ public interface MinecraftAccess {
     @Mutable
     @Accessor("timer")
     void horizon$setTimer(net.minecraft.client.Timer timer);
+
+    /** The client's baked models (Models120): mods' models fetch extra parts from it. */
+    @Mutable
+    @Accessor("modelManager")
+    void horizon$setModelManager(net.minecraft.client.resources.model.ModelManager manager);
+
+    /** The client's entity model layers (Render120): renderers ask the client for them. */
+    @Mutable
+    @Accessor("entityModels")
+    void horizon$setEntityModels(net.minecraft.client.model.geom.EntityModelSet models);
 }
