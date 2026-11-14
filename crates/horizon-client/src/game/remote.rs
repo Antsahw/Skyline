@@ -5980,6 +5980,9 @@ impl Game<'_> {
         // Their entity types, for the commands typed here.
         #[cfg(feature = "java-mods-120")]
         self.java120_command_types();
+        // The tooltips asked of the 1.20.1 mods, to the server.
+        #[cfg(feature = "java-mods-120")]
+        self.ask_java120_tooltips();
         self.tick_remote_level()?;
         // The rockets boosting this player tick after it, also while it waits
         // for chunks.

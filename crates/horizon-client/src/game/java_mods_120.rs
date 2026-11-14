@@ -890,4 +890,5 @@ mod items;
 mod keys;
 mod screens;
 mod ticks;
+pub(in crate::game) mod tooltips;
 mod worldgen;

@@ -1290,6 +1290,21 @@ impl Runtime120 {
         }
     }
 
+    /// What the mods add to a stack's tooltip (phase 5n): `(hover, after)`, each a JSON list
+    /// of components. `hover` is a mod item's own lines (`appendHoverText`, under the name),
+    /// `after` what tooltip mods append to any stack (Fabric's `ItemTooltipCallback`). `snbt`
+    /// is the stack as 1.20.1 saves it (`{id,Count,tag}`); `advanced`: F3+H's tooltips.
+    pub fn tooltip(&mut self, snbt: &str, advanced: bool) -> Result<(String, String), String> {
+        let answers = self.call_answers(
+            "tooltip",
+            &[Value::Str(snbt.to_owned()), Value::I32(i32::from(advanced))],
+        )?;
+        match answers.as_slice() {
+            [Value::Str(hover), Value::Str(after)] => Ok((hover.clone(), after.clone())),
+            other => Err(format!("tooltip: answer {other:?}")),
+        }
+    }
+
     /// The mods' effects due this tick on a player (phase 5k: `applyEffectTick` where
     /// `isDurationEffectTick` says). `state` is as [`Runtime120::hud_frame`]'s, with `effects`
     /// (all the player's: `[{id, duration, amplifier}]`) and `tick` (the mods' ones due:

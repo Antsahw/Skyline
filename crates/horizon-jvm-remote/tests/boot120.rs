@@ -2618,6 +2618,22 @@ fn the_mods_machines_pass_energy_between_them() {
         "nourishment takes the exhaustion back: {nourished}"
     );
 
+    // Phase 5n: a mod item's own tooltip lines. Farmer's Delight lists a meal's effects
+    // under its name (its ConsumableItem's appendHoverText), which Horizon doesn't draw.
+    let (hover, after) = runtime
+        .tooltip("{id:\"farmersdelight:beef_stew\",Count:1b}", false)
+        .expect("the tooltip");
+    eprintln!("beef stew's tooltip: {hover} / {after}");
+    let hover: serde_json::Value = serde_json::from_str(&hover).expect("json");
+    assert!(
+        hover.to_string().contains("farmersdelight.comfort"),
+        "its effect under its name: {hover}"
+    );
+    let (vanilla, _) = runtime
+        .tooltip("{id:\"minecraft:bread\",Count:1b}", false)
+        .expect("the tooltip");
+    assert_eq!(vanilla, "[]", "vanilla's own lines are Horizon's");
+
     // Phase 5i: what the mods draw on the HUD, over Horizon's. A hungry player in survival:
     // AppleSkin's saturation and exhaustion over the food bar, from Horizon's numbers; none
     // of vanilla's own hearts, bars or hotbar, which are Horizon's to draw.

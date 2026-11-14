@@ -46,6 +46,7 @@ fn open<R>(f: impl FnOnce(&mut HashMap<u32, Open>) -> R) -> R {
 pub(super) fn forget(conn: u32) {
     super::keys::forget(conn);
     super::hud::forget(conn);
+    super::tooltips::forget(conn);
     open(|screens| screens.remove(&conn));
 }
 
@@ -345,6 +346,10 @@ impl super::super::Game<'_> {
         let Ok(input) = serde_json::from_slice::<Value>(data) else {
             return false;
         };
+        if input.get("kind").and_then(Value::as_str) == Some("tooltip") {
+            self.java120_tooltip_request(host, conn, &input);
+            return true;
+        }
         if input.get("kind").and_then(Value::as_str) == Some("bind") {
             self.java120_key(host, conn, &input);
             return false;

@@ -33,6 +33,8 @@ impl Game<'_> {
             #[cfg(feature = "java-mods-120")]
             super::super::java_mods_120::config::CHANNEL => self.remote_java120_config_mods(data),
             #[cfg(feature = "java-mods-120")]
+            super::super::java_mods_120::tooltips::CHANNEL => self.remote_java120_tooltip(data),
+            #[cfg(feature = "java-mods-120")]
             super::super::java_mods_120::block_renders::CHANNEL => {
                 self.remote_java120_block_renders(data)
             }

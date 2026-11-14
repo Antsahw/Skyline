@@ -1252,6 +1252,60 @@ public final class Mirror120 {
         }
     }
 
+    /**
+     * What the mods add to a stack's tooltip (phase 5n), as two lists of JSON components:
+     * {hover, after}. `hover` is a mod item's own lines (`Item.appendHoverText`, which
+     * getTooltipLines puts under the name), `after` what the tooltip mods add to any stack
+     * (Fabric's ItemTooltipCallback, fired at the end of getTooltipLines with the whole list:
+     * the lines it appended). Horizon draws the rest of the tooltip itself. `snbt` is the
+     * stack as 1.20.1 saves it; `advanced` the F3+H tooltips.
+     */
+    public static Object[] tooltip(String snbt, int advanced) {
+        begin();
+        try {
+            ItemStack stack = ItemStack.of(net.minecraft.nbt.TagParser.parseTag(snbt));
+            var flag = advanced != 0 ? net.minecraft.world.item.TooltipFlag.ADVANCED
+                    : net.minecraft.world.item.TooltipFlag.NORMAL;
+            var hover = new java.util.ArrayList<net.minecraft.network.chat.Component>();
+            ResourceLocation id = BuiltInRegistries.ITEM.getKey(stack.getItem());
+            if (!stack.isEmpty() && !id.getNamespace().equals("minecraft")) {
+                try {
+                    stack.getItem().appendHoverText(stack, null, hover, flag);
+                } catch (Throwable t) {
+                    log(id + "'s tooltip failed: " + t);
+                }
+            }
+            var all = new java.util.ArrayList<net.minecraft.network.chat.Component>();
+            all.add(stack.getHoverName());
+            all.addAll(hover);
+            int before = all.size();
+            try {
+                Class<?> callback = Class.forName("net.fabricmc.fabric.api.client.item.v1.ItemTooltipCallback");
+                Object eventObject = callback.getField("EVENT").get(null);
+                Object invoker = eventObject.getClass().getMethod("invoker").invoke(eventObject);
+                var getTooltip = callback.getMethod("getTooltip", ItemStack.class,
+                        net.minecraft.world.item.TooltipFlag.class, java.util.List.class);
+                getTooltip.invoke(invoker, stack, flag, all);
+            } catch (ClassNotFoundException e) {
+                // No Fabric client item API: no tooltip mods.
+            } catch (Throwable t) {
+                Throwable cause = t instanceof java.lang.reflect.InvocationTargetException i && i.getCause() != null ? i.getCause() : t;
+                log("a tooltip mod failed on " + id + ": " + cause);
+            }
+            var hoverJson = new com.google.gson.JsonArray();
+            for (var line : hover) hoverJson.add(net.minecraft.network.chat.Component.Serializer.toJsonTree(line));
+            var afterJson = new com.google.gson.JsonArray();
+            for (int i = before; i < all.size(); i++) {
+                afterJson.add(net.minecraft.network.chat.Component.Serializer.toJsonTree(all.get(i)));
+            }
+            return new Object[] {hoverJson.toString(), afterJson.toString()};
+        } catch (com.mojang.brigadier.exceptions.CommandSyntaxException e) {
+            return new Object[] {"[]", "[]"};
+        } finally {
+            finish();
+        }
+    }
+
     /** A message the mods sent a player (ServerPlayerMixin): to Horizon's, as JSON. */
     public static void message(ServerPlayer player, net.minecraft.network.chat.Component message, boolean overlay) {
         if (event == null) return;

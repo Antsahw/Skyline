@@ -2556,6 +2556,12 @@ impl Game<'_> {
                 ));
             }
         }
+        // The 1.20.1 mods' lines (java_mods_120/tooltips.rs): a mod item's own under the
+        // name, the tooltip mods' at the end, as getTooltipLines puts them.
+        #[cfg(feature = "java-mods-120")]
+        if !nested {
+            self.java120_tooltip(stack, advanced, &mut lines);
+        }
         // Native mods last, once getTooltipLines has built every line; a
         // tooltip the stack hides stays hidden.
         if !nested && !lines.is_empty() {

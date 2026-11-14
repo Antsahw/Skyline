@@ -356,6 +356,23 @@ clicks pass until then). A click on a block of a 1.20.1 mod's namespace, or with
 their items, goes to it at `useItemOn`'s head (`java120_use_block`, beside the 26.3 bridge's
 hook in `lan_actions.rs`); what it set and what it did to the held stack land in Horizon.
 
+## Phase 5n status: the mods' tooltip lines (2026-11-14)
+
+What the mods add to an item's tooltip shows in Horizon's, which builds the rest itself: a mod
+item's own lines (`Item.appendHoverText`: Farmer's Delight's meals list their effects) under the
+name, and what tooltip mods append to any stack (Fabric's `ItemTooltipCallback`, fired as at
+the end of `getTooltipLines`) at the end (`tooltip`). The runtime is the server's and a tooltip
+shows in a player's game, so the server tells each game once that it answers tooltips; the game
+asks for a stack the first time its tooltip shows, and again a second later while it still
+shows; the answer is kept per stack and its lines go in as 1.20.1 puts them
+(`game/java_mods_120/tooltips.rs`). The stack goes down as 1.20.1 NBT with what the fixes kept
+of its own data (`minecraft:custom_data`: a battery's charge) back under its `tag`.
+
+Checked: in the runtime test, beef stew's own line is Comfort for 3:00 and bread has none from
+the runtime (vanilla's lines are Horizon's); in a game, the stew's tooltip shows it in blue under
+its name. Not yet: tooltip images (`TooltipComponent`: AppleSkin's food preview, shulker box
+contents), which draw rather than add lines.
+
 ## Phase 5m status: the mods' tools, weapons and armour (2026-11-14)
 
 A mod's tools and weapons came over as sticks with durability: their own classes (Farmer's
@@ -1362,7 +1379,7 @@ NeoForge could run beside Fabric 26.3 rather than in its place.
    done: mods' packets between their halves, players joining. 5d done: items used, mods' own
    screens, players leaving. 5e done: mods' key bindings and the client tick (above). 5f/5g done:
    sounds and particles. 5h done: the mods' settings screens. 5i done: the mods' HUD (above). 5j done: their
-   commands and messages. 5k done: their effects and food. 5l done: their villager trades. 5m done: their tools, weapons and armour. Left: the HUD overlays that read the client's world (Jade, minimaps).
+   commands and messages. 5k done: their effects and food. 5l done: their villager trades. 5m done: their tools, weapons and armour. 5n done: their tooltip lines. Left: the HUD overlays that read the client's world (Jade, minimaps).
 6. **Entities and worldgen.** 6a done: the mods' Fabric biome modifications reach Horizon's
    generator as biome modifiers. 6b done: a mod's own feature types run in the runtime on the
    chunks being decorated. 6c done: data-driven structures (above). 6d done: the mods' mobs

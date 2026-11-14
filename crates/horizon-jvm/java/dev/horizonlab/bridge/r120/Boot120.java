@@ -131,6 +131,7 @@ public final class Boot120 implements RemoteRuntime {
             case "commandTree":
             case "command":
             case "effectTicks":
+            case "tooltip":
             case "spawnNatural":
             case "spawnGenerated":
             case "animateTicks":
