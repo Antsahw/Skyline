@@ -100,6 +100,13 @@ final class Render120 {
             ((dev.horizonlab.platform120.mixin.MinecraftAccess) client).horizon$setItemRenderer(holder[0]);
         }
         camera = dispatcher.camera;
+        // Models that look at the player ask the client's game renderer for its camera as they
+        // pose (Naturalist's crab): a renderer made without its constructor, with this camera.
+        if (client.gameRenderer == null) {
+            var renderer = Allocate.make(net.minecraft.client.renderer.GameRenderer.class);
+            ((dev.horizonlab.platform120.mixin.GameRendererAccess) renderer).horizon$setMainCamera(camera);
+            ((dev.horizonlab.platform120.mixin.MinecraftAccess) client).horizon$setGameRenderer(renderer);
+        }
         var blockContext = new net.minecraft.client.renderer.blockentity.BlockEntityRendererProvider.Context(
                 blockDispatcher, blocks, holder[0], dispatcher, models, client.font);
         blockRenderers = new HashMap<>();

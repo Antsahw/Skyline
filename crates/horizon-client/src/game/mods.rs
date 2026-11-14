@@ -366,6 +366,83 @@ const STOPPED: &str = "Doesn't run any more: needs a native port";
 /// The player was told once about the WebAssembly mods that stopped (`horizon-mods/<this>`).
 const NOTICE_SEEN: &str = ".native-notice";
 
+/// The Mods page's section for each Java runtime with mods installed for it: Fabric 26.3's
+/// (`mods-java/`, when the player turned the Java mods on) and Fabric 1.20.1's
+/// (`mods-java-1.20.1/`), each mod as its jar names it.
+fn runtime_sections() -> Vec<horizon_client::mod_list::RuntimeMods> {
+    #[allow(unused_mut)]
+    let mut sections: Vec<horizon_client::mod_list::RuntimeMods> = Vec::new();
+    #[cfg(feature = "java-mods")]
+    sections.push(horizon_client::mod_list::RuntimeMods {
+        title: "horizon.mods.runtime.fabric_26_3".into(),
+        mods: jar_mods(&super::java_mods::mod_jars().1),
+    });
+    #[cfg(feature = "java-mods-120")]
+    {
+        let dir = Game::options_path().with_file_name(super::java_mods_120::DIR);
+        let mut jars: Vec<_> = std::fs::read_dir(&dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|e| e == "jar"))
+            .collect();
+        jars.sort();
+        sections.push(horizon_client::mod_list::RuntimeMods {
+            title: "horizon.mods.runtime.fabric_1_20_1".into(),
+            mods: jar_mods(&jars),
+        });
+    }
+    sections.retain(|s| !s.mods.is_empty());
+    sections
+}
+
+#[cfg_attr(
+    not(any(feature = "java-mods", feature = "java-mods-120")),
+    allow(dead_code)
+)]
+/// The Fabric mods in `jars`, by their `fabric.mod.json` (`Name 1.0`), in name order; a jar
+/// without one is listed by its file name.
+fn jar_mods(jars: &[std::path::PathBuf]) -> Vec<horizon_client::mod_list::RuntimeMod> {
+    let mut mods: Vec<_> = jars
+        .iter()
+        .map(|jar| {
+            let file = jar
+                .file_stem()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned();
+            let meta = std::fs::File::open(jar)
+                .ok()
+                .and_then(|f| zip::ZipArchive::new(f).ok())
+                .and_then(|mut z| {
+                    let mut text = String::new();
+                    std::io::Read::read_to_string(
+                        &mut z.by_name("fabric.mod.json").ok()?,
+                        &mut text,
+                    )
+                    .ok()?;
+                    serde_json::from_str::<serde_json::Value>(&text).ok()
+                });
+            let Some(meta) = meta else {
+                return horizon_client::mod_list::RuntimeMod {
+                    id: file.clone(),
+                    title: file,
+                };
+            };
+            let id = meta["id"].as_str().unwrap_or(&file).to_owned();
+            let name = meta["name"].as_str().unwrap_or(&id).to_owned();
+            let version = meta["version"].as_str().unwrap_or_default();
+            horizon_client::mod_list::RuntimeMod {
+                title: format!("{name} {version}").trim_end().to_owned(),
+                id,
+            }
+        })
+        .collect();
+    mods.sort_by_key(|m| m.title.to_lowercase());
+    mods
+}
+
 impl Game<'_> {
     /// Lists the installed mods on the Mods page. Content mods load with the resources
     /// (`content_root`); native ones are built into the game (`native_hooks.rs`). WebAssembly code
@@ -428,6 +505,7 @@ impl Game<'_> {
         let native_dir = Self::game_dir().join(mod_list::NATIVE_DIR);
         let unbuilt = not_built(&native_dir, &built, &self.settings.mods.installed);
         self.settings.mods.installed.extend(unbuilt);
+        self.settings.mods.runtimes = runtime_sections();
         let installed = &self.settings.mods.installed;
         self.mods.stopped = installed
             .iter()

@@ -356,6 +356,23 @@ clicks pass until then). A click on a block of a 1.20.1 mod's namespace, or with
 their items, goes to it at `useItemOn`'s head (`java120_use_block`, beside the 26.3 bridge's
 hook in `lan_actions.rs`); what it set and what it did to the held stack land in Horizon.
 
+## The Mods page by runtime (2026-11-14)
+
+Options > Mods lists the Java mods in a section per runtime: **Fabric 26.3** (`mods-java/`,
+when the Java mods are on) and **Fabric 1.20.1** (`mods-java-1.20.1/`), with Horizon's own mods
+under **Horizon** above them. Each mod is shown by its jar's `fabric.mod.json`, as `Name
+version` (`game/mods.rs`, `runtime_sections`), so the page lists them before a world opens.
+A mod whose settings screen the world's server can open is a **Settings** button; the others are
+greyed out. Mod Menu itself has no screen of its own here: this page is its stand-in. The
+server's mods with settings that no section lists (a server's own jars) come last, under
+"The server's Java mods". Checked in a game with AppleSkin, Cloth Config, Mod Menu and
+Naturalist.
+
+More fixes: Naturalist's crab poses its head toward the camera, which the runtime's client
+didn't have (it now has a game renderer holding the renderers' camera); a recorded screen's
+`flush` is cancelled (Immersive Aircraft's HUD flushes mid-frame); and a mod whose settings
+screen can't be found now logs the mod's own exception rather than the reflection wrapper.
+
 ## Fixes from a player's report (2026-11-14)
 
 - **Spawn eggs drew as nothing.** A 1.20.1 egg's model is vanilla's `item/template_spawn_egg`,

@@ -33,6 +33,25 @@ pub struct ModList {
     /// The Java mods of the world's server with a settings screen, `(id, name)`: the Mods
     /// page lists them, and the server opens one's screen (game/java_screen.rs).
     pub java: Vec<(String, String)>,
+    /// The Java mods installed for each Java runtime (Fabric 26.3, Fabric 1.20.1), a section
+    /// of the Mods page each: what the player put in each runtime's folder.
+    pub runtimes: Vec<RuntimeMods>,
+}
+
+/// One Java runtime's installed mods, as the Mods page lists them.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct RuntimeMods {
+    /// The section's heading, a lang key (`horizon.mods.runtime.fabric_1_20_1`).
+    pub title: String,
+    pub mods: Vec<RuntimeMod>,
+}
+
+/// A Java mod as its jar names it.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct RuntimeMod {
+    pub id: String,
+    /// `Name 1.0`.
+    pub title: String,
 }
 
 /// One installed mod as the Mods page shows it.
@@ -94,6 +113,7 @@ impl ModList {
             keys,
             installed: Vec::new(),
             java: Vec::new(),
+            runtimes: Vec::new(),
         }
     }
     pub fn serialize(&self) -> String {

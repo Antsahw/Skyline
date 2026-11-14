@@ -46,6 +46,17 @@ public abstract class GuiGraphicsMixin {
                 Math.round(m.m00() * x + m.m10() * y + m.m30()),
                 Math.round(m.m01() * x + m.m11() * y + m.m31())};
     }
+    /**
+     * A flush draws the batched vertices on the GPU. A recorder has no buffers and nothing
+     * batched: what it drew is already recorded (Immersive Aircraft's HUD flushes mid-frame).
+     */
+    @Inject(method = "flush()V", at = @At("HEAD"), cancellable = true)
+    private void horizon$flush(CallbackInfo ci) {
+        if (Graphics120.current() != null) {
+            ci.cancel();
+        }
+    }
+
     @Inject(method = "fill(Lnet/minecraft/client/renderer/RenderType;IIIIII)V",
             at = @At("HEAD"), cancellable = true)
     private void horizon$fill(RenderType type, int x0, int y0, int x1, int y1, int z, int color,

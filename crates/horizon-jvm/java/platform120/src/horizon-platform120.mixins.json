@@ -55,6 +55,7 @@
     "MouseHandlerAccess",
     "WindowAccess",
     "MinecraftMixin",
+    "GameRendererAccess",
     "ModelManagerAccess",
     "RawGlMixin",
     "RenderSystemMixin",

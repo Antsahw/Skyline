@@ -61,4 +61,9 @@ public interface MinecraftAccess {
     @Mutable
     @Accessor("entityModels")
     void horizon$setEntityModels(net.minecraft.client.model.geom.EntityModelSet models);
+
+    /** A stand-in game renderer (Render120): models ask it for the camera as they pose. */
+    @Mutable
+    @Accessor("gameRenderer")
+    void horizon$setGameRenderer(net.minecraft.client.renderer.GameRenderer renderer);
 }

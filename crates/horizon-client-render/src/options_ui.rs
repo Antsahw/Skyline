@@ -2862,14 +2862,16 @@ impl OptionsUi {
             }
             Page::Font => pairs(&[Opt::ForceUnicode, Opt::JapaneseGlyphs]),
             Page::Mods => {
-                if s.mods.installed.is_empty() && s.mods.java.is_empty() {
+                let runtimes = s.mods.runtimes.iter().any(|r| !r.mods.is_empty());
+                if s.mods.installed.is_empty() && s.mods.java.is_empty() && !runtimes {
                     return vec![Row::Header("horizon.mods.empty")];
                 }
-                s.mods
-                    .installed
-                    .iter()
-                    .enumerate()
-                    .map(|(i, installed)| {
+                // With Java mods beside them, Horizon's own get a heading of their own.
+                let horizon = (runtimes && !s.mods.installed.is_empty())
+                    .then(|| Row::Heading("horizon.mods.runtime.horizon".into()));
+                horizon
+                    .into_iter()
+                    .chain(s.mods.installed.iter().enumerate().map(|(i, installed)| {
                         let mut label = Text::option_name_value(
                             Text::literal(installed.title.clone()),
                             on_off(s.mods.is_on(i)),
@@ -2914,7 +2916,7 @@ impl OptionsUi {
                             let widget = button(0.0, 0.0, 310.0, label, Act::ToggleMod(i));
                             Row::Buttons(if dead { inactive(widget) } else { widget }, None)
                         }
-                    })
+                    }))
                     .chain(mod_rows::mod_rows(s))
                     .collect()
             }

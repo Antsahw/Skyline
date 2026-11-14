@@ -45,7 +45,10 @@ final class Config120 {
                     }
                 }
             } catch (Throwable e) {
-                Mirror120.log("the settings screen of " + id + " can't be found: " + e);
+                // Reflection wraps the mod's own failure: say that one.
+                Throwable cause = e;
+                while (cause.getCause() != null && cause.getCause() != cause) cause = cause.getCause();
+                Mirror120.log("the settings screen of " + id + " can't be found: " + cause);
             }
         }
         return factories;
