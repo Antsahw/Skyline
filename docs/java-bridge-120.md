@@ -356,6 +356,24 @@ clicks pass until then). A click on a block of a 1.20.1 mod's namespace, or with
 their items, goes to it at `useItemOn`'s head (`java120_use_block`, beside the 26.3 bridge's
 hook in `lan_actions.rs`); what it set and what it did to the held stack land in Horizon.
 
+## Phase 5m status: the mods' tools, weapons and armour (2026-11-14)
+
+A mod's tools and weapons came over as sticks with durability: their own classes (Farmer's
+Delight's `KnifeItem`, Tech Reborn's tools) matched no template, and the export had no attribute
+modifiers or mining rules. Now each item says the vanilla class it extends (`vanilla_class`: a
+mod's sword plays as a sword, its pickaxe as a pickaxe; the port-pack's template follows it),
+its default attribute modifiers in the hand or its armour slot (attack damage and speed;
+armour, toughness and knockback resistance, under 1.21's ids), and a tool's rules as 1.21.1's
+`tool` component: a `DiggerItem` mines its block tag at its tier's speed and drops it where its
+tier is enough (`incorrect_for_<tier>_tool` by the tier's level), a sword cuts cobwebs and what
+swords cut. Durability and repair items were exported before.
+
+Checked in a game: Tech Reborn's bronze pickaxe mines iron ore in about 2 seconds with the walk
+to it, drops raw iron and wears one point (a stick: 15 seconds, nothing); Farmer's Delight's iron
+knife hits a zombie for 3.4 of its 3.5 (an almost full swing); Tech Reborn's bronze chestplate
+gives 5 armour (it had the iron template's 6) and its ruby helmet 2 more. A tool whose mining
+speed is its own code (an energy drill's `getDestroySpeed`) mines as its tier says.
+
 ## Phase 5l status: the mods' villager trades (2026-11-14)
 
 The trades the mods add (Fabric's TradeOfferHelper puts their listings into 1.20.1's
@@ -1344,7 +1362,7 @@ NeoForge could run beside Fabric 26.3 rather than in its place.
    done: mods' packets between their halves, players joining. 5d done: items used, mods' own
    screens, players leaving. 5e done: mods' key bindings and the client tick (above). 5f/5g done:
    sounds and particles. 5h done: the mods' settings screens. 5i done: the mods' HUD (above). 5j done: their
-   commands and messages. 5k done: their effects and food. 5l done: their villager trades. Left: the HUD overlays that read the client's world (Jade, minimaps).
+   commands and messages. 5k done: their effects and food. 5l done: their villager trades. 5m done: their tools, weapons and armour. Left: the HUD overlays that read the client's world (Jade, minimaps).
 6. **Entities and worldgen.** 6a done: the mods' Fabric biome modifications reach Horizon's
    generator as biome modifiers. 6b done: a mod's own feature types run in the runtime on the
    chunks being decorated. 6c done: data-driven structures (above). 6d done: the mods' mobs

@@ -378,6 +378,12 @@ public final class Content120 {
                 json.name(id.toString());
                 json.beginObject();
                 json.name("class").value(Names.mojang(item.getClass()));
+                // The vanilla class it is one of (a mod's knife a DiggerItem, its sword a
+                // SwordItem): what it is played as when its own class isn't vanilla's.
+                Class<?> vanilla = item.getClass();
+                while (vanilla != null && !vanilla.getName().startsWith("net.minecraft.")) vanilla = vanilla.getSuperclass();
+                if (vanilla != null && vanilla != item.getClass()) json.name("vanilla_class").value(Names.mojang(vanilla));
+                modifiers(item);
                 json.name("max_stack_size").value(stack.getMaxStackSize());
                 json.name("rarity").value(stack.getRarity().name().toLowerCase(java.util.Locale.ROOT));
                 if (item instanceof BlockItem bi) {
@@ -431,6 +437,7 @@ public final class Content120 {
                     json.name("minecraft:damage").value(0);
                 }
                 if (item.isFireResistant()) json.name("minecraft:fire_resistant").beginObject().endObject();
+                tool(item);
                 if (food != null) {
                     json.name("minecraft:food");
                     json.beginObject();
@@ -462,6 +469,105 @@ public final class Content120 {
                 json.endObject();
             }
             json.endObject();
+        }
+
+        /**
+         * What holding or wearing it does (a weapon's attack damage and speed, an armour piece's
+         * armour, toughness and knockback resistance), as 1.21.1's `attribute_modifiers`
+         * component has it: the item's default modifiers in the hand or its armour slot.
+         */
+        void modifiers(Item item) throws IOException {
+            // An armour piece's are in its own slot (its defence and toughness), a tool's in the hand.
+            var slot = item instanceof ArmorItem armor ? armor.getEquipmentSlot()
+                    : net.minecraft.world.entity.EquipmentSlot.MAINHAND;
+            String piece = switch (slot) {
+                case HEAD -> "helmet";
+                case CHEST -> "chestplate";
+                case LEGS -> "leggings";
+                case FEET -> "boots";
+                default -> null;
+            };
+            var modifiers = item.getDefaultAttributeModifiers(slot);
+            if (modifiers.isEmpty()) return;
+            json.name("attribute_modifiers");
+            json.beginObject();
+            json.name("modifiers");
+            json.beginArray();
+            for (var entry : modifiers.entries()) {
+                ResourceLocation attribute = BuiltInRegistries.ATTRIBUTE.getKey(entry.getKey());
+                if (attribute == null || !attribute.getNamespace().equals("minecraft")) continue;
+                var modifier = entry.getValue();
+                String path = attribute.getPath().replace("generic.", "").replace("player.", "");
+                json.beginObject();
+                json.name("type").value(attribute.toString());
+                // Vanilla's tools' base modifiers have these ids in 1.21; the client shows them
+                // as the item's own damage and speed.
+                json.name("id").value(piece != null ? "minecraft:armor." + piece
+                        : path.equals("attack_damage") || path.equals("attack_speed")
+                                ? "minecraft:base_" + path : "minecraft:" + path);
+                json.name("amount").value(modifier.getAmount());
+                json.name("operation").value(switch (modifier.getOperation()) {
+                    case ADDITION -> "add_value";
+                    case MULTIPLY_BASE -> "add_multiplied_base";
+                    case MULTIPLY_TOTAL -> "add_multiplied_total";
+                });
+                json.name("slot").value(piece != null ? slot.getName() : "mainhand");
+                json.endObject();
+            }
+            json.endArray();
+            json.endObject();
+        }
+
+        /**
+         * A tool's or sword's mining as 1.21.1's `tool` component: a DiggerItem mines its blocks
+         * at its tier's speed and drops them where its tier is enough (1.21's
+         * `incorrect_for_<tier>_tool` tags, by the tier's level: a mod's own tiers by theirs);
+         * a sword cuts cobwebs and what swords cut, as vanilla's.
+         */
+        void tool(Item item) throws IOException {
+            if (item instanceof net.minecraft.world.item.DiggerItem digger) {
+                var tier = digger.getTier();
+                String incorrect = switch (Math.max(0, Math.min(tier.getLevel(), 4))) {
+                    case 0 -> "wooden";
+                    case 1 -> "stone";
+                    case 2 -> "iron";
+                    case 3 -> "diamond";
+                    default -> "netherite";
+                };
+                json.name("minecraft:tool");
+                json.beginObject();
+                json.name("rules");
+                json.beginArray();
+                json.beginObject();
+                json.name("blocks").value("#minecraft:incorrect_for_" + incorrect + "_tool");
+                json.name("correct_for_drops").value(false);
+                json.endObject();
+                json.beginObject();
+                json.name("blocks").value("#" + ((dev.horizonlab.platform120.mixin.DiggerItemAccess) digger).horizon$blocks().location());
+                json.name("speed").value(tier.getSpeed());
+                json.name("correct_for_drops").value(true);
+                json.endObject();
+                json.endArray();
+                json.name("damage_per_block").value(1);
+                json.endObject();
+            } else if (item instanceof net.minecraft.world.item.SwordItem) {
+                json.name("minecraft:tool");
+                json.beginObject();
+                json.name("rules");
+                json.beginArray();
+                json.beginObject();
+                json.name("blocks").value("minecraft:cobweb");
+                json.name("speed").value(15.0f);
+                json.name("correct_for_drops").value(true);
+                json.endObject();
+                json.beginObject();
+                json.name("blocks").value("#minecraft:sword_efficient");
+                json.name("speed").value(1.5f);
+                json.endObject();
+                json.endArray();
+                json.name("damage_per_block").value(2);
+                json.endObject();
+            }
         }
 
         /** An armour piece as 1.21.1 describes it: slot, material, its numbers, its layer textures. */

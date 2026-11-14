@@ -88,6 +88,10 @@ pub struct State {
 #[derive(Debug, Deserialize)]
 pub struct Item {
     pub class: String,
+    /// The vanilla class a mod's own item class extends (1.20.1's exporter: a knife's
+    /// DiggerItem, a mod sword's SwordItem); absent when `class` is vanilla's.
+    #[serde(default)]
+    pub vanilla_class: Option<String>,
     pub max_stack_size: u8,
     pub rarity: String,
     #[serde(default)]
@@ -172,7 +176,11 @@ impl Armor {
 
 /// The vanilla item standing in for an item of a vanilla class, for the behaviour the class gives.
 fn item_template(item: &Item) -> &'static str {
-    let class = item.class.strip_prefix("net.minecraft.world.item.");
+    let class = item
+        .vanilla_class
+        .as_deref()
+        .unwrap_or(&item.class)
+        .strip_prefix("net.minecraft.world.item.");
     match (class, item.armor.as_ref().map(|a| a.slot.as_str())) {
         (Some("SwordItem"), _) => "minecraft:iron_sword",
         (Some("PickaxeItem"), _) => "minecraft:iron_pickaxe",
@@ -818,6 +826,21 @@ mod tests {
         .unwrap();
         let (sword, _) = facts.item("m:sword", &["m"]).unwrap();
         assert_eq!(sword["template"], "minecraft:iron_sword");
+        // A mod's own sword class, with the vanilla one it extends.
+        let mut facts_own: Facts = serde_json::from_value(json!({
+            "blocks": {},
+            "items": {"m:blade": {"class": "com.example.BladeItem",
+                "vanilla_class": "net.minecraft.world.item.SwordItem",
+                "max_stack_size": 1, "rarity": "common",
+                "components": {"minecraft:max_damage": 300}}},
+        }))
+        .unwrap();
+        facts_own.vanilla_items = facts.vanilla_items.clone();
+        let (blade, _) = facts_own.item("m:blade", &["m"]).unwrap();
+        assert_eq!(
+            blade["template"], "minecraft:iron_sword",
+            "played as the sword it is"
+        );
         let c = &sword["components"];
         assert_eq!(c["minecraft:max_damage"], 905);
         assert_eq!(

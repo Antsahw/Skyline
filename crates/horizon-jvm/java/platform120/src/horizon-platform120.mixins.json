@@ -15,6 +15,7 @@
     "LevelStorageAccessAccess",
     "PlayerAccess",
     "LivingEntityAccess",
+    "DiggerItemAccess",
     "EntityAccess",
     "FoodDataAccess",
     "NaturalSpawnerAccess",
