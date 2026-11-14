@@ -160,6 +160,8 @@ mod java_hooks;
 pub(crate) mod java_mods;
 #[cfg(feature = "java-mods-120")]
 mod java_mods_120;
+#[cfg(feature = "java-mods-120")]
+pub(crate) use java_mods_120::loot_table_load as java120_loot_table_load;
 mod java_profile;
 mod java_screen;
 mod java_server;

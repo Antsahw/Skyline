@@ -66,6 +66,8 @@ pub fn main_with(mods: crate::mod_api::Mods) {
     if horizon_world::native_load_hooks::install(
         horizon_world::native_load_hooks::NativeLoadHooks {
             loot_table_load: |id, table| {
+                #[cfg(feature = "java-mods-120")]
+                crate::game::java120_loot_table_load(id, table);
                 crate::mod_api::dispatch_loot_table_load(crate::mod_api::mods(), id, table);
             },
             modify_default_components: |item, components| {

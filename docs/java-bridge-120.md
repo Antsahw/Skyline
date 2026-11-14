@@ -356,6 +356,27 @@ clicks pass until then). A click on a block of a 1.20.1 mod's namespace, or with
 their items, goes to it at `useItemOn`'s head (`java120_use_block`, beside the 26.3 bridge's
 hook in `lan_actions.rs`); what it set and what it did to the held stack land in Horizon.
 
+## Phase 5o status: what the mods add to loot tables (2026-11-14)
+
+Many mods put their items into vanilla's loot in code, through Fabric's
+`LootTableEvents.MODIFY` (Farmer's Delight's seeds and rope in dungeon chests, Tech Reborn's
+ingots in village and bastion chests, Supplementaries' bombs and flax). The carry-over carries
+a mod's own tables, but those additions were code, so Horizon's vanilla tables never had them.
+The mirror server loads its data the way a server does, so Fabric has already applied the mods'
+changes to its tables. `Loot120.added` compares each table's pools with its file's, and the
+extra pools are what the mods added. The content build writes them in 26.3's form
+(`content120::loot_added`, with the carry-over's loot upgrades) to `loot_added.json` beside the
+content. When Horizon loads a table (`loot::native_loot_table_load`, the native mods' hook), it
+appends them (`java_mods_120::loot_table_load`), as Fabric appends them. With the test pack,
+that is 70 pools in 45 tables. 1.20.1's `loot_table` entries name their table as `name`, which
+1.20.5 renamed to `value`; the 1.20.1 upgrade now renames it (`legacy120::loot`), in the carried
+tables too.
+
+Checked in a game: twenty rolls of `minecraft:chests/simple_dungeon` give Farmer's Delight's
+cabbage and tomato seeds and rope, and Tech Reborn's ingots and rubber saplings. Not yet: a mod
+that changes a table's existing pools (`modifyPools`) or replaces a table (`REPLACE`), and
+`MODIFY_DROPS`.
+
 ## Phase 6h status: structures of the mods' own types (2026-11-14)
 
 A structure of a mod's own type (Deeper and Darker's `deeperdarker:maze`: the Otherside's

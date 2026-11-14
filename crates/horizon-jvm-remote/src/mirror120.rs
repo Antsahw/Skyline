@@ -1651,6 +1651,15 @@ impl Runtime120 {
         }
     }
 
+    /// The pools the mods add to loot tables in code (Fabric's `LootTableEvents.MODIFY`), as JSON
+    /// `{table id: [pool, ...]}` in 1.20.1's form.
+    pub fn loot_added(&mut self) -> Result<String, String> {
+        match self.call_answers("lootAdded", &[])?.first() {
+            Some(Value::Str(json)) => Ok(json.clone()),
+            other => Err(format!("lootAdded: answer {other:?}")),
+        }
+    }
+
     /// The structure types of the mods' own structures (not vanilla's), whose starts Horizon's
     /// generator asks the runtime for ([`Runtime120::structure_start`]).
     pub fn mod_structure_types(&mut self) -> Result<Vec<String>, String> {

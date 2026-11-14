@@ -95,6 +95,17 @@ pub fn loot(v: &mut Value) {
             {
                 item_predicate(p);
             }
+            // 1.20.5: a loot_table entry names its table as `value`.
+            let table_entry = o
+                .get("type")
+                .and_then(Value::as_str)
+                .is_some_and(|t| matches!(t, "minecraft:loot_table" | "loot_table"));
+            if table_entry
+                && !o.contains_key("value")
+                && let Some(name) = o.remove("name")
+            {
+                o.insert("value".into(), name);
+            }
             if let Some(Value::String(f)) = o.get_mut("function") {
                 match f.as_str() {
                     // 1.20.5: an item's custom NBT is its custom_data component.

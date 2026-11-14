@@ -19,8 +19,11 @@ use std::path::{Path, PathBuf};
 /// changes are written as biome modifiers ([`biome_modifiers`]). 6: the carry-over renames the
 /// ids vanilla renamed since 1.20.1 (`minecraft:grass`) in the mods' data. 7: the mods that
 /// change vanilla's world generation (Terralith) get it as a data pack ([`worldgen_pack`]). 8: so
-/// do the mods with dimensions of their own.
-const FORMAT: u32 = 8;
+/// do the mods with dimensions of their own. 9: the pools they add to loot tables ([`loot_added`]).
+const FORMAT: u32 = 9;
+
+/// The file under the cache holding the pools the mods add to loot tables ([`loot_added`]).
+pub const LOOT_ADDED: &str = "loot_added.json";
 
 /// The folder under the cache holding the mods' world generation as a 26.3 data pack.
 pub const WORLDGEN_PACK: &str = "worldgen";
@@ -514,6 +517,20 @@ pub fn build(
     // Every jar is carried: its assets and data under its own namespaces.
     let all: Vec<String> = records.iter().map(|r| r.key.clone()).collect();
     horizon_port_pack::pipeline::carry(&work, Some(resources), &all, &log_line)?;
+    let added = loot_added(&runtime.call_with("lootAdded", &[])?);
+    let pools: usize = added.values().map(Vec::len).sum();
+    if pools > 0 {
+        log(format!(
+            "1.20.1 mods' content: {pools} loot pool(s) they add to {} table(s)",
+            added.len()
+        ));
+    }
+    std::fs::create_dir_all(cache).map_err(|e| format!("{}: {e}", cache.display()))?;
+    std::fs::write(
+        cache.join(LOOT_ADDED),
+        serde_json::to_vec(&added).unwrap_or_default(),
+    )
+    .map_err(|e| format!("{LOOT_ADDED}: {e}"))?;
     let changes = runtime.call_with("biomeChanges", &[])?;
     let modifiers = biome_modifiers(&changes, &carried(&work));
     if modifiers > 0 {
@@ -570,6 +587,28 @@ fn is_worldgen(name: &str) -> bool {
         ]
         .iter()
         .any(|k| path.starts_with(k))
+}
+
+/// The pools the mods add to loot tables in code (the runtime's `lootAdded`: Fabric's
+/// `LootTableEvents.MODIFY`, `{table: [pool]}` in 1.20.1's JSON) in 26.3's form, as the carry-over
+/// upgrades a 1.20.1 mod's own loot tables, by table id: what Horizon adds when it loads a table.
+fn loot_added(json: &str) -> std::collections::BTreeMap<String, Vec<serde_json::Value>> {
+    let Ok(serde_json::Value::Object(tables)) = serde_json::from_str(json) else {
+        return Default::default();
+    };
+    tables
+        .into_iter()
+        .filter_map(|(id, pools)| {
+            let mut table = serde_json::json!({ "pools": pools });
+            horizon_port_pack::legacy120::loot(&mut table);
+            horizon_port_pack::carry::upgrade_loot(&mut table);
+            horizon_port_pack::carry::renamed_ids(&mut table);
+            match table["pools"].take() {
+                serde_json::Value::Array(pools) if !pools.is_empty() => Some((id, pools)),
+                _ => None,
+            }
+        })
+        .collect()
 }
 
 /// Whether a jar's world generation files (`is_worldgen`) need the pack: it changes vanilla's
@@ -915,6 +954,34 @@ fn biome_modifiers(changes: &str, carried: &[PathBuf]) -> usize {
 
 #[cfg(test)]
 mod tests {
+    /// Farmer's Delight's straw-from-grass pool, as the runtime writes it.
+    #[test]
+    fn the_pools_mods_add_are_in_26_3s_form() {
+        let json = r#"{"minecraft:blocks/grass": [{"rolls": 1.0, "bonus_rolls": 0.0,
+            "entries": [{"type": "minecraft:item", "name": "farmersdelight:straw",
+                "conditions": [{"condition": "minecraft:match_tool", "predicate":
+                    {"items": ["farmersdelight:flint_knife"]}}]}]}],
+            "minecraft:chests/simple_dungeon": [{"rolls": 1.0, "entries": [{"type":
+                "minecraft:loot_table", "name": "farmersdelight:inject/chests/simple_dungeon"}]}],
+            "minecraft:chests/empty": []}"#;
+        let added = loot_added(json);
+        assert_eq!(added.len(), 2, "a table with no pool added is left out");
+        // Farmer's Delight's own table, by its 1.20.1 name: 1.20.5's `value`.
+        assert_eq!(
+            added["minecraft:chests/simple_dungeon"][0]["entries"][0],
+            serde_json::json!({"type": "minecraft:loot_table",
+                "value": "farmersdelight:inject/chests/simple_dungeon"})
+        );
+        let pool = &added["minecraft:blocks/grass"][0];
+        assert_eq!(pool["entries"][0]["name"], "farmersdelight:straw");
+        assert_eq!(
+            pool["entries"][0]["condition"],
+            serde_json::json!({"type": "minecraft:match_tool",
+                "predicate": {"items": "farmersdelight:flint_knife"}}),
+            "1.20.1's item list is a holder set, its condition list 26.3's one condition"
+        );
+    }
+
     #[test]
     fn a_carver_of_a_mods_own_type_is_left_out_with_its_mentions() {
         let mut files: std::collections::BTreeMap<String, Vec<u8>> = [

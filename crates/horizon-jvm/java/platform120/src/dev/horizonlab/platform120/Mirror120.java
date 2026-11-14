@@ -1830,6 +1830,12 @@ public final class Mirror120 {
         }
     }
 
+    /** The pools the mods add to loot tables in code (Loot120.added): {json}. */
+    public static Object[] lootAdded() {
+        setUp();
+        return new Object[] {Loot120.added()};
+    }
+
     /** The structure types of the mods' own structures (Worldgen120.modStructureTypes). */
     public static Object[] modStructureTypes() {
         setUp();

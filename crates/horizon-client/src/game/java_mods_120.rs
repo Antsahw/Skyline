@@ -64,6 +64,7 @@ pub(in crate::game) fn content(base: &Path) -> Vec<PathBuf> {
     let home = super::mods::horizon_cache().join("java-120");
     let cache = home.join("content");
     if let Some(folders) = horizon_jvm_remote::content120::cached(&stamped(&jars), &cache) {
+        remember_loot(&cache);
         levels::register(&cache.join(horizon_jvm_remote::content120::WORLDGEN_PACK));
         log::info!(
             "1.20.1 mods: {} content mod(s) from the cache",
@@ -85,6 +86,7 @@ pub(in crate::game) fn content(base: &Path) -> Vec<PathBuf> {
     }
     match make(&dir, &jars, base, &home, &cache) {
         Ok(folders) => {
+            remember_loot(&cache);
             levels::register(&cache.join(horizon_jvm_remote::content120::WORLDGEN_PACK));
             remember_namespaces(&folders);
             folders
@@ -93,6 +95,35 @@ pub(in crate::game) fn content(base: &Path) -> Vec<PathBuf> {
             log::warn!("1.20.1 mods: their content was not made: {e}");
             Vec::new()
         }
+    }
+}
+
+/// The pools the mods add to loot tables in code, by table (`content120::loot_added`), once the
+/// content is ready.
+static LOOT_ADDED: std::sync::OnceLock<std::collections::BTreeMap<String, Vec<serde_json::Value>>> =
+    std::sync::OnceLock::new();
+
+/// Reads the pools the mods add to loot tables from the content cache.
+fn remember_loot(cache: &Path) {
+    let added = std::fs::read(cache.join(horizon_jvm_remote::content120::LOOT_ADDED))
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_default();
+    let _ = LOOT_ADDED.set(added);
+}
+
+/// A loot table as it loads (`horizon_world::loot::native_loot_table_load`): the pools the 1.20.1
+/// mods add to it in code (Fabric's `LootTableEvents.MODIFY`) after its own, as Fabric adds them.
+pub(crate) fn loot_table_load(id: &str, table: &mut serde_json::Value) {
+    let Some(pools) = LOOT_ADDED.get().and_then(|a| a.get(id)) else {
+        return;
+    };
+    let Some(obj) = table.as_object_mut() else {
+        return;
+    };
+    match obj.entry("pools").or_insert_with(|| serde_json::json!([])) {
+        serde_json::Value::Array(own) => own.extend(pools.iter().cloned()),
+        other => *other = serde_json::Value::Array(pools.clone()),
     }
 }
 
