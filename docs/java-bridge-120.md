@@ -382,7 +382,7 @@ badge named after its runtime, **Fabric 26.3** (`mods-java/`) or **Fabric 1.20.1
 "Java mods" step. A Java mod's **Settings** opens its screen when the world's server can
 (`Event::JavaModSettings`), and is greyed out otherwise; Java mods aren't turned on or off
 here (their jars are). Mods of the server's with settings that no runtime lists get a
-**Server** badge. Its text is in the lang file (`horizon.mod_menu.*`). Options > Mods is back to
+**Server** badge. The pause menu has the same button after its icons (`game/screens.rs`, id 16): a Java mod's settings need the world's server, so they open from there. Its text is in the lang file (`horizon.mod_menu.*`). Options > Mods is back to
 Horizon's page with the settings buttons. Checked in a game with AppleSkin, Cloth Config, Mod
 Menu and Naturalist. Left out: the mod's DirectX 12 shader fix (not a menu matter).
 

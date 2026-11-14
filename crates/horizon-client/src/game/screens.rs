@@ -155,6 +155,11 @@ fn pause_icon_focus_ids(friends: bool) -> Vec<u8> {
         .collect()
 }
 const SPLIT_SETTINGS: &str = "horizon.pages.split_settings";
+/// Mod Menu's button (game/mod_menu_ui.rs) after the icon row, so the Java mods' settings, which
+/// need the world's server, can be reached in a world. The vanilla icons keep their places.
+fn mods_icon(icons: &[(f32, f32, &'static str); 4]) -> (f32, f32) {
+    (icons[3].0 + 24.0, icons[3].1)
+}
 fn pause_icons(
     w: f32,
     h: f32,
@@ -348,6 +353,38 @@ impl Game<'_> {
                 });
             }
         }
+        let icons = pause_icons(
+            w,
+            h,
+            links,
+            additions.is_some(),
+            self.options.split_guest || self.split_hud.menu,
+        );
+        let (mx, my) = mods_icon(&icons);
+        let hover = ui::hovered(self.cursor, mx, my, 20.0, 20.0) || self.pause_focus == Some(16);
+        horizon_client::widgets::record("horizon.mod_menu.button", [mx, my, 20.0, 20.0], true);
+        ui::button(
+            batch,
+            atlas,
+            mx,
+            my,
+            20.0,
+            20.0,
+            &Text::empty(),
+            true,
+            hover,
+        );
+        let bar = if hover {
+            rgba(255, 255, 255, 255)
+        } else {
+            rgba(224, 224, 224, 255)
+        };
+        for (x, y, bw, bh) in horizon_client::title::mod_menu::BARS {
+            batch.fill(atlas, mx + x, my + y, bw, bh, bar);
+        }
+        if hover {
+            tooltip = Some(Text::translate("horizon.mod_menu.button", &[]));
+        }
         // SpriteIconButton.withTootip: the label as a tooltip.
         if let Some(tip) = tooltip {
             let lines: Vec<Text> = atlas
@@ -382,6 +419,11 @@ impl Game<'_> {
             // PauseScreen: `new SocialInteractionsScreen(this)`.
             15 => self.open_social(true),
             30 => self.open_split_settings(),
+            // Mod Menu's screen, shown in place of the Options screen.
+            16 => {
+                horizon_client::title::mod_menu::open();
+                self.open_options(false);
+            }
             // addCustomDialogButtons: DialogConnectionAccess.openDialog of the
             // additions dialog, from the pause menu.
             14 => {
@@ -438,6 +480,10 @@ impl Game<'_> {
             (self.friends_view().shown
                 && ui::hovered(self.cursor, friends.0, friends.1, 20.0, 20.0))
             .then_some(10)
+        })
+        .or_else(|| {
+            let (x, y) = mods_icon(&icons);
+            ui::hovered(self.cursor, x, y, 20.0, 20.0).then_some(16)
         });
         if let Some(id) = hit {
             self.pause_focus = Some(id);
