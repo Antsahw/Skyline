@@ -1396,7 +1396,27 @@ fn generate(
             )?;
             (position, pieces.into_iter().map(Piece::Pool).collect())
         }
-        StructureKind::Unsupported(_) => return None,
+        StructureKind::Unsupported(kind) => {
+            // A mod's own type: its maker's start, if one makes this type.
+            let maker = super::foreign::foreign_structures(kind)?;
+            let mut world = ForeignStartContext(context);
+            let start = maker.start(&def.name, seed, [chunk.x, chunk.z], &mut world)?;
+            let pieces = start
+                .boxes
+                .iter()
+                .enumerate()
+                .map(|(i, b)| {
+                    Piece::Legacy(Box::new(super::foreign::ForeignPiece {
+                        handle: start.handle,
+                        bounding_box: BoundingBox::new([b[0], b[1], b[2]], [b[3], b[4], b[5]]),
+                        first: i == 0,
+                        step: def.step as i32,
+                        world_seed: seed,
+                    }))
+                })
+                .collect();
+            (start.position, pieces)
+        }
     };
     let quart = position.map(|v| v >> 2);
     if (!any_biome && !def.biomes.contains(&context.noise_biome(quart))) || pieces.is_empty() {
@@ -1406,6 +1426,18 @@ fn generate(
         structure, def, chunk, pieces,
     )))
 }
+/// A start's context as a foreign maker asks it: heights of this generator's terrain.
+struct ForeignStartContext<'c, C: StartContext>(&'c mut C);
+
+impl<C: StartContext> super::foreign::ForeignStartWorld for ForeignStartContext<'_, C> {
+    fn height(&mut self, heightmap: &str, x: i32, z: i32) -> Option<i32> {
+        let kind = HeightmapType::ALL
+            .into_iter()
+            .find(|k| k.name() == heightmap)?;
+        Some(self.0.base_height(x, z, kind))
+    }
+}
+
 impl StructureStart {
     /// A start of `def` (registry index `structure`) from its pieces, at
     /// least one: their box, grown where the structure adapts the terrain.

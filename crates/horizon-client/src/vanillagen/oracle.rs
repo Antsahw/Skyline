@@ -82,7 +82,12 @@ impl VanillaTerrain {
     /// (structure, its type): a mod's own structure type. The Java mod bridge has the mods
     /// generate such a dimension.
     pub fn unsupported_structures(&self) -> Vec<(String, String)> {
-        self.generator.unsupported_structures()
+        let mut unsupported = self.generator.unsupported_structures();
+        // Those a foreign maker generates (the 1.20.1 mods' own types, by their runtime).
+        unsupported.retain(|(_, kind)| {
+            horizon_world::worldgen::structure::foreign::foreign_structures(kind).is_none()
+        });
+        unsupported
     }
     /// Chunk `x z` at NoiseBasedChunkGenerator.doFill's end (noise, aquifers, ore veins:
     /// no surface, carvers or features), for another generator to finish (the Java mod

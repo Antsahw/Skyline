@@ -6,6 +6,9 @@
 use super::{DATA_VERSION_120, wait_for_runtime};
 use horizon_jvm_remote::mirror120::{PlaceFeature, Region120};
 use horizon_world::worldgen::foreign::{ForeignFeatures, ForeignPlacement, ForeignWorld};
+use horizon_world::worldgen::structure::foreign::{
+    ForeignStart, ForeignStartWorld, ForeignStructures,
+};
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -45,6 +48,96 @@ impl ForeignFeatures for Features120 {
         count(placed);
         placed
     }
+}
+
+/// The mods' own structure types, made and placed by the runtime (phase 6h).
+struct Structures120 {
+    types: HashSet<String>,
+}
+
+impl ForeignStructures for Structures120 {
+    fn generates(&self, structure_type: &str) -> bool {
+        self.types.contains(structure_type)
+    }
+
+    fn start(
+        &self,
+        structure: &str,
+        world_seed: i64,
+        chunk: [i32; 2],
+        world: &mut dyn ForeignStartWorld,
+    ) -> Option<ForeignStart> {
+        let mut guard = wait_for_runtime()?;
+        let runtime = guard.as_mut()?;
+        let mut region = StartRegion { world };
+        match runtime.structure_start(
+            &mut region,
+            "minecraft:overworld",
+            structure,
+            world_seed,
+            chunk,
+        ) {
+            Ok(start) => start.map(|s| ForeignStart {
+                handle: s.handle,
+                position: s.position,
+                boxes: s.boxes,
+            }),
+            Err(e) => {
+                failed_once(structure, &e);
+                None
+            }
+        }
+    }
+
+    fn place(
+        &self,
+        handle: i64,
+        world_seed: i64,
+        chunk: [i32; 2],
+        step: i32,
+        world: &mut dyn ForeignWorld,
+    ) -> bool {
+        let Some(mut guard) = wait_for_runtime() else {
+            return false;
+        };
+        let Some(runtime) = guard.as_mut() else {
+            return false;
+        };
+        let mut region = Region { world };
+        runtime
+            .structure_place(
+                &mut region,
+                "minecraft:overworld",
+                handle,
+                world_seed,
+                chunk,
+                0,
+                step,
+            )
+            .unwrap_or_else(|e| {
+                failed_once("a structure start", &e);
+                false
+            })
+    }
+}
+
+/// A start being made, as the runtime's side asks it: heights of Horizon's terrain.
+struct StartRegion<'a> {
+    world: &'a mut dyn ForeignStartWorld,
+}
+
+impl Region120 for StartRegion<'_> {
+    fn block_state(&mut self, _: i32, _: i32, _: i32) -> Option<String> {
+        None
+    }
+    fn height(&mut self, heightmap: &str, x: i32, z: i32) -> Option<i32> {
+        self.world.height(heightmap, x, z)
+    }
+    fn biome(&mut self, _: i32, _: i32, _: i32) -> Option<String> {
+        None
+    }
+    fn set_block(&mut self, _: [i32; 3], _: &str) {}
+    fn set_block_entity(&mut self, _: [i32; 3], _: &str) {}
 }
 
 /// How many placements were asked and how many placed something, said now and then.
@@ -138,6 +231,21 @@ pub(super) fn install(runtime: &mut horizon_jvm_remote::boot120::Runtime120) {
     horizon_world::worldgen::foreign::set_foreign_features(Some(Arc::new(Features120 {
         features,
     })));
+    match runtime.mod_structure_types() {
+        Ok(types) if !types.is_empty() => {
+            log::info!(
+                "1.20.1 mods: their structure types for the generator: {}",
+                types.join(", ")
+            );
+            horizon_world::worldgen::structure::foreign::set_foreign_structures(Some(Arc::new(
+                Structures120 {
+                    types: types.into_iter().collect(),
+                },
+            )));
+        }
+        Ok(_) => {}
+        Err(e) => log::warn!("1.20.1 mods: their structure types can't be listed: {e}"),
+    }
 }
 
 #[cfg(test)]

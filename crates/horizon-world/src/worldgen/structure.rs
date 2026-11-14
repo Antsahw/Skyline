@@ -3,6 +3,7 @@
 pub mod end_city;
 pub mod enhanced_terrain;
 pub mod features;
+pub mod foreign;
 pub mod formations;
 pub mod fortress;
 pub mod jigsaw;

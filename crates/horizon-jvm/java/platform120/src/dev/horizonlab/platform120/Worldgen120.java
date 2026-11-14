@@ -223,4 +223,120 @@ final class Worldgen120 {
         GenerationStep.Decoration[] all = GenerationStep.Decoration.values();
         return step < all.length ? all[step].name().toLowerCase(Locale.ROOT) : null;
     }
+
+    /** The mods' structure starts Horizon asked for, by handle, kept for their chunks. */
+    private static final Map<Long, net.minecraft.world.level.levelgen.structure.StructureStart> STARTS =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    private static long nextStart = 1;
+
+    private static net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplateManager templates;
+
+    /** The structure types of the mods' structures: those whose type is not vanilla's. */
+    static String[] modStructureTypes() {
+        var types = new java.util.TreeSet<String>();
+        var structures = Mirror120.registries().registryOrThrow(Registries.STRUCTURE);
+        for (var structure : structures) {
+            var id = net.minecraft.core.registries.BuiltInRegistries.STRUCTURE_TYPE.getKey(structure.type());
+            if (id != null && !"minecraft".equals(id.getNamespace())) types.add(id.toString());
+        }
+        return types.toArray(String[]::new);
+    }
+
+    /**
+     * {@code Structure.findValidGenerationPoint} for `id` in chunk `chunkX chunkZ`, as
+     * {@code ChunkGenerator.tryGenerateStructure} asks it: the large feature random of the world
+     * seed and the chunk, heights from Horizon's generator through the level (Generator120).
+     * Horizon checks the biome at the start itself, as it does its own structures', so every
+     * biome counts as valid here. The start is kept under a handle for its chunks' placement:
+     * {handle (0: none), the stub's position, each piece's box (6 ints)}.
+     */
+    static Object[] structureStart(net.minecraft.server.level.ServerLevel level, String id, long seed,
+            int chunkX, int chunkZ) {
+        RegistryAccess registries = Mirror120.registries();
+        var structure = registries.registryOrThrow(Registries.STRUCTURE)
+                .get(new net.minecraft.resources.ResourceLocation(id));
+        if (structure == null) return new Object[] {0L, new int[0], new int[0]};
+        if (templates == null) {
+            templates = new net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplateManager(
+                    Mirror120.dataPacks(), Mirror120.storage(), net.minecraft.util.datafix.DataFixers.getDataFixer(),
+                    registries.lookupOrThrow(Registries.BLOCK));
+        }
+        var gen = generator(registries);
+        var random = net.minecraft.world.level.levelgen.RandomState.create(
+                net.minecraft.world.level.levelgen.NoiseGeneratorSettings.dummy(),
+                registries.lookupOrThrow(Registries.NOISE), seed);
+        var chunk = new net.minecraft.world.level.ChunkPos(chunkX, chunkZ);
+        var context = new net.minecraft.world.level.levelgen.structure.Structure.GenerationContext(
+                registries, gen, gen.getBiomeSource(), random, templates, seed, chunk, level, biome -> true);
+        java.util.Optional<net.minecraft.world.level.levelgen.structure.Structure.GenerationStub> stub;
+        try {
+            stub = structure.findValidGenerationPoint(context);
+        } catch (RuntimeException | LinkageError e) {
+            Mirror120.log("structure " + id + " failed in chunk " + chunkX + " " + chunkZ + ": " + e);
+            return new Object[] {0L, new int[0], new int[0]};
+        }
+        if (stub.isEmpty()) return new Object[] {0L, new int[0], new int[0]};
+        var pieces = stub.get().getPiecesBuilder().build();
+        if (pieces.isEmpty()) return new Object[] {0L, new int[0], new int[0]};
+        var start = new net.minecraft.world.level.levelgen.structure.StructureStart(structure, chunk, 0, pieces);
+        long handle;
+        synchronized (STARTS) {
+            handle = nextStart++;
+        }
+        STARTS.put(handle, start);
+        var boxes = new int[pieces.pieces().size() * 6];
+        int i = 0;
+        for (var piece : pieces.pieces()) {
+            var b = piece.getBoundingBox();
+            boxes[i++] = b.minX();
+            boxes[i++] = b.minY();
+            boxes[i++] = b.minZ();
+            boxes[i++] = b.maxX();
+            boxes[i++] = b.maxY();
+            boxes[i++] = b.maxZ();
+        }
+        var at = stub.get().position();
+        return new Object[] {handle, new int[] {at.getX(), at.getY(), at.getZ()}, boxes};
+    }
+
+    /**
+     * {@code StructureStart.placeInChunk} of a kept start in chunk `chunkX chunkZ`, as
+     * {@code ChunkGenerator.applyBiomeDecoration} places a structure: the level's blocks are the
+     * region's for this call, and the random is the decoration seed's at the structure's step.
+     */
+    static boolean structurePlace(net.minecraft.server.level.ServerLevel level, long handle, long seed,
+            int chunkX, int chunkZ, int index, int step) {
+        var start = STARTS.get(handle);
+        if (start == null) return false;
+        var random = new net.minecraft.world.level.levelgen.WorldgenRandom(
+                new net.minecraft.world.level.levelgen.XoroshiroRandomSource(
+                        net.minecraft.world.level.levelgen.RandomSupport.generateUniqueSeed()));
+        long decoration = random.setDecorationSeed(seed, chunkX << 4, chunkZ << 4);
+        random.setFeatureSeed(decoration, index, step);
+        int x = chunkX << 4, z = chunkZ << 4;
+        var box = new net.minecraft.world.level.levelgen.structure.BoundingBox(
+                x, level.getMinBuildHeight(), z, x + 15, level.getMaxBuildHeight() - 1, z + 15);
+        try {
+            start.placeInChunk(level, level.structureManager(), generator(Mirror120.registries()), random, box,
+                    new net.minecraft.world.level.ChunkPos(chunkX, chunkZ));
+            return true;
+        } catch (RuntimeException | LinkageError e) {
+            Mirror120.log("structure start " + handle + " failed in chunk " + chunkX + " " + chunkZ + ": " + e);
+            return false;
+        }
+    }
+
+    /** Horizon let go of a start (all its chunks placed, or the world closed). */
+    static void structureForget(long handle) {
+        STARTS.remove(handle);
+    }
+
+    private static Generator120 generator(RegistryAccess registries) {
+        if (generator == null) {
+            generator = new Generator120(registries.registryOrThrow(Registries.BIOME)
+                    .getHolderOrThrow(net.minecraft.world.level.biome.Biomes.PLAINS));
+        }
+        return generator;
+    }
 }

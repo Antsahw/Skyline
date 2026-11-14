@@ -356,6 +356,31 @@ clicks pass until then). A click on a block of a 1.20.1 mod's namespace, or with
 their items, goes to it at `useItemOn`'s head (`java120_use_block`, beside the 26.3 bridge's
 hook in `lan_actions.rs`); what it set and what it did to the held stack land in Horizon.
 
+## Phase 6h status: structures of the mods' own types (2026-11-14)
+
+A structure of a mod's own type (Deeper and Darker's `deeperdarker:maze`: the Otherside's
+bloomaze and gloomaze) has no Rust implementation; Horizon's generator skipped it with a
+warning. Now the runtime makes and places them, as it places the mods' own features (6b).
+`horizon_world::worldgen::structure::foreign` is the hook: where one of the structure's sets
+puts a start, the generator asks the installed maker for it. The runtime runs
+`Structure.findValidGenerationPoint` and builds the pieces (`Worldgen120.structureStart`), with
+heights from Horizon's generator through the level (`Generator120.getBaseHeight`, the start
+context's `base_height`) and templates from the mods' data packs. It keeps the start under a
+handle and returns the stub's position and each piece's box. Horizon keeps those boxes as
+pieces (`ForeignPiece`) for the chunks they reach and checks the start's biome itself, as for
+its own starts. When a chunk the start reaches is decorated, the first piece asks the runtime
+to place the start there (`StructureStart.placeInChunk` on the mirror level, whose blocks are
+the chunk's for the call). The types the runtime makes are those of its registered structures
+outside `minecraft` (`Worldgen120.modStructureTypes`), installed with the features
+(`java_mods_120/worldgen.rs`).
+
+Checked in a game: `/execute in deeperdarker:otherside run locate structure deeperdarker:bloomaze`
+finds one 2,110 blocks away, and its walls are there (fortified sculk grime bricks and
+protected glass, 12 of 20 samples on one layer). Not yet: such starts are not saved with the
+chunk (a reload forgets them, and the runtime keeps every start it made until it stops), the
+pieces don't see biomes by name, the decoration random is the structure's step's at index 0,
+and the mirror level is the Overworld's whatever the dimension.
+
 ## Phase 6f status: the mods' dimensions (2026-11-14)
 
 A mod's dimension (Deeper and Darker's Otherside) is a level stem, a dimension type, noise
@@ -380,8 +405,8 @@ its chunks reach the player (sculk stone, sculk permafrost, shadow crystal and c
 `deeperdarker:deeplands`), and the runtime places its features (icicle patches, sculk spruce
 forests, crystal cones). Not yet: the noodle carver (most of the Otherside's open caves; it
 needs the runtime to carve, as features place), Deeper and Darker's portal and its teleports,
-its two maze structures (a structure type of its own), and the dimension's sky and fog (drawn
-as the Nether's).
+and the dimension's sky and fog (drawn as the Nether's). Its two maze structures came with
+phase 6h (above).
 
 ## Phase 6g status: the mods' world generation over vanilla's (2026-11-14)
 
@@ -1486,7 +1511,8 @@ NeoForge could run beside Fabric 26.3 rather than in its place.
    chunks being decorated. 6c done: data-driven structures (above). 6d done: the mods' mobs
    (above). 6g done: mods that replace vanilla's world generation as data (Terralith, above).
    6f done: the mods' data-driven dimensions as levels (above; their own carvers and portals
-   not yet). Next: structures with their own Java pieces. Biomes added by code
+   not yet). 6h done: structures of the mods' own types, made and placed by the runtime
+   (above; not saved yet). Next: the mods' own carvers. Biomes added by code
    (TerraBlender) are left to the 26.3 bridge (above).
 7. **In-world rendering.** Blocks drawn by their code done (above: Wired Redstone's wires and
    cables); block entity renderers done (7b: Farmer's Delight's cutting board). Next:

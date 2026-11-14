@@ -133,6 +133,7 @@ public final class Mirror120 {
         // recipes, loot, tags (bound into the registries: mods ask `state.is(BlockTags.CAMPFIRES)`),
         // advancements and functions.
         var packs = Tags120.dataPacks();
+        dataPacks = packs;
         var layers = net.minecraft.server.RegistryLayer.createRegistryAccess();
         var worldgen = net.minecraft.resources.RegistryDataLoader.load(packs,
                 layers.getAccessForLoading(net.minecraft.server.RegistryLayer.WORLDGEN), worldgenRegistries());
@@ -160,6 +161,14 @@ public final class Mirror120 {
         // Statistics award score to objectives: an empty board (Horizon keeps the real one).
         ((dev.horizonlab.platform120.mixin.MinecraftServerAccess) server).horizon$setScoreboard(new net.minecraft.server.ServerScoreboard(server));
         overworldType = registries.registryOrThrow(Registries.DIMENSION_TYPE).getHolderOrThrow(BuiltinDimensionTypes.OVERWORLD);
+    }
+
+    private static net.minecraft.server.packs.resources.ResourceManager dataPacks;
+
+    /** The data packs the registries were loaded from (vanilla's and the mods'). */
+    static net.minecraft.server.packs.resources.ResourceManager dataPacks() {
+        setUp();
+        return dataPacks;
     }
 
     public static MinecraftServer server() {
@@ -1819,6 +1828,42 @@ public final class Mirror120 {
         } finally {
             finish();
         }
+    }
+
+    /** The structure types of the mods' own structures (Worldgen120.modStructureTypes). */
+    public static Object[] modStructureTypes() {
+        setUp();
+        return new Object[] {Worldgen120.modStructureTypes()};
+    }
+
+    /**
+     * A mod's structure's start in a chunk (Worldgen120.structureStart): heights asked of Horizon
+     * through the level for this call. {handle, position, piece boxes}.
+     */
+    public static Object[] structureStart(String dimension, String id, long seed, int chunkX, int chunkZ) {
+        begin();
+        try {
+            return Worldgen120.structureStart(level(dimension), id, seed, chunkX, chunkZ);
+        } finally {
+            finish();
+        }
+    }
+
+    /** A kept start placed in the chunk Horizon is decorating (Worldgen120.structurePlace). */
+    public static Object[] structurePlace(String dimension, long handle, long seed, int chunkX, int chunkZ,
+            int index, int step) {
+        begin();
+        try {
+            return new Object[] {Worldgen120.structurePlace(level(dimension), handle, seed, chunkX, chunkZ, index, step)};
+        } finally {
+            finish();
+        }
+    }
+
+    /** Horizon let go of a kept start. */
+    public static Object[] structureForget(long handle) {
+        Worldgen120.structureForget(handle);
+        return new Object[0];
     }
 
     /** A heightmap's height at a column of a mirror level: Horizon's, the level's bottom if it can't say. */

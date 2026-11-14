@@ -173,6 +173,16 @@ pub struct PlaceFeature {
     pub origin: [i32; 3],
 }
 
+/// A mod's structure's start the runtime keeps ([`Runtime120::structure_start`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StructureStart120 {
+    pub handle: i64,
+    /// `GenerationStub.position`: where the start's biome is checked.
+    pub position: [i32; 3],
+    /// Each piece's box: min x, y, z, max x, y, z.
+    pub boxes: Vec<[i32; 6]>,
+}
+
 /// A block the mods' code set, for Horizon to apply.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SetBlock {
@@ -1639,6 +1649,84 @@ impl Runtime120 {
             Some(Value::Strs(ids)) => Ok(ids.clone()),
             other => Err(format!("modFeatures: answer 0 is {other:?}")),
         }
+    }
+
+    /// The structure types of the mods' own structures (not vanilla's), whose starts Horizon's
+    /// generator asks the runtime for ([`Runtime120::structure_start`]).
+    pub fn mod_structure_types(&mut self) -> Result<Vec<String>, String> {
+        match self.call_answers("modStructureTypes", &[])?.first() {
+            Some(Value::Strs(ids)) => Ok(ids.clone()),
+            other => Err(format!("modStructureTypes: answer 0 is {other:?}")),
+        }
+    }
+
+    /// A mod's structure's start in a chunk (`Structure.findValidGenerationPoint` and its
+    /// pieces), heights asked of `region` meanwhile: the runtime keeps it under the handle
+    /// returned, for [`Runtime120::structure_place`]. `None` when it has no start there.
+    pub fn structure_start(
+        &mut self,
+        region: &mut dyn Region120,
+        dimension: &str,
+        structure: &str,
+        world_seed: i64,
+        chunk: [i32; 2],
+    ) -> Result<Option<StructureStart120>, String> {
+        let mut handler = InRegion {
+            region,
+            log: self.log.clone(),
+        };
+        let args = [
+            Value::Str(dimension.to_owned()),
+            Value::Str(structure.to_owned()),
+            Value::I64(world_seed),
+            Value::I32(chunk[0]),
+            Value::I32(chunk[1]),
+        ];
+        let values = self.call_values("structureStart", &args, &mut handler)?;
+        match values.as_slice() {
+            [Value::I64(0), ..] => Ok(None),
+            [Value::I64(handle), Value::I32s(at), Value::I32s(boxes)] if at.len() == 3 => {
+                Ok(Some(StructureStart120 {
+                    handle: *handle,
+                    position: [at[0], at[1], at[2]],
+                    boxes: boxes
+                        .chunks_exact(6)
+                        .map(|b| [b[0], b[1], b[2], b[3], b[4], b[5]])
+                        .collect(),
+                }))
+            }
+            other => Err(format!("structureStart: answer {other:?}")),
+        }
+    }
+
+    /// A kept start placed in the chunk Horizon is decorating (`StructureStart.placeInChunk`,
+    /// the decoration random at the structure's index and step), its blocks going to `region`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn structure_place(
+        &mut self,
+        region: &mut dyn Region120,
+        dimension: &str,
+        handle: i64,
+        world_seed: i64,
+        chunk: [i32; 2],
+        index: i32,
+        step: i32,
+    ) -> Result<bool, String> {
+        let mut handler = InRegion {
+            region,
+            log: self.log.clone(),
+        };
+        let args = [
+            Value::Str(dimension.to_owned()),
+            Value::I64(handle),
+            Value::I64(world_seed),
+            Value::I32(chunk[0]),
+            Value::I32(chunk[1]),
+            Value::I32(index),
+            Value::I32(step),
+        ];
+        let values = self.call_values("structurePlace", &args, &mut handler)?;
+        Ok(matches!(values.first(), Some(Value::Bool(true))))
     }
 
     /// Places a mod's placed feature in the chunks Horizon's generator is decorating, as

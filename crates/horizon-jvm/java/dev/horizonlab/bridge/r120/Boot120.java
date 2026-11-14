@@ -144,6 +144,10 @@ public final class Boot120 implements RemoteRuntime {
                 return mirror(method, args);
             case "modFeatures":
             case "placeFeature":
+            case "modStructureTypes":
+            case "structureStart":
+            case "structurePlace":
+            case "structureForget":
                 // The mods' own features, placed in the chunks Horizon generates (Worldgen120).
                 if (game == null) throw new IllegalStateException("not started");
                 return mirror(method, args);
