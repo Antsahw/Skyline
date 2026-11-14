@@ -78,6 +78,18 @@ If the game can't find the 1.20.1 runtime, set where step 4 put it before starti
 $env:HORIZON_120_CACHE = "$env:USERPROFILE\.cache\horizon-120"
 ```
 
+## Native mods (JEI)
+
+`native-mods\` holds Horizon native mods (Just Enough Items). To build the game with them, use
+this instead of step 5's command:
+
+```powershell
+py -3 tools\skyline_native.py
+```
+
+It applies them to a copy of the source in `.local\native\` and builds that into the same
+`target\fast\horizon-client.exe`. The first time takes as long as a first build.
+
 ## Making a Windows release on GitHub
 
 1. Build: `cargo build --release -p horizon-client --features java-mods,java-mods-120`

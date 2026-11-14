@@ -1,0 +1,315 @@
+[mod]
+id = "justenoughitems"
+version = "1.1.2"
+priority = 100
+
+# Built for this Nightly: besides the hook points it draws in place of the
+# game's item panel (`draw_mod_browser`) and uses the game's own inventory,
+# recipe and tooltip code.
+[compatibility]
+horizon_revision = "fdc87aecdbd116bf1e08adcd062fcbaea8c2e2ca"
+
+[[module]]
+id = "runtime"
+file = "crates/horizon-client/src/game.rs"
+name = "justenoughitems"
+source = "runtime.rs"
+
+[[module]]
+id = "glue"
+file = "crates/horizon-client/src/game.rs"
+name = "justenoughitems_glue"
+source = "glue.rs"
+
+[[module]]
+id = "view"
+file = "crates/horizon-client/src/game.rs"
+name = "justenoughitems_view"
+source = "view.rs"
+
+[[module]]
+id = "sprites"
+file = "crates/horizon-client/src/game.rs"
+name = "justenoughitems_sprites"
+source = "sprites.rs"
+
+[[module]]
+id = "config_sprites"
+file = "crates/horizon-client/src/game.rs"
+name = "justenoughitems_config_sprites"
+source = "config_sprites.rs"
+
+# JEI's config screen (MezzConfig GUI's) and its place over the Options screen.
+[[module]]
+id = "config"
+file = "crates/horizon-client/src/game.rs"
+name = "justenoughitems_config"
+source = "config.rs"
+
+[[module]]
+id = "options"
+file = "crates/horizon-client/src/game.rs"
+name = "justenoughitems_options"
+source = "options.rs"
+
+# The game's tooltips over the overlays (drawn last, as in Java).
+[[module]]
+id = "defer"
+file = "crates/horizon-client/src/game.rs"
+name = "justenoughitems_defer"
+source = "defer.rs"
+
+# Options > Mods: the mod's row, keys and settings page.
+[[injection]]
+id = "list"
+hook = "mods"
+hook_version = 1
+kind = "HEAD"
+helper = "h_list.rs"
+bindings = [
+  { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
+  { name = "mods", ty = "&mut Vec<crate::game::native_hooks::NativeMod>", value = "&mut *mods" },
+]
+
+[[injection]]
+id = "settings"
+hook = "settings"
+hook_version = 1
+kind = "HEAD"
+helper = "h_settings.rs"
+bindings = [
+  { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
+  { name = "mod_id", ty = "&str", value = "mod_id" },
+  { name = "buttons", ty = "&mut Vec<String>", value = "&mut *buttons" },
+]
+
+[[injection]]
+id = "settings_click"
+hook = "settings_click"
+hook_version = 1
+kind = "HEAD"
+helper = "h_settings_click.rs"
+bindings = [
+  { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
+  { name = "mod_id", ty = "&str", value = "mod_id" },
+  { name = "button", ty = "usize", value = "button" },
+]
+
+# Once a frame: the item and recipe tables, and what the screen hooks asked for.
+[[injection]]
+id = "frame"
+hook = "frame"
+hook_version = 1
+kind = "HEAD"
+helper = "h_frame.rs"
+bindings = [
+  { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
+]
+
+# The overlays, drawn where the game draws its own item panel: over the
+# container screen, under the carried stack and the tooltips.
+[[injection]]
+id = "draw"
+target = "horizon_client::game::native_panel::Game<'_>::draw_mod_browser"
+kind = "HEAD"
+cancellable = true
+helper = "h_draw.rs"
+bindings = [
+  { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
+  { name = "batch", ty = "&mut horizon_client::hud::HudBatch", value = "&mut *batch" },
+]
+
+# The container screen closed.
+[[injection]]
+id = "closed"
+target = "horizon_client::game::native_panel::Game<'_>::mod_browser_closed"
+kind = "HEAD"
+helper = "h_closed.rs"
+bindings = []
+
+[[injection]]
+id = "press"
+hook = "screen_mouse_button_pressed_pre"
+hook_version = 1
+kind = "HEAD"
+helper = "h_press.rs"
+bindings = [
+  { name = "game", ty = "&crate::game::Game<'_>", value = "&*self" },
+  { name = "screen", ty = "&horizon_client::mod_api::NativeScreenView<'_>", value = "screen" },
+  { name = "button", ty = "i32", value = "button" },
+  { name = "modifiers", ty = "u32", value = "modifiers" },
+  { name = "canceled", ty = "&mut bool", value = "&mut *canceled" },
+]
+
+[[injection]]
+id = "release"
+hook = "screen_mouse_button_released_pre"
+hook_version = 1
+kind = "HEAD"
+helper = "h_release.rs"
+bindings = [
+  { name = "game", ty = "&crate::game::Game<'_>", value = "&*self" },
+  { name = "screen", ty = "&horizon_client::mod_api::NativeScreenView<'_>", value = "screen" },
+  { name = "button", ty = "i32", value = "button" },
+  { name = "canceled", ty = "&mut bool", value = "&mut *canceled" },
+]
+
+[[injection]]
+id = "scroll"
+hook = "screen_mouse_scrolled_pre"
+hook_version = 1
+kind = "HEAD"
+helper = "h_scroll.rs"
+bindings = [
+  { name = "game", ty = "&crate::game::Game<'_>", value = "&*self" },
+  { name = "screen", ty = "&horizon_client::mod_api::NativeScreenView<'_>", value = "screen" },
+  { name = "scroll", ty = "[f64; 2]", value = "scroll" },
+  { name = "canceled", ty = "&mut bool", value = "&mut *canceled" },
+]
+
+[[injection]]
+id = "key"
+hook = "screen_key_pressed_pre"
+hook_version = 1
+kind = "HEAD"
+helper = "h_key.rs"
+bindings = [
+  { name = "game", ty = "&crate::game::Game<'_>", value = "&*self" },
+  { name = "screen", ty = "&horizon_client::mod_api::NativeScreenView<'_>", value = "screen" },
+  { name = "key", ty = "&str", value = "key" },
+  { name = "modifiers", ty = "u32", value = "modifiers" },
+  { name = "canceled", ty = "&mut bool", value = "&mut *canceled" },
+]
+
+[[injection]]
+id = "char"
+hook = "screen_char_typed_pre"
+hook_version = 1
+kind = "HEAD"
+helper = "h_char.rs"
+bindings = [
+  { name = "game", ty = "&crate::game::Game<'_>", value = "&*self" },
+  { name = "screen", ty = "&horizon_client::mod_api::NativeScreenView<'_>", value = "screen" },
+  { name = "c", ty = "char", value = "c" },
+  { name = "canceled", ty = "&mut bool", value = "&mut *canceled" },
+]
+
+# The mod's name at the foot of item tooltips.
+[[injection]]
+id = "tooltip"
+hook = "tooltip"
+hook_version = 1
+kind = "HEAD"
+helper = "h_tooltip.rs"
+bindings = [
+  { name = "stack", ty = "&horizon_client::items::ItemStack", value = "stack" },
+  { name = "lines", ty = "&mut Vec<(horizon_client::text::Text, u32)>", value = "&mut *lines" },
+]
+
+# The game's tooltips are drawn inside the container screen, before the
+# overlays: each one's vertices are noted (from the start of the screen) and
+# moved over the overlays once they are drawn, as Java draws its tooltips
+# after `ScreenEvent.Render.Post`. A tooltip is a box and its text (a list
+# of lines, a creative tab's name), or a stack's whole tooltip.
+[[injection]]
+id = "screen_inventory"
+target = "horizon_client::game::Game<'_>::draw_inventory"
+kind = "HEAD"
+helper = "h_screen_inventory.rs"
+bindings = []
+
+[[injection]]
+id = "screen_creative"
+target = "horizon_client::game::Game<'_>::draw_creative"
+kind = "HEAD"
+helper = "h_screen_creative.rs"
+bindings = []
+
+[[injection]]
+id = "tooltip_box"
+target = "horizon_client::game::stations::Game<'_>::tooltip_box"
+kind = "HEAD"
+helper = "h_tooltip_box.rs"
+bindings = [
+  { name = "batch", ty = "&horizon_client::hud::HudBatch", value = "&*batch" },
+]
+
+[[injection]]
+id = "tooltip_text"
+target = "horizon_client::game::stations::Game<'_>::tooltip_text"
+kind = "RETURN"
+helper = "h_tooltip_text.rs"
+bindings = [
+  { name = "value", ty = "()", value = "$value" },
+  { name = "batch", ty = "&horizon_client::hud::HudBatch", value = "&*batch" },
+]
+
+[[injection]]
+id = "tooltip_stack_begin"
+target = "horizon_client::game::stations::Game<'_>::draw_stack_tooltip_with"
+kind = "HEAD"
+helper = "h_tooltip_stack_begin.rs"
+bindings = [
+  { name = "batch", ty = "&horizon_client::hud::HudBatch", value = "&*batch" },
+]
+
+[[injection]]
+id = "tooltip_stack_end"
+target = "horizon_client::game::stations::Game<'_>::draw_stack_tooltip_with"
+kind = "RETURN"
+helper = "h_tooltip_stack_end.rs"
+bindings = [
+  { name = "value", ty = "()", value = "$value" },
+  { name = "batch", ty = "&horizon_client::hud::HudBatch", value = "&*batch" },
+]
+
+
+
+# The pointer dragged with a button held, and keys let go: the config screen's.
+[[injection]]
+id = "drag"
+hook = "screen_mouse_dragged_pre"
+hook_version = 1
+kind = "HEAD"
+helper = "h_drag.rs"
+bindings = [
+  { name = "game", ty = "&crate::game::Game<'_>", value = "&*self" },
+  { name = "screen", ty = "&horizon_client::mod_api::NativeScreenView<'_>", value = "screen" },
+  { name = "canceled", ty = "&mut bool", value = "&mut *canceled" },
+]
+
+[[injection]]
+id = "key_released"
+hook = "screen_key_released_pre"
+hook_version = 1
+kind = "HEAD"
+helper = "h_key_released.rs"
+bindings = [
+  { name = "game", ty = "&crate::game::Game<'_>", value = "&*self" },
+  { name = "screen", ty = "&horizon_client::mod_api::NativeScreenView<'_>", value = "screen" },
+  { name = "canceled", ty = "&mut bool", value = "&mut *canceled" },
+]
+
+# JEI's config screen over the Options screen, while it is open on JEI's page.
+[[injection]]
+id = "render"
+hook = "screen_render_post"
+hook_version = 1
+kind = "HEAD"
+helper = "h_render.rs"
+bindings = [
+  { name = "game", ty = "&crate::game::Game<'_>", value = "&*self" },
+  { name = "batch", ty = "&mut horizon_client::hud::HudBatch", value = "&mut *batch" },
+  { name = "screen", ty = "&horizon_client::mod_api::NativeScreenView<'_>", value = "screen" },
+]
+
+# The Options screen stays hidden under it.
+[[injection]]
+id = "options_cover"
+target = "horizon_client::game::options::Game<'_>::draw_options"
+kind = "HEAD"
+cancellable = true
+helper = "h_options_cover.rs"
+bindings = [
+  { name = "game", ty = "&crate::game::Game<'_>", value = "&*self" },
+]

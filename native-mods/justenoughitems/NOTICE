@@ -1,0 +1,26 @@
+Just Enough Items for Horizon
+A port of Just Enough Items (JEI) to Horizon (Minecraft: Java Edition 26.3
+rewritten in Rust) as a native mod.
+
+Just Enough Items
+Copyright (c) 2014-2015 mezz
+https://github.com/mezz/JustEnoughItems (branch 26.3)
+Licensed under the MIT License (LICENSE).
+
+The GUI sprites in mixins/justenoughitems/sprites.rs are JEI's own textures
+(Common/src/main/resources/assets/jei/textures/gui/sprites, MIT), converted to
+runs of pixels by tools/sprites.mjs.
+
+The config screen (config.rs) follows MezzConfig GUI, the config screen JEI
+26.3 opens, by mezz, https://github.com/mezz/MezzConfigGui (branch 26.3, MIT);
+config_sprites.rs holds its textures
+(Common/src/main/resources/assets/mezz_config/textures/mezz_config/atlas/gui)
+and JEI's icon, converted by tools/configsprites.mjs.
+
+This port rewrites JEI's ingredient list, bookmarks, search grammar and
+recipes screen in Rust for Horizon's native mod API, from the game's own item
+and recipe tables. Changes from the original: no plugin API (Horizon has no
+Java mods to register categories); settings live on Horizon's mod settings
+page; the creative tab (%) and identifier (&) search prefixes are on; colour
+search (^) and the item-hiding edit mode are not ported. It is not affiliated
+with mezz, Mojang or Microsoft.

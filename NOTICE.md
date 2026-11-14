@@ -35,6 +35,14 @@ licence allows. When in doubt about a part, `git log` says who wrote it.
 
       (the MIT permission notice, as in LICENSE)
 
+- **Just Enough Items for Horizon** by
+  [DeportedToHell](https://github.com/DeportedToHell/MCRE-Mods/tree/e662a0c6672c8f2b0770fb815bfae6611b9f0e16/justenoughitems)
+  (1.1.2, MIT), a port of [JEI](https://github.com/mezz/JustEnoughItems) by mezz (MIT): a
+  native mod in `native-mods/justenoughitems/`, with its own LICENSE and NOTICE. Skyline's
+  changes, for its older Horizon: the creative screen's hook target, and three parts left out
+  (the game's tooltips hidden under the recipes screen, the blur behind the config screen, the
+  search box's own skin). Built with `tools/skyline_native.py`.
+
 ## This project's licence
 
 Skyline is MIT-licensed, like both projects before it. [LICENSE](LICENSE) is Horizon's,

@@ -356,6 +356,19 @@ clicks pass until then). A click on a block of a 1.20.1 mod's namespace, or with
 their items, goes to it at `useItemOn`'s head (`java120_use_block`, beside the 26.3 bridge's
 hook in `lan_actions.rs`); what it set and what it did to the held stack land in Horizon.
 
+## Recipe viewer: Horizon's Just Enough Items (2026-11-14)
+
+The 1.20.1 mods' items and recipes are Horizon content once converted, so a native recipe viewer
+lists them with nothing more: DeportedToHell's Just Enough Items 1.1.2 (MIT, a port of mezz's
+JEI) is in `native-mods/justenoughitems/`, and `python3 tools/skyline_native.py` builds the game
+with it (horizon-mixins at the mod's commit, applied to a copy of this checkout in
+`.local/native/stage/`, built into `target/`). It was made for a newer Horizon (fdc87ae): the
+script pins it to this checkout, and the bundle has four changes (NOTICE.md). Checked in a game
+with Farmer's Delight and Tech Reborn: the panel beside the inventory, a search for "tomato"
+finding Farmer's Delight's items, and the tomato crate's crafting recipe. The mods' own recipe
+types (Farmer's Delight's cooking pot and cutting board, Tech Reborn's machines) aren't in
+Horizon's recipe tables, so they don't show. The Java JEI's own overlay is a parked stash.
+
 ## The Mods screen: Mod Menu for Horizon, built in (2026-11-14)
 
 The title screen's ☰ button (after Accessibility) opens **Mod Menu for Horizon** by tariksabanuz
