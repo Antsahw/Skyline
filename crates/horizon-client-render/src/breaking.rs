@@ -57,6 +57,59 @@ pub fn geometry(
     }
 }
 
+/// The crack on boxes in block space (`[x0, y0, z0, x1, y1, z1]`): a block whose shape only its
+/// mod knows, drawn by the mod's own code, has no model of its own to crack. Each box's six
+/// faces, their corners in vanilla's `FaceInfo` order.
+pub fn box_geometry(
+    boxes: &[[f64; 6]],
+    origin: glam::Vec3,
+    stage: [f32; 2],
+    out: &mut Vec<Vertex>,
+) {
+    for b in boxes {
+        let [x0, y0, z0, x1, y1, z1] = b.map(|v| v as f32);
+        let faces = [
+            (
+                Direction::Down,
+                [[x0, y0, z1], [x0, y0, z0], [x1, y0, z0], [x1, y0, z1]],
+            ),
+            (
+                Direction::Up,
+                [[x0, y1, z0], [x0, y1, z1], [x1, y1, z1], [x1, y1, z0]],
+            ),
+            (
+                Direction::North,
+                [[x1, y1, z0], [x1, y0, z0], [x0, y0, z0], [x0, y1, z0]],
+            ),
+            (
+                Direction::South,
+                [[x0, y1, z1], [x0, y0, z1], [x1, y0, z1], [x1, y1, z1]],
+            ),
+            (
+                Direction::West,
+                [[x0, y1, z0], [x0, y0, z0], [x0, y0, z1], [x0, y1, z1]],
+            ),
+            (
+                Direction::East,
+                [[x1, y1, z1], [x1, y0, z1], [x1, y0, z0], [x1, y1, z0]],
+            ),
+        ];
+        for (facing, corners) in faces {
+            for pos in corners {
+                out.push(Vertex {
+                    pos: (origin + glam::Vec3::from(pos)).to_array(),
+                    uv: decal_uv(pos, facing),
+                    layer: 11,
+                    color: 0xffff_ffff,
+                    light: stage_light(stage),
+                    normal: [0; 4],
+                    glint_uv: [0.0, 0.0],
+                });
+            }
+        }
+    }
+}
+
 /// Project a block entity's transformed quads onto the same destroy-stage pass.
 pub fn entity_geometry(vertices: &mut [Vertex], origin: glam::Vec3, stage: [f32; 2]) {
     for quad in vertices.as_chunks_mut::<4>().0 {

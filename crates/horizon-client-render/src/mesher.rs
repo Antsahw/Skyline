@@ -1518,7 +1518,13 @@ impl Mesher<'_> {
                     // A block its mod's code draws per position: the model drawn there (its
                     // state may have no model of its own).
                     let code = java.code_model(id, [world.x, world.y, world.z]);
-                    if code.is_none() && (!state.model || java.drawn_by_block_entity(id)) {
+                    // Not drawn there yet (just placed: the code draws it within half a second):
+                    // nothing, rather than its state's stand-in model for a moment.
+                    if code.is_none()
+                        && (!state.model
+                            || java.drawn_by_block_entity(id)
+                            || java.drawn_by_code(id))
+                    {
                         continue;
                     }
                     if let Some(model) = code {

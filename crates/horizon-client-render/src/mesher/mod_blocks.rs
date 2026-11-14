@@ -196,6 +196,12 @@ impl<'a> SectionJava<'a> {
         self.code_models.get(&pos).map(|m| &**m)
     }
 
+    /// Whether state `id` is one its mod's code draws per position ([`Self::code_model`]).
+    #[inline]
+    pub(super) fn drawn_by_code(&self, id: u32) -> bool {
+        self.drawn_by_code.get(id as usize) == Some(&true)
+    }
+
     /// Whether state `id`'s block entity draws its whole block (its chunk model is skipped).
     #[inline]
     pub(super) fn drawn_by_block_entity(&self, id: u32) -> bool {

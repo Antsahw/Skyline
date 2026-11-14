@@ -369,6 +369,14 @@ The block outline drew from the registry's shape, which is nothing for a LibMult
 and a full cube for a mod's block with no fixed shape; it now draws the boxes the mod gives at
 the position (`mod_block_shape`), as aiming already did: the gate's outline is its plate.
 
+Breaking one still did nothing (reported with a sword): LibMultiPart picks the part to take apart
+when breaking starts, and the mirror went straight to `destroyBlock`, so it removed nothing. It
+now runs `handleBlockBreakAction(START_DESTROY_BLOCK)` first. The crack overlay was drawn on the
+state's stand-in cube; it is drawn on the mod's boxes now (`breaking::box_geometry`). A block its
+code draws showed its stand-in for up to half a second after being placed, until the code had
+drawn it; the mesher now leaves it out until then. Checked in a game: a gate broken with a
+diamond sword in survival, the crack on its plate, no flash on placing.
+
 ## Phase 5q: the mods' mixins on vanilla behaviour (2026-11-14)
 
 `tools/java_bridge/mixins120.py` reads every mixin of Modrinth's top Fabric 1.20.1 mods (their

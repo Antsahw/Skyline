@@ -2180,7 +2180,17 @@ public final class Mirror120 {
             Events120.around(level, pos);
             boolean goes;
             switch (how) {
-                case BREAK_THEIRS -> goes = player.gameMode.destroyBlock(pos);
+                case BREAK_THEIRS -> {
+                    // Breaking starts first, as a client's START_DESTROY_BLOCK does: a mod that
+                    // takes apart one piece of a block (LibMultiPart's containers: a Wired
+                    // Redstone gate on a cable) picks the piece aimed at there, and without it
+                    // destroyBlock removes nothing. A block broken at once there is gone already.
+                    BlockState was = level.getBlockState(pos);
+                    player.gameMode.handleBlockBreakAction(pos,
+                            net.minecraft.network.protocol.game.ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK,
+                            net.minecraft.core.Direction.UP, level.getMaxBuildHeight(), 0);
+                    goes = level.getBlockState(pos) != was || player.gameMode.destroyBlock(pos);
+                }
                 case BREAK_BEFORE -> {
                     BlockState was = level.getBlockState(pos);
                     var entity = level.getBlockEntity(pos);

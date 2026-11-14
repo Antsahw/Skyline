@@ -11925,6 +11925,12 @@ impl Game<'_> {
             let o = (glam::DVec3::new(f64::from(pos[0]), f64::from(pos[1]), f64::from(pos[2]))
                 - camera)
                 .as_vec3();
+            // A block whose shape only its mod knows (`mod_block_shape`): the crack on those
+            // boxes, as its own model is the mod's drawing and the registry's is a stand-in.
+            if let Some(boxes) = self.mod_block_shape(pos) {
+                horizon_client::breaking::box_geometry(&boxes, o, stage, &mut out);
+                continue;
+            }
             let state = self.world.block(pos[0], pos[1], pos[2]);
             if self.res.facts().get(state).render_shape
                 == horizon_client::blocks::RenderShape::Model
