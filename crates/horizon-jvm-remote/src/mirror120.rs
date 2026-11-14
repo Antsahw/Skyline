@@ -1012,6 +1012,82 @@ impl Runtime120 {
         })
     }
 
+    /// The mods' fluid blocks (their `LiquidBlock`s: Tech Reborn's oil), which their own code
+    /// runs (phase 6e): Horizon's water and lava leave them.
+    pub fn mod_fluid_blocks(&mut self) -> Result<Vec<String>, String> {
+        match self.call_answers("modFluidBlocks", &[])?.first() {
+            Some(Value::Strs(ids)) => Ok(ids.clone()),
+            other => Err(format!("modFluidBlocks: answer {other:?}")),
+        }
+    }
+
+    /// How the mods' fluids are drawn: JSON by fluid block id, `{"still", "flow", "tint",
+    /// "translucent"}`, the sprites as texture ids (the 26.3 bridge's fluid looks' form).
+    pub fn fluid_looks(&mut self) -> Result<String, String> {
+        match self.call_answers("fluidLooks", &[])?.first() {
+            Some(Value::Str(json)) => Ok(json.clone()),
+            other => Err(format!("fluidLooks: answer {other:?}")),
+        }
+    }
+
+    /// Horizon changed blocks at or beside `positions` (x, y, z each) with a mod's fluid among
+    /// them: their ticks are scheduled at the mod's delay. How many are pending.
+    pub fn fluid_changed(
+        &mut self,
+        world: &dyn World120,
+        dimension: &str,
+        positions: &[i32],
+        game_time: i64,
+    ) -> Result<i32, String> {
+        let args = [
+            Value::Str(dimension.to_owned()),
+            Value::I32s(positions.to_vec()),
+            Value::I64(game_time),
+        ];
+        let mut handler = InWorld {
+            world,
+            set: Vec::new(),
+            block_entities: Vec::new(),
+            spawned: Vec::new(),
+            log: self.log.clone(),
+        };
+        match self
+            .call_values("fluidChanged", &args, &mut handler)?
+            .first()
+        {
+            Some(Value::I32(n)) => Ok(*n),
+            other => Err(format!("fluidChanged: answer {other:?}")),
+        }
+    }
+
+    /// The mods' fluid ticks due in `dimension` by `game_time`, each `FluidState.tick` (their
+    /// own spread): what they set, and (`ticked`) how many ticks are still pending.
+    pub fn fluid_ticks(
+        &mut self,
+        world: &dyn World120,
+        dimension: &str,
+        game_time: i64,
+    ) -> Result<Ticked, String> {
+        let args = [Value::Str(dimension.to_owned()), Value::I64(game_time)];
+        let mut handler = InWorld {
+            world,
+            set: Vec::new(),
+            block_entities: Vec::new(),
+            spawned: Vec::new(),
+            log: self.log.clone(),
+        };
+        let values = self.call_values("fluidTicks", &args, &mut handler)?;
+        Ok(Ticked {
+            ticked: match values.first() {
+                Some(Value::I32(v)) => *v,
+                other => return Err(format!("fluidTicks: answer 0 is {other:?}")),
+            },
+            set: handler.set,
+            block_entities: handler.block_entities,
+            spawned: handler.spawned,
+        })
+    }
+
     /// One server tick of `dimension` at Horizon's game time: the mods hear it through Fabric
     /// API's tick events (the server's start and level loads first, once). [`ServerTicked`]
     /// says whether any mod listens to ticks at all: when none does, a caller can ask less

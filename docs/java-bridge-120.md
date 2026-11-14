@@ -356,6 +356,34 @@ clicks pass until then). A click on a block of a 1.20.1 mod's namespace, or with
 their items, goes to it at `useItemOn`'s head (`java120_use_block`, beside the 26.3 bridge's
 hook in `lan_actions.rs`); what it set and what it did to the held stack land in Horizon.
 
+## Phase 6e status: the mods' fluids in the world (2026-11-14)
+
+A mod's fluid block (Tech Reborn's 35: oil, diesel...) is carried on water's or lava's
+template, so Horizon's fluid code ran it as that: a placed oil source spread as
+`minecraft:water`. Now their states are foreign to Horizon's fluids (`LevelAccess::
+foreign_fluid`, as the 26.3 bridge's): Horizon's water and lava leave them, and where Horizon
+would schedule their tick (placed, a neighbour changed) it tells
+`game/java_mods_120/fluids.rs` instead. Each server tick those positions go to the runtime
+(`fluidChanged`), which schedules each fluid's tick at the mod's own delay in the mirror level's
+fluid ticks (`FluidTicks120`: a schedule kept by position, as a level without chunks drops
+vanilla's), and the ticks due run there (`fluidTicks`: `FluidState.tick`, the mod's own spread
+and drop-off); the blocks they set land in Horizon's world, which tells the module again, and
+so it flows. A level with nothing pending costs no call.
+
+They are drawn with their own sprites: the runtime reads each fluid's still and flowing texture
+where it's kept (Fabric's `SimpleFluidRenderHandler`, a fluid's own settings as Reborn Core's,
+else the handler's sprites; this client stitches no atlas) and the game hands them to Horizon's
+mesher as the 26.3 bridge's fluid looks (`fluidLooks`). Only where the runtime runs in the
+game's process (single player, a LAN host), as the 26.3 bridge's.
+
+Checked: in the runtime test, an oil source spreads to its four sides as oil one level down,
+on its tick and not before, and the spread oil's ticks are scheduled when Horizon says it placed
+them; in a game, a placed oil source spreads as oil down to level 7 (eight blocks) and stops,
+drawn black with its own sprites. Not yet: entities in them (Horizon's physics read the
+template: a player in oil swims as in water), Horizon's water and lava meeting them, their looks
+on a remote player's game, and Tech Reborn's oil lakes, whose feature fails in the runtime
+("Should always be able to create a chunk").
+
 ## Phase 5n status: the mods' tooltip lines (2026-11-14)
 
 What the mods add to an item's tooltip shows in Horizon's, which builds the rest itself: a mod
@@ -1379,7 +1407,7 @@ NeoForge could run beside Fabric 26.3 rather than in its place.
    done: mods' packets between their halves, players joining. 5d done: items used, mods' own
    screens, players leaving. 5e done: mods' key bindings and the client tick (above). 5f/5g done:
    sounds and particles. 5h done: the mods' settings screens. 5i done: the mods' HUD (above). 5j done: their
-   commands and messages. 5k done: their effects and food. 5l done: their villager trades. 5m done: their tools, weapons and armour. 5n done: their tooltip lines. Left: the HUD overlays that read the client's world (Jade, minimaps).
+   commands and messages. 5k done: their effects and food. 5l done: their villager trades. 5m done: their tools, weapons and armour. 5n done: their tooltip lines. 6e done: their fluids flow and are drawn. Left: the HUD overlays that read the client's world (Jade, minimaps).
 6. **Entities and worldgen.** 6a done: the mods' Fabric biome modifications reach Horizon's
    generator as biome modifiers. 6b done: a mod's own feature types run in the runtime on the
    chunks being decorated. 6c done: data-driven structures (above). 6d done: the mods' mobs

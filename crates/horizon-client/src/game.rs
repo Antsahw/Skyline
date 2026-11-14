@@ -1193,9 +1193,19 @@ impl GameLevel<'_> {
 }
 impl LevelAccess for GameLevel<'_> {
     fn foreign_fluid(&self, state: BlockStateId) -> bool {
+        #[cfg(feature = "java-mods-120")]
+        if java_mods_120::is_fluid(state) {
+            return true;
+        }
         Game::java_fluid(state)
     }
     fn foreign_fluid_changed(&mut self, pos: BlockPos) {
+        // Either bridge's: each takes only its own fluids' positions when it runs them.
+        #[cfg(feature = "java-mods-120")]
+        if java_mods_120::is_fluid(self.block_state(pos)) {
+            java_mods_120::fluid_changed(pos);
+            return;
+        }
         Game::java_fluid_changed(pos);
     }
     fn liquid_interaction(&mut self, pos: BlockPos) -> bool {
@@ -7982,6 +7992,8 @@ impl Game<'_> {
         self.tick_java120_neighbours();
         #[cfg(feature = "java-mods-120")]
         self.tick_java120_block_entities();
+        #[cfg(feature = "java-mods-120")]
+        self.tick_java120_fluids();
         #[cfg(feature = "java-mods-120")]
         self.tick_java120_screens();
         #[cfg(feature = "java-mods-120")]

@@ -220,7 +220,8 @@ public final class Mirror120 {
             sl.horizon$setSleepStatus(new net.minecraft.server.players.SleepStatus());
             // Ticks mods schedule: kept, not run (Horizon's ticks: a later step).
             sl.horizon$setBlockTicks(new net.minecraft.world.ticks.LevelTicks<>(pos -> true, () -> net.minecraft.util.profiling.InactiveProfiler.INSTANCE));
-            sl.horizon$setFluidTicks(new net.minecraft.world.ticks.LevelTicks<>(pos -> true, () -> net.minecraft.util.profiling.InactiveProfiler.INSTANCE));
+            // The mods' fluids' ticks are kept and run (FluidTicks120).
+            sl.horizon$setFluidTicks(new FluidTicks120());
             sl.horizon$setRandomSequences(new net.minecraft.world.RandomSequences(0L));
             // A chunk source holding no chunks, with the level's saved data (Fabric API's
             // attachments, mods' SavedData) in the runtime's folder.
@@ -1301,6 +1302,190 @@ public final class Mirror120 {
             return new Object[] {hoverJson.toString(), afterJson.toString()};
         } catch (com.mojang.brigadier.exceptions.CommandSyntaxException e) {
             return new Object[] {"[]", "[]"};
+        } finally {
+            finish();
+        }
+    }
+
+    /** Whether a fluid is a mod's (its own code runs it: phase 6e). */
+    static boolean ourFluid(net.minecraft.world.level.material.Fluid fluid) {
+        ResourceLocation id = BuiltInRegistries.FLUID.getKey(fluid);
+        return id != null && !id.getNamespace().equals("minecraft");
+    }
+
+    /**
+     * The mods' fluid blocks (their LiquidBlocks: Tech Reborn's oil): {ids}. Horizon leaves
+     * them to the mods' code (`LevelAccess::foreign_fluid`): its water and lava don't run them.
+     */
+    public static Object[] modFluidBlocks() {
+        var ids = new java.util.ArrayList<String>();
+        for (var block : BuiltInRegistries.BLOCK) {
+            if (block instanceof net.minecraft.world.level.block.LiquidBlock liquid
+                    && ourFluid(liquid.getFluidState(liquid.defaultBlockState()).getType())) {
+                ids.add(BuiltInRegistries.BLOCK.getKey(block).toString());
+            }
+        }
+        return new Object[] {ids.toArray(new String[0])};
+    }
+
+    /**
+     * How the mods' fluids are drawn (phase 6e): {json}, by the fluid block's id, `{"still",
+     * "flow", "tint", "translucent"}` as the 26.3 bridge's HorizonFluids gives them, the
+     * sprites as texture ids (`techreborn:block/fluids/oil_still`). Read where they are kept,
+     * not from the block atlas (this client stitches none): Fabric's SimpleFluidRenderHandler's
+     * fields, a fluid's own settings (Reborn Core's `getFluidSettings`), else the handler's
+     * sprites. A fluid none of these say is left out, drawn as its template.
+     */
+    public static Object[] fluidLooks() {
+        var out = new com.google.gson.JsonObject();
+        Object registry = null;
+        java.lang.reflect.Method get = null;
+        try {
+            Class<?> r = Class.forName("net.fabricmc.fabric.api.client.render.fluid.v1.FluidRenderHandlerRegistry");
+            registry = r.getField("INSTANCE").get(null);
+            get = r.getMethod("get", net.minecraft.world.level.material.Fluid.class);
+        } catch (Throwable t) {
+            // No Fabric fluid rendering: only the fluids' own settings.
+        }
+        for (var fluid : BuiltInRegistries.FLUID) {
+            if (!ourFluid(fluid) || !(fluid instanceof net.minecraft.world.level.material.FlowingFluid flowing)
+                    || fluid != flowing.getSource()) {
+                continue;
+            }
+            var state = fluid.defaultFluidState();
+            var block = state.createLegacyBlock();
+            if (block.isAir()) continue;
+            String still = null, flow = null;
+            int tint = -1;
+            Object handler = null;
+            try {
+                if (registry != null) handler = get.invoke(registry, fluid);
+            } catch (Throwable t) {
+                handler = null;
+            }
+            if (handler != null) {
+                still = idField(handler, "stillTexture");
+                flow = idField(handler, "flowingTexture");
+                try {
+                    Object t = field(handler, "tint");
+                    if (t instanceof Integer i) tint = i;
+                } catch (Throwable t) {
+                    // No tint of its own.
+                }
+            }
+            if (still == null) {
+                try {
+                    Object settings = fluid.getClass().getMethod("getFluidSettings").invoke(fluid);
+                    still = String.valueOf(settings.getClass().getMethod("getStillTexture").invoke(settings));
+                    flow = String.valueOf(settings.getClass().getMethod("getFlowingTexture").invoke(settings));
+                } catch (Throwable t) {
+                    still = null;
+                }
+            }
+            if (still == null && handler != null) {
+                try {
+                    Object sprites = handler.getClass().getMethod("getFluidSprites",
+                            net.minecraft.world.level.BlockAndTintGetter.class, BlockPos.class,
+                            net.minecraft.world.level.material.FluidState.class).invoke(handler, null, null, state);
+                    var array = (net.minecraft.client.renderer.texture.TextureAtlasSprite[]) sprites;
+                    still = array[0].contents().name().toString();
+                    flow = array[1].contents().name().toString();
+                } catch (Throwable t) {
+                    still = null;
+                }
+            }
+            if (still == null || flow == null || still.equals("null")) continue;
+            var look = new com.google.gson.JsonObject();
+            look.addProperty("still", still);
+            look.addProperty("flow", flow);
+            look.addProperty("tint", tint);
+            look.addProperty("translucent", true);
+            out.add(BuiltInRegistries.BLOCK.getKey(block.getBlock()).toString(), look);
+        }
+        return new Object[] {out.toString()};
+    }
+
+    private static Object field(Object on, String name) throws ReflectiveOperationException {
+        for (Class<?> c = on.getClass(); c != null; c = c.getSuperclass()) {
+            try {
+                var f = c.getDeclaredField(name);
+                f.setAccessible(true);
+                return f.get(on);
+            } catch (NoSuchFieldException e) {
+                // Up the classes.
+            }
+        }
+        throw new NoSuchFieldException(name);
+    }
+
+    private static String idField(Object on, String name) {
+        try {
+            Object v = field(on, name);
+            return v instanceof ResourceLocation id ? id.toString() : null;
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    private static FluidTicks120 fluidTicksOf(ServerLevel level) {
+        return level.getFluidTicks() instanceof FluidTicks120 t ? t : null;
+    }
+
+    /**
+     * Horizon changed blocks at or beside `positions` (x, y, z each), a mod's fluid among
+     * them: each such fluid's tick is scheduled at its own delay, as `LiquidBlock.onPlace` and
+     * `neighborChanged` do. {ticks pending}.
+     */
+    public static Object[] fluidChanged(String dimension, int[] positions, long gameTime) {
+        begin();
+        try {
+            ServerLevel level = level(dimension);
+            worldData.setGameTime(gameTime);
+            FluidTicks120 ticks = fluidTicksOf(level);
+            if (ticks == null) return new Object[] {0};
+            for (int i = 0; i + 2 < positions.length; i += 3) {
+                BlockPos pos = new BlockPos(positions[i], positions[i + 1], positions[i + 2]);
+                var fluid = level.getFluidState(pos);
+                if (fluid.isEmpty() || !ourFluid(fluid.getType())) continue;
+                ticks.schedule(pos.asLong(), gameTime + fluid.getType().getTickDelay(level));
+            }
+            return new Object[] {ticks.count()};
+        } finally {
+            finish();
+        }
+    }
+
+    /**
+     * The mods' fluid ticks due in `dimension` by Horizon's `gameTime`: each runs
+     * `FluidState.tick` (the mod's own spread, delay and drop-off), as ServerLevel.tickFluid
+     * does, at most 4096 a call. What they set goes back as any call's writes; the ticks they
+     * schedule are kept. {ticks still pending}.
+     */
+    public static Object[] fluidTicks(String dimension, long gameTime) {
+        begin();
+        try {
+            ServerLevel level = level(dimension);
+            worldData.setGameTime(gameTime);
+            FluidTicks120 ticks = fluidTicksOf(level);
+            if (ticks == null) return new Object[] {0};
+            var due = new java.util.ArrayList<Map.Entry<Long, Long>>();
+            for (var e : ticks.due.entrySet()) if (e.getValue() <= gameTime) due.add(e);
+            due.sort(Map.Entry.comparingByValue());
+            int ran = 0;
+            for (var e : due) {
+                if (ran++ >= 4096) break;
+                long at = e.getKey();
+                ticks.due.remove(at);
+                BlockPos pos = BlockPos.of(at);
+                var fluid = level.getFluidState(pos);
+                if (fluid.isEmpty() || !ourFluid(fluid.getType())) continue;
+                try {
+                    fluid.tick(level, pos);
+                } catch (Throwable t) {
+                    log("fluid " + BuiltInRegistries.FLUID.getKey(fluid.getType()) + " at " + pos + " failed: " + t);
+                }
+            }
+            return new Object[] {ticks.count()};
         } finally {
             finish();
         }

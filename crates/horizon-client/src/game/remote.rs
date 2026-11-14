@@ -5983,6 +5983,9 @@ impl Game<'_> {
         // The tooltips asked of the 1.20.1 mods, to the server.
         #[cfg(feature = "java-mods-120")]
         self.ask_java120_tooltips();
+        // Their fluids' looks (this process's server).
+        #[cfg(feature = "java-mods-120")]
+        self.java120_fluid_looks();
         self.tick_remote_level()?;
         // The rockets boosting this player tick after it, also while it waits
         // for chunks.

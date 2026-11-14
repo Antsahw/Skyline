@@ -2618,6 +2618,63 @@ fn the_mods_machines_pass_energy_between_them() {
         "nourishment takes the exhaustion back: {nourished}"
     );
 
+    // Phase 6e: the mods' fluids run by their own code. Tech Reborn's oil is one of theirs;
+    // an oil source on stone, told Horizon placed it, spreads as oil on its tick, not before.
+    let fluids = runtime.mod_fluid_blocks().expect("their fluids");
+    assert!(fluids.iter().any(|f| f == "techreborn:oil"), "{fluids:?}");
+    let looks: serde_json::Value =
+        serde_json::from_str(&runtime.fluid_looks().expect("their looks")).expect("json");
+    assert_eq!(
+        looks["techreborn:oil"]["still"], "techreborn:block/fluids/oil_still",
+        "oil drawn with its own sprites: {looks}"
+    );
+    let pool = Blocks::new(vec![(
+        [40, 65, 40],
+        "techreborn:oil[level=0]".into(),
+        String::new(),
+    )]);
+    let pending = runtime
+        .fluid_changed(&pool, "minecraft:overworld", &[40, 65, 40], 1000)
+        .expect("scheduled");
+    assert_eq!(pending, 1, "the source's tick");
+    let early = runtime
+        .fluid_ticks(&pool, "minecraft:overworld", 1000)
+        .expect("ticks");
+    assert!(early.set.is_empty(), "not due yet: {:?}", early.set);
+    let spread = runtime
+        .fluid_ticks(&pool, "minecraft:overworld", 1100)
+        .expect("ticks");
+    eprintln!("oil spread: {:?}", spread.set);
+    let beside: Vec<&str> = spread
+        .set
+        .iter()
+        .filter(|s| s.pos[1] == 65)
+        .map(|s| s.state.as_str())
+        .collect();
+    assert_eq!(beside.len(), 4, "to its four sides: {:?}", spread.set);
+    assert!(
+        beside.iter().all(|s| s.starts_with("techreborn:oil[")),
+        "as oil, not water: {beside:?}"
+    );
+    // Horizon places them, and tells the runtime (its foreign_fluid_changed): their ticks.
+    let placed: Vec<i32> = spread.set.iter().flat_map(|s| s.pos).collect();
+    let spread_pool = Blocks::new(
+        spread
+            .set
+            .iter()
+            .map(|s| (s.pos, s.state.clone(), String::new()))
+            .chain([(
+                [40, 65, 40],
+                "techreborn:oil[level=0]".into(),
+                String::new(),
+            )])
+            .collect(),
+    );
+    let pending = runtime
+        .fluid_changed(&spread_pool, "minecraft:overworld", &placed, 1100)
+        .expect("scheduled");
+    assert_eq!(pending, 4, "the spread oil's own ticks");
+
     // Phase 5n: a mod item's own tooltip lines. Farmer's Delight lists a meal's effects
     // under its name (its ConsumableItem's appendHoverText), which Horizon doesn't draw.
     let (hover, after) = runtime

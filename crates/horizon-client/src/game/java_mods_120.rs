@@ -877,6 +877,8 @@ mod tests {
 pub(in crate::game) mod block_renders;
 mod breaking;
 mod commands;
+mod fluids;
+pub(in crate::game) use fluids::{changed as fluid_changed, is_fluid};
 pub(in crate::game) mod config;
 mod drawn;
 mod effects;

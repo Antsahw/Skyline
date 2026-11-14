@@ -132,6 +132,10 @@ public final class Boot120 implements RemoteRuntime {
             case "command":
             case "effectTicks":
             case "tooltip":
+            case "modFluidBlocks":
+            case "fluidChanged":
+            case "fluidTicks":
+            case "fluidLooks":
             case "spawnNatural":
             case "spawnGenerated":
             case "animateTicks":
