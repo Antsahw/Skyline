@@ -429,6 +429,7 @@ fn jar_mods(jars: &[std::path::PathBuf]) -> Vec<horizon_client::mod_list::Runtim
                     id: file.clone(),
                     title: file,
                     description: String::new(),
+                    icon: None,
                 };
             };
             let id = meta["id"].as_str().unwrap_or(&file).to_owned();
@@ -437,12 +438,37 @@ fn jar_mods(jars: &[std::path::PathBuf]) -> Vec<horizon_client::mod_list::Runtim
             horizon_client::mod_list::RuntimeMod {
                 title: format!("{name} {version}").trim_end().to_owned(),
                 description: meta["description"].as_str().unwrap_or_default().to_owned(),
+                icon: jar_icon(jar, &meta["icon"]).map(std::sync::Arc::new),
                 id,
             }
         })
         .collect();
     mods.sort_by_key(|m| m.title.to_lowercase());
     mods
+}
+
+/// A jar's icon as fabric.mod.json names it: a path, or sizes to paths (the largest is taken),
+/// scaled for the Mods screen.
+fn jar_icon(jar: &std::path::Path, icon: &serde_json::Value) -> Option<Vec<u8>> {
+    let path = match icon {
+        serde_json::Value::String(p) => p.clone(),
+        serde_json::Value::Object(sizes) => sizes
+            .iter()
+            .max_by_key(|(size, _)| size.parse::<u32>().unwrap_or(0))?
+            .1
+            .as_str()?
+            .to_owned(),
+        _ => return None,
+    };
+    let mut zip = zip::ZipArchive::new(std::fs::File::open(jar).ok()?).ok()?;
+    let mut bytes = Vec::new();
+    std::io::Read::read_to_end(
+        &mut zip.by_name(path.trim_start_matches('/')).ok()?,
+        &mut bytes,
+    )
+    .ok()?;
+    let (w, h, rgba) = horizon_client::hud::decode_image_bytes(&bytes).ok()?;
+    horizon_client::mod_list::runtime_icon(w, h, &rgba)
 }
 
 impl Game<'_> {

@@ -386,6 +386,15 @@ here (their jars are). Mods of the server's with settings that no runtime lists 
 Horizon's page with the settings buttons. Checked in a game with AppleSkin, Cloth Config, Mod
 Menu and Naturalist. Left out: the mod's DirectX 12 shader fix (not a menu matter).
 
+Each Java mod shows its jar's own icon (`fabric.mod.json`'s `icon`, scaled to 128 by nearest
+pixel, `mod_list::runtime_icon`), drawn from the pack icon slots, and the Fabric runtimes' badges
+are grey (other loaders get colours of their own). Settings screens built from vanilla widgets
+(Tectonic's) drew their buttons and sliders without backgrounds: 1.20.1 blits them from
+`widgets.png`, `slider.png` and `checkbox.png`, which 26.3 replaced with GUI sprites, so
+`Graphics120.widgetSprite` makes each such blit one of the sprite of the same picture (the
+slider handle is nine-sliced from a 200 wide row: its right end is the sprite's right edge).
+Checked in a game: Tectonic's screen with its buttons and sliders, and its toggle working.
+
 More fixes: Naturalist's crab poses its head toward the camera, which the runtime's client
 didn't have (it now has a game renderer holding the renderers' camera); a recorded screen's
 `flush` is cancelled (Immersive Aircraft's HUD flushes mid-frame); and a mod whose settings

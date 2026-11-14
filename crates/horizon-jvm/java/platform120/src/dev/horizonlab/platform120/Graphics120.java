@@ -147,6 +147,16 @@ public final class Graphics120 {
         if (texture == null) {
             return;
         }
+        // 1.20.1's widget sheets are gone in 26.3, whose GUI sprites hold the same pictures.
+        Object[] sprite = widgetSprite(texture, u0, v0, u1, v1);
+        if (sprite != null) {
+            texture = (ResourceLocation) sprite[0];
+            float[] uv = (float[]) sprite[1];
+            u0 = uv[0];
+            v0 = uv[1];
+            u1 = uv[2];
+            v1 = uv[3];
+        }
         JsonObject o = op("blit");
         o.addProperty("texture", texture.toString());
         rect(o, x, y, width, height);
@@ -154,6 +164,62 @@ public final class Graphics120 {
         o.addProperty("v0", v0);
         o.addProperty("u1", u1);
         o.addProperty("v1", v1);
+    }
+
+    /**
+     * A blit from 1.20.1's widget sheets ({@code widgets.png}'s buttons, {@code slider.png},
+     * {@code checkbox.png}) as 26.3's sprite of the same picture, the UVs made the sprite's own:
+     * {texture, {u0, v0, u1, v1}}, or null for any other texture or part.
+     */
+    static Object[] widgetSprite(ResourceLocation texture, float u0, float v0, float u1, float v1) {
+        if (!"minecraft".equals(texture.getNamespace())) return null;
+        String path = texture.getPath();
+        // The part's top-left corner in the sheet's pixels.
+        float size = path.equals("textures/gui/checkbox.png") ? 64f : 256f;
+        float x = Math.min(u0, u1) * size, y = Math.min(v0, v1) * size;
+        String name;
+        float left, top, width, height;
+        switch (path) {
+            case "textures/gui/widgets.png" -> {
+                if (x >= 200f) return null;
+                int row = (int) Math.floor((y - 46f) / 20f);
+                if (y < 46f || row > 2) return null;
+                name = new String[] {"button_disabled", "button", "button_highlighted"}[row];
+                left = 0f;
+                top = 46f + 20f * row;
+                width = 200f;
+                height = 20f;
+            }
+            case "textures/gui/slider.png" -> {
+                int row = (int) Math.floor(y / 20f);
+                if (row < 0 || row > 3) return null;
+                name = new String[] {"slider", "slider_highlighted", "slider_handle", "slider_handle_highlighted"}[row];
+                left = 0f;
+                top = 20f * row;
+                width = row < 2 ? 200f : 8f;
+                height = 20f;
+            }
+            case "textures/gui/checkbox.png" -> {
+                boolean focused = x >= 20f, selected = y >= 20f;
+                name = "checkbox" + (selected ? "_selected" : "") + (focused ? "_highlighted" : "");
+                left = focused ? 20f : 0f;
+                top = selected ? 20f : 0f;
+                width = 20f;
+                height = 20f;
+            }
+            default -> {
+                return null;
+            }
+        }
+        float px0 = u0 * size - left, px1 = u1 * size - left;
+        if (width == 8f && Math.max(px0, px1) > 8f) {
+            // The handle is nine-sliced out of a 200 wide row whose right edge is the handle's:
+            // a piece from that end is the sprite's right edge.
+            px0 -= 192f;
+            px1 -= 192f;
+        }
+        float[] uv = {px0 / width, (v0 * size - top) / height, px1 / width, (v1 * size - top) / height};
+        return new Object[] {new ResourceLocation("minecraft", "textures/gui/sprites/widget/" + name + ".png"), uv};
     }
 
     /** A line of text. Styled text keeps its styling, as Horizon reads the component's JSON. */

@@ -79,6 +79,7 @@ fn entries(game: &Game<'_>) -> Vec<m::Entry> {
         has_settings: false,
         runtime: None,
         java_settings: None,
+        icon: None,
     };
     std::iter::once(me)
         .chain(mods.installed.iter().enumerate().map(|(i, e)| m::Entry {
@@ -92,6 +93,7 @@ fn entries(game: &Game<'_>) -> Vec<m::Entry> {
             has_settings: e.native.is_some(),
             runtime: None,
             java_settings: None,
+            icon: None,
         }))
         .chain(java_entries(mods))
         .collect()
@@ -115,6 +117,7 @@ fn java_entries(mods: &horizon_client::mod_list::ModList) -> Vec<m::Entry> {
                 &j.description,
                 &runtime.title,
                 settings,
+                j.icon.clone(),
             ));
         }
     }
@@ -125,6 +128,7 @@ fn java_entries(mods: &horizon_client::mod_list::ModList) -> Vec<m::Entry> {
             "",
             "horizon.mods.runtime.server",
             Some(i),
+            None,
         ));
     }
     out
@@ -136,6 +140,7 @@ fn java_entry(
     about: &str,
     runtime: &str,
     settings: Option<usize>,
+    icon: Option<std::sync::Arc<Vec<u8>>>,
 ) -> m::Entry {
     m::Entry {
         id: id.into(),
@@ -148,6 +153,7 @@ fn java_entry(
         has_settings: settings.is_some(),
         runtime: Some(runtime.into()),
         java_settings: settings,
+        icon,
     }
 }
 
@@ -213,9 +219,29 @@ fn draw_menu_icon(batch: &mut HudBatch, atlas: &HudAtlas, x: f32, y: f32) {
 
 /// A mod's icon: a dark tile with a block in the mod's colour (grey while it is off); Mod Menu has
 /// its own picture.
-fn draw_icon(batch: &mut HudBatch, atlas: &HudAtlas, x: f32, y: f32, e: &m::Entry) {
+/// A mod's icon: its own picture when its jar has one (in pack icon slot `slot`: the Mods screen
+/// and the pack screen are never open together), else Mod Menu's block in the mod's colour.
+fn draw_icon(batch: &mut HudBatch, atlas: &HudAtlas, x: f32, y: f32, e: &m::Entry, slot: usize) {
     if m::is_self(e) {
         draw_menu_icon(batch, atlas, x, y);
+        return;
+    }
+    let sprite = format!(
+        "horizon/pack-icon{}",
+        slot % horizon_client::hud::PACK_ICON_SLOTS
+    );
+    if let Some(pixels) = &e.icon
+        && let Some(rect) = atlas.sprites.get(&sprite)
+    {
+        let side = horizon_client::mod_list::RUNTIME_ICON;
+        batch.patches.push(horizon_client::font::Patch {
+            x: (rect.u0 * atlas.width as f32).round() as u32,
+            y: (rect.v0 * atlas.height as f32).round() as u32,
+            width: side,
+            height: side,
+            rgba: pixels.to_vec(),
+        });
+        batch.sprite_scaled(atlas, &sprite, x, y, m::ICON, m::ICON, u32::MAX);
         return;
     }
     let live = e.on && e.problem.is_none();
@@ -282,6 +308,7 @@ fn draw_row(
     w: f32,
     selected: bool,
     hover: bool,
+    slot: usize,
 ) {
     let measure = |s: &str| HudBatch::text_width(atlas, s);
     if selected {
@@ -297,7 +324,7 @@ fn draw_row(
     } else if hover {
         batch.fill(atlas, x + 2.0, y, w - 4.0, m::ROW, rgba(255, 255, 255, 40));
     }
-    draw_icon(batch, atlas, x + 4.0, y + 2.0, e);
+    draw_icon(batch, atlas, x + 4.0, y + 2.0, e, slot);
     let text_x = x + 4.0 + m::ICON + 4.0;
     let live = e.on && e.problem.is_none();
     let badges = m::screen_badges(e);
@@ -457,6 +484,7 @@ pub fn draw(game: &mut Game<'_>, batch: &mut HudBatch) {
             l.list.w - 6.0,
             st.selected == Some(index),
             hover,
+            row % (horizon_client::hud::PACK_ICON_SLOTS - 1),
         );
     }
     if entries.is_empty() {
@@ -493,7 +521,15 @@ pub fn draw(game: &mut Game<'_>, batch: &mut HudBatch) {
         st.detail_scroll = st.detail_scroll.clamp(0.0, (content - l.detail.h).max(0.0));
         let d = m::detail(&l, st.detail_scroll, buttons);
         let first = batch.vertices.len();
-        draw_icon(batch, atlas, d.icon.x, d.icon.y, e);
+        // The last slot: the list's rows take the others.
+        draw_icon(
+            batch,
+            atlas,
+            d.icon.x,
+            d.icon.y,
+            e,
+            horizon_client::hud::PACK_ICON_SLOTS - 1,
+        );
         let name = m::name_and_version(&e.title).0;
         let name_w = batch.text(atlas, name, d.name[0], d.name[1], u32::MAX, true);
         let mut bx = d.name[0] + name_w + 5.0;

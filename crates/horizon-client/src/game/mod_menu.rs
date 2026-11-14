@@ -36,6 +36,8 @@ pub struct Entry {
     /// A Java mod whose settings screen the world's server can open: its index in
     /// `Mods::java` (game/java_screen.rs).
     pub java_settings: Option<usize>,
+    /// A Java mod's own icon (`mod_list::RUNTIME_ICON` square, RGBA).
+    pub icon: Option<std::sync::Arc<Vec<u8>>>,
 }
 
 /// Mod Menu itself: it can't be turned off from here and has no settings, so its detail pane has
@@ -347,6 +349,8 @@ pub fn screen_badges(e: &Entry) -> Vec<Badge> {
         rgb,
     };
     let mut v = vec![match &e.runtime {
+        // Fabric's runtimes in grey; other loaders get colours of their own.
+        Some(runtime) if runtime.contains("fabric") => badge(runtime, 0x7F7F7F),
         Some(runtime) => badge(runtime, 0xB5652E),
         None if e.native => badge("horizon.mod_menu.badge.native", 0x3B7DC4),
         None => badge("horizon.mod_menu.badge.content", 0x3F9A55),
@@ -568,6 +572,7 @@ mod tests {
             has_settings: native,
             runtime: None,
             java_settings: None,
+            icon: None,
         }
     }
 
