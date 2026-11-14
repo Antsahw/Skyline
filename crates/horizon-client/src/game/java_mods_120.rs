@@ -317,15 +317,19 @@ macro_rules! trace120 {
 }
 
 /// How long a click waits for a runtime that is busy with another call before giving up. Long
-/// enough for a call that is on its way out (a call costs tens of microseconds), short enough
-/// that a wedged runtime doesn't hold the server's tick.
-const BUSY_WAIT: Duration = Duration::from_millis(50);
+/// enough for a call on its way out (a feature placement in a chunk being generated takes
+/// milliseconds, and the chunk workers step aside for a click: `worldgen_runtime`), short
+/// enough that a wedged runtime doesn't hold the server's tick.
+const BUSY_WAIT: Duration = Duration::from_millis(250);
 
 /// The runtime, waited for while another call has it. None when it stayed busy: the click
 /// passes, and that is said rather than left silent, because a click that quietly does nothing
 /// reads as a broken mod.
 fn wait_for_runtime() -> Option<std::sync::MutexGuard<'static, Option<Runtime120>>> {
     let until = std::time::Instant::now() + BUSY_WAIT;
+    // The chunk workers placing the mods' features step aside meanwhile (`worldgen_runtime`):
+    // they take it again for every placement, and a lock that isn't fair let them keep it.
+    let _waiting = Waiting::new();
     loop {
         match RUNTIME.try_lock() {
             Ok(guard) => return Some(guard),
@@ -337,6 +341,54 @@ fn wait_for_runtime() -> Option<std::sync::MutexGuard<'static, Option<Runtime120
                         "1.20.1 mods: their runtime was busy for {} ms; this click did nothing",
                         BUSY_WAIT.as_millis()
                     );
+                    return None;
+                }
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
+    }
+}
+
+/// How many player-facing calls wait for the runtime now ([`wait_for_runtime`]).
+static WAITING: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// One call counted in [`WAITING`] while it lives.
+struct Waiting;
+
+impl Waiting {
+    fn new() -> Self {
+        WAITING.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Waiting
+    }
+}
+
+impl Drop for Waiting {
+    fn drop(&mut self) {
+        WAITING.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+/// The runtime for a chunk worker placing the mods' features: after any player-facing call
+/// waiting for it (a click, a break), which a person is waiting on, then as
+/// [`wait_for_runtime`]. A worker isn't held back longer than a second.
+fn worldgen_runtime() -> Option<std::sync::MutexGuard<'static, Option<Runtime120>>> {
+    let until = std::time::Instant::now() + Duration::from_secs(1);
+    while WAITING.load(std::sync::atomic::Ordering::SeqCst) > 0 && std::time::Instant::now() < until
+    {
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    wait_for_runtime_quietly()
+}
+
+/// [`wait_for_runtime`] without counting as a player's call or saying it gave up.
+fn wait_for_runtime_quietly() -> Option<std::sync::MutexGuard<'static, Option<Runtime120>>> {
+    let until = std::time::Instant::now() + BUSY_WAIT;
+    loop {
+        match RUNTIME.try_lock() {
+            Ok(guard) => return Some(guard),
+            Err(std::sync::TryLockError::Poisoned(e)) => return Some(e.into_inner()),
+            Err(std::sync::TryLockError::WouldBlock) => {
+                if std::time::Instant::now() >= until {
                     return None;
                 }
                 std::thread::sleep(Duration::from_millis(1));

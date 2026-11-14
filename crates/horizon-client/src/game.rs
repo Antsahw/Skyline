@@ -16448,6 +16448,22 @@ impl Game<'_> {
                         [0.0; 3]
                     };
                     let p = h.pos.map(f64::from);
+                    // A block whose shape only its mod knows (`mod_block_shape`): each of its
+                    // boxes' edges, where the registry has a full cube or nothing.
+                    if let Some(boxes) = self.mod_block_shape(h.pos) {
+                        let edges = horizon_client::blocks::cube_edges();
+                        return boxes
+                            .iter()
+                            .flat_map(|b| {
+                                edges.iter().map(move |e| {
+                                    std::array::from_fn(|i| {
+                                        let k = i % 3;
+                                        p[k] + b[k] + e[i] * (b[k + 3] - b[k])
+                                    })
+                                })
+                            })
+                            .collect();
+                    }
                     if let Some(b) = self.context_outline(h.pos, state) {
                         return horizon_client::blocks::cube_edges()
                             .iter()

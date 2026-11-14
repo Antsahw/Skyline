@@ -356,6 +356,19 @@ clicks pass until then). A click on a block of a 1.20.1 mod's namespace, or with
 their items, goes to it at `useItemOn`'s head (`java120_use_block`, beside the 26.3 bridge's
 hook in `lan_actions.rs`); what it set and what it did to the held stack land in Horizon.
 
+## Clicks while chunks generate, and mod shapes' outlines (2026-11-14)
+
+A click or a break on a mod's block waited 50 ms for the runtime and then did nothing ("their
+runtime was busy"): while new chunks generate, the chunk workers take the runtime for every
+feature placement, and a lock that isn't fair let them keep it. Now a player-facing call counts
+itself waiting (`WAITING`), the workers step aside for it (`worldgen_runtime`, at most a
+second), and it waits up to 250 ms. Checked in a game: a Wired Redstone gate placed on the first
+click right after a teleport into new chunks, and broken in survival with its drop.
+
+The block outline drew from the registry's shape, which is nothing for a LibMultiPart container
+and a full cube for a mod's block with no fixed shape; it now draws the boxes the mod gives at
+the position (`mod_block_shape`), as aiming already did: the gate's outline is its plate.
+
 ## Phase 5q: the mods' mixins on vanilla behaviour (2026-11-14)
 
 `tools/java_bridge/mixins120.py` reads every mixin of Modrinth's top Fabric 1.20.1 mods (their

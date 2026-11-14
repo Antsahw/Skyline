@@ -3,7 +3,7 @@
 //! to the runtime (horizon-world's `worldgen::foreign`), which places it with the mod's own
 //! code on the chunks being decorated: reads from the region, writes into it as they happen.
 
-use super::{DATA_VERSION_120, wait_for_runtime};
+use super::{DATA_VERSION_120, worldgen_runtime};
 use horizon_jvm_remote::mirror120::{PlaceFeature, Region120};
 use horizon_world::worldgen::foreign::{ForeignFeatures, ForeignPlacement, ForeignWorld};
 use horizon_world::worldgen::structure::foreign::{
@@ -31,7 +31,7 @@ impl ForeignFeatures for Features120 {
             step: placement.step,
             origin: placement.origin,
         };
-        let Some(mut guard) = wait_for_runtime() else {
+        let Some(mut guard) = worldgen_runtime() else {
             return false;
         };
         let Some(runtime) = guard.as_mut() else {
@@ -67,7 +67,7 @@ impl ForeignStructures for Structures120 {
         chunk: [i32; 2],
         world: &mut dyn ForeignStartWorld,
     ) -> Option<ForeignStart> {
-        let mut guard = wait_for_runtime()?;
+        let mut guard = worldgen_runtime()?;
         let runtime = guard.as_mut()?;
         let mut region = StartRegion { world };
         match runtime.structure_start(
@@ -97,7 +97,7 @@ impl ForeignStructures for Structures120 {
         step: i32,
         world: &mut dyn ForeignWorld,
     ) -> bool {
-        let Some(mut guard) = wait_for_runtime() else {
+        let Some(mut guard) = worldgen_runtime() else {
             return false;
         };
         let Some(runtime) = guard.as_mut() else {
