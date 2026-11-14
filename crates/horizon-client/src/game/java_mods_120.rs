@@ -47,7 +47,12 @@ fn jars(dir: &Path) -> Vec<PathBuf> {
 fn install() -> PathBuf {
     std::env::var_os("HORIZON_120_CACHE")
         .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache/horizon-120")))
+        // fetch120.py's `~/.cache/horizon-120`: Windows has the home in USERPROFILE, not HOME.
+        .or_else(|| {
+            std::env::var_os("HOME")
+                .or_else(|| std::env::var_os("USERPROFILE"))
+                .map(|h| PathBuf::from(h).join(".cache").join("horizon-120"))
+        })
         .unwrap_or_default()
         .join("1.20.1")
 }
