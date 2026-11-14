@@ -163,6 +163,11 @@ public final class Boot120 implements RemoteRuntime {
             case "keyPress":
                 // The mods' key bindings, and a player's keys for them (Mirror120, Keys120).
                 return mirror(method, args);
+            case "playerHurt":
+            case "playerDied":
+                // What mods inject into a player's hurt and die (Mirror120, Mixins120).
+                if (game == null) throw new IllegalStateException("not started");
+                return mirror(method, args);
             case "playerLeft":
                 // A player of Horizon's left the game (Mirror120.playerLeft).
                 return mirror("playerLeft", args);

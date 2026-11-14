@@ -453,7 +453,10 @@ public final class Mirror120 {
             Events120.start(server, LEVELS.values());
             // The players' client ticks, where the mods read the keys pressed since the last.
             Keys120.tick(PLAYERS);
-            if (!Events120.anyTickListeners()) return new Object[] {false};
+            // What the mods inject into a player's tick (Architectury's and Collective's player
+            // tick events): Horizon ticks its players itself.
+            boolean playerTicks = Mixins120.tickPlayers(level, PLAYERS.values());
+            if (!Events120.anyTickListeners()) return new Object[] {playerTicks};
             Events120.tick(server, level, gameTime);
             return new Object[] {true};
         } finally {
@@ -1990,6 +1993,67 @@ public final class Mirror120 {
      * ServerPlayConnectionEvents.DISCONNECT, and the mirror player goes from the server's
      * list; the next time they reach the mods' code they join again.
      */
+    /**
+     * A player of Horizon's is about to be hurt by `damageType` (LivingEntity.hurtServer past
+     * its guards): what mods inject at the head of ServerPlayer's, Player's and LivingEntity's
+     * {@code hurt}, on the player's mirror (Architectury's, Collective's and Puzzles Lib's hurt
+     * events). {cancelled}.
+     */
+    public static Object[] playerHurt(String uuid, String name, String dimension, String damageType,
+            double amount) {
+        begin();
+        try {
+            ServerPlayer player = player(uuid, name, level(dimension));
+            Object[] args = {damageSource(player.serverLevel(), damageType), (float) amount};
+            for (String target : new String[] {
+                "net.minecraft.server.level.ServerPlayer.hurt",
+                "net.minecraft.world.entity.player.Player.hurt",
+                "net.minecraft.world.entity.LivingEntity.hurt",
+            }) {
+                if (Mixins120.fire(target, player, args, true).cancelled()) return new Object[] {true};
+            }
+            return new Object[] {false};
+        } finally {
+            finish();
+        }
+    }
+
+    /** A player of Horizon's died of `damageType`: what mods inject into its {@code die}. */
+    public static Object[] playerDied(String uuid, String name, String dimension, String damageType) {
+        begin();
+        try {
+            ServerPlayer player = player(uuid, name, level(dimension));
+            Object[] args = {damageSource(player.serverLevel(), damageType)};
+            int ran = 0;
+            for (String target : new String[] {
+                "net.minecraft.server.level.ServerPlayer.die",
+                "net.minecraft.world.entity.LivingEntity.die",
+            }) {
+                ran += Mixins120.fire(target, player, args, false).ran();
+            }
+            return new Object[] {ran};
+        } finally {
+            finish();
+        }
+    }
+
+    /** A DamageSource of the damage type `id` (generic when the registry lacks it). */
+    private static net.minecraft.world.damagesource.DamageSource damageSource(ServerLevel level, String id) {
+        var registry = level.registryAccess().registryOrThrow(net.minecraft.core.registries.Registries.DAMAGE_TYPE);
+        String name = id == null || id.isEmpty() ? "generic" : id;
+        var location = net.minecraft.resources.ResourceLocation.tryParse(name);
+        if (location != null) {
+            var found = registry.getHolder(net.minecraft.resources.ResourceKey.create(
+                    net.minecraft.core.registries.Registries.DAMAGE_TYPE, location));
+            if (found.isPresent()) return new net.minecraft.world.damagesource.DamageSource(found.get());
+        }
+        // A death message names the type by its message id (death.attack.genericKill).
+        for (var holder : registry.holders().toList()) {
+            if (holder.value().msgId().equals(name)) return new net.minecraft.world.damagesource.DamageSource(holder);
+        }
+        return level.damageSources().generic();
+    }
+
     public static Object[] playerLeft(String uuid) {
         ServerPlayer player = PLAYERS.get(UUID.fromString(uuid));
         if (player == null) return new Object[] {false};

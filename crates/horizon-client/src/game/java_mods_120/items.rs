@@ -112,4 +112,87 @@ impl super::super::Game<'_> {
             log::warn!("1.20.1 mods: {uuid} leaving: {e}");
         }
     }
+
+    /// Player `uuid` died, `message` the death message's key (`death.attack.fall`): what the
+    /// 1.20.1 mods inject into a player's `die` (the library mods' death events).
+    pub(in crate::game) fn java120_player_died(
+        &mut self,
+        uuid: u128,
+        name: &str,
+        dimension: &str,
+        message: Option<&str>,
+    ) {
+        if self.remote.is_some() {
+            return;
+        }
+        let damage_type = message
+            .and_then(|k| k.strip_prefix("death.attack."))
+            .map_or("generic", |id| id.split('.').next().unwrap_or(id))
+            .to_owned();
+        let uuid = uuid_string(uuid);
+        let died = {
+            let Some(mut guard) = super::runtime_within(std::time::Duration::from_millis(25))
+            else {
+                return;
+            };
+            let Some(runtime) = guard.as_mut() else {
+                return;
+            };
+            runtime.player_died(&Level(self), &uuid, name, dimension, &damage_type)
+        };
+        if let Err(e) = died {
+            log::warn!("1.20.1 mods: {uuid} dying: {e}");
+        }
+    }
+}
+
+/// The players of the 1.20.1 mods' levels by entity id: their UUID, name and dimension, for
+/// what Horizon's damage code asks about a player with no game at hand (`java120_hurt_player`).
+static PLAYERS_120: std::sync::Mutex<
+    Option<std::collections::HashMap<i32, (String, String, String)>>,
+> = std::sync::Mutex::new(None);
+
+/// Remembers who player entity `id` is (each tick, from the players the mods' mobs see).
+pub(in crate::game) fn remember_player(id: i32, uuid: String, name: String, dimension: String) {
+    PLAYERS_120
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get_or_insert_with(Default::default)
+        .insert(id, (uuid, name, dimension));
+}
+
+impl super::super::Game<'_> {
+    /// A player is about to be hurt (`LivingEntity.hurtServer` past its guards, where native
+    /// mods hear it: native_hooks.rs `hurt_server`): what the 1.20.1 mods inject into its
+    /// `hurt`. True cancels the hit. Never waits for a busy runtime.
+    pub(in crate::game) fn java120_hurt_player(
+        hurting: &horizon_client::health::Hurting<'_>,
+        amount: f32,
+    ) -> bool {
+        let horizon_client::health::Hurting::Player(id, source) = hurting else {
+            return false;
+        };
+        let Some((uuid, name, dimension)) = PLAYERS_120
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .and_then(|p| p.get(id).cloned())
+        else {
+            log::debug!("1.20.1 mods: a hit on player {id}, whom the mods haven't met");
+            return false;
+        };
+        let Some(mut guard) = super::runtime_within(std::time::Duration::from_millis(25)) else {
+            return false;
+        };
+        let Some(runtime) = guard.as_mut() else {
+            return false;
+        };
+        match runtime.player_hurt(&uuid, &name, &dimension, source.damage_type, amount) {
+            Ok(canceled) => canceled,
+            Err(e) => {
+                log::warn!("1.20.1 mods: a hit on {name}: {e}");
+                false
+            }
+        }
+    }
 }

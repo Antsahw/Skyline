@@ -62,17 +62,25 @@ API=$(for m in $API_MODULES; do printf '%s:' "$API_NAMED/$m.jar"; done)
 "${JAVAC[@]}" -cp "$NAMED:$LIBS:$MIXIN:$API" -d "$TMP/classes" $(find "$SRC/src" -name '*.java')
 cp "$SRC/src/fabric.mod.json" "$SRC/src/horizon-platform120.mixins.json" "$TMP/classes/"
 mkdir -p "$TMP/classes/horizon"
-python3 -I - "$MAPPINGS" "$TMP/classes/horizon/classes-1.20.1.tsv" <<'PY'
+python3 -I - "$MAPPINGS" "$TMP/classes/horizon/classes-1.20.1.tsv" "$TMP/classes/horizon/methods-1.20.1.tsv" <<'PY'
 import sys
-# Tiny v2: "c<TAB>official<TAB>intermediary<TAB>named" for every class.
-with open(sys.argv[1]) as f, open(sys.argv[2], "w") as out:
+# Tiny v2: "c<TAB>official<TAB>intermediary<TAB>named" for every class, and under it
+# "<TAB>m<TAB>desc<TAB>official<TAB>intermediary<TAB>named" for its methods.
+with open(sys.argv[1]) as f, open(sys.argv[2], "w") as out, open(sys.argv[3], "w") as methods:
     header = f.readline().rstrip("\n").split("\t")
     names = header[3:]
     i, n = names.index("intermediary"), names.index("named")
+    seen = set()
     for line in f:
         if line.startswith("c\t"):
             parts = line.rstrip("\n").split("\t")[1:]
             out.write(parts[i].replace("/", ".") + "\t" + parts[n].replace("/", ".") + "\n")
+        elif line.startswith("\tm\t"):
+            parts = line.rstrip("\n").split("\t")[3:]
+            # Intermediary method names are unique: one line each, its Mojang name.
+            if parts[i].startswith("method_") and parts[i] not in seen:
+                seen.add(parts[i])
+                methods.write(parts[i] + "\t" + parts[n] + "\n")
 PY
 (cd "$TMP/classes" && "$JAVA_HOME/bin/jar" cf "$TMP/platform120-named.jar" .)
 # 4. Remap to intermediary.

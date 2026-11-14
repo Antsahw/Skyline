@@ -8180,6 +8180,11 @@ pub(super) fn hurt_server(hurting: Hurting<'_>, amount: &mut f32) -> bool {
     if Game::java_hurt_player(&hurting, amount) {
         return true;
     }
+    // The 1.20.1 mods' (java_mods_120/items.rs).
+    #[cfg(feature = "java-mods-120")]
+    if Game::java120_hurt_player(&hurting, *amount) {
+        return true;
+    }
     let (entity, kind, source) = hurt_server_args(hurting);
     let HurtSource {
         damage_type,

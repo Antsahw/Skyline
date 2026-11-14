@@ -3985,6 +3985,11 @@ impl Game<'_> {
             let cause = host.play.get_mut(&conn).and_then(|p| p.death_cause.take());
             // Java mods first (java_server.rs), then native ones.
             self.java_player_died(uuid, cause.as_deref(), Some(conn));
+            #[cfg(feature = "java-mods-120")]
+            {
+                let dimension = host.hub.guests[gi].dimension.clone();
+                self.java120_player_died(uuid, &name, &dimension, cause.as_deref());
+            }
             self.native_player_died(uuid, cause.as_deref());
             // ServerPlayer.die: the neutral mobs near a guest in this level
             // forget their anger at them.

@@ -1826,6 +1826,62 @@ impl Runtime120 {
         }
     }
 
+    /// A player is about to be hurt by `damage_type`: what mods inject into its `hurt` (the
+    /// library mods' hurt events). True when one canceled the hit. It reads no blocks: it is
+    /// asked from inside Horizon's damage code, which holds the world.
+    pub fn player_hurt(
+        &mut self,
+        uuid: &str,
+        name: &str,
+        dimension: &str,
+        damage_type: &str,
+        amount: f32,
+    ) -> Result<bool, String> {
+        let values = self.call_answers(
+            "playerHurt",
+            &[
+                Value::Str(uuid.to_owned()),
+                Value::Str(name.to_owned()),
+                Value::Str(dimension.to_owned()),
+                Value::Str(damage_type.to_owned()),
+                Value::F64(f64::from(amount)),
+            ],
+        )?;
+        Ok(matches!(values.first(), Some(Value::Bool(true))))
+    }
+
+    /// A player died of `damage_type`: what mods inject into its `die`. How many handlers ran.
+    pub fn player_died(
+        &mut self,
+        world: &dyn World120,
+        uuid: &str,
+        name: &str,
+        dimension: &str,
+        damage_type: &str,
+    ) -> Result<i32, String> {
+        let mut handler = InWorld {
+            world,
+            set: Vec::new(),
+            block_entities: Vec::new(),
+            spawned: Vec::new(),
+            log: self.log.clone(),
+        };
+        let values = self.call_values(
+            "playerDied",
+            &[
+                Value::Str(uuid.to_owned()),
+                Value::Str(name.to_owned()),
+                Value::Str(dimension.to_owned()),
+                Value::Str(damage_type.to_owned()),
+            ],
+            &mut handler,
+        )?;
+        Ok(match values.first() {
+            Some(Value::I32(n)) => *n,
+            _ => 0,
+        })
+    }
+
     /// Horizon's player `uuid` left the game: their screen closes, the mods hear Fabric's
     /// `ServerPlayConnectionEvents.DISCONNECT`, and the mirror forgets them. False when the
     /// mods never met them.

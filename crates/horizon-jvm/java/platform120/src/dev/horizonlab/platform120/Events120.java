@@ -100,6 +100,10 @@ final class Events120 {
                 l -> l.onPlayInit(connection, server));
         fire(net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents.JOIN, "player join",
                 l -> l.onPlayReady(connection, sender, server));
+        // What mods inject into PlayerList.placeNewPlayer (Architectury's and Balm's join events).
+        // Its Connection is the player's network one, which this mirror has none of.
+        Mixins120.fire("net.minecraft.server.players.PlayerList.placeNewPlayer", server.getPlayerList(),
+                new Object[] {null, player}, false);
     }
 
     /** A player leaves: Fabric API's ServerPlayConnectionEvents.DISCONNECT. */
@@ -107,6 +111,8 @@ final class Events120 {
         var connection = player.connection;
         fire(net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents.DISCONNECT, "player leave",
                 l -> l.onPlayDisconnect(connection, server));
+        Mixins120.fire("net.minecraft.server.players.PlayerList.remove", server.getPlayerList(),
+                new Object[] {player}, false);
     }
 
     private static final Map<ServerLevel, Set<Long>> CHUNKS = new java.util.IdentityHashMap<>();

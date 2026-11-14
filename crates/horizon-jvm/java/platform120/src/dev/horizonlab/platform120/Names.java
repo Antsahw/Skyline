@@ -43,4 +43,35 @@ final class Names {
         }
         return table;
     }
+
+    private static Map<String, String> methods;
+
+    /** Mojang's name of an intermediary method name ({@code method_5773}); others as they are. */
+    static String mojangMethod(String name) {
+        if (!name.startsWith("method_")) return name;
+        return loadMethods().getOrDefault(name, name);
+    }
+
+    /** Mojang's name of an intermediary class name in either spelling (dots or slashes). */
+    static String mojangClass(String name) {
+        String dotted = name.replace('/', '.');
+        return load().getOrDefault(dotted, dotted);
+    }
+
+    private static synchronized Map<String, String> loadMethods() {
+        if (methods != null) return methods;
+        methods = new HashMap<>();
+        try (InputStream in = Names.class.getResourceAsStream("/horizon/methods-1.20.1.tsv")) {
+            if (in != null) {
+                BufferedReader r = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8));
+                for (String line; (line = r.readLine()) != null; ) {
+                    int tab = line.indexOf('\t');
+                    if (tab > 0) methods.put(line.substring(0, tab), line.substring(tab + 1));
+                }
+            }
+        } catch (IOException e) {
+            // No table: names stay intermediary.
+        }
+        return methods;
+    }
 }

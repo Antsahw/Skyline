@@ -356,6 +356,32 @@ clicks pass until then). A click on a block of a 1.20.1 mod's namespace, or with
 their items, goes to it at `useItemOn`'s head (`java120_use_block`, beside the 26.3 bridge's
 hook in `lan_actions.rs`); what it set and what it did to the held stack land in Horizon.
 
+## Phase 5q: the mods' mixins on vanilla behaviour (2026-11-14)
+
+`tools/java_bridge/mixins120.py` reads every mixin of Modrinth's top Fabric 1.20.1 mods (their
+configs, refmaps and classes' annotations) and counts the vanilla methods they change, named as
+Mojang does (`mixins.tsv`). Over 149 mods: 2765 methods, most of them client and rendering; the
+gameplay ones Horizon runs itself are each changed by few mods, and mostly by library mods
+turning them into events (Architectury's, Collective's, Puzzles Lib's hurt, death, tick and join
+events). So the runtime runs those handlers itself: `Mixins120` indexes each mod's `@Inject`
+handlers once by the method they target (the configs, refmaps and mixin class bytes, read with
+its own annotation reader; build120.sh now also writes `methods-1.20.1.tsv`, intermediary to
+Mojang), finds each merged into the target class (`@MixinMerged`, its name kept last), and calls
+it on the mirror's object with the method's arguments and a `CallbackInfo`. Fabric API's own are
+left out (Events120 fires its events). Where Horizon calls it:
+
+- a player joining and leaving (`PlayerList.placeNewPlayer` with no Connection, `remove`);
+- each server tick, the players' ticks (`Entity`, `LivingEntity`, `Player`, `ServerPlayer`);
+- a player about to be hurt (native_hooks.rs `hurt_server`, `Mirror120.playerHurt`: a handler
+  that cancels cancels the hit; the player is found by entity id from the players the mods' mobs
+  see, as the damage code has no game at hand);
+- a player dying (`playerDied`, with the death message's damage type, by id or message id).
+
+Checked in a game with the 34 mods of a player's own pack: 1109 handlers on 769 methods indexed,
+and the join (5), tick (5 and 2), hurt (2 and 2) and death (2 and 2) handlers ran, none failing.
+Not yet: mobs' hurt and death, blocks' and items' methods, and `@Redirect` or `@ModifyArg`, which
+change code inside a method Horizon runs itself.
+
 ## Recipe viewer: Horizon's Just Enough Items (2026-11-14)
 
 The 1.20.1 mods' items and recipes are Horizon content once converted, so a native recipe viewer

@@ -483,10 +483,19 @@ impl Game<'_> {
                     .guests
                     .iter()
                     .filter(|g| h.hub.here(g) && !g.spectator() && !g.dead)
-                    .map(|g| horizon_jvm_remote::mirror120::PlayerHere {
-                        uuid: super::uuid_string(g.uuid),
-                        name: g.name.clone(),
-                        pos: g.position,
+                    .map(|g| {
+                        let uuid = super::uuid_string(g.uuid);
+                        super::items::remember_player(
+                            g.entity_id,
+                            uuid.clone(),
+                            g.name.clone(),
+                            self.dim.id().to_owned(),
+                        );
+                        horizon_jvm_remote::mirror120::PlayerHere {
+                            uuid,
+                            name: g.name.clone(),
+                            pos: g.position,
+                        }
                     })
             })
             .collect()
