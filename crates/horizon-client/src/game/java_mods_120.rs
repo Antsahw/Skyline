@@ -64,6 +64,7 @@ pub(in crate::game) fn content(base: &Path) -> Vec<PathBuf> {
     let home = super::mods::horizon_cache().join("java-120");
     let cache = home.join("content");
     if let Some(folders) = horizon_jvm_remote::content120::cached(&stamped(&jars), &cache) {
+        levels::register(&cache.join(horizon_jvm_remote::content120::WORLDGEN_PACK));
         log::info!(
             "1.20.1 mods: {} content mod(s) from the cache",
             folders.len()
@@ -84,6 +85,7 @@ pub(in crate::game) fn content(base: &Path) -> Vec<PathBuf> {
     }
     match make(&dir, &jars, base, &home, &cache) {
         Ok(folders) => {
+            levels::register(&cache.join(horizon_jvm_remote::content120::WORLDGEN_PACK));
             remember_namespaces(&folders);
             folders
         }
@@ -894,6 +896,7 @@ pub(in crate::game) mod block_renders;
 mod breaking;
 mod commands;
 mod fluids;
+mod levels;
 pub(in crate::game) use fluids::{changed as fluid_changed, is_fluid};
 pub(in crate::game) mod config;
 mod drawn;

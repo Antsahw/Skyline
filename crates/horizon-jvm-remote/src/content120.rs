@@ -18,8 +18,9 @@ use std::path::{Path, PathBuf};
 /// cache built before this holds none of a library mod's blocks. 5: the mods' Fabric biome
 /// changes are written as biome modifiers ([`biome_modifiers`]). 6: the carry-over renames the
 /// ids vanilla renamed since 1.20.1 (`minecraft:grass`) in the mods' data. 7: the mods that
-/// change vanilla's world generation (Terralith) get it as a data pack ([`worldgen_pack`]).
-const FORMAT: u32 = 7;
+/// change vanilla's world generation (Terralith) get it as a data pack ([`worldgen_pack`]). 8: so
+/// do the mods with dimensions of their own.
+const FORMAT: u32 = 8;
 
 /// The folder under the cache holding the mods' world generation as a 26.3 data pack.
 pub const WORLDGEN_PACK: &str = "worldgen";
@@ -571,6 +572,71 @@ fn is_worldgen(name: &str) -> bool {
         .any(|k| path.starts_with(k))
 }
 
+/// Whether a jar's world generation files (`is_worldgen`) need the pack: it changes vanilla's
+/// (a file under `minecraft` other than a tag) or adds a dimension of its own, whose level stem
+/// the generator reads only from a pack.
+fn needs_pack(names: &[String]) -> bool {
+    names.iter().any(|n| {
+        (n.starts_with("data/minecraft/") && !n.starts_with("data/minecraft/tags/"))
+            || n.strip_prefix("data/")
+                .and_then(|r| r.split_once('/'))
+                .is_some_and(|(_, path)| path.starts_with("dimension/"))
+    })
+}
+
+/// Leaves out the carvers of a mod's own type (Deeper and Darker's `noodles`), and the biomes'
+/// mentions of them: Horizon's generator carves only vanilla's types, and refuses a world with
+/// any other. Their ids, sorted.
+fn drop_own_carvers(files: &mut std::collections::BTreeMap<String, Vec<u8>>) -> Vec<String> {
+    use serde_json::Value as Json;
+    let mut own = Vec::new();
+    files.retain(|name, bytes| {
+        let Some((ns, path)) = name
+            .strip_prefix("data/")
+            .and_then(|r| r.split_once("/worldgen/configured_carver/"))
+            .and_then(|(ns, p)| Some((ns, p.strip_suffix(".json")?)))
+        else {
+            return true;
+        };
+        let vanilla_type = serde_json::from_slice::<Json>(bytes)
+            .ok()
+            .and_then(|v| v["type"].as_str().map(str::to_owned))
+            .is_none_or(|t| !t.contains(':') || t.starts_with("minecraft:"));
+        if !vanilla_type {
+            own.push(format!("{ns}:{path}"));
+        }
+        vanilla_type
+    });
+    if own.is_empty() {
+        return own;
+    }
+    for (name, bytes) in files.iter_mut() {
+        if !name.contains("/worldgen/biome/") {
+            continue;
+        }
+        let Ok(mut v) = serde_json::from_slice::<Json>(bytes) else {
+            continue;
+        };
+        let mut changed = false;
+        let mut strip = |list: &mut Json| {
+            if let Json::Array(ids) = list {
+                let before = ids.len();
+                ids.retain(|id| id.as_str().is_none_or(|id| !own.iter().any(|o| o == id)));
+                changed |= ids.len() != before;
+            }
+        };
+        match &mut v["carvers"] {
+            Json::Object(steps) => steps.values_mut().for_each(&mut strip),
+            list => strip(list),
+        }
+        if changed {
+            *bytes = serde_json::to_vec(&v).unwrap_or_default();
+        }
+    }
+    own.sort();
+    own
+}
+
 /// The world generation of the mods that change vanilla's (a level stem or worldgen file under
 /// `minecraft`: Terralith's overworld and its noise), as a 26.3 data pack in `out`. The carry-over
 /// keeps a mod's files under its own namespaces, so these changes never reached the game; as
@@ -611,10 +677,7 @@ fn worldgen_pack(
             .filter(|n| is_worldgen(n))
             .map(str::to_owned)
             .collect();
-        if !names
-            .iter()
-            .any(|n| n.starts_with("data/minecraft/") && !n.starts_with("data/minecraft/tags/"))
-        {
+        if !needs_pack(&names) {
             continue;
         }
         for name in names {
@@ -636,6 +699,13 @@ fn worldgen_pack(
     }
     if files.is_empty() {
         return Ok(0);
+    }
+    let own_carvers = drop_own_carvers(&mut files);
+    if !own_carvers.is_empty() {
+        log(format!(
+            "1.20.1 mods' content: carvers of the mods' own types left out of their world generation: {}",
+            own_carvers.join(", ")
+        ));
     }
     // The biomes that exist: vanilla's (26.3's, prepared) and the pack's.
     let biomes: std::collections::HashSet<String> = files
@@ -845,6 +915,48 @@ fn biome_modifiers(changes: &str, carried: &[PathBuf]) -> usize {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_carver_of_a_mods_own_type_is_left_out_with_its_mentions() {
+        let mut files: std::collections::BTreeMap<String, Vec<u8>> = [
+            (
+                "data/dd/worldgen/configured_carver/noodles.json",
+                r#"{"type": "dd:noodles"}"#,
+            ),
+            (
+                "data/dd/worldgen/configured_carver/cave.json",
+                r#"{"type": "minecraft:cave"}"#,
+            ),
+            (
+                "data/dd/worldgen/biome/deeplands.json",
+                r#"{"carvers": {"air": ["dd:noodles", "dd:cave"]}}"#,
+            ),
+        ]
+        .into_iter()
+        .map(|(n, b)| (n.to_owned(), b.as_bytes().to_vec()))
+        .collect();
+        assert_eq!(drop_own_carvers(&mut files), ["dd:noodles"]);
+        assert!(!files.contains_key("data/dd/worldgen/configured_carver/noodles.json"));
+        let biome: serde_json::Value =
+            serde_json::from_slice(&files["data/dd/worldgen/biome/deeplands.json"]).unwrap();
+        assert_eq!(biome["carvers"], serde_json::json!({"air": ["dd:cave"]}));
+    }
+
+    #[test]
+    fn a_mod_changing_vanillas_worldgen_or_adding_a_dimension_gets_the_pack() {
+        let names = |n: &[&str]| n.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert!(needs_pack(&names(&[
+            "data/minecraft/dimension/overworld.json"
+        ])));
+        assert!(needs_pack(&names(&[
+            "data/deeperdarker/dimension/otherside.json"
+        ])));
+        // Its own features and vanilla's tags alone are the carry-over's.
+        assert!(!needs_pack(&names(&[
+            "data/farmersdelight/worldgen/configured_feature/wild_rice.json",
+            "data/minecraft/tags/worldgen/biome/is_forest.json",
+        ])));
+    }
+
     #[test]
     fn the_mods_biome_changes_become_biome_modifiers() {
         let dir = std::env::temp_dir().join(format!("content120-biomes-{}", std::process::id()));

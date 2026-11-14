@@ -620,12 +620,25 @@ fn worldgen_overrides_of(
     horizon_client::datapack::worldgen_overrides(&enabled, |b| biomes.contains(b))
 }
 
+/// The 1.20.1 mods' world generation pack was refused for this run: the generator can't build it.
+static MOD_WORLDGEN_REFUSED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
 /// The 1.20.1 mods' world generation as a data pack, below the world's packs.
 fn mod_worldgen_packs() -> Vec<horizon_client::datapack::DataPack> {
+    if MOD_WORLDGEN_REFUSED.load(std::sync::atomic::Ordering::Relaxed) {
+        return Vec::new();
+    }
     #[cfg(feature = "java-mods-120")]
     return super::java_mods_120::worldgen_packs();
     #[cfg(not(feature = "java-mods-120"))]
     Vec::new()
+}
+
+/// Leaves the 1.20.1 mods' world generation pack out from now on; whether there was one to leave.
+fn refuse_mod_worldgen_packs() -> bool {
+    !mod_worldgen_packs().is_empty()
+        && !MOD_WORLDGEN_REFUSED.swap(true, std::sync::atomic::Ordering::Relaxed)
 }
 
 /// The shapes of the world's levels: their dimension types, the world's
@@ -847,7 +860,35 @@ pub(super) fn make_streaming(
             .and_then(|s| s.get("dimensions")?.get(dim.id()).cloned())
             .map(|stem| horizon_client::scoreboard::tag_to_json(&stem))
             .or_else(|| extra_level_stem(dim, shape));
-        let mut inner = VanillaTerrain::for_world_with_settings(&options.resources.join("worldgen"), &overrides, pack.assets.registry, &biomes, seed, preset, dim.id(), structures, saved_stem.as_ref()).map_err(|e| {
+        let build = |overrides: &horizon_world::worldgen::overrides::WorldgenOverrides| {
+            VanillaTerrain::for_world_with_settings(
+                &options.resources.join("worldgen"),
+                overrides,
+                pack.assets.registry,
+                &biomes,
+                seed,
+                preset,
+                dim.id(),
+                structures,
+                saved_stem.as_ref(),
+            )
+        };
+        let mut built = build(&overrides);
+        // The 1.20.1 mods' world generation is a pack the player didn't choose: one Horizon's
+        // generator can't build (a mod's own carver type) leaves the world as it would be
+        // without it, rather than unplayable.
+        let mut overrides = overrides;
+        if let Err(e) = &built
+            && refuse_mod_worldgen_packs()
+        {
+            log::warn!(
+                "1.20.1 mods: their world generation can't be built ({e}): the world generates without it"
+            );
+            overrides =
+                world_worldgen_overrides(world_root, &options.resources, &biomes, enabled_features);
+            built = build(&overrides);
+        }
+        let mut inner = built.map_err(|e| {
                 if overrides.is_empty() {
                     format!("{e}\nPrepare the worldgen bundle with the launcher, or: horizon-prepare --prepare")
                 } else {

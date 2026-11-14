@@ -190,6 +190,25 @@ public final class Mirror120 {
         return data;
     }
 
+    /**
+     * The dimension type of the level `dimension`: its level stem's (a mod's dimension: its
+     * build range, skylight, ceiling), vanilla's Nether and End theirs, else the Overworld's.
+     */
+    static Holder<DimensionType> typeOf(String dimension) {
+        var types = registries.registryOrThrow(Registries.DIMENSION_TYPE);
+        switch (dimension) {
+            case "minecraft:the_nether":
+                return types.getHolderOrThrow(BuiltinDimensionTypes.NETHER);
+            case "minecraft:the_end":
+                return types.getHolderOrThrow(BuiltinDimensionTypes.END);
+            default:
+                break;
+        }
+        var stem = registries.registry(Registries.LEVEL_STEM)
+                .map(r -> r.get(new ResourceLocation(dimension))).orElse(null);
+        return stem != null ? stem.type() : overworldType;
+    }
+
     /** A level of Horizon's (`minecraft:overworld`), made once. */
     private static synchronized ServerLevel makeLevel(String dimension) {
         setUp();
@@ -199,7 +218,7 @@ public final class Mirror120 {
             ResourceKey<Level> key = ResourceKey.create(Registries.DIMENSION, new ResourceLocation(d));
             access.horizon$setDimension(key);
             access.horizon$setRandom(RandomSource.create());
-            access.horizon$setDimensionType(overworldType);
+            access.horizon$setDimensionType(typeOf(d));
             access.horizon$setThreadSafeRandom(RandomSource.createThreadSafe());
             access.horizon$setWorldBorder(new net.minecraft.world.level.border.WorldBorder());
             access.horizon$setLevelData(worldData);
@@ -265,7 +284,7 @@ public final class Mirror120 {
             // What mods do at the end of Level's and ServerLevel's constructors, with the
             // arguments a server gives them (Lithium's height cache, ...).
             java.util.function.Supplier<net.minecraft.util.profiling.ProfilerFiller> profiler = () -> net.minecraft.util.profiling.InactiveProfiler.INSTANCE;
-            Constructed120.run(level, worldData, key, registries, overworldType, profiler, server, java.util.List.of());
+            Constructed120.run(level, worldData, key, registries, typeOf(d), profiler, server, java.util.List.of());
             return level;
         });
     }

@@ -356,6 +356,33 @@ clicks pass until then). A click on a block of a 1.20.1 mod's namespace, or with
 their items, goes to it at `useItemOn`'s head (`java120_use_block`, beside the 26.3 bridge's
 hook in `lan_actions.rs`); what it set and what it did to the held stack land in Horizon.
 
+## Phase 6f status: the mods' dimensions (2026-11-14)
+
+A mod's dimension (Deeper and Darker's Otherside) is a level stem, a dimension type, noise
+settings and biomes in its data. A jar with a level stem of its own now gets the world
+generation pack too (phase 6g's, `content120::needs_pack`), and each stem in that pack is
+registered as one of Horizon's extra levels when the mods' content is ready, before a world
+opens (`java_mods_120/levels.rs`, as the 26.3 bridge registers its mods' levels): its dimension
+type is in the registries a joining player is sent, `/execute in deeperdarker:otherside` reaches
+it, and Horizon's generator makes it from its stem, the pack's being read before any saved one.
+The mods' placed features in it are placed by the runtime, as in the Overworld. The runtime's
+mirror level for a dimension now takes that dimension's type (`Mirror120.typeOf`), so the mods'
+code there sees its build range, ceiling and skylight.
+
+Two safety nets came with it. A carver of a mod's own type (the Otherside's `noodles`) has no
+Rust implementation, and Horizon's generator refused the whole world over it: such carvers are
+left out of the pack, with the biomes' mentions of them, and logged. And if Horizon's generator
+still can't build a level with the mods' pack, the world generates without it, with a warning,
+rather than not opening (`world_loading.rs`, `refuse_mod_worldgen_packs`).
+
+Checked in a game: the Otherside registers as a level (y 0 to 128), the player stands in it,
+its chunks reach the player (sculk stone, sculk permafrost, shadow crystal and calcite, biome
+`deeperdarker:deeplands`), and the runtime places its features (icicle patches, sculk spruce
+forests, crystal cones). Not yet: the noodle carver (most of the Otherside's open caves; it
+needs the runtime to carve, as features place), Deeper and Darker's portal and its teleports,
+its two maze structures (a structure type of its own), and the dimension's sky and fog (drawn
+as the Nether's).
+
 ## Phase 6g status: the mods' world generation over vanilla's (2026-11-14)
 
 Terralith (data only, no code) puts its 101 biomes into the overworld by replacing vanilla's
@@ -1458,7 +1485,8 @@ NeoForge could run beside Fabric 26.3 rather than in its place.
    generator as biome modifiers. 6b done: a mod's own feature types run in the runtime on the
    chunks being decorated. 6c done: data-driven structures (above). 6d done: the mods' mobs
    (above). 6g done: mods that replace vanilla's world generation as data (Terralith, above).
-   Next: the mods' dimensions (6f), structures with their own Java pieces. Biomes added by code
+   6f done: the mods' data-driven dimensions as levels (above; their own carvers and portals
+   not yet). Next: structures with their own Java pieces. Biomes added by code
    (TerraBlender) are left to the 26.3 bridge (above).
 7. **In-world rendering.** Blocks drawn by their code done (above: Wired Redstone's wires and
    cables); block entity renderers done (7b: Farmer's Delight's cutting board). Next:
