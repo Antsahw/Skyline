@@ -428,6 +428,7 @@ fn jar_mods(jars: &[std::path::PathBuf]) -> Vec<horizon_client::mod_list::Runtim
                 return horizon_client::mod_list::RuntimeMod {
                     id: file.clone(),
                     title: file,
+                    description: String::new(),
                 };
             };
             let id = meta["id"].as_str().unwrap_or(&file).to_owned();
@@ -435,6 +436,7 @@ fn jar_mods(jars: &[std::path::PathBuf]) -> Vec<horizon_client::mod_list::Runtim
             let version = meta["version"].as_str().unwrap_or_default();
             horizon_client::mod_list::RuntimeMod {
                 title: format!("{name} {version}").trim_end().to_owned(),
+                description: meta["description"].as_str().unwrap_or_default().to_owned(),
                 id,
             }
         })

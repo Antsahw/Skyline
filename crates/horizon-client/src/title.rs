@@ -20,6 +20,7 @@ mod confirm_experiments;
 mod create_world;
 mod experiments;
 mod flat;
+pub mod mod_menu;
 mod onboarding;
 #[cfg(test)]
 mod tests;
@@ -1749,7 +1750,33 @@ impl Title {
         }
         folder
     }
+    /// The screen's buttons, with Mod Menu's Mods button after Accessibility on the main menu
+    /// (`mod_menu`): the icon row moves left half a button to stay centred.
     fn buttons(&self, w: f32, h: f32) -> Vec<Button> {
+        let mut buttons = self.own_buttons(w, h);
+        if matches!(self.mode, Mode::Main) {
+            for b in buttons.iter_mut().filter(|b| matches!(b.id, 5..=7)) {
+                b.x -= mod_menu::ROW_SHIFT;
+            }
+            if let Some((x, y)) = buttons.iter().find(|b| b.id == 7).map(|b| (b.x, b.y)) {
+                // No label: `draw_with_items` draws the icon over it.
+                buttons.push(Button {
+                    x: x + 24.0,
+                    y,
+                    w: 20.0,
+                    label: String::new(),
+                    enabled: true,
+                    id: mod_menu::BUTTON_ID,
+                    icon: None,
+                    trailing: None,
+                    action: None,
+                });
+            }
+        }
+        buttons
+    }
+
+    fn own_buttons(&self, w: f32, h: f32) -> Vec<Button> {
         // The game rules draw and press their own.
         if self.rules.borrow().is_some() {
             return Vec::new();
@@ -2500,6 +2527,52 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
     /// [`Title::draw`] with the item models, which draw the item icons of the
     /// Superflat screens the way `GuiGraphics.renderItem` does.
     pub fn draw_with_items(
+        &self,
+        atlas: &HudAtlas,
+        items: Option<&crate::item_render::ItemRenderer>,
+        batch: &mut HudBatch,
+        cursor: (f32, f32),
+        hide_splash: bool,
+        hide_server_address: bool,
+    ) {
+        self.draw_own(
+            atlas,
+            items,
+            batch,
+            cursor,
+            hide_splash,
+            hide_server_address,
+        );
+        if !matches!(self.mode, Mode::Main) || self.rules.borrow().is_some() {
+            return;
+        }
+        let (w, h) = (batch.width.ceil(), batch.height.ceil());
+        if let Some(b) = self
+            .buttons(w, h)
+            .into_iter()
+            .find(|b| b.id == mod_menu::BUTTON_ID)
+        {
+            let hover =
+                cursor.0 >= b.x && cursor.0 < b.x + b.w && cursor.1 >= b.y && cursor.1 < b.y + 20.0;
+            let bar = if hover {
+                rgba(255, 255, 255, 255)
+            } else {
+                rgba(224, 224, 224, 255)
+            };
+            for (x, y, bw, bh) in mod_menu::BARS {
+                batch.fill(atlas, b.x + x, b.y + y, bw, bh, bar);
+            }
+            if hover {
+                let lines = atlas
+                    .font
+                    .split(&Text::translate("horizon.mod_menu.button", &[]), 170.0);
+                crate::ui::tooltip(batch, atlas, &lines, cursor);
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn draw_own(
         &self,
         atlas: &HudAtlas,
         items: Option<&crate::item_render::ItemRenderer>,
@@ -3435,6 +3508,18 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
     /// Navigation buttons can return `Action::None` while still sounding.
     pub fn click(&mut self, x: f32, y: f32, size: (f32, f32)) -> (Action, bool) {
         self.remember_direct_address();
+        if matches!(self.mode, Mode::Main) && self.rules.get_mut().is_none() {
+            let hit = self
+                .buttons(size.0.ceil(), size.1.ceil())
+                .into_iter()
+                .find(|b| b.enabled && x >= b.x && x < b.x + b.w && y >= b.y && y < b.y + 20.0)
+                .map(|b| b.id);
+            if hit == Some(mod_menu::BUTTON_ID) {
+                // The game opens Options, which shows the Mods screen while it is asked for.
+                mod_menu::open();
+                return (Action::Options, true);
+            }
+        }
         // The game rules take the press in `press_rules`, which has the atlas.
         if self.rules.get_mut().is_some()
             || self.experiments.get_mut().is_some()

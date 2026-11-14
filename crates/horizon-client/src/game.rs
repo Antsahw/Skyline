@@ -208,6 +208,8 @@ mod mob_looting;
 mod mob_sounds;
 mod mod_api_host;
 mod mod_block_shape;
+mod mod_menu;
+mod mod_menu_ui;
 mod mods;
 mod mount_menu;
 mod mounts;

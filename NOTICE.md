@@ -21,6 +21,20 @@ Skyline is the third link in a chain, and the credit has to say so:
 Describing Skyline as though the 26.3 bridge were its own work would be false, whatever the
 licence allows. When in doubt about a part, `git log` says who wrote it.
 
+## Built in from other projects
+
+- **Mod Menu for Horizon** by [tariksabanuz](https://github.com/tariksabanuz/ModMenuHorizon)
+  (0.3.5, MIT): the Mods screen behind the title screen's ☰ button (`game/mod_menu.rs`,
+  `game/mod_menu_ui.rs`, `title/mod_menu.rs`). Skyline adds the Java runtimes' mods to its list.
+  Its licence:
+
+      MIT License
+
+      Copyright (c) 2026 Horizon Veinminer contributors
+      Copyright (c) 2026 Horizon native mod contributors
+
+      (the MIT permission notice, as in LICENSE)
+
 ## This project's licence
 
 Skyline is MIT-licensed, like both projects before it. [LICENSE](LICENSE) is Horizon's,

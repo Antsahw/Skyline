@@ -356,17 +356,22 @@ clicks pass until then). A click on a block of a 1.20.1 mod's namespace, or with
 their items, goes to it at `useItemOn`'s head (`java120_use_block`, beside the 26.3 bridge's
 hook in `lan_actions.rs`); what it set and what it did to the held stack land in Horizon.
 
-## The Mods page by runtime (2026-11-14)
+## The Mods screen: Mod Menu for Horizon, built in (2026-11-14)
 
-Options > Mods lists the Java mods in a section per runtime: **Fabric 26.3** (`mods-java/`,
-when the Java mods are on) and **Fabric 1.20.1** (`mods-java-1.20.1/`), with Horizon's own mods
-under **Horizon** above them. Each mod is shown by its jar's `fabric.mod.json`, as `Name
-version` (`game/mods.rs`, `runtime_sections`), so the page lists them before a world opens.
-A mod whose settings screen the world's server can open is a **Settings** button; the others are
-greyed out. Mod Menu itself has no screen of its own here: this page is its stand-in. The
-server's mods with settings that no section lists (a server's own jars) come last, under
-"The server's Java mods". Checked in a game with AppleSkin, Cloth Config, Mod Menu and
-Naturalist.
+The title screen's ☰ button (after Accessibility) opens **Mod Menu for Horizon** by tariksabanuz
+(MIT, github.com/tariksabanuz/ModMenuHorizon 0.3.5), built into Skyline instead of applied as a
+native mod, since the launcher can't build the 1.20.1 bridge (`game/mod_menu.rs`,
+`game/mod_menu_ui.rs`, `title/mod_menu.rs`; its injections are plain calls in `title.rs` and
+`game/options.rs`). It lists Horizon's mods and the Java mods together, each Java mod with a
+badge named after its runtime, **Fabric 26.3** (`mods-java/`) or **Fabric 1.20.1**
+(`mods-java-1.20.1/`), and its jar's `fabric.mod.json` name, version and description
+(`game/mods.rs`, `runtime_sections`), so it lists them before a world opens. The filter has a
+"Java mods" step. A Java mod's **Settings** opens its screen when the world's server can
+(`Event::JavaModSettings`), and is greyed out otherwise; Java mods aren't turned on or off
+here (their jars are). Mods of the server's with settings that no runtime lists get a
+**Server** badge. Its text is in the lang file (`horizon.mod_menu.*`). Options > Mods is back to
+Horizon's page with the settings buttons. Checked in a game with AppleSkin, Cloth Config, Mod
+Menu and Naturalist. Left out: the mod's DirectX 12 shader fix (not a menu matter).
 
 More fixes: Naturalist's crab poses its head toward the camera, which the runtime's client
 didn't have (it now has a game renderer holding the renderers' camera); a recorded screen's
@@ -684,7 +689,7 @@ looks at (`Minecraft.hitResult`) and a client level with the blocks; minimaps ne
 
 ## Phase 5h status: the mods' settings screens (2026-11-13)
 
-A mod's settings screen opens from Horizon's Mods page (Options, Mods...), listed as
+A mod's settings screen opens from Mod Menu's screen (above) or Horizon's Mods page (Options, Mods...), listed as
 "<mod>: Settings", and is drawn and used as any screen of the mods' (phase 4). The runtime
 finds them as Mod Menu does, from the mods' `modmenu` entrypoints (`Config120`, through
 FabricLoader by reflection: it isn't on the glue's classpath), and lists every mod with a

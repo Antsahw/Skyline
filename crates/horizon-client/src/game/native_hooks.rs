@@ -2210,6 +2210,11 @@ impl Game<'_> {
     }
     /// Once a frame, in a world or not, after Horizon's extras.
     pub(super) fn native_frame(&mut self, elapsed: Duration) {
+        // Mod Menu (game/mod_menu_ui.rs): an Options screen gone without leaving the Mods screen
+        // (a world loading, a disconnect) makes the next Options screen the normal one.
+        if horizon_client::title::mod_menu::is_open() && self.screen != Screen::Options {
+            horizon_client::title::mod_menu::close();
+        }
         mod_api::dispatch_frame(self, mod_api::mods(), elapsed);
     }
     /// Client-side evaluation of a mod's namespaced conditional item model property.

@@ -173,6 +173,9 @@ impl Game<'_> {
         }
     }
     pub(super) fn draw_options(&mut self, batch: &mut HudBatch) {
+        if horizon_client::title::mod_menu::is_open() {
+            return super::mod_menu_ui::draw(self, batch);
+        }
         self.watch_pack_folder();
         let mut ui = std::mem::take(&mut self.ui.options);
         ui.draw(&self.settings, batch, &self.gui.atlas, self.cursor);
@@ -215,6 +218,9 @@ impl Game<'_> {
         }
     }
     pub(super) fn options_mouse(&mut self, pressed: bool, right: bool) -> Result<()> {
+        if let Some(r) = super::mod_menu_ui::options_mouse(self, pressed, right) {
+            return r;
+        }
         if !pressed {
             if right {
                 return Ok(());
@@ -246,6 +252,10 @@ impl Game<'_> {
         self.handle_option_events(events)
     }
     pub(super) fn options_drag(&mut self) -> Result<()> {
+        if horizon_client::title::mod_menu::is_open() {
+            self.dragging = false;
+            return Ok(());
+        }
         let size = self.gui_size();
         let framebuffer = self.renderer.as_ref().map_or([1280, 720], |r| {
             [r.config.width as i32, r.config.height as i32]
@@ -265,6 +275,9 @@ impl Game<'_> {
         self.handle_option_events(events)
     }
     pub(super) fn options_key(&mut self, key: KeyCode, text: Option<&str>) -> Result<()> {
+        if let Some(r) = super::mod_menu_ui::options_key(self, key, text) {
+            return r;
+        }
         let size = self.gui_size();
         let shift = self.has_shift_down();
         let framebuffer = self.renderer.as_ref().map_or([1280, 720], |r| {
@@ -282,11 +295,17 @@ impl Game<'_> {
         &mut self,
         shortcut: horizon_client::clipboard::EditShortcut,
     ) -> bool {
+        if horizon_client::title::mod_menu::is_open() {
+            return super::mod_menu_ui::shortcut(self, shortcut);
+        }
         self.ui
             .options
             .shortcut(&self.gui.atlas, shortcut, &mut self.clipboard)
     }
     pub(super) fn options_scroll(&mut self, amount: f32) -> Result<()> {
+        if horizon_client::title::mod_menu::is_open() {
+            return super::mod_menu_ui::scroll(self, amount);
+        }
         if self.pad_stick_scroll() {
             let size = self.gui_size();
             self.ui

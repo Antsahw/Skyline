@@ -52,6 +52,8 @@ pub struct RuntimeMod {
     pub id: String,
     /// `Name 1.0`.
     pub title: String,
+    /// Its fabric.mod.json's description.
+    pub description: String,
 }
 
 /// One installed mod as the Mods page shows it.
