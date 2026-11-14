@@ -120,6 +120,13 @@ def plan(vj, lock, out, name=None, machine=None):
     fabric_api = os.path.join(fab_dir, os.path.basename(lock["fabric_api_url"]))
     sources = [lock["fabric_api_url"]] + ([lock["fabric_api_mirror"]] if lock.get("fabric_api_mirror") else [])
     jobs.append((sources, fabric_api, "sha256", lock["fabric_api_sha256"]))
+    # Mod Menu's API, which the mods' settings screens are handed over through (their `modmenu`
+    # entrypoints implement its ModMenuApi): with the runtime like Fabric API, unless the
+    # player's mods hold their own. Horizon's own Mods screen shows them.
+    mod_menu = None
+    if lock.get("mod_menu_url"):
+        mod_menu = os.path.join(fab_dir, os.path.basename(lock["mod_menu_url"]))
+        jobs.append(([lock["mod_menu_url"]], mod_menu, "sha256", lock["mod_menu_sha256"]))
     build_tools = []
     for tool in lock.get("build_tools", []):
         path = os.path.join(fab_dir, "tools", tool["file"])
@@ -150,6 +157,7 @@ def plan(vj, lock, out, name=None, machine=None):
         "game_jar": game_jar,
         "mojang_mappings": mojang,
         "fabric_api": fabric_api,
+        "mod_menu": mod_menu,
         # build120.sh's remapper: never on a game's class path.
         "build_tools": build_tools,
         "loader_version": os.path.basename(loader[0])[len("fabric-loader-"):-len(".jar")],

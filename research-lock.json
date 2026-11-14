@@ -126,6 +126,8 @@
     "fabric_api_url": "https://maven.fabricmc.net/net/fabricmc/fabric-api/fabric-api/0.92.12+1.20.1/fabric-api-0.92.12+1.20.1.jar",
     "fabric_api_mirror": "https://github.com/FabricMC/fabric/releases/download/0.92.12%2B1.20.1/fabric-api-0.92.12%2B1.20.1.jar",
     "fabric_api_sha256": "4197ff4fbdac13cffccd267c1bc59e9fbabb2b5683a9d5f8023f4b5ea16a1c1e",
+    "mod_menu_url": "https://cdn.modrinth.com/data/mOgUt4GM/versions/lEkperf6/modmenu-7.2.2.jar",
+    "mod_menu_sha256": "a041b0f0305ffa5eb90120aa23768e1cfbb27583904b1751e3783c0f69382f1a",
     "build_tools": [
       {
         "file": "tiny-remapper-0.15.0-fat.jar",

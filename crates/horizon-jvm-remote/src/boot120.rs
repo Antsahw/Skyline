@@ -58,6 +58,9 @@ pub struct Launch {
     pub game_jar: PathBuf,
     pub mojang_mappings: PathBuf,
     pub fabric_api: PathBuf,
+    /// Mod Menu, for its API (`fetch120.py`): the mods' settings screens are handed over through
+    /// it. None in a launch.json written before it was fetched.
+    pub mod_menu: Option<PathBuf>,
     pub loader_version: String,
     pub java_major: i64,
 }
@@ -99,6 +102,7 @@ fn parse_launch(text: &str) -> Result<Launch, String> {
         game_jar: path("game_jar")?,
         mojang_mappings: path("mojang_mappings")?,
         fabric_api: path("fabric_api")?,
+        mod_menu: json["mod_menu"].as_str().map(PathBuf::from),
         loader_version: json["loader_version"].as_str().unwrap_or("").to_string(),
         java_major: json["java_major"].as_i64().unwrap_or(25),
     })
@@ -110,13 +114,21 @@ pub fn runtime_args(config: &Fabric120, launch: &Launch) -> Vec<String> {
         .mods
         .clone()
         .unwrap_or_else(|| config.game_dir.join("mods"));
-    // Fabric API comes with the runtime unless the player's mods hold their own.
-    let own_fabric_api = std::fs::read_dir(&mods)
-        .map(|d| {
-            d.filter_map(|e| e.ok())
-                .any(|e| e.file_name().to_string_lossy().starts_with("fabric-api-"))
-        })
-        .unwrap_or(false);
+    // Fabric API and Mod Menu come with the runtime unless the player's mods hold their own.
+    let own = |prefix: &str| {
+        std::fs::read_dir(&mods)
+            .map(|d| {
+                d.filter_map(|e| e.ok()).any(|e| {
+                    e.file_name()
+                        .to_string_lossy()
+                        .to_ascii_lowercase()
+                        .starts_with(prefix)
+                })
+            })
+            .unwrap_or(false)
+    };
+    let own_fabric_api = own("fabric-api-");
+    let own_mod_menu = own("modmenu");
     let mut args = vec![
         "--game-jar".to_string(),
         launch.game_jar.to_string_lossy().into_owned(),
@@ -136,6 +148,11 @@ pub fn runtime_args(config: &Fabric120, launch: &Launch) -> Vec<String> {
     let mut add = Vec::new();
     if !own_fabric_api {
         add.push(launch.fabric_api.clone());
+    }
+    if let Some(mod_menu) = launch.mod_menu.as_ref().filter(|p| p.is_file())
+        && !own_mod_menu
+    {
+        add.push(mod_menu.clone());
     }
     add.extend(config.platform.iter().cloned());
     if !add.is_empty() {
@@ -367,8 +384,31 @@ mod tests {
             Some(mods.to_string_lossy().into_owned())
         );
         assert_eq!(after(&args, "--side").as_deref(), Some("client"));
+        // Mod Menu too, when it was fetched, unless the mods hold their own.
+        let fetched = game.join("modmenu-7.2.2.jar");
+        std::fs::write(&fetched, b"").unwrap();
+        let mut with_menu = parse_launch(LAUNCH).unwrap();
+        with_menu.mod_menu = Some(fetched.clone());
+        let joined = |paths: &[&std::path::Path]| {
+            std::env::join_paths(paths)
+                .unwrap()
+                .to_string_lossy()
+                .into_owned()
+        };
+        assert_eq!(
+            after(&runtime_args(&config(&game), &with_menu), "--add-mods"),
+            Some(joined(&[
+                std::path::Path::new("/c/fabric/fabric-api-0.92.12+1.20.1.jar"),
+                &fetched
+            ]))
+        );
+        std::fs::write(mods.join("ModMenu-7.2.2.jar"), b"").unwrap();
+        assert_eq!(
+            after(&runtime_args(&config(&game), &with_menu), "--add-mods").as_deref(),
+            Some("/c/fabric/fabric-api-0.92.12+1.20.1.jar")
+        );
         std::fs::write(mods.join("fabric-api-0.92.2+1.20.1.jar"), b"").unwrap();
-        let args = runtime_args(&config(&game), &launch);
+        let args = runtime_args(&config(&game), &with_menu);
         assert_eq!(after(&args, "--add-mods"), None);
         std::fs::remove_dir_all(&game).unwrap();
         assert!(parse_launch(r#"{"game_jar": "x", "class_path": []}"#).is_err());
