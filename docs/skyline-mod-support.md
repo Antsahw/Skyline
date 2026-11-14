@@ -56,7 +56,7 @@ not a working machine, and almost every content mod has at least one screen.
 | What the mod does | Status | Where |
 |---|---|---|
 | Loot table and recipe injection into vanilla | **partial** | phase 2 carries its own; injection unverified |
-| Villager trades, advancements | **unverified** | — |
+| Villager trades, advancements | **partial** | phase 5l: the trades mods add to vanilla's professions and the wandering trader join their pools (Farmer's Delight's rice and cabbage for a farmer's emerald, checked in a game); one that needs a villager to answer (a map), gives an item with data, or belongs to a mod's own profession is left out. The mods' advancements with vanilla's triggers are granted (Supplementaries', Tech Reborn's seen in a game); five use their own triggers, which don't fire yet |
 | Armour and tool tiers, durability, repair | **unverified** | — |
 | Mod fluids placed in the world | **not yet** | phase 6 |
 | Client-only mods with no server half | **unverified** | — |

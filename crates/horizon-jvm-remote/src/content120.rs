@@ -334,6 +334,64 @@ fn foods(facts: &serde_json::Value, carried: &[PathBuf]) -> usize {
     written
 }
 
+/// The trades the mods add to villagers and the wandering trader (the facts' `trades`: each
+/// listing's offer, as 26.3's `villager_trade` has it) as data: each a `villager_trade` in the
+/// carried mod of the namespace it trades in, joined to its level's (or the wandering trader
+/// pool's) tag, which the trade sets draw from beside vanilla's. How many trades.
+fn trades(facts: &serde_json::Value, carried: &[PathBuf]) -> usize {
+    use std::collections::BTreeMap;
+    // The tags each carried mod adds to: (carry, set) -> trade ids.
+    let mut tags: BTreeMap<(PathBuf, String), Vec<String>> = BTreeMap::new();
+    let mut counts: BTreeMap<(String, String), usize> = BTreeMap::new();
+    let mut written = 0;
+    for trade in facts["trades"].as_array().into_iter().flatten() {
+        let (Some(set), Some(offer)) = (trade["set"].as_str(), trade.get("offer")) else {
+            continue;
+        };
+        // The namespace of a mod's item it trades in: the trade is that mod's.
+        let ns = ["gives", "wants", "additional_wants"]
+            .iter()
+            .filter_map(|k| offer[*k]["id"].as_str())
+            .filter_map(|id| id.split_once(':').map(|(ns, _)| ns))
+            .find(|ns| *ns != "minecraft" && carrying(carried, ns).is_some());
+        let Some(ns) = ns else {
+            continue;
+        };
+        let Some(carry) = carrying(carried, ns) else {
+            continue;
+        };
+        let n = counts.entry((ns.to_owned(), set.to_owned())).or_default();
+        *n += 1;
+        let path = format!("{set}/{}", n);
+        let file = carry
+            .join("data")
+            .join(ns)
+            .join("villager_trade")
+            .join(format!("{path}.json"));
+        if file
+            .parent()
+            .is_some_and(|d| std::fs::create_dir_all(d).is_ok())
+            && std::fs::write(&file, offer.to_string()).is_ok()
+        {
+            tags.entry((carry.clone(), set.to_owned()))
+                .or_default()
+                .push(format!("{ns}:{path}"));
+            written += 1;
+        }
+    }
+    for ((carry, set), ids) in tags {
+        let file = carry
+            .join("data/minecraft/tags/villager_trade")
+            .join(format!("{set}.json"));
+        let json = serde_json::json!({"replace": false, "values": ids});
+        if let Some(dir) = file.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let _ = std::fs::write(&file, json.to_string());
+    }
+    written
+}
+
 /// Vanilla's blocks in the facts as 26.3 has them. The facts are 1.20.1's, and the carry-over
 /// borrows vanilla states for mods' shapes (`"shape": "minecraft:piglin_head[rotation=0]"`): a
 /// state 26.3 doesn't have (its heads gained `powered`) makes the game refuse every content mod.
@@ -464,6 +522,12 @@ pub fn build(
         .unwrap_or_default();
     let effects = mob_effects(&facts_json, &carried(&work));
     let eaten = foods(&facts_json, &carried(&work));
+    let traded = trades(&facts_json, &carried(&work));
+    if traded > 0 {
+        log(format!(
+            "1.20.1 mods' content: {traded} villager trade(s) of theirs"
+        ));
+    }
     if effects + eaten > 0 {
         log(format!(
             "1.20.1 mods' content: {effects} effect(s) of their own, {eaten} food(s) eaten as in 1.20.1"
@@ -688,6 +752,44 @@ mod tests {
             modifiers.contains(&serde_json::json!({"type": "neoforge:remove_features",
             "biomes": ["minecraft:desert"], "features": ["minecraft:desert_well"],
             "steps": ["surface_structures"]}))
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_mods_villager_trades_join_their_levels_pool() {
+        let dir = std::env::temp_dir().join(format!("content120-trades-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let carry = dir.join("mods/fd/carry");
+        std::fs::create_dir_all(carry.join("assets/farmersdelight")).unwrap();
+        let offer = |wants: &str, gives: &str| {
+            serde_json::json!({"wants": {"id": wants, "count": 15}, "gives": {"id": gives},
+                "max_uses": 16, "xp": 2, "reputation_discount": 0.05})
+        };
+        let facts = serde_json::json!({"trades": [
+            {"set": "farmer/level_1", "offer": offer("farmersdelight:onion", "minecraft:emerald")},
+            {"set": "farmer/level_1", "offer": offer("farmersdelight:tomato", "minecraft:emerald")},
+            {"set": "wandering_trader/common", "offer": offer("minecraft:emerald", "farmersdelight:rice")},
+            // Only vanilla items: no mod of these to carry it.
+            {"set": "farmer/level_2", "offer": offer("minecraft:wheat", "minecraft:emerald")},
+        ]});
+        assert_eq!(trades(&facts, std::slice::from_ref(&carry)), 3);
+        let read = |p: &str| -> serde_json::Value {
+            serde_json::from_slice(&std::fs::read(carry.join(p)).unwrap()).unwrap()
+        };
+        assert_eq!(
+            read("data/minecraft/tags/villager_trade/farmer/level_1.json"),
+            serde_json::json!({"replace": false, "values": [
+                "farmersdelight:farmer/level_1/1", "farmersdelight:farmer/level_1/2"]}),
+            "added to vanilla's pool, not over it"
+        );
+        assert_eq!(
+            read("data/farmersdelight/villager_trade/farmer/level_1/2.json")["wants"]["id"],
+            "farmersdelight:tomato"
+        );
+        assert_eq!(
+            read("data/minecraft/tags/villager_trade/wandering_trader/common.json")["values"][0],
+            "farmersdelight:wandering_trader/common/1"
         );
         let _ = std::fs::remove_dir_all(&dir);
     }

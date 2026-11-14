@@ -356,6 +356,26 @@ clicks pass until then). A click on a block of a 1.20.1 mod's namespace, or with
 their items, goes to it at `useItemOn`'s head (`java120_use_block`, beside the 26.3 bridge's
 hook in `lan_actions.rs`); what it set and what it did to the held stack land in Horizon.
 
+## Phase 5l status: the mods' villager trades (2026-11-14)
+
+The trades the mods add (Fabric's TradeOfferHelper puts their listings into 1.20.1's
+`VillagerTrades` tables, beside vanilla's) are 26.3 data: the content build asks each mod's
+listing for its offer once (the facts' `trades`) and writes it as a `villager_trade` in the
+carried mod of the namespace it trades in, added (not over vanilla's) to its level's tag or the
+wandering trader's pool (`content120.rs`: `trades`; 1.20.1's rare wandering trades go to 26.3's
+`uncommon`). Left out: a listing that needs a villager or a level to answer (Supplementaries'
+adventurer maps), one that gives an item with data, and the trades of a mod's own profession
+(Tech Reborn's), which has no villagers in Horizon. A random listing keeps the offer it gave.
+
+Horizon's trade loader read only `data/minecraft/`, so a content mod's trades never loaded
+though its tag named them: it now reads every namespace's `villager_trade` and `trade_set`, as
+a data pack's are (`merchant.rs`, with a test; the trading harness passes).
+
+Checked in a game with Farmer's Delight Refabricated: farmers offer its rice and cabbages for
+emeralds beside vanilla's trades. With the Fabric Farmer's Delight beside Moonlight (mods1),
+the runtime's own tables no longer hold FD's trades when the export reads them (Moonlight's
+data trades are the likely cause): what 1.20.1 has is what goes over.
+
 ## Phase 5k status: the mods' effects and food (2026-11-14)
 
 The mods' effects are Horizon's: the content build writes each (its category and colour) as a
@@ -1324,7 +1344,7 @@ NeoForge could run beside Fabric 26.3 rather than in its place.
    done: mods' packets between their halves, players joining. 5d done: items used, mods' own
    screens, players leaving. 5e done: mods' key bindings and the client tick (above). 5f/5g done:
    sounds and particles. 5h done: the mods' settings screens. 5i done: the mods' HUD (above). 5j done: their
-   commands and messages. 5k done: their effects and food. Left: the HUD overlays that read the client's world (Jade, minimaps).
+   commands and messages. 5k done: their effects and food. 5l done: their villager trades. Left: the HUD overlays that read the client's world (Jade, minimaps).
 6. **Entities and worldgen.** 6a done: the mods' Fabric biome modifications reach Horizon's
    generator as biome modifiers. 6b done: a mod's own feature types run in the runtime on the
    chunks being decorated. 6c done: data-driven structures (above). 6d done: the mods' mobs

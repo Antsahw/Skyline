@@ -101,6 +101,7 @@ public final class Content120 {
             items();
             creativeTabs();
             mobEffects();
+            trades();
             json.name("tags");
             json.beginObject();
             Tags120.Loaded tags = Tags120.load();
@@ -116,6 +117,76 @@ public final class Content120 {
          * (CreativeModeTabs.tryRebuildTabContents, with the server's registries). A tab whose
          * contents can't be made here is left out: its items are still in the search tab.
          */
+        /**
+         * The trades the mods add to villagers and the wandering trader (Fabric's
+         * TradeOfferHelper puts their listings into VillagerTrades' tables, beside vanilla's):
+         * {@code [{"set": "farmer/level_1" | "wandering_trader/common", "offer": {...}}]}, each
+         * listing asked for its offer once, as 26.3's villager_trade has it (`wants`,
+         * `additional_wants`, `gives`, `max_uses`, `xp`, `reputation_discount`). A listing whose
+         * offer is random (a random item, a random price) keeps the one it gave; one that needs
+         * a villager or a level to answer, or gives an item with data, is left out.
+         */
+        void trades() throws IOException {
+            json.name("trades");
+            json.beginArray();
+            var random = net.minecraft.util.RandomSource.create(1201L);
+            for (var entry : net.minecraft.world.entity.npc.VillagerTrades.TRADES.entrySet()) {
+                ResourceLocation profession = BuiltInRegistries.VILLAGER_PROFESSION.getKey(entry.getKey());
+                // A mod's own profession has no villagers in Horizon.
+                if (profession == null || !profession.getNamespace().equals("minecraft")) continue;
+                for (var level : entry.getValue().int2ObjectEntrySet()) {
+                    String set = profession.getPath() + "/level_" + level.getIntKey();
+                    for (var listing : level.getValue()) offer(set, listing, random);
+                }
+            }
+            for (var level : net.minecraft.world.entity.npc.VillagerTrades.WANDERING_TRADER_TRADES.int2ObjectEntrySet()) {
+                String set = "wandering_trader/" + (level.getIntKey() == 1 ? "common" : "uncommon");
+                for (var listing : level.getValue()) offer(set, listing, random);
+            }
+            json.endArray();
+        }
+
+        private void offer(String set, net.minecraft.world.entity.npc.VillagerTrades.ItemListing listing,
+                net.minecraft.util.RandomSource random) throws IOException {
+            String owner = listing.getClass().getName();
+            // Vanilla's own listings are 26.3's data already.
+            if (owner.startsWith("net.minecraft.")) return;
+            net.minecraft.world.item.trading.MerchantOffer offer;
+            try {
+                offer = listing.getOffer(null, random);
+            } catch (Throwable t) {
+                return;
+            }
+            if (offer == null || offer.getResult().isEmpty() || offer.getResult().hasTag()
+                    || offer.getBaseCostA().hasTag() || offer.getCostB().hasTag()) {
+                return;
+            }
+            json.beginObject();
+            json.name("set").value(set);
+            json.name("offer");
+            json.beginObject();
+            json.name("wants");
+            stack(offer.getBaseCostA());
+            if (!offer.getCostB().isEmpty()) {
+                json.name("additional_wants");
+                stack(offer.getCostB());
+            }
+            json.name("gives");
+            stack(offer.getResult());
+            json.name("max_uses").value(offer.getMaxUses());
+            json.name("xp").value(offer.getXp());
+            json.name("reputation_discount").value(offer.getPriceMultiplier());
+            json.endObject();
+            json.endObject();
+        }
+
+        private void stack(ItemStack stack) throws IOException {
+            json.beginObject();
+            json.name("id").value(BuiltInRegistries.ITEM.getKey(stack.getItem()).toString());
+            if (stack.getCount() != 1) json.name("count").value(stack.getCount());
+            json.endObject();
+        }
+
         /**
          * The mods' own effects (Farmer's Delight's Comfort and Nourishment): as Horizon's content
          * declares one, `{"id", "category", "color"}`.

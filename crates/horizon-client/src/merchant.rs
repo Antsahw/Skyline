@@ -453,13 +453,32 @@ pub struct Trades {
 /// The `.json` files under `dir` as `minecraft:<path>` ids, through `json_folder` (from the
 /// prepared data file when there is one); a file that doesn't parse is left out.
 fn walk(dir: &Path, out: &mut HashMap<String, Value>) {
+    walk_in(dir, "minecraft", out);
+}
+/// A folder's JSON files as ids of namespace `ns`.
+fn walk_in(dir: &Path, ns: &str, out: &mut HashMap<String, Value>) {
     let Ok(folder) = horizon_world::json_folder::read(dir) else {
         return;
     };
     for file in &folder.files {
         if let Ok(value) = serde_json::from_slice(file.bytes().unwrap_or_default()) {
-            out.insert(format!("minecraft:{}", file.name), value);
+            out.insert(format!("{ns}:{}", file.name), value);
         }
+    }
+}
+/// `kind`'s files of every namespace but minecraft's in the root's `data/` (content mods'
+/// trades: `data/<ns>/villager_trade/`), as a data pack's are read.
+fn walk_namespaces(root: &Path, kind: &str, out: &mut HashMap<String, Value>) {
+    let Ok(entries) = std::fs::read_dir(root.join("data")) else {
+        return;
+    };
+    let mut namespaces: Vec<String> = entries
+        .filter_map(|e| e.ok()?.file_name().into_string().ok())
+        .filter(|ns| ns != "minecraft")
+        .collect();
+    namespaces.sort();
+    for ns in namespaces {
+        walk_in(&root.join("data").join(&ns).join(kind), &ns, out);
     }
 }
 impl Trades {
@@ -472,6 +491,8 @@ impl Trades {
         walk(&data.join("villager_trade"), &mut trades);
         walk(&data.join("tags/villager_trade"), &mut raw_tags);
         walk(&data.join("trade_set"), &mut sets);
+        walk_namespaces(root, "villager_trade", &mut trades);
+        walk_namespaces(root, "trade_set", &mut sets);
         let mut raw_potions = HashMap::new();
         walk(&data.join("tags/potion"), &mut raw_potions);
         // The packs' trade files: a trade or set's top pack file replaces
@@ -972,6 +993,32 @@ impl Trades {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn a_content_mods_trades_load_from_its_own_namespace() {
+        let root = std::env::temp_dir().join(format!("merchant-ns-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let put = |path: &str, v: serde_json::Value| {
+            let file = root.join(path);
+            std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+            std::fs::write(file, v.to_string()).unwrap();
+        };
+        let trade = json!({"wants": {"id": "minecraft:emerald"}, "gives": {"id": "ruby:gem"}});
+        put("data/minecraft/villager_trade/farmer/1/a.json", trade.clone());
+        put("data/ruby/villager_trade/farmer/level_1/1.json", trade);
+        put(
+            "data/minecraft/tags/villager_trade/farmer/level_1.json",
+            json!({"values": ["minecraft:farmer/1/a", "ruby:farmer/level_1/1"]}),
+        );
+        let trades = Trades::load(&root, &horizon_world::loot::PackOverlay::NONE);
+        assert!(trades.trades.contains_key("minecraft:farmer/1/a"));
+        assert!(
+            trades.trades.contains_key("ruby:farmer/level_1/1"),
+            "the mod's trade, which its tag names, is there: {:?}",
+            trades.trades.keys().collect::<Vec<_>>()
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     fn items() -> Items {
         Items::for_tests(HashMap::new())
