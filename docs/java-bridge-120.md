@@ -376,8 +376,11 @@ outside `minecraft` (`Worldgen120.modStructureTypes`), installed with the featur
 
 Checked in a game: `/execute in deeperdarker:otherside run locate structure deeperdarker:bloomaze`
 finds one 2,110 blocks away, and its walls are there (fortified sculk grime bricks and
-protected glass, 12 of 20 samples on one layer). Not yet: such starts are not saved with the
-chunk (a reload forgets them, and the runtime keeps every start it made until it stops), the
+protected glass, 12 of 20 samples on one layer). A start is made again from the seed whenever
+a chunk near it needs it, after a reload too, as Horizon's own starts are (only an older
+version's chunks keep their saved starts). Not yet: such starts aren't written into the chunk's
+`structures` NBT (a server reading that would not see them), the runtime keeps every start it
+made until it stops, the
 pieces don't see biomes by name, the decoration random is the structure's step's at index 0,
 and the mirror level is the Overworld's whatever the dimension.
 
@@ -1512,7 +1515,7 @@ NeoForge could run beside Fabric 26.3 rather than in its place.
    (above). 6g done: mods that replace vanilla's world generation as data (Terralith, above).
    6f done: the mods' data-driven dimensions as levels (above; their own carvers and portals
    not yet). 6h done: structures of the mods' own types, made and placed by the runtime
-   (above; not saved yet). Next: saving those starts with their chunks. Carvers of a mod's own
+   (above). Carvers of a mod's own
    type are skipped for now (rare: most mods configure vanilla's cave and canyon carvers; the
    runtime could carve a chunk copy as it places features). Biomes added by code
    (TerraBlender) are left to the 26.3 bridge (above).
