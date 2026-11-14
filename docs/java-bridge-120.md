@@ -1512,7 +1512,9 @@ NeoForge could run beside Fabric 26.3 rather than in its place.
    (above). 6g done: mods that replace vanilla's world generation as data (Terralith, above).
    6f done: the mods' data-driven dimensions as levels (above; their own carvers and portals
    not yet). 6h done: structures of the mods' own types, made and placed by the runtime
-   (above; not saved yet). Next: the mods' own carvers. Biomes added by code
+   (above; not saved yet). Next: saving those starts with their chunks. Carvers of a mod's own
+   type are skipped for now (rare: most mods configure vanilla's cave and canyon carvers; the
+   runtime could carve a chunk copy as it places features). Biomes added by code
    (TerraBlender) are left to the 26.3 bridge (above).
 7. **In-world rendering.** Blocks drawn by their code done (above: Wired Redstone's wires and
    cables); block entity renderers done (7b: Farmer's Delight's cutting board). Next:
