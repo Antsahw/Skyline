@@ -457,6 +457,10 @@ pub struct Recipe {
     pub render_only_output: bool,
     /// Anvil: the cost of each output, when it varies (enchanted books).
     pub costs: Vec<u32>,
+    /// Skyline's Mod Recipes: the block it's made in and what its result comes in, shown,
+    /// not looked up (the runtime's guess from the recipe type and the recipe's fields).
+    pub station: Vec<Stack>,
+    pub container: Vec<Stack>,
 }
 
 impl Recipe {

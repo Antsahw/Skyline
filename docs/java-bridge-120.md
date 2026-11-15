@@ -463,9 +463,17 @@ as the recipe's `getIngredients` gives it, tags resolved by the mod's code, and 
 `getResultItem`; 330 of 2564 in a 34-mod pack), Skyline keeps them for native mods
 (`mod_list::foreign_recipes`, set when the runtime is up), and JEI shows each as a shapeless
 grid of up to nine slots (`native-mods/justenoughitems`: `Category::Mod`, glue.rs
-`foreign_recipes`; it remakes its data when that list arrives). What the grid can't show: a
-recipe's container (a bowl), its time, and the station it needs. Checked in a game: Farmer's
+`foreign_recipes`; it remakes its data when that list arrives). Checked in a game: Farmer's
 Delight's cooking pot recipe for rabbit stew.
+
+What no interface says is read from the recipe's own fields by name (`Mirror120.details`): an
+int named for time, duration or ticks (the time), a float named for experience (the XP), an
+ItemStack named for a container (the bowl), and Ingredient fields `getIngredients` leaves out (a
+cutting board's knife), added as inputs. The station is guessed from the type's id: an item of
+the same mod named as the type's path, or starting with it (`farmersdelight:cooking` ->
+`cooking_pot`). JEI shows the station over the arrow and the container under it, both shown
+and not looked up, and the time and experience on a line under the grid (the category is 10
+taller). Checked in a game: beef stew in the cooking pot, 10s and 1.0 XP, with its bowl.
 
 ## The Mods screen: Mod Menu for Horizon, built in (2026-11-14)
 

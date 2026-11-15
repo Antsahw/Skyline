@@ -422,6 +422,8 @@ fn foreign_recipes(game: &Game<'_>, b: &mut Builder<'_, '_>, out: &mut Vec<Recip
         if inputs.is_empty() || outputs.is_empty() {
             continue;
         }
+        let station: Vec<Stack> = r.station.as_deref().and_then(|item| stack(item, 1)).into_iter().collect();
+        let container: Vec<Stack> = r.container.as_deref().and_then(|item| stack(item, 1)).into_iter().collect();
         let (inputs, width, height) = jei::crafting_grid(inputs, 0, 0, true);
         out.push(Recipe {
             category: Some(Category::Mod),
@@ -431,7 +433,11 @@ fn foreign_recipes(game: &Game<'_>, b: &mut Builder<'_, '_>, out: &mut Vec<Recip
             width,
             height,
             shapeless: true,
+            ticks: r.ticks,
+            experience: r.experience,
             book_id: -1,
+            station,
+            container,
             ..Recipe::default()
         });
     }

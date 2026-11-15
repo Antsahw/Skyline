@@ -2712,6 +2712,21 @@ fn the_mods_machines_pass_energy_between_them() {
         );
     }
 
+    // The mods' recipes of their own types, with what their fields keep: Farmer's Delight's
+    // cooking pot recipes name their time and bowl, and the pot is found as their station.
+    let recipes: serde_json::Value =
+        serde_json::from_str(&runtime.mod_recipes().expect("the mods' recipes")).expect("json");
+    let stew = recipes.as_array().expect("a list").iter().find(|r| {
+        r["id"].as_str().is_some_and(|id| id.ends_with("beef_stew"))
+            && r["type"] == "farmersdelight:cooking"
+    });
+    if let Some(stew) = stew {
+        eprintln!("beef stew's recipe: {stew}");
+        assert_eq!(stew["station"], "farmersdelight:cooking_pot", "{stew}");
+        assert!(stew["time"].as_u64().unwrap_or(0) > 0, "{stew}");
+        assert_eq!(stew["container"], "minecraft:bowl", "{stew}");
+    }
+
     // A vanilla mob's hurt reaches what mods hook there (Fabric's ALLOW_DAMAGE, `hurt`
     // mixins) on a stand-in, and answers whether any mod listens at all.
     let (cancelled, listened) = runtime

@@ -604,7 +604,9 @@ fn bookmark_list(
 /// A category's size (`getWidth`, `getHeight`).
 fn category_size(game: &Game<'_>, ru: bool, c: Category) -> (f32, f32) {
     match c {
-        Category::Crafting | Category::Smelting | Category::Mod => (116.0, 54.0),
+        Category::Crafting | Category::Smelting => (116.0, 54.0),
+        // Skyline: a line under the grid for the time and experience.
+        Category::Mod => (116.0, 64.0),
         Category::Smoking | Category::Blasting => (82.0, 54.0),
         Category::Campfire => (82.0, 44.0),
         Category::Stonecutting => (82.0, 34.0),
@@ -981,6 +983,13 @@ fn draw_recipe(
                 let (c, row) = ((i % 3) as f32, (i / 3) as f32);
                 add(batch, &mut hits, input(i), c * 18.0 + 1.0, row * 18.0 + 1.0, Frame::Standard, 0, Vec::new());
             }
+            // Skyline: where it's made, over the arrow, and what its result comes in, under.
+            if !r.station.is_empty() {
+                add(batch, &mut hits, &r.station, 64.0, 1.0, Frame::Standard, 0, Vec::new());
+            }
+            if !r.container.is_empty() {
+                add(batch, &mut hits, &r.container, 64.0, 37.0, Frame::Standard, 0, Vec::new());
+            }
         }
         Category::Smelting | Category::Smoking | Category::Blasting | Category::Campfire => {
             let fuel_slot = category != Category::Campfire;
@@ -1035,6 +1044,15 @@ fn draw_recipe(
     match category {
         Category::Crafting | Category::Mod => {
             blit(game, batch, &sprites::RECIPE_ARROW, x + 61.0, y + 19.0, 1.0);
+            if r.ticks > 0 {
+                let t = jei::cooking_time(ru, r.ticks);
+                let tw = width(game, &t);
+                text(game, batch, &t, x + w - tw, y + h - 8.0, GREY, false);
+            }
+            if r.experience > 0.0 {
+                let t = jei::experience(ru, r.experience);
+                text(game, batch, &t, x, y + h - 8.0, GREY, false);
+            }
             if r.shapeless {
                 let icon = [x + w - 8.0, y, 8.0, 8.0];
                 blit(game, batch, &sprites::ICON_SHAPELESS, icon[0], icon[1], 0.25);

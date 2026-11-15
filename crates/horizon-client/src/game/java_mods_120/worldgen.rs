@@ -365,6 +365,10 @@ fn foreign_recipes(json: &str) -> Vec<horizon_client::mod_list::ForeignRecipe> {
                         Some((text(&o["item"])?, o["count"].as_u64().unwrap_or(1) as u32))
                     })
                     .collect(),
+                station: text(&r["station"]),
+                ticks: r["time"].as_u64().unwrap_or(0) as u32,
+                experience: r["experience"].as_f64().unwrap_or(0.0) as f32,
+                container: text(&r["container"]),
             })
         })
         .collect()
@@ -377,7 +381,9 @@ mod recipe_tests {
         let json = r#"[
             {"id":"farmersdelight:cooking/beef_stew","type":"farmersdelight:cooking",
              "inputs":[["minecraft:beef"],["minecraft:carrot","minecraft:potato"],[]],
-             "outputs":[{"item":"farmersdelight:beef_stew","count":2}]},
+             "outputs":[{"item":"farmersdelight:beef_stew","count":2}],
+             "station":"farmersdelight:cooking_pot","time":200,"experience":1.0,
+             "container":"minecraft:bowl"},
             {"id":"broken","inputs":[]}
         ]"#;
         let recipes = super::foreign_recipes(json);
@@ -387,6 +393,9 @@ mod recipe_tests {
         assert_eq!(r.inputs[1], ["minecraft:carrot", "minecraft:potato"]);
         assert!(r.inputs[2].is_empty());
         assert_eq!(r.outputs, [("farmersdelight:beef_stew".to_owned(), 2)]);
+        assert_eq!(r.station.as_deref(), Some("farmersdelight:cooking_pot"));
+        assert_eq!((r.ticks, r.experience), (200, 1.0));
+        assert_eq!(r.container.as_deref(), Some("minecraft:bowl"));
         assert!(super::foreign_recipes("not json").is_empty());
     }
 }

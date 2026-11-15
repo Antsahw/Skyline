@@ -207,6 +207,7 @@ public final class Mirror120 {
      */
     public static Object[] modRecipes() {
         setUp();
+        var stations = new java.util.HashMap<ResourceLocation, String>();
         var out = new com.google.gson.JsonArray();
         int all = 0;
         for (var recipe : data.getRecipeManager().getRecipes()) {
@@ -235,6 +236,9 @@ public final class Mirror120 {
                     outputs.add(o);
                 }
                 json.add("outputs", outputs);
+                details(recipe, inputs, json);
+                String station = stations.computeIfAbsent(type, Mirror120::station);
+                if (!station.isEmpty()) json.addProperty("station", station);
                 if (inputs.size() > 0 && outputs.size() > 0) out.add(json);
             } catch (RuntimeException | LinkageError e) {
                 log("recipe " + recipe.getId() + " can't be listed: " + e);
@@ -242,6 +246,69 @@ public final class Mirror120 {
         }
         log("the mods' recipes of their own types: " + out.size() + " of " + all + " recipes");
         return new Object[] {out.toString()};
+    }
+
+    /**
+     * What a recipe of a mod's type keeps in its own fields, read by their names, as no
+     * interface says: its time in ticks (`cookTime`, `processingTime`: an int named for time or
+     * duration), experience (a float named for experience or xp), the container its result
+     * comes in (an ItemStack named for a container: a cooking pot's bowl) and the ingredients
+     * getIngredients leaves out (a cutting board's knife), added to `inputs`.
+     */
+    private static void details(net.minecraft.world.item.crafting.Recipe<?> recipe,
+            com.google.gson.JsonArray inputs, com.google.gson.JsonObject json) {
+        var listed = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<Object, Boolean>());
+        listed.addAll(recipe.getIngredients());
+        for (Class<?> c = recipe.getClass(); c != null && c != Object.class; c = c.getSuperclass()) {
+            for (var field : c.getDeclaredFields()) {
+                if (java.lang.reflect.Modifier.isStatic(field.getModifiers())) continue;
+                String name = field.getName().toLowerCase(java.util.Locale.ROOT);
+                try {
+                    field.setAccessible(true);
+                    Object value = field.get(recipe);
+                    if (field.getType() == int.class && !json.has("time")
+                            && (name.contains("time") || name.contains("duration") || name.contains("ticks"))) {
+                        int ticks = (Integer) value;
+                        if (ticks > 0) json.addProperty("time", ticks);
+                    } else if (field.getType() == float.class && !json.has("experience")
+                            && (name.contains("experience") || name.equals("xp"))) {
+                        float xp = (Float) value;
+                        if (xp > 0) json.addProperty("experience", xp);
+                    } else if (value instanceof ItemStack stack && name.contains("container") && !stack.isEmpty()) {
+                        json.addProperty("container",
+                                net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stack.getItem()).toString());
+                    } else if (value instanceof net.minecraft.world.item.crafting.Ingredient ingredient
+                            && !listed.contains(ingredient) && !ingredient.isEmpty()) {
+                        listed.add(ingredient);
+                        var slot = new com.google.gson.JsonArray();
+                        for (var stack : ingredient.getItems()) {
+                            if (!stack.isEmpty()) slot.add(net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stack.getItem()).toString());
+                        }
+                        if (slot.size() > 0) inputs.add(slot);
+                    }
+                } catch (ReflectiveOperationException | RuntimeException e) {
+                    // A field it keeps to itself.
+                }
+            }
+        }
+    }
+
+    /**
+     * The item of the block a mod's recipe type is made in, by name, as no registry says:
+     * the type's own path (`techreborn:grinder`), else an item of its mod that the path starts
+     * (`farmersdelight:cooking` -> `cooking_pot`, `cutting` -> `cutting_board`); "" when none.
+     */
+    private static String station(ResourceLocation type) {
+        String path = type.getPath();
+        String exact = null, prefixed = null;
+        for (var id : net.minecraft.core.registries.BuiltInRegistries.ITEM.keySet()) {
+            if (!id.getNamespace().equals(type.getNamespace())) continue;
+            if (id.getPath().equals(path)) exact = id.toString();
+            else if (id.getPath().startsWith(path + "_") && (prefixed == null || id.toString().length() < prefixed.length())) {
+                prefixed = id.toString();
+            }
+        }
+        return exact != null ? exact : prefixed != null ? prefixed : "";
     }
 
     /**

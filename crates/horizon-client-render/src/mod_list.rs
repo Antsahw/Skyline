@@ -60,7 +60,7 @@ pub struct RuntimeMod {
 
 /// A recipe of a Java mod's own type (a cooking pot's, a machine's): Horizon has no such type,
 /// so it is only shown, by recipe viewers (native JEI). Item ids as the runtime has them.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct ForeignRecipe {
     /// `farmersdelight:cooking/beef_stew`.
     pub id: String,
@@ -70,6 +70,14 @@ pub struct ForeignRecipe {
     pub inputs: Vec<Vec<String>>,
     /// Its results: item id and count.
     pub outputs: Vec<(String, u32)>,
+    /// The item of the block it's made in, when the runtime could tell (`cooking_pot`).
+    pub station: Option<String>,
+    /// Its time in ticks, when it keeps one.
+    pub ticks: u32,
+    /// The experience it gives.
+    pub experience: f32,
+    /// What its result comes in (a cooking pot's bowl).
+    pub container: Option<String>,
 }
 
 static FOREIGN_RECIPES: std::sync::RwLock<Option<std::sync::Arc<Vec<ForeignRecipe>>>> =
