@@ -231,7 +231,13 @@ impl super::super::Game<'_> {
         };
         trace120!("{kind} opened for {uuid}: its screen goes to connection {conn}");
         open(|screens| {
-            let size = screens.get(&conn).map_or(FIRST_SIZE, |s| s.size);
+            // The size the screen last had, else the HUD's (the same GUI), so the first frame
+            // is not laid out in a small default and then jump.
+            let size = screens
+                .get(&conn)
+                .map(|s| s.size)
+                .or_else(|| super::hud::gui_size(conn))
+                .unwrap_or(FIRST_SIZE);
             screens.insert(
                 conn,
                 Open {

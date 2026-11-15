@@ -40,6 +40,11 @@ fn huds<R>(f: impl FnOnce(&mut HashMap<u32, Hud>) -> R) -> R {
 /// at GUI scale 3, which the game corrects once the first frame reaches it.
 const FIRST_SIZE: (i32, i32) = (427, 240);
 
+/// The GUI size `conn`'s game last said its HUD has: the size its screens are laid out in too.
+pub(super) fn gui_size(conn: u32) -> Option<(i32, i32)> {
+    huds(|h| h.get(&conn).map(|hud| hud.size))
+}
+
 /// A player left.
 pub(super) fn forget(conn: u32) {
     huds(|h| h.remove(&conn));
