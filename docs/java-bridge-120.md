@@ -834,8 +834,11 @@ and a client tick. The HUD frame (`Hud120.frame`) now gives them those, from the
 Checked in a game with the 34-mod pack and Jade 11.13.3: looking at a furnace shows Jade's
 panel with its icon, "Furnace", "Minecraft" and the harvest tool; a cooking pot shows "Cooking
 Pot", "Farmer's Delight"; a cow at 7 of 10 health shows "Cow", three and a half hearts of five,
-"Minecraft". Not yet: a block's server-side data (a furnace's contents); minimaps (they read
-client chunks).
+"Minecraft"; a furnace with ore and coal shows them and its progress, which Jade's server half
+reads from the block entity. Vanilla block entities are Horizon's, saved as 26.3 saves them, so
+their stacks go down to 1.20.1's form (`count` to `Count`) before the runtime loads them
+(`stacks_to_120`); they loaded empty before. `HORIZON_120_PACKETS` prints the mods' packets
+each way. Not yet: minimaps (they read client chunks).
 
 ## Phase 5i status: the mods' HUD (2026-11-14)
 

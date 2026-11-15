@@ -435,6 +435,26 @@ fn runtime_within(wait: Duration) -> Option<std::sync::MutexGuard<'static, Optio
     }
 }
 
+/// 26.3's item stacks in `tag`, wherever they are, as 1.20.1 saves them: `count` (an int) is
+/// `Count` (a byte). Components have no way down yet (stack_to_120's are for held items).
+fn stacks_to_120(tag: &mut horizon_world::nbt::Tag) {
+    use horizon_world::nbt::Tag;
+    match tag {
+        Tag::Compound(c) => {
+            let stack = c.contains_key(&"id".into()) && !c.contains_key(&"Count".into());
+            if stack && let Some(Tag::Int(count)) = c.get(&"count".into()).cloned() {
+                c.remove(&"count".into());
+                c.insert("Count".into(), Tag::Byte(count.clamp(0, 127) as i8));
+            }
+            for value in c.values_mut() {
+                stacks_to_120(value);
+            }
+        }
+        Tag::List(items) => items.iter_mut().for_each(stacks_to_120),
+        _ => {}
+    }
+}
+
 /// Said once: a tick of the mods' block entities that failed. A tick runs twenty times a
 /// second, so the same failure would otherwise fill the log.
 fn tick_failed_once(e: &str) {
@@ -597,6 +617,16 @@ impl World120 for Level<'_, '_> {
         let mut tag = game.block_entity_nbt([x, y, z])?;
         if let horizon_world::nbt::Tag::Compound(c) = &mut tag {
             c.remove(&"keepPacked".into());
+            // Vanilla's block entities are Horizon's, saved as 26.3 saves them: their stacks
+            // go down to 1.20.1's form, or they load empty there (a furnace's contents, which
+            // Jade shows from the server half).
+            let vanilla = matches!(
+                c.get(&"id".into()),
+                Some(horizon_world::nbt::Tag::String(id)) if id.to_string().is_ok_and(|id| id.starts_with("minecraft:"))
+            );
+            if vanilla {
+                stacks_to_120(&mut tag);
+            }
         }
         Some(horizon_world::snbt_text::to_snbt(&tag))
     }
@@ -1065,6 +1095,22 @@ impl super::Game<'_> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_vanilla_block_entitys_stacks_go_down_to_1_20_1() {
+        let (mut tag, _) = horizon_world::nbt::parse_snbt(
+            r#"{id:"minecraft:furnace",Items:[{Slot:0b,id:"minecraft:iron_ore",count:5},{Slot:1b,id:"minecraft:coal",count:300}],CookTime:3s}"#,
+        )
+        .expect("snbt");
+        super::stacks_to_120(&mut tag);
+        let snbt = horizon_world::snbt_text::to_snbt(&tag);
+        assert!(
+            snbt.contains("Count:5b") && snbt.contains("Count:127b"),
+            "{snbt}"
+        );
+        assert!(!snbt.contains("count:"), "{snbt}");
+        assert!(snbt.contains("CookTime:3s"), "the rest stays: {snbt}");
+    }
     use super::stack_from_120;
 
     /// Leaf litter (no collision) is air to the mods' mobs, a carpet's height a carpet, a full

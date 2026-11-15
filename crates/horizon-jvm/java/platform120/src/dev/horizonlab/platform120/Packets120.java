@@ -35,6 +35,9 @@ public final class Packets120 {
     private static final Set<String> FAILED = ConcurrentHashMap.newKeySet();
 
     /** Who the client half is now. */
+    /** The mods' packets each way, printed (`HORIZON_120_PACKETS`). */
+    private static final boolean TRACE = System.getenv("HORIZON_120_PACKETS") != null;
+
     public static ServerPlayer standingIn() {
         return Screens120.standingIn();
     }
@@ -66,6 +69,7 @@ public final class Packets120 {
         if (!(packet instanceof ClientboundCustomPayloadPacket payload)) return;
         ResourceLocation channel = payload.getIdentifier();
         var receiver = ClientNetworkingImpl.PLAY.getHandler(channel);
+        if (TRACE) System.out.println("Packets120: to the client on " + channel + (receiver == null ? " (no receiver)" : ""));
         if (receiver == null || player == null) return;
         FriendlyByteBuf bytes = copy(payload.getData());
         Screens120.clientPlayer(player);
@@ -88,6 +92,7 @@ public final class Packets120 {
         ServerPlayer player = Screens120.standingIn();
         ResourceLocation channel = payload.getIdentifier();
         var receiver = ServerNetworkingImpl.PLAY.getHandler(channel);
+        if (TRACE) System.out.println("Packets120: to the server on " + channel + (receiver == null ? " (no receiver)" : ""));
         if (receiver == null || player == null) return;
         FriendlyByteBuf bytes = copy(payload.getData());
         try {
