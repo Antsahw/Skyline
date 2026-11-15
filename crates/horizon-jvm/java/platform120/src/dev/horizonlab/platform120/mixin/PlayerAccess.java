@@ -28,4 +28,10 @@ public interface PlayerAccess {
     @Mutable
     @Accessor("abilities")
     void horizon$setAbilities(net.minecraft.world.entity.player.Abilities abilities);
+
+    /** The client player is made without a constructor: its profile is the server player's
+     * (its name, which renderers ask for as they decide whether to show a mob's). */
+    @Mutable
+    @Accessor("gameProfile")
+    void horizon$setGameProfile(com.mojang.authlib.GameProfile profile);
 }

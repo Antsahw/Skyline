@@ -2106,6 +2106,56 @@ public final class Mirror120 {
         return new Object[] {out.toString()};
     }
 
+    /** The mods' items drawn by their code (Render120.drawItems): {json}, textures into `dir`. */
+    public static Object[] codeItems(String dir) {
+        setUp();
+        return new Object[] {Render120.drawItems(java.nio.file.Path.of(dir))};
+    }
+
+    /**
+     * The client resources the mods make in code rather than ship in their jars (a runtime
+     * resource pack: ARRP's, which Medieval Weapons makes its weapons' models in), written into
+     * `dir` as a jar holds them (`assets/ns/...`), mods' namespaces only: {json} `{ns: files}`.
+     * A pack that is vanilla's, Fabric's or a mod's own files is the jar's, and left out.
+     */
+    public static Object[] runtimePacks(String dir) throws java.io.IOException {
+        setUp();
+        var out = new com.google.gson.JsonObject();
+        var root = java.nio.file.Path.of(dir);
+        var type = net.minecraft.server.packs.PackType.CLIENT_RESOURCES;
+        try (var resources = Models120.clientResources()) {
+            for (var pack : resources.listPacks().toList()) {
+                String kind = pack.getClass().getName();
+                if (kind.startsWith("net.minecraft.") || kind.startsWith("net.fabricmc.")) continue;
+                for (String ns : pack.getNamespaces(type)) {
+                    if ("minecraft".equals(ns)) continue;
+                    int[] written = {0};
+                    for (String folder : new String[] {"models", "blockstates", "textures", "lang", "particles"}) {
+                        try {
+                            pack.listResources(type, ns, folder, (location, supplier) -> {
+                                var to = root.resolve("assets").resolve(location.getNamespace()).resolve(location.getPath());
+                                if (java.nio.file.Files.exists(to)) return;
+                                try (var in = supplier.get()) {
+                                    java.nio.file.Files.createDirectories(to.getParent());
+                                    java.nio.file.Files.write(to, in.readAllBytes());
+                                    written[0]++;
+                                } catch (java.io.IOException | RuntimeException e) {
+                                    log("a runtime pack's " + location + " can't be read: " + e);
+                                }
+                            });
+                        } catch (RuntimeException e) {
+                            log("the runtime pack " + pack.packId() + " can't list its " + folder + ": " + e);
+                        }
+                    }
+                    if (written[0] > 0) {
+                        out.addProperty(ns, (out.has(ns) ? out.get(ns).getAsInt() : 0) + written[0]);
+                    }
+                }
+            }
+        }
+        return new Object[] {out.toString()};
+    }
+
     /** The pools the mods add to loot tables in code (Loot120.added): {json}. */
     public static Object[] lootAdded() {
         setUp();

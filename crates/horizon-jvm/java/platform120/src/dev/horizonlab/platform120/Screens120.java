@@ -416,6 +416,9 @@ public final class Screens120 {
                     Allocate.make(net.minecraft.client.multiplayer.ClientPacketListener.class));
         }
         standingIn = player;
+        if (local.getGameProfile() != player.getGameProfile()) {
+            ((dev.horizonlab.platform120.mixin.PlayerAccess) local).horizon$setGameProfile(player.getGameProfile());
+        }
         mixinFieldsFrom(player, local);
         ((dev.horizonlab.platform120.mixin.PlayerAccess) local).horizon$setInventory(player.getInventory());
         ((dev.horizonlab.platform120.mixin.PlayerAccess) local).horizon$setInventoryMenu(player.inventoryMenu);

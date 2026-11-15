@@ -156,6 +156,8 @@ public final class Boot120 implements RemoteRuntime {
                 return mirror(method, args);
             case "lootAdded":
             case "spawnEggs":
+            case "codeItems":
+            case "runtimePacks":
             case "biomeChanges":
                 // What the mods' Fabric biome modifications add to and take from vanilla's
                 // biomes, as data (Mirror120, Worldgen120).

@@ -9,6 +9,8 @@
 //! The result is kept in a cache folder under a stamp of the jars (names, sizes, times) and of
 //! this crate's version, so a start with the same mods reads it back without starting Java.
 
+mod code;
+
 use crate::boot120::Runtime120;
 use crate::wire::Value;
 use std::path::{Path, PathBuf};
@@ -20,8 +22,9 @@ use std::path::{Path, PathBuf};
 /// ids vanilla renamed since 1.20.1 (`minecraft:grass`) in the mods' data. 7: the mods that
 /// change vanilla's world generation (Terralith) get it as a data pack ([`worldgen_pack`]). 8: so
 /// do the mods with dimensions of their own. 9: the pools they add to loot tables ([`loot_added`]).
-/// 10: their spawn eggs drawn as in 1.20.1 ([`spawn_eggs`]).
-const FORMAT: u32 = 10;
+/// 10: their spawn eggs drawn as in 1.20.1 ([`spawn_eggs`]). 11: the files their runtime resource
+/// packs hold, and their items drawn by code as models ([`code`]).
+const FORMAT: u32 = 11;
 
 /// The file under the cache holding the pools the mods add to loot tables ([`loot_added`]).
 pub const LOOT_ADDED: &str = "loot_added.json";
@@ -500,6 +503,20 @@ pub fn build(
     });
     std::fs::write(instance.join("mmc-pack.json"), pack.to_string())
         .map_err(|e| format!("mmc-pack.json: {e}"))?;
+    // What the mods make in runtime resource packs (ARRP's): into their jars, carried as theirs.
+    let packs = cache.join("runtime_packs");
+    let written = runtime.call_with(
+        "runtimePacks",
+        &[Value::Str(packs.to_string_lossy().into_owned())],
+    )?;
+    let from_packs = code::add_runtime_packs(&written, &packs, &mods, &|l| {
+        log(format!("1.20.1 mods' content: {l}"))
+    });
+    if from_packs > 0 {
+        log(format!(
+            "1.20.1 mods' content: {from_packs} file(s) from their runtime resource packs"
+        ));
+    }
     let log_line = |line: String| log(format!("1.20.1 mods' content: {line}"));
     horizon_port_pack::pipeline::import(&instance, &work, &log_line)?;
     let records = horizon_port_pack::pipeline::inventory(&work, true, &log_line)?;
@@ -571,6 +588,19 @@ pub fn build(
     if eggs > 0 {
         log(format!(
             "1.20.1 mods' content: {eggs} spawn egg(s) drawn as 1.20.1 draws them"
+        ));
+    }
+    let drawn = cache.join("code_items");
+    let items = runtime.call_with(
+        "codeItems",
+        &[Value::Str(drawn.to_string_lossy().into_owned())],
+    )?;
+    let items = code::code_items(&items, &drawn, &carried(&work), &|l| {
+        log(format!("1.20.1 mods' content: {l}"))
+    });
+    if items > 0 {
+        log(format!(
+            "1.20.1 mods' content: {items} item(s) drawn by their code, as models"
         ));
     }
     let tabs = creative_tabs(&facts, &carried(&work));

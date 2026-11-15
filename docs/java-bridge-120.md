@@ -506,6 +506,37 @@ didn't have (it now has a game renderer holding the renderers' camera); a record
 `flush` is cancelled (Immersive Aircraft's HUD flushes mid-frame); and a mod whose settings
 screen can't be found now logs the mod's own exception rather than the reflection wrapper.
 
+## Fixes from a player's report (2026-11-15)
+
+- **Epic Knights' shields drew as nothing.** Their item model is `builtin/entity`: the item's
+  renderer (Fabric's `BuiltinItemRendererRegistry`) draws it in code, which 26.3's item models
+  can't say. The runtime now draws each such item once, as the item renderer does with no
+  display transform (`Render120.drawItems`, the runtime's `codeItems`), and the content build
+  turns each quad into a flat element on the texture it was drawn with, copied beside the mod's
+  item textures (`content120/code.rs`). The model keeps the display transforms it had through
+  its parents, so the shield is held and shown as in 1.20.1. A quad not on the block's axes
+  can't be an element and is left out (a lance's tilted tip). The shields' renderer loads its
+  model in Fabric's `LivingEntityFeatureRendererRegistrationCallback`, which the runtime now
+  fires once as the client does.
+- **Medieval Weapons' weapons drew as nothing.** Their models are made in code, in an ARRP
+  runtime resource pack. The runtime lists the client packs that are neither vanilla's,
+  Fabric's nor a mod's own files and writes what they hold (`runtimePacks`); the content build
+  adds it to the mod's jar copy, so the carry-over takes it as the mod's own.
+- **Items of the 1.20.1 mods vanished when dropped**, with the 26.3 bridge running. Horizon's
+  item entities are shown to the 26.3 mods (`HorizonItems`); an item 26.3's registries don't
+  have read as empty there, and an emptied item is one a mod took, so Horizon removed it. Such
+  an item is now left to Horizon alone.
+- **Geophilic's disks failed** ("Should always be able to create a chunk!"): a disk marks the
+  block above it on its chunk, and a mirror level has no chunks. A caller that must have one now
+  gets an empty chunk; the blocks go through the level, to Horizon. The game also says why it
+  can't read a feature itself (those go to the slower runtime), by reason.
+- **A mod's screen opened small in a corner for a frame.** Its first frame was laid out in a
+  427x240 default until the game sent its size; it now takes the HUD's size, the same GUI.
+- **Naturalist's jellyfish didn't draw**: the client player had no profile (its name decides
+  whether a mob's name shows). It has the server player's.
+- Not a bug: Epic Knights' tooltips show `%1$f`. Its translations use `%f`, which vanilla's
+  `Component.translatable` doesn't format, in 1.20.1 too.
+
 ## Fixes from a player's report (2026-11-14)
 
 - **Spawn eggs drew as nothing.** A 1.20.1 egg's model is vanilla's `item/template_spawn_egg`,

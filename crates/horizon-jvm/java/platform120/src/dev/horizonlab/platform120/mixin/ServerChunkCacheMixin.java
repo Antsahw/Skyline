@@ -21,6 +21,10 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  */
 @Mixin(ServerChunkCache.class)
 public abstract class ServerChunkCacheMixin {
+    @org.spongepowered.asm.mixin.Shadow
+    @org.spongepowered.asm.mixin.Final
+    net.minecraft.server.level.ServerLevel level;
+
     @Inject(method = "hasChunk", at = @At("HEAD"), cancellable = true)
     private void horizon$hasChunk(int x, int z, CallbackInfoReturnable<Boolean> cir) {
         cir.setReturnValue(false);
@@ -35,6 +39,17 @@ public abstract class ServerChunkCacheMixin {
             at = @At("HEAD"), cancellable = true)
     private void horizon$chunk(int x, int z, net.minecraft.world.level.chunk.ChunkStatus status,
             boolean require, CallbackInfoReturnable<ChunkAccess> cir) {
+        // Code that must have a chunk (a disk feature marks the block above for post-processing
+        // on it) gets an empty one, whose marks and writes go nowhere, rather than vanilla's
+        // "Should always be able to create a chunk!" ending the feature halfway: its blocks
+        // are written through the level, which is Horizon's world.
+        if (require && level != null) {
+            var plains = level.registryAccess().registryOrThrow(net.minecraft.core.registries.Registries.BIOME)
+                    .getHolderOrThrow(net.minecraft.world.level.biome.Biomes.PLAINS);
+            cir.setReturnValue(new net.minecraft.world.level.chunk.EmptyLevelChunk(level,
+                    new net.minecraft.world.level.ChunkPos(x, z), plains));
+            return;
+        }
         cir.setReturnValue(null);
     }
 

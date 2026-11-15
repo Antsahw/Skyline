@@ -278,6 +278,21 @@ impl VanillaTerrain {
         }
         oracle::warn_unsupported_structures(dimension, &generator.unsupported_structures());
         let mut unsupported = generator.unsupported_features();
+        // Why, by reason, the most common first: a feature Horizon can't read is placed by a
+        // Java mods' runtime, far slower than Horizon's own placing, or not at all.
+        if !unsupported.is_empty() {
+            let mut reasons: std::collections::BTreeMap<&str, (usize, &str)> = Default::default();
+            for (name, reason) in &unsupported {
+                reasons.entry(reason.as_str()).or_insert((0, name.as_str())).0 += 1;
+            }
+            let mut reasons: Vec<_> = reasons.into_iter().collect();
+            reasons.sort_by_key(|r| std::cmp::Reverse(r.1.0));
+            for (reason, (count, example)) in reasons.iter().take(6) {
+                log::info!(
+                    "Horizon: {count} placed feature(s) Horizon can't read ({example}...): {reason}"
+                );
+            }
+        }
         // Those a mod's own code places (the 1.20.1 mods' runtime) do run.
         if let Some(foreign) = horizon_world::worldgen::foreign::foreign_features() {
             let before = unsupported.len();

@@ -39,6 +39,8 @@ final class Render120 {
             net.minecraft.client.renderer.blockentity.BlockEntityRenderer<?>> blockRenderers;
     private static net.minecraft.client.renderer.blockentity.BlockEntityRenderDispatcher blockDispatcher;
     private static net.minecraft.client.Camera camera;
+    /** The client's item renderer, over its baked item models (made in setUp). */
+    private static net.minecraft.client.renderer.entity.ItemRenderer items;
     private static final Set<String> FAILED = new HashSet<>();
     /** A texture's name in a render type's description: `ns:textures/....png`. */
     private static final Pattern TEXTURE = Pattern.compile("([a-z0-9_.-]+:[a-z0-9_./-]+\\.png)");
@@ -80,6 +82,7 @@ final class Render120 {
             }
         }
         Mirror120.log(renderers.size() + " mod entity renderer(s) made");
+        featureRenderers(context);
 
         // Block entity renderers (phase 7b): a cutting board's item, a skillet's food. They draw
         // items through an ItemRenderer over the client's baked item models (Models120).
@@ -100,6 +103,7 @@ final class Render120 {
             ((dev.horizonlab.platform120.mixin.MinecraftAccess) client).horizon$setItemRenderer(holder[0]);
         }
         camera = dispatcher.camera;
+        items = holder[0];
         // Models that look at the player ask the client's game renderer for its camera as they
         // pose (Naturalist's crab): a renderer made without its constructor, with this camera.
         if (client.gameRenderer == null) {
@@ -120,6 +124,45 @@ final class Render120 {
             }
         }
         Mirror120.log(blockRenderers.size() + " mod block entity renderer(s) made");
+    }
+
+    /**
+     * Fabric's `LivingEntityFeatureRendererRegistrationCallback`, as the client fires it while it
+     * makes its entity renderers: mods load their item models there (Epic Knights' shields, whose
+     * item renderer draws nothing until then). Fired once, for a pig's renderer, with a helper
+     * that keeps the layers nowhere (the mods' layers on vanilla's mobs are Horizon's to draw).
+     */
+    private static void featureRenderers(EntityRendererProvider.Context context) {
+        try {
+            // By reflection: Fabric's rendering API is the mods', not on the bridge's classpath.
+            var pig = new net.minecraft.client.renderer.entity.PigRenderer(context);
+            Class<?> callback = Class.forName(
+                    "net.fabricmc.fabric.api.client.rendering.v1.LivingEntityFeatureRendererRegistrationCallback");
+            Class<?> helperType = Class.forName(callback.getName() + "$RegistrationHelper");
+            Object helper = java.lang.reflect.Proxy.newProxyInstance(helperType.getClassLoader(),
+                    new Class<?>[] {helperType}, (proxy, method, args) -> {
+                        if (method.getDeclaringClass() == Object.class) {
+                            return switch (method.getName()) {
+                                case "hashCode" -> System.identityHashCode(proxy);
+                                case "equals" -> proxy == args[0];
+                                default -> "RegistrationHelper";
+                            };
+                        }
+                        return null;
+                    });
+            Object event = callback.getField("EVENT").get(null);
+            Object invoker = event.getClass().getMethod("invoker").invoke(event);
+            for (var method : callback.getMethods()) {
+                if (method.getName().equals("registerRenderers") && method.getParameterCount() == 4) {
+                    method.invoke(invoker, EntityType.PIG, pig, helper, context);
+                }
+            }
+        } catch (ReflectiveOperationException e) {
+            Mirror120.log("the mods' feature renderer hooks failed: " + (e.getCause() != null ? e.getCause() : e));
+        } catch (RuntimeException | LinkageError e) {
+            Mirror120.log("the mods' feature renderer hooks failed: " + e);
+            for (StackTraceElement at : e.getStackTrace()) Mirror120.log("    at " + at);
+        }
     }
 
     /**
@@ -154,6 +197,71 @@ final class Render120 {
             }
             JsonArray meshes = capture.meshes();
             if (!meshes.isEmpty()) out.add(pos.getX() + "," + pos.getY() + "," + pos.getZ(), meshes);
+        }
+        return out.toString();
+    }
+
+    /**
+     * The mods' items whose model is their code (a model with parent `builtin/entity`: Epic
+     * Knights' shields, a mod's chest as an item), each drawn once by its own renderer (the
+     * item's `BlockEntityWithoutLevelRenderer`, or what it registered with Fabric's
+     * `BuiltinItemRendererRegistry`), as the item renderer draws it with no display transform:
+     * JSON {item: [{"tex", "o", "v"}...]}, positions in the model's block units (0 to 1 across
+     * the item's cube). The textures drawn with are written into `dir` (`ns/path.png`, their
+     * resource path), from the client's resources, for Horizon to draw them as an item model.
+     */
+    static String drawItems(java.nio.file.Path dir) {
+        setUp();
+        JsonObject out = new JsonObject();
+        Set<String> textures = new HashSet<>();
+        int custom = 0;
+        for (var item : BuiltInRegistries.ITEM) {
+            var id = BuiltInRegistries.ITEM.getKey(item);
+            if ("minecraft".equals(id.getNamespace())) continue;
+            var stack = new net.minecraft.world.item.ItemStack(item);
+            net.minecraft.client.resources.model.BakedModel model;
+            try {
+                model = items.getItemModelShaper().getItemModel(stack);
+            } catch (RuntimeException | LinkageError e) {
+                continue;
+            }
+            if (model == null || !model.isCustomRenderer()) continue;
+            custom++;
+            Capture capture = new Capture();
+            try {
+                items.render(stack, net.minecraft.world.item.ItemDisplayContext.NONE, false, new PoseStack(), capture,
+                        0xF000F0, net.minecraft.client.renderer.texture.OverlayTexture.NO_OVERLAY, model);
+            } catch (RuntimeException | LinkageError e) {
+                if (FAILED.add(id.toString())) {
+                    Mirror120.log("the item " + id + " didn't draw: " + e);
+                    for (StackTraceElement at : e.getStackTrace()) Mirror120.log("    at " + at);
+                }
+                continue;
+            }
+            JsonArray meshes = capture.meshes();
+            if (meshes.isEmpty()) {
+                if (FAILED.add(id.toString())) Mirror120.log("the item " + id + " drew nothing");
+                continue;
+            }
+            for (var mesh : meshes) textures.add(mesh.getAsJsonObject().get("tex").getAsString());
+            out.add(id.toString(), meshes);
+        }
+        Mirror120.log(custom + " mod item(s) drawn by their code, " + out.size() + " drew something");
+        if (textures.isEmpty()) return out.toString();
+        try (var resources = Models120.clientResources()) {
+            for (String texture : textures) {
+                var location = net.minecraft.resources.ResourceLocation.tryParse(texture);
+                if (location == null) continue;
+                var resource = resources.getResource(location);
+                if (resource.isEmpty()) continue;
+                var to = dir.resolve(location.getNamespace()).resolve(location.getPath());
+                try (var in = resource.get().open()) {
+                    java.nio.file.Files.createDirectories(to.getParent());
+                    java.nio.file.Files.write(to, in.readAllBytes());
+                } catch (java.io.IOException e) {
+                    Mirror120.log("the texture " + texture + " can't be written: " + e);
+                }
+            }
         }
         return out.toString();
     }
