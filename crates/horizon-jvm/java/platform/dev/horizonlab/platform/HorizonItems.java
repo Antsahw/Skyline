@@ -70,6 +70,9 @@ public final class HorizonItems {
      * pickup_delay, "stack snbt"], ...]}`: the shadows follow, new ones are made, those no
      * longer listed (picked up, merged, gone, far) go.
      */
+    /** Stacks that read as empty here (another runtime's items), not read again each tick. */
+    private static final java.util.Set<String> UNREAD = new java.util.HashSet<>();
+
     public static synchronized void update(String json) {
         Map<ServerLevel, Map<Integer, ItemEntity>> seen = new IdentityHashMap<>();
         var root = JsonParser.parseString(json).getAsJsonObject();
@@ -82,6 +85,18 @@ public final class HorizonItems {
                 JsonArray a = el.getAsJsonArray();
                 int id = a.get(0).getAsInt();
                 ItemEntity shadow = had.get(id);
+                String snbt = a.get(10).getAsString();
+                if (UNREAD.contains(snbt)) continue;
+                Seen before = shadow == null ? null : SEEN.get(shadow);
+                ItemStack stack = before != null && before.snbt().equals(snbt) ? null : HorizonServer.item(snbt);
+                // An item this game's registries don't have (another runtime's: a 1.20.1 mod's)
+                // reads as empty. The mods can't see it, and a shadow of it would be emptied,
+                // which says to Horizon it is gone: it stays Horizon's alone.
+                if (stack != null && stack.isEmpty()) {
+                    if (UNREAD.size() > 4096) UNREAD.clear();
+                    UNREAD.add(snbt);
+                    continue;
+                }
                 Vec3 at = new Vec3(a.get(1).getAsDouble(), a.get(2).getAsDouble(), a.get(3).getAsDouble());
                 if (shadow == null || shadow.isRemoved()) shadow = adopt(level, id, at, a.get(10).getAsString());
                 if (shadow == null) shadow = make(level, id);
@@ -94,9 +109,10 @@ public final class HorizonItems {
                 shadow.setOnGround(a.get(7).getAsInt() != 0);
                 setAge(shadow, a.get(8).getAsInt());
                 shadow.setPickUpDelay(a.get(9).getAsInt());
-                String snbt = a.get(10).getAsString();
-                Seen before = SEEN.get(shadow);
-                if (before == null || !before.snbt().equals(snbt)) shadow.setItem(HorizonServer.item(snbt));
+                before = SEEN.get(shadow);
+                if (before == null || !before.snbt().equals(snbt)) {
+                    shadow.setItem(stack != null ? stack : HorizonServer.item(snbt));
+                }
                 SEEN.put(shadow, new Seen(snbt, shadow.getItem().copy(), pos, vel));
                 now.put(id, shadow);
             }
