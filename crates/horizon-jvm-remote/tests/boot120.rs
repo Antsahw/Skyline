@@ -2690,7 +2690,18 @@ fn the_mods_machines_pass_energy_between_them() {
         .tooltip("{id:\"minecraft:bread\",Count:1b}", false)
         .expect("the tooltip");
     assert_eq!(vanilla, "[]", "vanilla's own lines are Horizon's");
-    assert_eq!(image, "", "and no image");
+    // Its picture is a mod's: AppleSkin's food and saturation, a line its mixins make a
+    // picture; none without it.
+    if configs.iter().any(|(id, _)| id == "appleskin") {
+        let image: serde_json::Value = serde_json::from_str(&image).expect("AppleSkin's picture");
+        assert!(image["h"].as_i64().unwrap_or(0) > 0, "{image}");
+        assert!(
+            !image["ops"].as_array().is_none_or(Vec::is_empty),
+            "its shanks drawn: {image}"
+        );
+    } else {
+        assert_eq!(image, "", "and no picture");
+    }
     // A mod item's tooltip image: Farmer's Delight's cooking pot shows the meal it holds
     // (CookingPotTooltip, made by its TooltipComponentCallback), drawn as an item.
     let (_, _, image) = runtime

@@ -173,10 +173,11 @@ impl Game<'_> {
         });
     }
 
-    /// The game: a mod item's tooltip image for `stack`, when its answer has one (asked for
-    /// with its lines, by [`Self::java120_tooltip`]).
+    /// The game: the tooltip pictures the mods give `stack` (a mod item's image, AppleSkin's
+    /// food on vanilla food), when its answer has them (asked for with its lines, by
+    /// [`Self::java120_tooltip`]).
     pub(in crate::game) fn java120_tooltip_image(&self, stack: &ItemStack) -> Option<Image> {
-        if !ON.load(Ordering::Relaxed) || stack.item.starts_with("minecraft:") {
+        if !ON.load(Ordering::Relaxed) {
             return None;
         }
         let key = (stack_key(stack), false);

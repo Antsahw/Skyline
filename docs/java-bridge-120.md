@@ -706,9 +706,18 @@ what `renderText` draws through `TextRecorder120` (a font whose `drawInBatch` be
 operations), and answers `{w, h, ops}` as a third value of `tooltip`. The game draws the ops
 under the lines and any native component, in a box made that much larger (`stations.rs`,
 `draw_java_ops` moved by the image's origin). Checked in a game: Farmer's Delight's cooking pot
-holding beef stew shows "Holds 2 servings of:" and the stew's icon and name. Only mod items'
-images (vanilla's own, like a bundle's, are Horizon's); images a mod gives vanilla items through
-mixins (AppleSkin's food preview) are not asked for.
+holding beef stew shows "Holds 2 servings of:" and the stew's icon and name.
+
+Vanilla items' pictures from mods (2026-11-15): every stack is asked, a vanilla item's own
+image left out (a bundle's is Horizon's). Pictures can also be lines: a mod's mixin into
+`getTooltipLines` adds a line that its mixin into `ClientTooltipComponent.create` makes
+something other than text (AppleSkin's food and saturation). So the runtime builds the
+stack's whole `getTooltipLines` (with the client player standing in) and draws each line
+`create` doesn't make a `ClientTextTooltip`, under the item's own image. For that, the client
+player shares the server player's mixin-added fields where its own are empty (Cardinal
+Components' container, which Trinkets reads in tooltips: `Screens120.mixinFieldsFrom`), and
+the client level's enabled features are its server level's. Checked in a game with the 34-mod
+pack and AppleSkin 2.5.2: bread shows its two and a half shanks and the saturation under them.
 
 ## Phase 5m status: the mods' tools, weapons and armour (2026-11-14)
 

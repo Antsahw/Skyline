@@ -416,6 +416,7 @@ public final class Screens120 {
                     Allocate.make(net.minecraft.client.multiplayer.ClientPacketListener.class));
         }
         standingIn = player;
+        mixinFieldsFrom(player, local);
         ((dev.horizonlab.platform120.mixin.PlayerAccess) local).horizon$setInventory(player.getInventory());
         ((dev.horizonlab.platform120.mixin.PlayerAccess) local).horizon$setInventoryMenu(player.inventoryMenu);
         local.containerMenu = player.containerMenu;
@@ -431,6 +432,36 @@ public final class Screens120 {
         if (players.size() != 1 || players.get(0) != local) {
             players.clear();
             players.add(local);
+        }
+    }
+
+    /**
+     * What mods' mixins add to entities and players (Cardinal Components' container, which
+     * Trinkets reads in a tooltip), which the client player, made without a constructor, has
+     * none of: the server player's, shared, where the client player's is empty. Only fields
+     * a mixin added, of the classes both are.
+     */
+    private static void mixinFieldsFrom(net.minecraft.server.level.ServerPlayer from, net.minecraft.client.player.LocalPlayer to) {
+        for (Class<?> c = net.minecraft.world.entity.player.Player.class; c != null && c != Object.class; c = c.getSuperclass()) {
+            for (var field : c.getDeclaredFields()) {
+                // Added by a mixin: a '$' in its name, or any name but an intermediary one on a
+                // Minecraft class (Allocate.mixinCollections' rule: Cardinal Components' plain
+                // `components`).
+                boolean added = field.getName().indexOf('$') >= 0
+                        || (c.getName().startsWith("net.minecraft.") && !field.getName().startsWith("field_"));
+                if (java.lang.reflect.Modifier.isStatic(field.getModifiers()) || field.getType().isPrimitive() || !added) {
+                    continue;
+                }
+                try {
+                    field.setAccessible(true);
+                    if (field.get(to) == null) {
+                        Object value = field.get(from);
+                        if (value != null) Allocate.put(to, field, value);
+                    }
+                } catch (ReflectiveOperationException | RuntimeException e) {
+                    // A field it keeps to itself.
+                }
+            }
         }
     }
 

@@ -66,6 +66,11 @@ public final class Allocate {
         }
     }
 
+    /** Sets a field, final or not (a final one Mixin added: its initializer never ran). */
+    static void put(Object target, java.lang.reflect.Field field, Object value) {
+        UNSAFE.putObject(target, UNSAFE.objectFieldOffset(field), value);
+    }
+
     /** An empty collection of the kind `type` names, or null for a type that isn't one. */
     private static Object emptyOf(Class<?> type) {
         String name = type.getName();

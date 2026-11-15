@@ -1478,7 +1478,7 @@ public final class Mirror120 {
             for (int i = before; i < all.size(); i++) {
                 afterJson.add(net.minecraft.network.chat.Component.Serializer.toJsonTree(all.get(i)));
             }
-            String image = id.getNamespace().equals("minecraft") ? "" : tooltipImage(id, stack);
+            String image = tooltipImage(id, stack, flag);
             return new Object[] {hoverJson.toString(), afterJson.toString(), image};
         } catch (com.mojang.brigadier.exceptions.CommandSyntaxException e) {
             return new Object[] {"[]", "[]", ""};
@@ -1488,42 +1488,74 @@ public final class Mirror120 {
     }
 
     /**
-     * A mod item's tooltip image (`Item.getTooltipImage`, made a ClientTooltipComponent by
-     * `ClientTooltipComponent.create`, where Fabric's TooltipComponentCallback answers: Farmer's
-     * Delight's cooking pot shows its meal), as JSON {w, h, ops}: its size and what its
-     * `renderImage` and `renderText` draw at the origin. "" when it has none.
+     * A stack's tooltip pictures as JSON {w, h, ops}: its size and what they draw at the
+     * origin, under one another. A mod item's image (`Item.getTooltipImage`, made a
+     * ClientTooltipComponent where Fabric's TooltipComponentCallback answers: Farmer's
+     * Delight's cooking pot shows its meal), and lines a mod made pictures (AppleSkin's food).
+     * "" when it has none.
      */
-    private static String tooltipImage(ResourceLocation id, ItemStack stack) {
-        java.util.Optional<net.minecraft.world.inventory.tooltip.TooltipComponent> data;
+    private static String tooltipImage(ResourceLocation id, ItemStack stack, net.minecraft.world.item.TooltipFlag flag) {
+        var components = new ArrayList<net.minecraft.client.gui.screens.inventory.tooltip.ClientTooltipComponent>();
+        boolean vanilla = id.getNamespace().equals("minecraft");
+        // The item's own image (a mod item's; a mod's mixin may give a vanilla item one, but
+        // vanilla's own, a bundle's contents, is Horizon's to draw).
         try {
-            data = stack.getTooltipImage();
+            var data = stack.getTooltipImage();
+            if (data.isPresent()) {
+                var component = clientTooltip(data.get());
+                if (!vanilla || !component.getClass().getName().startsWith("net.minecraft.")) components.add(component);
+            }
         } catch (Throwable t) {
             log(id + "'s tooltip image failed: " + t);
-            return "";
         }
-        if (data.isEmpty()) return "";
+        // Lines that are pictures: a mod's mixin into getTooltipLines adds a line that its
+        // mixin into ClientTooltipComponent.create makes something other than text
+        // (AppleSkin's food and saturation). The client player is the last one standing in.
+        try {
+            var player = Screens120.standingIn();
+            if (player != null) Screens120.clientPlayer(player);
+            var lines = stack.getTooltipLines(player == null ? null : net.minecraft.client.Minecraft.getInstance().player, flag);
+            for (var line : lines) {
+                var component = net.minecraft.client.gui.screens.inventory.tooltip.ClientTooltipComponent.create(line.getVisualOrderText());
+                if (!(component instanceof net.minecraft.client.gui.screens.inventory.tooltip.ClientTextTooltip)) {
+                    components.add(component);
+                }
+            }
+        } catch (Throwable t) {
+            log(id + "'s tooltip lines failed: " + t);
+        }
+        if (components.isEmpty()) return "";
         synchronized (Hud120.class) {
             Graphics120 recording = Graphics120.begin();
             try {
                 var font = Screens120.font();
-                var component = clientTooltip(data.get());
-                int w = component.getWidth(font);
-                int h = component.getHeight();
-                component.renderImage(font, 0, 0, Screens120.recorder());
-                // What it draws with the font itself (its text), as the tooltip draws it.
-                try {
-                    component.renderText(TextRecorder120.of(font), 0, 0, new org.joml.Matrix4f(), null);
-                } catch (Throwable t) {
-                    log(id + "'s tooltip text failed: " + t);
+                var recorder = Screens120.recorder();
+                int w = 0, y = 0;
+                // Under one another, as the tooltip lays its components out (2 between the
+                // first and the rest, which Horizon's box already leaves).
+                for (var component : components) {
+                    w = Math.max(w, component.getWidth(font));
+                    try {
+                        recorder.pose().pushPose();
+                        recorder.pose().translate(0, y, 0);
+                        component.renderImage(font, 0, 0, recorder);
+                        recorder.pose().popPose();
+                        // What it draws with the font itself (its text), as the tooltip draws it.
+                        component.renderText(TextRecorder120.of(font), 0, y, new org.joml.Matrix4f(), null);
+                    } catch (Throwable t) {
+                        log(id + "'s tooltip image failed: " + t);
+                    }
+                    y += component.getHeight();
                 }
+                if (w <= 0 || y <= 0) return "";
                 var out = new com.google.gson.JsonObject();
                 out.addProperty("w", w);
-                out.addProperty("h", h);
+                out.addProperty("h", y);
                 out.add("ops", recording.finish());
                 return out.toString();
             } catch (Throwable t) {
                 log(id + "'s tooltip image failed: " + t);
-                    return "";
+                return "";
             } finally {
                 if (Graphics120.current() == recording) recording.finish();
             }
