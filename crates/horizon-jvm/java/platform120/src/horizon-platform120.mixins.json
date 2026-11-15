@@ -34,6 +34,7 @@
     "ServerGamePacketListenerMixin"
   ],
   "client": [
+    "AbstractClientPlayerAccess",
     "AbstractContainerScreenMixin",
     "ClientPacketListenerMixin",
     "ClientPlayNetworkingMixin",
@@ -41,6 +42,7 @@
     "GlStateManagerMixin",
     "GuiAccess",
     "ClientLevelAccess",
+    "ClientLevelMixin",
     "GuiGraphicsAccess",
     "GuiGraphicsMixin",
     "GraphLibClientMixin",

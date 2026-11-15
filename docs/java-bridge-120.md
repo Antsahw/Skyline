@@ -813,6 +813,11 @@ and a client tick. The HUD frame (`Hud120.frame`) now gives them those, from the
   camera is set up at the player's eyes, the GUI's boss bars, chat and player list (never
   shown), a font set that measures (fonts made from the headless font, Jade's), and mixins'
   `ThreadLocal` fields on objects made without constructors (`Allocate`: Porting Lib's).
+- **The same client level for everything client-side** (`Screens120.clientPlayer`: screens,
+  keys, packets): `Minecraft.level` and the client player's level and `clientLevel` are the
+  player's dimension's, with the client player in its `players`, and an entity asked for by
+  id is the server level's (`ClientLevelMixin`). Mods' sync packets at join failed without a
+  client level (Cardinal Components', Trinkets'); they go through now.
 - **Colored quads drawn straight through a BufferBuilder** while a frame is recorded
   (`BufferUploaderMixin`: Jade's panel, HUD bars) become fills or gradients.
 

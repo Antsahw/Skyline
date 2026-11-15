@@ -11,4 +11,8 @@ public interface ClientLevelAccess {
     @Mutable
     @Accessor("clientLevelData")
     void horizon$setLevelData(ClientLevel.ClientLevelData data);
+
+    @Mutable
+    @Accessor("players")
+    void horizon$setPlayers(java.util.List<net.minecraft.client.player.AbstractClientPlayer> players);
 }

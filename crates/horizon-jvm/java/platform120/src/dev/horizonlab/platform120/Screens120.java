@@ -420,6 +420,18 @@ public final class Screens120 {
         ((dev.horizonlab.platform120.mixin.PlayerAccess) local).horizon$setInventoryMenu(player.inventoryMenu);
         local.containerMenu = player.containerMenu;
         minecraft.player = local;
+        // The client's world is the player's dimension (Hud120.clientLevel), with the client
+        // player in it: what client code reaches through Minecraft.level or player.level()
+        // (Trinkets' and Cardinal Components' sync packets at join).
+        var level = Hud120.clientLevel(player.serverLevel());
+        minecraft.level = level;
+        ((dev.horizonlab.platform120.mixin.EntityAccess) (Object) local).horizon$setLevel(level);
+        ((dev.horizonlab.platform120.mixin.AbstractClientPlayerAccess) local).horizon$setClientLevel(level);
+        var players = level.players();
+        if (players.size() != 1 || players.get(0) != local) {
+            players.clear();
+            players.add(local);
+        }
     }
 
     /**

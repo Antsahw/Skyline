@@ -118,7 +118,7 @@ public final class Hud120 {
     private static void share(ServerPlayer player, net.minecraft.client.player.LocalPlayer local) {
         var entity = (dev.horizonlab.platform120.mixin.EntityAccess) (Object) local;
         entity.horizon$setEntityData(player.getEntityData());
-        entity.horizon$setLevel(player.level());
+        entity.horizon$setLevel(clientLevel(player.serverLevel()));
         entity.horizon$setFluidOnEyes(((dev.horizonlab.platform120.mixin.EntityAccess) (Object) player).horizon$fluidOnEyes());
         var living = (dev.horizonlab.platform120.mixin.LivingEntityAccess) (Object) local;
         living.horizon$setAttributes(player.getAttributes());
@@ -202,6 +202,8 @@ public final class Hud120 {
         access.horizon$setProfiler(() -> net.minecraft.util.profiling.InactiveProfiler.INSTANCE);
         access.horizon$setDamageSources(server.damageSources());
         access.horizon$setRegistryAccess(server.registryAccess());
+        // Its players: the client player, once one stands in (Screens120.clientPlayer).
+        ((dev.horizonlab.platform120.mixin.ClientLevelAccess) level).horizon$setPlayers(new java.util.ArrayList<>());
         SERVER_LEVELS.put(level, server);
         CLIENT_LEVELS.put(server, level);
         return level;
