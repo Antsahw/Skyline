@@ -432,7 +432,15 @@ without Fabric's entity events), then the mods' `LivingEntity.die` handlers; wha
 listeners and two `die` handlers ran. The mods' own mobs die in the runtime, where all of it runs
 anyway.
 
-Not yet: mobs' hurt, blocks' and items' methods (each changed by four of the top mods at most:
+A vanilla mob about to be hurt (native_hooks.rs `hurt_server`, `Mirror120.mobHurt`) is told the
+same way: on a stand-in, Fabric's `ServerLivingEntityEvents.ALLOW_DAMAGE` (false cancels the
+hit), then the mods' `hurt` handlers along the mob's classes up to `LivingEntity` (a cancel
+cancels). The damage code has no game at hand, so the level is the one being ticked (levels.rs
+sets it). The runtime answers whether any mod listens at all; when none does, Horizon stops
+asking, and it never waits for a busy runtime. Checked in a game with the 34 mods: a zombie hit
+and burning, two `LivingEntity.hurt` handlers ran, the damage went through.
+
+Not yet: blocks' and items' methods (each changed by four of the top mods at most:
 farmland trampling, crops, bone meal), and `@Redirect` or `@ModifyArg`, which change code inside
 a method Horizon runs itself.
 

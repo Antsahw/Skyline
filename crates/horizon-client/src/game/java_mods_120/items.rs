@@ -208,6 +208,20 @@ pub(in crate::game) fn remember_player(id: i32, uuid: String, name: String, dime
         .insert(id, (uuid, name, dimension));
 }
 
+/// The level being ticked, for what Horizon's damage code asks about a mob with no game at
+/// hand (`java120_hurt_mob`). Set before each level's tick (levels.rs).
+static TICKING: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+
+/// No mod listens to mobs' hurt (the runtime said so once): Horizon stops asking.
+static MOB_HURT_UNHEARD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub(in crate::game) fn set_ticking_dimension(dimension: &str) {
+    let mut ticking = TICKING.lock().unwrap_or_else(|e| e.into_inner());
+    if *ticking != dimension {
+        dimension.clone_into(&mut ticking);
+    }
+}
+
 impl super::super::Game<'_> {
     /// A player is about to be hurt (`LivingEntity.hurtServer` past its guards, where native
     /// mods hear it: native_hooks.rs `hurt_server`): what the 1.20.1 mods inject into its
@@ -238,6 +252,54 @@ impl super::super::Game<'_> {
             Ok(canceled) => canceled,
             Err(e) => {
                 log::warn!("1.20.1 mods: a hit on {name}: {e}");
+                false
+            }
+        }
+    }
+
+    /// One of Horizon's vanilla mobs is about to be hurt (as [`Self::java120_hurt_player`]):
+    /// Fabric's `ALLOW_DAMAGE` and what the 1.20.1 mods inject into `hurt`. True cancels the
+    /// hit. Asks no more once the runtime says no mod listens; never waits for a busy runtime.
+    pub(in crate::game) fn java120_hurt_mob(
+        hurting: &horizon_client::health::Hurting<'_>,
+        amount: f32,
+    ) -> bool {
+        use std::sync::atomic::Ordering;
+        let horizon_client::health::Hurting::Mob(mob, damage) = hurting else {
+            return false;
+        };
+        if MOB_HURT_UNHEARD.load(Ordering::Relaxed) || !mob.kind.id.starts_with("minecraft:") {
+            return false;
+        }
+        let dimension = TICKING.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        if dimension.is_empty() {
+            return false;
+        }
+        let Some(mut guard) = super::runtime_within(std::time::Duration::from_millis(25)) else {
+            return false;
+        };
+        let Some(runtime) = guard.as_mut() else {
+            return false;
+        };
+        let by_player = damage.attacker == Some(horizon_client::mobs::Who::Player);
+        let pos = [mob.position.x, mob.position.y, mob.position.z];
+        let damage_type = super::super::creatures::source_damage_type(**damage);
+        match runtime.mob_hurt(
+            &dimension,
+            &mob.kind.id,
+            pos,
+            damage_type,
+            amount,
+            by_player,
+        ) {
+            Ok((canceled, listened)) => {
+                if !listened {
+                    MOB_HURT_UNHEARD.store(true, Ordering::Relaxed);
+                }
+                canceled
+            }
+            Err(e) => {
+                log::warn!("1.20.1 mods: a hit on a {}: {e}", mob.kind.id);
                 false
             }
         }

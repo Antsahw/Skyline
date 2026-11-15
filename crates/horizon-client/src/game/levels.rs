@@ -482,6 +482,8 @@ impl Game<'_> {
                 packets_drained: false,
             };
             if observe_level {
+                #[cfg(feature = "java-mods-120")]
+                super::java_mods_120::items::set_ticking_dimension(dim.id());
                 self.native_level_tick_pre(dim.id());
             }
             self.update_dedicated_streaming();

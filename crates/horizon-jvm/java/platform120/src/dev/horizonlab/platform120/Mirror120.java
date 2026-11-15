@@ -2210,6 +2210,82 @@ public final class Mirror120 {
         }
     }
 
+    /**
+     * One of Horizon's vanilla mobs (`type`, at x y z) is about to be hurt by `amount` of
+     * `damageType` (LivingEntity.hurt past its guards; `byPlayer`: a player's attack): Fabric's
+     * ServerLivingEntityEvents.ALLOW_DAMAGE, then what mods inject into `hurt` along the mob's
+     * classes, on a stand-in of the type. {cancelled, listened}: `listened` false when no mod
+     * listens to any mob's hurt, so Horizon stops asking.
+     */
+    public static Object[] mobHurt(String dimension, String type, double x, double y, double z,
+            String damageType, double amount, int byPlayer) {
+        begin();
+        try {
+            Object allow = allowDamageInvoker();
+            boolean hooked = Mixins120.index().keySet().stream().anyMatch(t -> t.endsWith(".hurt")
+                    && !t.startsWith("net.minecraft.server.level.ServerPlayer.")
+                    && !t.startsWith("net.minecraft.world.entity.player."));
+            if (allow == null && !hooked) return new Object[] {false, false};
+            ServerLevel level = level(dimension);
+            var kind = net.minecraft.world.entity.EntityType.byString(type).orElse(null);
+            if (kind == null) return new Object[] {false, true};
+            var made = kind.create(level);
+            if (!(made instanceof net.minecraft.world.entity.LivingEntity mob)) return new Object[] {false, true};
+            mob.moveTo(x, y, z, 0f, 0f);
+            var source = damageSource(level, byPlayer != 0 && (damageType == null || damageType.isEmpty())
+                    ? "minecraft:player_attack" : damageType);
+            if (allow != null) {
+                try {
+                    for (var m : allow.getClass().getMethods()) {
+                        if (m.getName().equals("allowDamage") && m.getParameterCount() == 3) {
+                            m.setAccessible(true);
+                            if (Boolean.FALSE.equals(m.invoke(allow, mob, source, (float) amount))) {
+                                return new Object[] {true, true};
+                            }
+                            break;
+                        }
+                    }
+                } catch (ReflectiveOperationException | RuntimeException | LinkageError e) {
+                    Throwable cause = e.getCause() != null ? e.getCause() : e;
+                    log("a mod's damage listener failed for " + type + ": " + cause);
+                }
+            }
+            Object[] args = {source, (float) amount};
+            for (Class<?> c = mob.getClass(); c != null && c != Object.class; c = c.getSuperclass()) {
+                String target = Names.mojangClass(c.getName()) + ".hurt";
+                if (Mixins120.fire(target, mob, args, true).cancelled()) return new Object[] {true, true};
+                if (c == net.minecraft.world.entity.LivingEntity.class) break;
+            }
+            return new Object[] {false, true};
+        } finally {
+            finish();
+        }
+    }
+
+    /**
+     * Fabric's ALLOW_DAMAGE invoker, or null without Fabric's entity events or a mod listening
+     * (its ArrayBackedEvent's `handlers` empty).
+     */
+    private static Object allowDamageInvoker() {
+        try {
+            Object event = Class.forName("net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents")
+                    .getField("ALLOW_DAMAGE").get(null);
+            for (Class<?> c = event.getClass(); c != null; c = c.getSuperclass()) {
+                try {
+                    var field = c.getDeclaredField("handlers");
+                    field.setAccessible(true);
+                    if (field.get(event) instanceof Object[] handlers && handlers.length == 0) return null;
+                    break;
+                } catch (NoSuchFieldException e) {
+                    // Up the classes.
+                }
+            }
+            return event.getClass().getMethod("invoker").invoke(event);
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError e) {
+            return null;
+        }
+    }
+
     /** A DamageSource of the damage type `id` (generic when the registry lacks it). */
     private static net.minecraft.world.damagesource.DamageSource damageSource(ServerLevel level, String id) {
         var registry = level.registryAccess().registryOrThrow(net.minecraft.core.registries.Registries.DAMAGE_TYPE);

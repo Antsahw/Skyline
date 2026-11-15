@@ -1900,6 +1900,39 @@ impl Runtime120 {
         Ok(matches!(values.first(), Some(Value::Bool(true))))
     }
 
+    /// One of Horizon's vanilla mobs of `kind` at `pos` is about to be hurt by `amount` of
+    /// `damage_type` (`by_player`: a player's attack): Fabric's `ALLOW_DAMAGE` and what mods
+    /// inject into `hurt`, on a stand-in of the type. `(cancelled, listened)`: `listened` is
+    /// false when no mod listens to any mob's hurt.
+    #[allow(clippy::too_many_arguments)]
+    pub fn mob_hurt(
+        &mut self,
+        dimension: &str,
+        kind: &str,
+        pos: [f64; 3],
+        damage_type: &str,
+        amount: f32,
+        by_player: bool,
+    ) -> Result<(bool, bool), String> {
+        let values = self.call_answers(
+            "mobHurt",
+            &[
+                Value::Str(dimension.to_owned()),
+                Value::Str(kind.to_owned()),
+                Value::F64(pos[0]),
+                Value::F64(pos[1]),
+                Value::F64(pos[2]),
+                Value::Str(damage_type.to_owned()),
+                Value::F64(f64::from(amount)),
+                Value::I32(i32::from(by_player)),
+            ],
+        )?;
+        match values.as_slice() {
+            [Value::Bool(cancelled), Value::Bool(listened)] => Ok((*cancelled, *listened)),
+            other => Err(format!("mobHurt: answers {other:?}")),
+        }
+    }
+
     /// One of Horizon's vanilla mobs of `kind` died at `pos` of `damage_type`, killed by player
     /// `killer` (uuid, name) when there is one: Fabric's `AFTER_DEATH` and what mods inject into
     /// `die`, on a stand-in of the type. What they spawned (drops).

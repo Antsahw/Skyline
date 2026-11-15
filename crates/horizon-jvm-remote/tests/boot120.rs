@@ -2705,10 +2705,27 @@ fn the_mods_machines_pass_energy_between_them() {
         let image: serde_json::Value = serde_json::from_str(&image).expect("an image");
         assert!(image["w"].as_i64().unwrap_or(0) > 0, "{image}");
         assert!(
-            image["ops"].to_string().contains("farmersdelight:beef_stew"),
+            image["ops"]
+                .to_string()
+                .contains("farmersdelight:beef_stew"),
             "the meal drawn: {image}"
         );
     }
+
+    // A vanilla mob's hurt reaches what mods hook there (Fabric's ALLOW_DAMAGE, `hurt`
+    // mixins) on a stand-in, and answers whether any mod listens at all.
+    let (cancelled, listened) = runtime
+        .mob_hurt(
+            "minecraft:overworld",
+            "minecraft:zombie",
+            [0.5, 70.0, 0.5],
+            "minecraft:player_attack",
+            4.0,
+            true,
+        )
+        .expect("a zombie's hurt answers");
+    eprintln!("a zombie's hurt: cancelled {cancelled}, listened {listened}");
+    assert!(!cancelled, "nothing here refuses a zombie's damage");
 
     // Phase 5i: what the mods draw on the HUD, over Horizon's. A hungry player in survival:
     // AppleSkin's saturation and exhaustion over the food bar, from Horizon's numbers; none

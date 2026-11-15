@@ -1107,7 +1107,7 @@ mod redstone;
 pub(in crate::game) use breaking::Break120;
 mod hoppers;
 mod hud;
-mod items;
+pub(in crate::game) mod items;
 mod keys;
 mod screens;
 mod ticks;
