@@ -1097,6 +1097,16 @@ In a game (Anthony's set):
   `horizon:block_collision` attachment. Wired Redstone's ground wires and cables are walked
   through, as in 1.20.1 (their `getCollisionShape` is empty, like redstone dust); its standing
   wires are solid.
+- **A wire placed where Horizon had removed one stayed dark (2026-11-15).** GraphLib keeps
+  its nodes by position and drops them when the mod's own code removes its block; a block
+  Horizon changed (`/setblock`, an explosion) never ran that code, and the stale node kept the
+  new wire out of the network. Each neighbour update the runtime hears now has GraphLib find
+  the nodes at its source again, in every universe (`Mirror120.graphNodes`,
+  `GraphWorld.updateNodes`, by reflection). Also, a shape and signal refresh that found the
+  runtime held by the chunk workers was dropped silently; it now asks ahead of them for 50 ms
+  and otherwise again next tick (`RETRY_SHAPES`). Checked in a game: a powered line with lamps
+  at its end and side, the middle wire removed with `/setblock` and placed again: both lamps
+  light.
 - **GraphLib's client half logged a stack trace on every graph merge**, because the headless
   client has no world. Its storage lookup answers none while there is no world, which GraphLib
   already handles.

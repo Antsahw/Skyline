@@ -1069,6 +1069,7 @@ public final class Mirror120 {
             for (int i = 0; i + 2 < positions.length; i += 3) {
                 BlockPos source = new BlockPos(positions[i], positions[i + 1], positions[i + 2]);
                 Events120.around(level, source);
+                graphNodes(level, source);
                 BlockState from = level.getBlockState(source);
                 for (net.minecraft.core.Direction side : net.minecraft.core.Direction.values()) {
                     BlockPos at = source.relative(side);
@@ -1089,6 +1090,41 @@ public final class Mirror120 {
             return new Object[] {heard};
         } finally {
             finish();
+        }
+    }
+
+    /** GraphLib's universes (`GraphLibImpl.UNIVERSE`), or none without GraphLib. */
+    private static Iterable<?> graphUniverses;
+    private static boolean graphLooked;
+
+    /**
+     * GraphLib's nodes at `pos` found again, in every universe (`GraphWorld.updateNodes`).
+     * GraphLib (Wired Redstone's wire networks) keeps nodes by position and drops them when the
+     * mod's own code removes its block; a block Horizon changed (a command, an explosion)
+     * never ran that code, and the stale node left a wire placed there later unpowered.
+     */
+    private static void graphNodes(ServerLevel level, BlockPos pos) {
+        if (!graphLooked) {
+            graphLooked = true;
+            try {
+                Object universes = Class.forName("com.kneelawk.graphlib.impl.GraphLibImpl").getField("UNIVERSE").get(null);
+                if (universes instanceof Iterable<?> all) graphUniverses = all;
+            } catch (ReflectiveOperationException | RuntimeException | LinkageError e) {
+                // No GraphLib.
+            }
+        }
+        if (graphUniverses == null) return;
+        for (Object universe : graphUniverses) {
+            try {
+                Object world = universe.getClass().getMethod("getServerGraphWorld", ServerLevel.class).invoke(universe, level);
+                if (world == null) continue;
+                var update = world.getClass().getMethod("updateNodes", BlockPos.class);
+                update.setAccessible(true);
+                update.invoke(world, pos);
+            } catch (ReflectiveOperationException | RuntimeException | LinkageError e) {
+                Throwable cause = e.getCause() != null ? e.getCause() : e;
+                log("GraphLib's nodes at " + pos.toShortString() + " not found again: " + cause);
+            }
         }
     }
 

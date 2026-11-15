@@ -386,6 +386,19 @@ fn worldgen_runtime() -> Option<std::sync::MutexGuard<'static, Option<Runtime120
     wait_for_runtime_quietly()
 }
 
+/// The runtime within `wait`, with the chunk workers stepping aside meanwhile (as for
+/// [`wait_for_runtime`]), saying nothing when it stays busy.
+fn runtime_ahead_of_worldgen(
+    wait: Duration,
+) -> Option<std::sync::MutexGuard<'static, Option<Runtime120>>> {
+    let _waiting = Waiting::new();
+    runtime_within(wait)
+}
+
+/// Positions whose shapes and signals weren't asked for because the runtime was busy
+/// (`refresh_java120_shapes`), with their dimension: asked again at the next tick.
+static RETRY_SHAPES: std::sync::Mutex<Vec<(String, [i32; 3])>> = std::sync::Mutex::new(Vec::new());
+
 /// [`wait_for_runtime`] without counting as a player's call or saying it gave up.
 fn wait_for_runtime_quietly() -> Option<std::sync::MutexGuard<'static, Option<Runtime120>>> {
     let until = std::time::Instant::now() + BUSY_WAIT;
@@ -885,6 +898,32 @@ impl super::Game<'_> {
         self.refresh_java120_shapes(dimension, &touched);
     }
 
+    /// The shapes and signals left unasked last time (`RETRY_SHAPES`), of this level, asked
+    /// again. Each tick.
+    pub(in crate::game) fn retry_java120_shapes(&mut self) {
+        let dimension = self.dim.id().to_owned();
+        let mine: Vec<[i32; 3]> = {
+            let mut retry = RETRY_SHAPES.lock().unwrap_or_else(|e| e.into_inner());
+            if retry.is_empty() {
+                return;
+            }
+            let mut mine = Vec::new();
+            retry.retain(|(d, p)| {
+                if *d == dimension {
+                    mine.push(*p);
+                    false
+                } else {
+                    true
+                }
+            });
+            mine
+        };
+        let mut mine = mine;
+        mine.sort_unstable();
+        mine.dedup();
+        self.refresh_java120_shapes(&dimension, &mine);
+    }
+
     /// The shape each of `positions` has, asked of the mods at the position and kept on the
     /// block entity as a synced attachment, which is how it reaches the client that aims at it
     /// (`mod_block_shape`). Positions without a mod's block entity are left alone: their shape
@@ -918,7 +957,14 @@ impl super::Game<'_> {
         }
         let flat: Vec<i32> = asked.iter().flatten().copied().collect();
         let answers = {
-            let Ok(mut guard) = RUNTIME.try_lock() else {
+            // Ahead of the chunk workers, which hold the runtime while they place features: a
+            // shape or signal not asked for here was lost (a wire powered after it was placed
+            // left the lamp beside it dark). Still busy, it's asked again next tick.
+            let Some(mut guard) = runtime_ahead_of_worldgen(Duration::from_millis(50)) else {
+                RETRY_SHAPES
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .extend(asked.iter().map(|p| (dimension.to_owned(), *p)));
                 return;
             };
             let Some(runtime) = guard.as_mut() else {
@@ -971,6 +1017,7 @@ impl super::Game<'_> {
             {
                 log::warn!("1.20.1 mods: keeping what is solid of a block at {pos:?}: {e:?}");
             }
+            trace120!("{pos:?}: the mods say it gives {signals:?}");
             if redstone::keep(pos, Some((state, signals))) {
                 self.java120_signal_changed(pos);
             }

@@ -55,6 +55,7 @@ impl super::super::Game<'_> {
         if self.remote.is_some() {
             return;
         }
+        self.retry_java120_shapes();
         if OURS.get().is_none() {
             let namespaces = NAMESPACES.lock().unwrap_or_else(|e| e.into_inner());
             let Some(namespaces) = namespaces.as_ref() else {
