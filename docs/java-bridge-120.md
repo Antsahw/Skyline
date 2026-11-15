@@ -356,6 +356,20 @@ clicks pass until then). A click on a block of a 1.20.1 mod's namespace, or with
 their items, goes to it at `useItemOn`'s head (`java120_use_block`, beside the 26.3 bridge's
 hook in `lan_actions.rs`); what it set and what it did to the held stack land in Horizon.
 
+## The mods' structure placements (2026-11-15)
+
+A structure set placed by a mod's own placement type (YUNG's Better Desert Temples' and Better
+Strongholds': random spreads with rules of their own on top, a biome search and ring sections)
+didn't generate ("structures can't generate here: ... placement"). Horizon now keeps any
+non-vanilla placement type as foreign (`structure/start.rs`, `Placement::Foreign`, with the
+random spread's numbers when the set has them, so the chunks it may pick are known), and asks
+the runtime whether a chunk is a start chunk (`ForeignStructures::placement_chunk`,
+`Worldgen120.placementChunk`: the placement's own `isStructureChunk` over a structure state of
+the runtime's generator; answers kept per set and chunk). Sets are read before the runtime is up,
+so the type is kept and asked at generation time. The biomes such a placement searches around a
+chunk are the runtime generator's (plains), not Horizon's. Checked in a game: `/locate` finds a
+Better Desert Temple and a Better Stronghold, and the temple's pyramid generates there.
+
 ## Clicks while chunks generate, and mod shapes' outlines (2026-11-14)
 
 A click or a break on a mod's block waited 50 ms for the runtime and then did nothing ("their

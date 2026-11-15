@@ -1660,6 +1660,35 @@ impl Runtime120 {
         }
     }
 
+    /// The placement types of the mods' structure sets (not vanilla's): Horizon's generator asks
+    /// [`Runtime120::placement_chunk`] for those sets' chunks.
+    pub fn mod_placement_types(&mut self) -> Result<Vec<String>, String> {
+        match self.call_answers("modPlacementTypes", &[])?.first() {
+            Some(Value::Strs(ids)) => Ok(ids.clone()),
+            other => Err(format!("modPlacementTypes: answer 0 is {other:?}")),
+        }
+    }
+
+    /// Whether `chunk` is a start chunk of the mods' structure set `set`, by its placement's own
+    /// `isStructureChunk`.
+    pub fn placement_chunk(
+        &mut self,
+        set: &str,
+        world_seed: i64,
+        chunk: [i32; 2],
+    ) -> Result<bool, String> {
+        let args = [
+            Value::Str(set.to_owned()),
+            Value::I64(world_seed),
+            Value::I32(chunk[0]),
+            Value::I32(chunk[1]),
+        ];
+        match self.call_answers("placementChunk", &args)?.first() {
+            Some(Value::Bool(b)) => Ok(*b),
+            other => Err(format!("placementChunk: answer 0 is {other:?}")),
+        }
+    }
+
     /// The structure types of the mods' own structures (not vanilla's), whose starts Horizon's
     /// generator asks the runtime for ([`Runtime120::structure_start`]).
     pub fn mod_structure_types(&mut self) -> Result<Vec<String>, String> {

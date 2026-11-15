@@ -244,6 +244,51 @@ final class Worldgen120 {
     }
 
     /**
+     * The placement types of the mods' structure sets (not vanilla's): YUNG's Better Desert
+     * Temples' and Better Strongholds' own subclasses of the random spread, whose extra rules are
+     * their code. Horizon's generator asks {@link #placementChunk} for those sets' chunks.
+     */
+    static String[] modPlacementTypes() {
+        var types = new java.util.TreeSet<String>();
+        for (var set : Mirror120.registries().registryOrThrow(Registries.STRUCTURE_SET)) {
+            var id = net.minecraft.core.registries.BuiltInRegistries.STRUCTURE_PLACEMENT.getKey(set.placement().type());
+            if (id != null && !"minecraft".equals(id.getNamespace())) types.add(id.toString());
+        }
+        return types.toArray(String[]::new);
+    }
+
+    /** The structure sets' state for {@link #placementChunk}, made once per world seed. */
+    private static net.minecraft.world.level.chunk.ChunkGeneratorStructureState placementState;
+    private static long placementSeed;
+
+    /**
+     * Whether chunk `chunkX chunkZ` is a start chunk of structure set `set`, by its placement's
+     * own {@code isStructureChunk} (its spread, frequency, exclusion zone and the mod's own rules).
+     * Biomes come from the runtime's generator (plains): a placement that looks for biomes
+     * around the chunk sees plains there.
+     */
+    static synchronized boolean placementChunk(String set, long seed, int chunkX, int chunkZ) {
+        RegistryAccess registries = Mirror120.registries();
+        var found = registries.registryOrThrow(Registries.STRUCTURE_SET)
+                .get(new net.minecraft.resources.ResourceLocation(set));
+        if (found == null) return false;
+        if (placementState == null || placementSeed != seed) {
+            var random = net.minecraft.world.level.levelgen.RandomState.create(
+                    net.minecraft.world.level.levelgen.NoiseGeneratorSettings.dummy(),
+                    registries.lookupOrThrow(Registries.NOISE), seed);
+            placementState = generator(registries).createState(
+                    registries.lookupOrThrow(Registries.STRUCTURE_SET), random, seed);
+            placementSeed = seed;
+        }
+        try {
+            return found.placement().isStructureChunk(placementState, chunkX, chunkZ);
+        } catch (RuntimeException | LinkageError e) {
+            Mirror120.log("structure set " + set + "'s placement failed in chunk " + chunkX + " " + chunkZ + ": " + e);
+            return false;
+        }
+    }
+
+    /**
      * {@code Structure.findValidGenerationPoint} for `id` in chunk `chunkX chunkZ`, as
      * {@code ChunkGenerator.tryGenerateStructure} asks it: the large feature random of the world
      * seed and the chunk, heights from Horizon's generator through the level (Generator120).

@@ -139,6 +139,14 @@ enum Placement {
     /// being the chunk of the NoiseSpawnFinder position). The type has no
     /// salt, frequency reduction or exclusion zone: the chunk alone decides.
     DimensionOrigin,
+    /// A mod's own placement, decided by the mod's code (`foreign::foreign_placement`): the
+    /// whole of `StructurePlacement.isStructureChunk`, frequency and exclusion zone included.
+    Foreign {
+        kind: String,
+        /// Its random spread's spacing, separation and triangular spread, when it is one with
+        /// rules of its own on top (YUNG's): the chunks it may pick, which Horizon looks at.
+        spread: Option<(i32, i32, bool)>,
+    },
     Unsupported,
 }
 /// Concentric ring chunk positions by structure set name.
@@ -479,6 +487,23 @@ impl StructureRegistry {
                     count: p["count"].as_i64().unwrap_or(0) as i32,
                     preferred: biome_set(&p["preferred_biomes"])?,
                 },
+                // A mod's own placement: its code decides, once its runtime is up (`foreign`).
+                t if !t.is_empty() && !t.starts_with("minecraft:") => Placement::Foreign {
+                    kind: t.to_owned(),
+                    spread: match (p["spacing"].as_i64(), p["separation"].as_i64()) {
+                        (Some(spacing), Some(separation))
+                            if (1..=4096).contains(&spacing)
+                                && (0..spacing).contains(&separation) =>
+                        {
+                            Some((
+                                spacing as i32,
+                                separation as i32,
+                                p["spread_type"].as_str() == Some("triangular"),
+                            ))
+                        }
+                        _ => None,
+                    },
+                },
                 _ => Placement::Unsupported,
             };
             out.push(StructureSet {
@@ -603,13 +628,17 @@ impl StructureRegistry {
     /// RandomSpreadStructurePlacement.getPotentialStructureChunk for the
     /// sector holding chunk (`x`, `z`); `None` for other placements.
     pub fn potential_chunk(set: &StructureSet, seed: i64, x: i32, z: i32) -> Option<ChunkPos> {
-        let Placement::RandomSpread {
-            spacing,
-            separation,
-            triangular,
-        } = set.placement
-        else {
-            return None;
+        let (spacing, separation, triangular) = match set.placement {
+            Placement::RandomSpread {
+                spacing,
+                separation,
+                triangular,
+            } => (spacing, separation, triangular),
+            Placement::Foreign {
+                spread: Some(spread),
+                ..
+            } => spread,
+            _ => return None,
         };
         let (gx, gz) = (x.div_euclid(spacing), z.div_euclid(spacing));
         let mut random = WorldgenRandom::new(LegacyRandom::new(0));
@@ -653,8 +682,12 @@ impl StructureRegistry {
         if matches!(set.placement, Placement::DimensionOrigin) {
             return x == self.origin.x && z == self.origin.z;
         }
+        if let Placement::Foreign { kind, .. } = &set.placement {
+            return super::foreign::foreign_placement(kind)
+                .is_some_and(|m| m.placement_chunk(&set.name, seed, [x, z]));
+        }
         let placed = match set.placement {
-            Placement::DimensionOrigin => unreachable!("handled above"),
+            Placement::DimensionOrigin | Placement::Foreign { .. } => unreachable!("handled above"),
             Placement::RandomSpread {
                 spacing,
                 separation,
@@ -740,7 +773,11 @@ impl StructureSet {
     /// The random spread's spacing in chunks (`None` for rings).
     pub fn spacing(&self) -> Option<i32> {
         match self.placement {
-            Placement::RandomSpread { spacing, .. } => Some(spacing),
+            Placement::RandomSpread { spacing, .. }
+            | Placement::Foreign {
+                spread: Some((spacing, ..)),
+                ..
+            } => Some(spacing),
             _ => None,
         }
     }

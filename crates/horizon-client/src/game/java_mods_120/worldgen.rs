@@ -53,11 +53,54 @@ impl ForeignFeatures for Features120 {
 /// The mods' own structure types, made and placed by the runtime (phase 6h).
 struct Structures120 {
     types: HashSet<String>,
+    /// The mods' own placement types of structure sets (YUNG's), decided by their code.
+    placements: HashSet<String>,
+    /// Their answers by set and chunk: a chunk's sets are asked again for each neighbour's
+    /// exclusion zones and for `/locate`.
+    answered: std::sync::Mutex<std::collections::HashMap<(String, i64, [i32; 2]), bool>>,
 }
 
 impl ForeignStructures for Structures120 {
     fn generates(&self, structure_type: &str) -> bool {
         self.types.contains(structure_type)
+    }
+
+    fn places(&self, placement_type: &str) -> bool {
+        self.placements.contains(placement_type)
+    }
+
+    fn placement_chunk(&self, set: &str, world_seed: i64, chunk: [i32; 2]) -> bool {
+        let key = (set.to_owned(), world_seed, chunk);
+        if let Some(&known) = self
+            .answered
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&key)
+        {
+            return known;
+        }
+        let answer = {
+            let Some(mut guard) = worldgen_runtime() else {
+                return false;
+            };
+            let Some(runtime) = guard.as_mut() else {
+                return false;
+            };
+            match runtime.placement_chunk(set, world_seed, chunk) {
+                Ok(placed) => placed,
+                Err(e) => {
+                    failed_once(set, &e);
+                    // Not remembered: a busy runtime may answer next time.
+                    return false;
+                }
+            }
+        };
+        let mut answered = self.answered.lock().unwrap_or_else(|e| e.into_inner());
+        if answered.len() > 200_000 {
+            answered.clear();
+        }
+        answered.insert(key, answer);
+        answer
     }
 
     fn start(
@@ -231,20 +274,34 @@ pub(super) fn install(runtime: &mut horizon_jvm_remote::boot120::Runtime120) {
     horizon_world::worldgen::foreign::set_foreign_features(Some(Arc::new(Features120 {
         features,
     })));
-    match runtime.mod_structure_types() {
-        Ok(types) if !types.is_empty() => {
-            log::info!(
-                "1.20.1 mods: their structure types for the generator: {}",
-                types.join(", ")
-            );
-            horizon_world::worldgen::structure::foreign::set_foreign_structures(Some(Arc::new(
-                Structures120 {
-                    types: types.into_iter().collect(),
-                },
-            )));
-        }
-        Ok(_) => {}
-        Err(e) => log::warn!("1.20.1 mods: their structure types can't be listed: {e}"),
+    let types = runtime.mod_structure_types().unwrap_or_else(|e| {
+        log::warn!("1.20.1 mods: their structure types can't be listed: {e}");
+        Vec::new()
+    });
+    let placements = runtime.mod_placement_types().unwrap_or_else(|e| {
+        log::warn!("1.20.1 mods: their structure placements can't be listed: {e}");
+        Vec::new()
+    });
+    if !types.is_empty() {
+        log::info!(
+            "1.20.1 mods: their structure types for the generator: {}",
+            types.join(", ")
+        );
+    }
+    if !placements.is_empty() {
+        log::info!(
+            "1.20.1 mods: their structure placements for the generator: {}",
+            placements.join(", ")
+        );
+    }
+    if !types.is_empty() || !placements.is_empty() {
+        horizon_world::worldgen::structure::foreign::set_foreign_structures(Some(Arc::new(
+            Structures120 {
+                types: types.into_iter().collect(),
+                placements: placements.into_iter().collect(),
+                answered: Default::default(),
+            },
+        )));
     }
 }
 

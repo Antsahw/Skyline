@@ -1867,6 +1867,18 @@ public final class Mirror120 {
         return new Object[] {Loot120.added()};
     }
 
+    /** The placement types of the mods' structure sets (Worldgen120.modPlacementTypes). */
+    public static Object[] modPlacementTypes() {
+        setUp();
+        return new Object[] {Worldgen120.modPlacementTypes()};
+    }
+
+    /** Whether a chunk is a start chunk of a mod's structure set (Worldgen120.placementChunk). */
+    public static Object[] placementChunk(String set, long seed, int chunkX, int chunkZ) {
+        setUp();
+        return new Object[] {Worldgen120.placementChunk(set, seed, chunkX, chunkZ)};
+    }
+
     /** The structure types of the mods' own structures (Worldgen120.modStructureTypes). */
     public static Object[] modStructureTypes() {
         setUp();

@@ -16,6 +16,12 @@ impl StructureRegistry {
                     _ if matches!(set.placement, Placement::Unsupported) => {
                         format!("{} placement", set.name)
                     }
+                    // A mod's placement no runtime decides (none is up, or none knows it).
+                    _ if matches!(&set.placement, Placement::Foreign { kind, .. }
+                        if super::super::foreign::foreign_placement(kind).is_none()) =>
+                    {
+                        format!("{} placement", set.name)
+                    }
                     _ => continue,
                 };
                 if !out.iter().any(|(name, _)| *name == def.name) {

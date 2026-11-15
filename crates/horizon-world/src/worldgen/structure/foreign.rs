@@ -54,6 +54,16 @@ pub trait ForeignStructures: Send + Sync {
         step: i32,
         world: &mut dyn ForeignWorld,
     ) -> bool;
+    /// Whether it decides the start chunks of structure sets with this placement type (a mod's
+    /// own placement).
+    fn places(&self, _placement_type: &str) -> bool {
+        false
+    }
+    /// Whether `chunk` is a start chunk of structure set `set` (`StructurePlacement
+    /// .isStructureChunk`: its spread, frequency and exclusion zone with the mod's own rules).
+    fn placement_chunk(&self, _set: &str, _world_seed: i64, _chunk: [i32; 2]) -> bool {
+        false
+    }
 }
 
 static FOREIGN: RwLock<Option<Arc<dyn ForeignStructures>>> = RwLock::new(None);
@@ -70,6 +80,15 @@ pub fn foreign_structures(structure_type: &str) -> Option<Arc<dyn ForeignStructu
         .unwrap_or_else(|e| e.into_inner())
         .clone()
         .filter(|f| f.generates(structure_type))
+}
+
+/// The maker installed now, if it decides the chunks of sets with `placement_type`.
+pub fn foreign_placement(placement_type: &str) -> Option<Arc<dyn ForeignStructures>> {
+    FOREIGN
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+        .filter(|f| f.places(placement_type))
 }
 
 /// One piece of a foreign start: its box. The first places the whole start in each chunk it's
