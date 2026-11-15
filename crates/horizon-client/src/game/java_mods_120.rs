@@ -819,7 +819,7 @@ impl super::Game<'_> {
     /// What a call in the mods' world left for Horizon: the blocks it set, the block entities
     /// it changed and the items it dropped, in that order (a block entity belongs to the block
     /// that is there once the sets have landed).
-    fn apply_java120(
+    pub(in crate::game) fn apply_java120(
         &mut self,
         dimension: &str,
         set: &[SetBlock],

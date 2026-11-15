@@ -414,8 +414,17 @@ left out (Events120 fires its events). Where Horizon calls it:
 
 Checked in a game with the 34 mods of a player's own pack: 1109 handlers on 769 methods indexed,
 and the join (5), tick (5 and 2), hurt (2 and 2) and death (2 and 2) handlers ran, none failing.
-Not yet: mobs' hurt and death, blocks' and items' methods, and `@Redirect` or `@ModifyArg`, which
-change code inside a method Horizon runs itself.
+A vanilla mob of Horizon's dying (creatures.rs `mob_died`, past the native mods' cancel) is told
+too (`Mirror120.mobDied`): a stand-in of its type is made where it died (not added to the level),
+Fabric's `ServerLivingEntityEvents.AFTER_DEATH` fires (by reflection: the platform jar is built
+without Fabric's entity events), then the mods' `LivingEntity.die` handlers; what they spawn
+(extra drops) lands in Horizon's world. Checked in a game: a zombie and a cow killed, Fabric's
+listeners and two `die` handlers ran. The mods' own mobs die in the runtime, where all of it runs
+anyway.
+
+Not yet: mobs' hurt, blocks' and items' methods (each changed by four of the top mods at most:
+farmland trampling, crops, bone meal), and `@Redirect` or `@ModifyArg`, which change code inside
+a method Horizon runs itself.
 
 ## Recipe viewer: Horizon's Just Enough Items (2026-11-14)
 

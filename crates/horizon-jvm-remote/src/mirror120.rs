@@ -1879,6 +1879,43 @@ impl Runtime120 {
         Ok(matches!(values.first(), Some(Value::Bool(true))))
     }
 
+    /// One of Horizon's vanilla mobs of `kind` died at `pos` of `damage_type`, killed by player
+    /// `killer` (uuid, name) when there is one: Fabric's `AFTER_DEATH` and what mods inject into
+    /// `die`, on a stand-in of the type. What they spawned (drops).
+    pub fn mob_died(
+        &mut self,
+        world: &dyn World120,
+        dimension: &str,
+        kind: &str,
+        pos: [f64; 3],
+        damage_type: &str,
+        killer: Option<(&str, &str)>,
+    ) -> Result<Vec<SpawnItem>, String> {
+        let mut handler = InWorld {
+            world,
+            set: Vec::new(),
+            block_entities: Vec::new(),
+            spawned: Vec::new(),
+            log: self.log.clone(),
+        };
+        let (uuid, name) = killer.unwrap_or(("", ""));
+        self.call_values(
+            "mobDied",
+            &[
+                Value::Str(dimension.to_owned()),
+                Value::Str(kind.to_owned()),
+                Value::F64(pos[0]),
+                Value::F64(pos[1]),
+                Value::F64(pos[2]),
+                Value::Str(damage_type.to_owned()),
+                Value::Str(uuid.to_owned()),
+                Value::Str(name.to_owned()),
+            ],
+            &mut handler,
+        )?;
+        Ok(handler.spawned)
+    }
+
     /// A player died of `damage_type`: what mods inject into its `die`. How many handlers ran.
     pub fn player_died(
         &mut self,

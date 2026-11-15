@@ -167,6 +167,7 @@ public final class Boot120 implements RemoteRuntime {
                 return mirror(method, args);
             case "playerHurt":
             case "playerDied":
+            case "mobDied":
                 // What mods inject into a player's hurt and die (Mirror120, Mixins120).
                 if (game == null) throw new IllegalStateException("not started");
                 return mirror(method, args);

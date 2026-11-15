@@ -2049,6 +2049,57 @@ public final class Mirror120 {
         }
     }
 
+    /**
+     * One of Horizon's vanilla mobs (`type`, at x y z) died of `damageType`, killed by Horizon's
+     * player `killerUuid` when not "": the mods hear it as a death of theirs. A stand-in of the
+     * type is made there (not added to the level), Fabric's ServerLivingEntityEvents.AFTER_DEATH
+     * fires, then what mods inject into its {@code die} (Architectury's and Collective's death
+     * events). What they spawn (extra drops) goes back with the call. {handlers that ran}.
+     */
+    public static Object[] mobDied(String dimension, String type, double x, double y, double z,
+            String damageType, String killerUuid, String killerName) {
+        begin();
+        try {
+            ServerLevel level = level(dimension);
+            var kind = net.minecraft.world.entity.EntityType.byString(type).orElse(null);
+            if (kind == null) return new Object[] {0};
+            var made = kind.create(level);
+            if (!(made instanceof net.minecraft.world.entity.LivingEntity mob)) return new Object[] {0};
+            mob.moveTo(x, y, z, 0f, 0f);
+            mob.setHealth(0f);
+            net.minecraft.world.damagesource.DamageSource source;
+            if (killerUuid != null && !killerUuid.isEmpty()) {
+                ServerPlayer killer = player(killerUuid, killerName, level);
+                source = level.damageSources().playerAttack(killer);
+                mob.setLastHurtByPlayer(killer);
+            } else {
+                source = damageSource(level, damageType);
+            }
+            int ran = 0;
+            // Fabric API's entity events, by reflection: the platform jar is built without them.
+            try {
+                Object event = Class.forName("net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents")
+                        .getField("AFTER_DEATH").get(null);
+                Object invoker = event.getClass().getMethod("invoker").invoke(event);
+                for (var m : invoker.getClass().getMethods()) {
+                    if (m.getName().equals("afterDeath") && m.getParameterCount() == 2) {
+                        m.setAccessible(true);
+                        m.invoke(invoker, mob, source);
+                        ran++;
+                        break;
+                    }
+                }
+            } catch (ReflectiveOperationException | RuntimeException | LinkageError e) {
+                Throwable cause = e.getCause() != null ? e.getCause() : e;
+                log("a mod's death listener failed for " + type + ": " + cause);
+            }
+            ran += Mixins120.fire("net.minecraft.world.entity.LivingEntity.die", mob, new Object[] {source}, false).ran();
+            return new Object[] {ran};
+        } finally {
+            finish();
+        }
+    }
+
     /** A DamageSource of the damage type `id` (generic when the registry lacks it). */
     private static net.minecraft.world.damagesource.DamageSource damageSource(ServerLevel level, String id) {
         var registry = level.registryAccess().registryOrThrow(net.minecraft.core.registries.Registries.DAMAGE_TYPE);

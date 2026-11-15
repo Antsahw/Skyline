@@ -1355,6 +1355,16 @@ impl Game<'_> {
             self.set_bed_occupied(bed, false);
         }
         let killer = self.last_hurt_by_player.remove(&m.id);
+        // The 1.20.1 mods' death events (java_mods_120/items.rs): their drops land with the mob's.
+        #[cfg(feature = "java-mods-120")]
+        {
+            let damage_type = m
+                .last_damage
+                .map_or("minecraft:generic", |(d, _)| source_damage_type(d));
+            let kind = super::native_hooks::mob_kind(m);
+            let at = [m.position.x, m.position.y, m.position.z];
+            self.java120_mob_died(&kind, at, damage_type, killer.flatten());
+        }
         // TamableAnimal.die, before the rest of LivingEntity.die.
         self.tell_owner_pet_died(m, killer);
         self.love_cause.remove(&m.id);

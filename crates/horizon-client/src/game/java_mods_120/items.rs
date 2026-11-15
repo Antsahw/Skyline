@@ -146,6 +146,53 @@ impl super::super::Game<'_> {
     }
 }
 
+impl super::super::Game<'_> {
+    /// One of Horizon's vanilla mobs died (`LivingEntity.die`, past the native mods' cancel): the
+    /// 1.20.1 mods hear it, and what they drop lands. `killer`: the guest connection that hit it
+    /// last, when a player did.
+    pub(in crate::game) fn java120_mob_died(
+        &mut self,
+        kind: &str,
+        pos: [f64; 3],
+        damage_type: &str,
+        killer: Option<u32>,
+    ) {
+        if self.remote.is_some() || !kind.starts_with("minecraft:") {
+            return;
+        }
+        let killer = killer.and_then(|conn| {
+            let guests = self.lan.as_ref()?.hub.guests.as_slice();
+            let g = guests.iter().find(|g| g.conn == conn)?;
+            Some((uuid_string(g.uuid), g.name.clone()))
+        });
+        let dimension = self.dim.id().to_owned();
+        let died = {
+            let Some(mut guard) = super::runtime_within(std::time::Duration::from_millis(25))
+            else {
+                return;
+            };
+            let Some(runtime) = guard.as_mut() else {
+                return;
+            };
+            runtime.mob_died(
+                &Level(self),
+                &dimension,
+                kind,
+                pos,
+                damage_type,
+                killer.as_ref().map(|(u, n)| (u.as_str(), n.as_str())),
+            )
+        };
+        match died {
+            Ok(spawned) if !spawned.is_empty() => {
+                self.apply_java120(&dimension, &[], &[], &spawned);
+            }
+            Ok(_) => {}
+            Err(e) => log::warn!("1.20.1 mods: a {kind} dying: {e}"),
+        }
+    }
+}
+
 /// The players of the 1.20.1 mods' levels by entity id: their UUID, name and dimension, for
 /// what Horizon's damage code asks about a player with no game at hand (`java120_hurt_player`).
 static PLAYERS_120: std::sync::Mutex<
