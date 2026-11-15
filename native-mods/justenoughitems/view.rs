@@ -604,7 +604,7 @@ fn bookmark_list(
 /// A category's size (`getWidth`, `getHeight`).
 fn category_size(game: &Game<'_>, ru: bool, c: Category) -> (f32, f32) {
     match c {
-        Category::Crafting | Category::Smelting => (116.0, 54.0),
+        Category::Crafting | Category::Smelting | Category::Mod => (116.0, 54.0),
         Category::Smoking | Category::Blasting => (82.0, 54.0),
         Category::Campfire => (82.0, 44.0),
         Category::Stonecutting => (82.0, 34.0),
@@ -975,7 +975,7 @@ fn draw_recipe(
     let id_lines = recipe_id_lines(ctx, r);
     let link = r.focus_link(ctx.focus);
     match category {
-        Category::Crafting => {
+        Category::Crafting | Category::Mod => {
             add(batch, &mut hits, output, 95.0, 19.0, Frame::Output, 0, id_lines);
             for i in 0..9 {
                 let (c, row) = ((i % 3) as f32, (i / 3) as f32);
@@ -1033,7 +1033,7 @@ fn draw_recipe(
     }
     // The widgets and texts, over the slots.
     match category {
-        Category::Crafting => {
+        Category::Crafting | Category::Mod => {
             blit(game, batch, &sprites::RECIPE_ARROW, x + 61.0, y + 19.0, 1.0);
             if r.shapeless {
                 let icon = [x + w - 8.0, y, 8.0, 8.0];

@@ -274,6 +274,20 @@ pub(super) fn install(runtime: &mut horizon_jvm_remote::boot120::Runtime120) {
     horizon_world::worldgen::foreign::set_foreign_features(Some(Arc::new(Features120 {
         features,
     })));
+    // The mods' recipes of their own types, for recipe viewers (they're not Horizon's).
+    match runtime.mod_recipes() {
+        Ok(json) => {
+            let recipes = foreign_recipes(&json);
+            if !recipes.is_empty() {
+                log::info!(
+                    "1.20.1 mods: {} recipe(s) of their own types for recipe viewers",
+                    recipes.len()
+                );
+            }
+            horizon_client::mod_list::set_foreign_recipes(recipes);
+        }
+        Err(e) => log::warn!("1.20.1 mods: their recipes can't be listed: {e}"),
+    }
     let types = runtime.mod_structure_types().unwrap_or_else(|e| {
         log::warn!("1.20.1 mods: their structure types can't be listed: {e}");
         Vec::new()
@@ -321,5 +335,58 @@ mod tests {
             super::state_from_120("minecraft:oak_log[axis=y]"),
             "minecraft:oak_log[axis=y]"
         );
+    }
+}
+
+/// The runtime's `modRecipes` answer as recipes; anything unreadable is left out.
+fn foreign_recipes(json: &str) -> Vec<horizon_client::mod_list::ForeignRecipe> {
+    let Ok(serde_json::Value::Array(all)) = serde_json::from_str::<serde_json::Value>(json) else {
+        return Vec::new();
+    };
+    let text = |v: &serde_json::Value| v.as_str().map(str::to_owned);
+    all.iter()
+        .filter_map(|r| {
+            Some(horizon_client::mod_list::ForeignRecipe {
+                id: text(&r["id"])?,
+                kind: text(&r["type"])?,
+                inputs: r["inputs"]
+                    .as_array()?
+                    .iter()
+                    .map(|slot| {
+                        slot.as_array()
+                            .map(|items| items.iter().filter_map(text).collect())
+                            .unwrap_or_default()
+                    })
+                    .collect(),
+                outputs: r["outputs"]
+                    .as_array()?
+                    .iter()
+                    .filter_map(|o| {
+                        Some((text(&o["item"])?, o["count"].as_u64().unwrap_or(1) as u32))
+                    })
+                    .collect(),
+            })
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod recipe_tests {
+    #[test]
+    fn the_runtimes_recipes_are_read_and_bad_ones_left_out() {
+        let json = r#"[
+            {"id":"farmersdelight:cooking/beef_stew","type":"farmersdelight:cooking",
+             "inputs":[["minecraft:beef"],["minecraft:carrot","minecraft:potato"],[]],
+             "outputs":[{"item":"farmersdelight:beef_stew","count":2}]},
+            {"id":"broken","inputs":[]}
+        ]"#;
+        let recipes = super::foreign_recipes(json);
+        assert_eq!(recipes.len(), 1);
+        let r = &recipes[0];
+        assert_eq!(r.kind, "farmersdelight:cooking");
+        assert_eq!(r.inputs[1], ["minecraft:carrot", "minecraft:potato"]);
+        assert!(r.inputs[2].is_empty());
+        assert_eq!(r.outputs, [("farmersdelight:beef_stew".to_owned(), 2)]);
+        assert!(super::foreign_recipes("not json").is_empty());
     }
 }

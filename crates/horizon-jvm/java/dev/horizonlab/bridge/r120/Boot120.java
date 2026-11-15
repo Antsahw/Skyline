@@ -144,6 +144,7 @@ public final class Boot120 implements RemoteRuntime {
                 return mirror(method, args);
             case "modFeatures":
             case "placeFeature":
+            case "modRecipes":
             case "modPlacementTypes":
             case "placementChunk":
             case "modStructureTypes":

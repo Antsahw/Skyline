@@ -1660,6 +1660,15 @@ impl Runtime120 {
         }
     }
 
+    /// The mods' recipes of their own types (not vanilla's), as JSON: `[{id, type, inputs:
+    /// [[item ids]], outputs: [{item, count}]}]`, from the runtime's recipe manager.
+    pub fn mod_recipes(&mut self) -> Result<String, String> {
+        match self.call_answers("modRecipes", &[])?.first() {
+            Some(Value::Str(json)) => Ok(json.clone()),
+            other => Err(format!("modRecipes: answer 0 is {other:?}")),
+        }
+    }
+
     /// The placement types of the mods' structure sets (not vanilla's): Horizon's generator asks
     /// [`Runtime120::placement_chunk`] for those sets' chunks.
     pub fn mod_placement_types(&mut self) -> Result<Vec<String>, String> {

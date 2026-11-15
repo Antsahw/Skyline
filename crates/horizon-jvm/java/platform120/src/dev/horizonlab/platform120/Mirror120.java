@@ -200,6 +200,51 @@ public final class Mirror120 {
     }
 
     /**
+     * The mods' recipes of their own types (not vanilla's: those Horizon has already), for
+     * Horizon's recipe viewers: a JSON array of {id, type, inputs: [[item ids of a slot]...],
+     * outputs: [{item, count}]}, the inputs as the recipe's own {@code getIngredients} gives
+     * them (tags resolved by the mod's code) and the output its {@code getResultItem}.
+     */
+    public static Object[] modRecipes() {
+        setUp();
+        var out = new com.google.gson.JsonArray();
+        int all = 0;
+        for (var recipe : data.getRecipeManager().getRecipes()) {
+            all++;
+            var type = net.minecraft.core.registries.BuiltInRegistries.RECIPE_TYPE.getKey(recipe.getType());
+            if (type == null || "minecraft".equals(type.getNamespace())) continue;
+            try {
+                var json = new com.google.gson.JsonObject();
+                json.addProperty("id", recipe.getId().toString());
+                json.addProperty("type", type.toString());
+                var inputs = new com.google.gson.JsonArray();
+                for (var ingredient : recipe.getIngredients()) {
+                    var slot = new com.google.gson.JsonArray();
+                    for (var stack : ingredient.getItems()) {
+                        if (!stack.isEmpty()) slot.add(net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stack.getItem()).toString());
+                    }
+                    inputs.add(slot);
+                }
+                json.add("inputs", inputs);
+                var outputs = new com.google.gson.JsonArray();
+                var result = recipe.getResultItem(registries);
+                if (result != null && !result.isEmpty()) {
+                    var o = new com.google.gson.JsonObject();
+                    o.addProperty("item", net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(result.getItem()).toString());
+                    o.addProperty("count", result.getCount());
+                    outputs.add(o);
+                }
+                json.add("outputs", outputs);
+                if (inputs.size() > 0 && outputs.size() > 0) out.add(json);
+            } catch (RuntimeException | LinkageError e) {
+                log("recipe " + recipe.getId() + " can't be listed: " + e);
+            }
+        }
+        log("the mods' recipes of their own types: " + out.size() + " of " + all + " recipes");
+        return new Object[] {out.toString()};
+    }
+
+    /**
      * The dimension type of the level `dimension`: its level stem's (a mod's dimension: its
      * build range, skylight, ceiling), vanilla's Nether and End theirs, else the Overworld's.
      */

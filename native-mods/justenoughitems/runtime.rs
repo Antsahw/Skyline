@@ -362,10 +362,13 @@ pub enum Category {
     Grindstone,
     Smithing,
     Compostable,
+    /// Skyline: the Java mods' recipes of their own types (a cooking pot's, a machine's), which
+    /// Horizon only shows (`mod_list::foreign_recipes`); drawn as a shapeless crafting grid.
+    Mod,
 }
 
 impl Category {
-    pub const ALL: [Category; 14] = [
+    pub const ALL: [Category; 15] = [
         Category::Crafting,
         Category::Stonecutting,
         Category::Smelting,
@@ -380,6 +383,7 @@ impl Category {
         Category::Grindstone,
         Category::Smithing,
         Category::Compostable,
+        Category::Mod,
     ];
     pub fn index(self) -> usize {
         Category::ALL.iter().position(|c| *c == self).unwrap_or(0)
@@ -399,6 +403,8 @@ impl Category {
             Category::Grindstone => &["minecraft:grindstone"],
             Category::Smithing => &["minecraft:smithing_table"],
             Category::Compostable => &["minecraft:composter"],
+            // No workstation is known: the tab's icon.
+            Category::Mod => &["minecraft:knowledge_book"],
         }
     }
 }
@@ -1045,6 +1051,7 @@ pub fn category_title(ru: bool, c: Category) -> &'static str {
         Category::Grindstone => ("Grinding", "Заточка"),
         Category::Smithing => ("Smithing Table", "Кузнечный стол"),
         Category::Compostable => ("Composting", "Биоразлагаемость"),
+        Category::Mod => ("Mod Recipes", "Рецепты модов"),
     };
     if ru { ru_text } else { en }
 }

@@ -58,6 +58,38 @@ pub struct RuntimeMod {
     pub icon: Option<std::sync::Arc<Vec<u8>>>,
 }
 
+/// A recipe of a Java mod's own type (a cooking pot's, a machine's): Horizon has no such type,
+/// so it is only shown, by recipe viewers (native JEI). Item ids as the runtime has them.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ForeignRecipe {
+    /// `farmersdelight:cooking/beef_stew`.
+    pub id: String,
+    /// Its type, `farmersdelight:cooking`.
+    pub kind: String,
+    /// Each input slot's items, any one of which fits.
+    pub inputs: Vec<Vec<String>>,
+    /// Its results: item id and count.
+    pub outputs: Vec<(String, u32)>,
+}
+
+static FOREIGN_RECIPES: std::sync::RwLock<Option<std::sync::Arc<Vec<ForeignRecipe>>>> =
+    std::sync::RwLock::new(None);
+
+/// The Java mods' recipes of their own types, once a runtime has listed them; a new `Arc` each
+/// time they change, so a viewer can tell (`Arc::ptr_eq`).
+pub fn foreign_recipes() -> Option<std::sync::Arc<Vec<ForeignRecipe>>> {
+    FOREIGN_RECIPES
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+}
+
+/// Sets the Java mods' recipes of their own types (`foreign_recipes`).
+pub fn set_foreign_recipes(recipes: Vec<ForeignRecipe>) {
+    *FOREIGN_RECIPES.write().unwrap_or_else(|e| e.into_inner()) =
+        Some(std::sync::Arc::new(recipes));
+}
+
 /// The side of a Java mod's icon as the Mods screen keeps it: the pack icons' slots' size.
 pub const RUNTIME_ICON: u32 = crate::hud::PACK_ICON_SIZE;
 

@@ -439,6 +439,16 @@ finding Farmer's Delight's items, and the tomato crate's crafting recipe. The mo
 types (Farmer's Delight's cooking pot and cutting board, Tech Reborn's machines) aren't in
 Horizon's recipe tables, so they don't show. The Java JEI's own overlay is a parked stash.
 
+Since 2026-11-15 they do, in a "Mod Recipes" category (the knowledge book's tab): the runtime's
+recipe manager lists the recipes of the mods' own types (`Mirror120.modRecipes`: each input slot
+as the recipe's `getIngredients` gives it, tags resolved by the mod's code, and its
+`getResultItem`; 330 of 2564 in a 34-mod pack), Skyline keeps them for native mods
+(`mod_list::foreign_recipes`, set when the runtime is up), and JEI shows each as a shapeless
+grid of up to nine slots (`native-mods/justenoughitems`: `Category::Mod`, glue.rs
+`foreign_recipes`; it remakes its data when that list arrives). What the grid can't show: a
+recipe's container (a bowl), its time, and the station it needs. Checked in a game: Farmer's
+Delight's cooking pot recipe for rabbit stew.
+
 ## The Mods screen: Mod Menu for Horizon, built in (2026-11-14)
 
 The title screen's ☰ button (after Accessibility) opens **Mod Menu for Horizon** by tariksabanuz

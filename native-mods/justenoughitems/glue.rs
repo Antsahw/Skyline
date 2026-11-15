@@ -313,7 +313,10 @@ fn sync(game: &mut Game<'_>) {
         return;
     };
     let language = horizon_client::lang::code();
-    let at = Arc::as_ptr(&recipes) as usize;
+    // Skyline: the Java mods' own recipes come later than the game's (their runtime starts in
+    // the background), so either list changing makes the data again.
+    let foreign = horizon_client::mod_list::foreign_recipes();
+    let at = (Arc::as_ptr(&recipes) as usize) ^ foreign.as_ref().map_or(0, |f| Arc::as_ptr(f) as usize);
     let fresh = with(|s| {
         s.data
             .as_ref()
@@ -392,6 +395,45 @@ impl Builder<'_, '_> {
         self.ingredients.push(ingredient);
         self.by_key.insert(key, id);
         id
+    }
+}
+
+/// Skyline: the Java mods' recipes of their own types (`mod_list::foreign_recipes`), in the
+/// Mod Recipes category as shapeless grids of up to nine slots; items the game lacks are left
+/// out, and a recipe left with no input or output.
+fn foreign_recipes(game: &Game<'_>, b: &mut Builder<'_, '_>, out: &mut Vec<Recipe>) {
+    let Some(foreign) = horizon_client::mod_list::foreign_recipes() else {
+        return;
+    };
+    for r in foreign.iter() {
+        let mut stack = |item: &str, count: u32| {
+            game.res.items().get(item)?;
+            let id = b.id(&ItemStack::new(item, 1));
+            Some(Stack { id, count: count.max(1), damage: 0 })
+        };
+        let inputs: Vec<Vec<Stack>> = r
+            .inputs
+            .iter()
+            .take(9)
+            .map(|slot| slot.iter().filter_map(|item| stack(item, 1)).collect::<Vec<_>>())
+            .filter(|slot| !slot.is_empty())
+            .collect();
+        let outputs: Vec<Stack> = r.outputs.iter().filter_map(|(item, count)| stack(item, *count)).collect();
+        if inputs.is_empty() || outputs.is_empty() {
+            continue;
+        }
+        let (inputs, width, height) = jei::crafting_grid(inputs, 0, 0, true);
+        out.push(Recipe {
+            category: Some(Category::Mod),
+            id: r.id.clone(),
+            inputs,
+            outputs: vec![outputs],
+            width,
+            height,
+            shapeless: true,
+            book_id: -1,
+            ..Recipe::default()
+        });
     }
 }
 
@@ -485,6 +527,7 @@ fn build(
             ..Recipe::default()
         });
     }
+    foreign_recipes(game, &mut b, &mut out);
     extra_recipes(game, &mut b, &list, &mut out);
     let listed: Vec<ItemStack> = list.iter().map(|&id| b.ingredients[id as usize].stack.clone()).collect();
     made_up_recipes(game, &mut b, &listed, &mut out);

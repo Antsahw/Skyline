@@ -41,7 +41,7 @@ licence allows. When in doubt about a part, `git log` says who wrote it.
   native mod in `native-mods/justenoughitems/`, with its own LICENSE and NOTICE. Skyline's
   changes, for its older Horizon: the creative screen's hook target, and three parts left out
   (the game's tooltips hidden under the recipes screen, the blur behind the config screen, the
-  search box's own skin). Built with `tools/skyline_native.py`.
+  search box's own skin), and a "Mod Recipes" category listing the Java mods' recipes of their own types. Built with `tools/skyline_native.py`.
 
 ## This project's licence
 
