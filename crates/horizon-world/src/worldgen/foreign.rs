@@ -49,6 +49,41 @@ pub trait ForeignFeatures: Send + Sync {
 
 static FOREIGN: RwLock<Option<Arc<dyn ForeignFeatures>>> = RwLock::new(None);
 
+/// Whether a placer of foreign features and structures is on its way (a Java mods' runtime that
+/// starts beside the game): until it is, chunks wait for it ([`wait_for_foreign`]) rather than
+/// generate without the mods' features and structures for good.
+static PENDING: (std::sync::Mutex<bool>, std::sync::Condvar) =
+    (std::sync::Mutex::new(false), std::sync::Condvar::new());
+
+/// How long a chunk waits for a placer on its way, at most.
+const PENDING_WAIT: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// Says a placer is on its way (`true`), or that it came or never will (`false`).
+pub fn set_foreign_pending(pending: bool) {
+    let (lock, ready) = &PENDING;
+    *lock.lock().unwrap_or_else(|e| e.into_inner()) = pending;
+    if !pending {
+        ready.notify_all();
+    }
+}
+
+/// Waits while a placer is on its way ([`set_foreign_pending`]), two minutes at most.
+pub fn wait_for_foreign() {
+    let (lock, ready) = &PENDING;
+    let pending = lock.lock().unwrap_or_else(|e| e.into_inner());
+    if !*pending {
+        return;
+    }
+    let (_pending, timeout) = ready
+        .wait_timeout_while(pending, PENDING_WAIT, |p| *p)
+        .unwrap_or_else(|e| e.into_inner());
+    if timeout.timed_out() {
+        log::warn!(
+            "Horizon: the Java mods' features weren't ready in time; this chunk goes on without them"
+        );
+    }
+}
+
 /// Installs (or, with `None`, removes) the placer of foreign features.
 pub fn set_foreign_features(placer: Option<Arc<dyn ForeignFeatures>>) {
     *FOREIGN.write().unwrap_or_else(|e| e.into_inner()) = placer;

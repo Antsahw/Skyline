@@ -3810,6 +3810,8 @@ impl GeneratorWorker {
         &mut self,
         pos: ChunkPos,
     ) -> Vec<Arc<super::structure::start::StructureStart>> {
+        // A mod's structures and placements come with a placer on its way: waited for.
+        super::foreign::wait_for_foreign();
         self.pipeline.structure_starts(&mut self.state, pos)
     }
     /// `Structure.generate` for `/place structure`: the start `structure`

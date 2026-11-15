@@ -481,7 +481,9 @@ impl Decoration {
             [center.x * 16 + 15, min_y + height - 1, center.z * 16 + 15],
         );
         let mut structure_errors = 0;
-        // Features of a type only someone else can run (a mod's), when someone can.
+        // Features of a type only someone else can run (a mod's), when someone can; one on its
+        // way is waited for, so no chunk is decorated without them for good.
+        super::foreign::wait_for_foreign();
         let foreign = super::foreign::foreign_features();
         let registry = data.registry();
         let result = self.plan.decorate(

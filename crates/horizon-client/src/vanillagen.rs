@@ -290,9 +290,13 @@ impl VanillaTerrain {
             }
         }
         if !unsupported.is_empty() {
+            let mut names: Vec<&str> = unsupported.iter().map(|(name, _)| name.as_str()).collect();
+            names.sort_unstable();
             log::warn!(
-                "Horizon: {} placed features cannot run and will be skipped",
-                unsupported.len()
+                "Horizon: {} placed features cannot run and will be skipped, unless a Java mods' \
+                 runtime that starts later places them: {}",
+                unsupported.len(),
+                names.join(", ")
             );
             if !dir.join("blocks/block-properties.nbt").exists() {
                 log::warn!(

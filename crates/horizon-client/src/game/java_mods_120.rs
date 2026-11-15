@@ -77,15 +77,21 @@ pub(in crate::game) fn content(base: &Path) -> Vec<PathBuf> {
             folders.len()
         );
         remember_namespaces(&folders);
-        // Their code: the runtime boots beside the game's start (clicks pass until it's up).
+        // Their code: the runtime boots beside the game's start (clicks pass until it's up). The
+        // generator waits for it, so no chunk misses their features and structures.
+        horizon_world::worldgen::foreign::set_foreign_pending(true);
         let (dir, home) = (dir.clone(), home.clone());
         let started = std::thread::Builder::new()
             .name("fabric-1.20.1 start".into())
-            .spawn(move || match start(&dir, &home) {
-                Ok((runtime, _)) => keep(runtime),
-                Err(e) => log::warn!("1.20.1 mods: their code doesn't run: {e}"),
+            .spawn(move || {
+                match start(&dir, &home) {
+                    Ok((runtime, _)) => keep(runtime),
+                    Err(e) => log::warn!("1.20.1 mods: their code doesn't run: {e}"),
+                }
+                horizon_world::worldgen::foreign::set_foreign_pending(false);
             });
         if let Err(e) = started {
+            horizon_world::worldgen::foreign::set_foreign_pending(false);
             log::warn!("1.20.1 mods: their code doesn't run: {e}");
         }
         return folders;

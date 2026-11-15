@@ -356,6 +356,16 @@ clicks pass until then). A click on a block of a 1.20.1 mod's namespace, or with
 their items, goes to it at `useItemOn`'s head (`java120_use_block`, beside the 26.3 bridge's
 hook in `lan_actions.rs`); what it set and what it did to the held stack land in Horizon.
 
+## Chunks wait for a runtime that is starting (2026-11-15)
+
+With the content cached, the runtime starts beside the game, and the generator was made before
+it was up: "71 placed features cannot run" was logged, and the chunks generated meanwhile (the
+spawn's) got none of the mods' features and structures, for good. Now `content()` says a placer
+is on its way (`foreign::set_foreign_pending`), and decoration and structure starts wait for it
+(`foreign::wait_for_foreign`, two minutes at most) until `keep` has installed it. The warning
+names the features and says a runtime that starts later may place them. Checked in a game: a
+new world loads, the runtime up first, the 71 features placed by the mods' code.
+
 ## The mods' structure placements (2026-11-15)
 
 A structure set placed by a mod's own placement type (YUNG's Better Desert Temples' and Better
