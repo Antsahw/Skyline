@@ -821,11 +821,21 @@ and a client tick. The HUD frame (`Hud120.frame`) now gives them those, from the
 - **Colored quads drawn straight through a BufferBuilder** while a frame is recorded
   (`BufferUploaderMixin`: Jade's panel, HUD bars) become fills or gradients.
 
+- **Horizon's own mob under the crosshair** (the runtime's level holds only the mods'): the
+  server sends it with the frame (`hud.rs`: the guest's `mob_hit` before any block: type,
+  position, rotation, health, max health, name), and the runtime makes a stand-in of its type
+  there, not added to the level (`Hud120.standIn`), as the client's hit result. The server
+  level finds a stand-in by its id (ServerLevelMixin `getEntity`), so what a client overlay
+  asks the server about it is answered (Jade waits for that before showing a mob).
+- **Textured quads drawn through a BufferBuilder** become blits of the shader's texture
+  (`setShaderTexture` is kept), and the 9x9 heart, food and armour icons of 1.20.1's
+  `icons.png`, gone in 26.3, are mapped to its HUD sprites (`Graphics120.iconSprite`).
+
 Checked in a game with the 34-mod pack and Jade 11.13.3: looking at a furnace shows Jade's
 panel with its icon, "Furnace", "Minecraft" and the harvest tool; a cooking pot shows "Cooking
-Pot", "Farmer's Delight". Not yet: Horizon's own mobs, which the runtime's level doesn't hold
-(the mods' mobs are there); Jade's server-side data (a furnace's contents, a mob's health)
-comes over its own packets, not tried yet; minimaps (they read client chunks).
+Pot", "Farmer's Delight"; a cow at 7 of 10 health shows "Cow", three and a half hearts of five,
+"Minecraft". Not yet: a block's server-side data (a furnace's contents); minimaps (they read
+client chunks).
 
 ## Phase 5i status: the mods' HUD (2026-11-14)
 

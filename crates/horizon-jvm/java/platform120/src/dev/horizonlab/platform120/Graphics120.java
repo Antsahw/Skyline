@@ -43,6 +43,9 @@ public final class Graphics120 {
         return ops.size();
     }
 
+    /** The texture last set for shaders to sample (RenderSystemMixin), for BufferUploaderMixin. */
+    public static volatile ResourceLocation shaderTexture;
+
     /** The recorder a mixin writes to, or null when nothing is being recorded. */
     public static Graphics120 current() {
         return current;
@@ -174,6 +177,7 @@ public final class Graphics120 {
     static Object[] widgetSprite(ResourceLocation texture, float u0, float v0, float u1, float v1) {
         if (!"minecraft".equals(texture.getNamespace())) return null;
         String path = texture.getPath();
+        if (path.equals("textures/gui/icons.png")) return iconSprite(u0, v0, u1, v1);
         // The part's top-left corner in the sheet's pixels.
         float size = path.equals("textures/gui/checkbox.png") ? 64f : 256f;
         float x = Math.min(u0, u1) * size, y = Math.min(v0, v1) * size;
@@ -220,6 +224,43 @@ public final class Graphics120 {
         }
         float[] uv = {px0 / width, (v0 * size - top) / height, px1 / width, (v1 * size - top) / height};
         return new Object[] {new ResourceLocation("minecraft", "textures/gui/sprites/widget/" + name + ".png"), uv};
+    }
+
+    /**
+     * A 9x9 icon from 1.20.1's {@code icons.png} that mods draw again (Jade's and HUD mods'
+     * hearts, food, armour): the 26.3 HUD sprite with the same picture, with the part of the
+     * cell asked for. Null for the rest of the sheet.
+     */
+    private static Object[] iconSprite(float u0, float v0, float u1, float v1) {
+        float x = Math.min(u0, u1) * 256f, y = Math.min(v0, v1) * 256f;
+        int column = (int) Math.floor(x / 9f) * 9, row = (int) Math.floor(y / 9f) * 9;
+        // The cells' left edges are 16 + 9n, the rows' tops 0 (hearts), 9 (armour), 27 (food).
+        int left = 16 + (int) Math.floor((x - 16f) / 9f) * 9;
+        String name = switch ((int) Math.floor(y / 9f) * 9) {
+            case 0 -> switch (left) {
+                case 16 -> "hud/heart/container";
+                case 52 -> "hud/heart/full";
+                case 61 -> "hud/heart/half";
+                default -> null;
+            };
+            case 9 -> switch (left) {
+                case 16 -> "hud/armor_empty";
+                case 25 -> "hud/armor_half";
+                case 34 -> "hud/armor_full";
+                default -> null;
+            };
+            case 27 -> switch (left) {
+                case 16 -> "hud/food_empty";
+                case 52 -> "hud/food_full";
+                case 61 -> "hud/food_half";
+                default -> null;
+            };
+            default -> null;
+        };
+        if (name == null || x < 16f) return null;
+        float top = row;
+        float[] uv = {(u0 * 256f - left) / 9f, (v0 * 256f - top) / 9f, (u1 * 256f - left) / 9f, (v1 * 256f - top) / 9f};
+        return new Object[] {new ResourceLocation("minecraft", "textures/gui/sprites/" + name + ".png"), uv};
     }
 
     /** A line of text. Styled text keeps its styling, as Horizon reads the component's JSON. */

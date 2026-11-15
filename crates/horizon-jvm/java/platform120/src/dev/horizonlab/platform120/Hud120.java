@@ -61,7 +61,7 @@ public final class Hud120 {
         // what the player looks at (`hitResult`) and Fabric's client tick events, where
         // overlays about the world find it (Jade's).
         if (TIMER != null) TIMER.tickDelta = 1f;
-        part("client tick", () -> clientTick(minecraft, player, local));
+        part("client tick", () -> clientTick(minecraft, player, local, s));
         Graphics120 recording = Graphics120.begin();
         recording.modsOnly = true;
         try {
@@ -79,7 +79,9 @@ public final class Hud120 {
                 System.out.println("Hud120: " + recording.dropped + " vanilla operations left out, kept "
                         + recording.finishedCount());
             }
-            return recording.finish().toString();
+            String frame = recording.finish().toString();
+            if (DEBUG) System.out.println("Hud120: frame " + frame.substring(0, Math.min(frame.length(), 3000)));
+            return frame;
         } finally {
             if (Graphics120.current() == recording) recording.finish();
             minecraft.level = levelBefore;
@@ -218,7 +220,8 @@ public final class Hud120 {
      * One client tick for the HUD's player: what the crosshair hits (GameRenderer.pick, at the
      * reach of the player's mode) as `hitResult`, then Fabric's START and END client tick events.
      */
-    private static void clientTick(Minecraft minecraft, ServerPlayer player, net.minecraft.client.player.LocalPlayer local) {
+    private static void clientTick(Minecraft minecraft, ServerPlayer player, net.minecraft.client.player.LocalPlayer local,
+            JsonObject state) {
         place(player, local);
         // The client's game mode, made without its connection: the player's mode, which its
         // reach (getPickRange) and the mods ask.
@@ -250,6 +253,14 @@ public final class Hud120 {
         var box = player.getBoundingBox().expandTowards(look.scale(far)).inflate(1.0);
         var entity = net.minecraft.world.entity.projectile.ProjectileUtil.getEntityHitResult(player, eye, end, box,
                 e -> !e.isSpectator() && e.isPickable() && e != player, far * far);
+        // Horizon's own mob under the crosshair (the runtime's level holds only the mods'):
+        // a stand-in of its type where it is, with its health and name.
+        var horizon = state.has("target") && state.get("target").isJsonObject()
+                ? standIn(player.serverLevel(), state.getAsJsonObject("target")) : null;
+        if (horizon != null) {
+            entity = new net.minecraft.world.phys.EntityHitResult(horizon,
+                    horizon.getBoundingBox().clip(eye, eye.add(look.scale(reach))).orElse(horizon.position()));
+        }
         minecraft.hitResult = entity != null ? entity : block;
         minecraft.crosshairPickEntity = entity != null ? entity.getEntity() : null;
         if (DEBUG) {
@@ -264,6 +275,54 @@ public final class Hud120 {
             Events120.fire(net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents.END_CLIENT_TICK,
                     "client tick end", l -> l.onEndTick(minecraft));
         }
+    }
+
+    /** Stand-ins of Horizon's mobs, by Horizon's entity id: kept while one is looked at. */
+    private static final java.util.Map<Integer, net.minecraft.world.entity.Entity> STAND_INS = new java.util.HashMap<>();
+    /** The same stand-ins by their own id in the runtime. */
+    private static final java.util.Map<Integer, net.minecraft.world.entity.Entity> BY_OWN_ID =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** A stand-in of Horizon's mob by its id in the runtime, or null. */
+    public static net.minecraft.world.entity.Entity standIn(int ownId) {
+        return BY_OWN_ID.get(ownId);
+    }
+
+    /**
+     * A stand-in for Horizon's mob `target` ({id, type, pos, yaw, head_yaw, health, max_health,
+     * name}): an entity of its type, made once and not added to the level, where the mob is
+     * and as hurt as it is. Null for a type the runtime doesn't know.
+     */
+    private static net.minecraft.world.entity.Entity standIn(net.minecraft.server.level.ServerLevel level, JsonObject target) {
+        int id = target.get("id").getAsInt();
+        String type = target.get("type").getAsString();
+        var made = STAND_INS.get(id);
+        if (made == null || made.level() != level
+                || !net.minecraft.world.entity.EntityType.getKey(made.getType()).toString().equals(type)) {
+            if (STAND_INS.size() > 64) {
+                STAND_INS.clear();
+                BY_OWN_ID.clear();
+            }
+            var kind = net.minecraft.world.entity.EntityType.byString(type).orElse(null);
+            if (kind == null) return null;
+            made = kind.create(level);
+            if (made == null) return null;
+            STAND_INS.put(id, made);
+            BY_OWN_ID.put(made.getId(), made);
+        }
+        var pos = target.getAsJsonArray("pos");
+        float yaw = target.has("yaw") ? target.get("yaw").getAsFloat() : 0f;
+        made.moveTo(pos.get(0).getAsDouble(), pos.get(1).getAsDouble(), pos.get(2).getAsDouble(), yaw, 0f);
+        if (target.has("head_yaw")) made.setYHeadRot(target.get("head_yaw").getAsFloat());
+        if (made instanceof net.minecraft.world.entity.LivingEntity living) {
+            var max = living.getAttribute(net.minecraft.world.entity.ai.attributes.Attributes.MAX_HEALTH);
+            if (max != null && target.has("max_health")) max.setBaseValue(target.get("max_health").getAsDouble());
+            if (target.has("health")) living.setHealth(target.get("health").getAsFloat());
+        }
+        if (target.has("name") && target.get("name").isJsonPrimitive()) {
+            made.setCustomName(net.minecraft.network.chat.Component.literal(target.get("name").getAsString()));
+        }
+        return made;
     }
 
     /**

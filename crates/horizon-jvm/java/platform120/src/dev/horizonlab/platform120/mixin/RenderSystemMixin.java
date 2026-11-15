@@ -28,4 +28,13 @@ public abstract class RenderSystemMixin {
     private static void horizon$noQueue(CallbackInfo ci) {
         ci.cancel();
     }
+
+    /**
+     * The texture a draw through a BufferBuilder will sample, while a frame is recorded
+     * (BufferUploaderMixin turns its quads into blits of it).
+     */
+    @Inject(method = "setShaderTexture(ILnet/minecraft/resources/ResourceLocation;)V", at = @At("HEAD"))
+    private static void horizon$shaderTexture(int slot, net.minecraft.resources.ResourceLocation texture, CallbackInfo ci) {
+        if (slot == 0) dev.horizonlab.platform120.Graphics120.shaderTexture = texture;
+    }
 }

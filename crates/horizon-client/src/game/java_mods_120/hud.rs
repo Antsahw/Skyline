@@ -129,10 +129,32 @@ impl super::super::Game<'_> {
                 g.mode,
                 (g.experience.level, g.experience.progress),
             );
+            // Horizon's own mob under the crosshair, before any block: the runtime's level
+            // doesn't hold Horizon's mobs, so overlays about what the player looks at (Jade)
+            // are told of it here.
+            let target = g
+                .mob_hit()
+                .filter(|&(_, d)| g.before_block(d))
+                .map(|(i, _)| {
+                    let m = &g.mobs[i];
+                    json!({
+                        "id": m.id,
+                        "type": &*m.kind.id,
+                        "pos": [m.position.x, m.position.y, m.position.z],
+                        "yaw": m.yaw,
+                        "head_yaw": m.head_yaw,
+                        "health": m.health,
+                        "max_health": horizon_client::mobs::finalize::max_health(m),
+                        "name": m.custom_name,
+                    })
+                });
             let player = g.player.as_mut()?;
             let mut state = state(&dimension, player, mode, experience);
             if let (Some(state), Some(at)) = (state.as_object_mut(), at.as_object()) {
                 state.extend(at.clone());
+                if let Some(target) = target {
+                    state.insert("target".into(), target);
+                }
             }
             let state = state.to_string();
             // Busy (a click is being run): this tick's frame is skipped, the next one comes.

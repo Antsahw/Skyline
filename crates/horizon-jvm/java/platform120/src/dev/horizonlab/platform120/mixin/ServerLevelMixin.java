@@ -128,4 +128,16 @@ public abstract class ServerLevelMixin {
                 sound, source, volume, pitch);
         ci.cancel();
     }
+
+    /**
+     * A stand-in for one of Horizon's mobs (Hud120.standIn) is found by its id, though it isn't
+     * in the level: what a client overlay asks the server about by id (Jade's mob data).
+     */
+    @org.spongepowered.asm.mixin.injection.Inject(method = "getEntity(I)Lnet/minecraft/world/entity/Entity;",
+            at = @org.spongepowered.asm.mixin.injection.At("HEAD"), cancellable = true)
+    private void horizon$standIn(int id,
+            org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable<net.minecraft.world.entity.Entity> cir) {
+        var standIn = dev.horizonlab.platform120.Hud120.standIn(id);
+        if (standIn != null && standIn.level() == (Object) this) cir.setReturnValue(standIn);
+    }
 }
