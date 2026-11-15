@@ -126,6 +126,17 @@ public final class Graphics120 {
         o.addProperty("y1", y + height);
     }
 
+    /**
+     * The field of view as the mods make it, a scale of the player's setting (a zoom mod's):
+     * kept whoever asks, as it is no drawing (Horizon's server sends it to the camera).
+     */
+    public void fov(double factor) {
+        JsonObject o = new JsonObject();
+        o.addProperty("op", "fov");
+        o.addProperty("factor", factor);
+        ops.add(o);
+    }
+
     /** A filled rectangle. `GuiGraphics.fill`. */
     public void fill(int x0, int y0, int x1, int y1, int color) {
         JsonObject o = op("fill");

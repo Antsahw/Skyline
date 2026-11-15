@@ -12,6 +12,8 @@ use super::super::java_screen::{HUD_WINDOW, HudPart, forget_hud, send_hud_part};
 use super::super::lan::LanHost;
 use super::{Level, RUNTIME, uuid_string};
 use horizon_client::command::args::GameMode;
+use horizon_protocol::packets::configuration::CustomPayload;
+use horizon_protocol::packets::play::Clientbound as C;
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -22,6 +24,8 @@ struct Hud {
     size: (i32, i32),
     /// The frame last sent: an unchanged one is not sent again.
     sent: Option<String>,
+    /// The field-of-view scale last sent (the mods' zoom), 1 for none.
+    view: f32,
 }
 
 /// By the player's connection.
@@ -59,7 +63,11 @@ pub(super) fn take_size(conn: u32, input: &Value) -> bool {
     };
     let size = (width.clamp(1, 8192) as i32, height.clamp(1, 8192) as i32);
     huds(|h| {
-        let hud = h.entry(conn).or_insert(Hud { size, sent: None });
+        let hud = h.entry(conn).or_insert(Hud {
+            size,
+            sent: None,
+            view: 1.0,
+        });
         hud.size = size;
     });
     true
@@ -172,8 +180,34 @@ impl super::super::Game<'_> {
             }
             None => return,
         };
+        // The mods' field-of-view scale (a zoom mod's: Hud120's `fov` operation), to the
+        // player's game on the 26.3 bridge's view channel when it changes.
+        let view = view_scale(&frame);
+        let view_changed = huds(|h| {
+            let hud = h.entry(conn).or_insert(Hud {
+                size,
+                sent: None,
+                view: 1.0,
+            });
+            let changed = (hud.view - view).abs() > 1e-4;
+            hud.view = view;
+            changed
+        });
+        if view_changed {
+            host.hub.send_to(
+                conn,
+                &C::CustomPayload(CustomPayload {
+                    channel: super::super::java_screen::VIEW.into(),
+                    data: serde_json::to_vec(&view).unwrap_or_default(),
+                }),
+            );
+        }
         let changed = huds(|h| {
-            let hud = h.entry(conn).or_insert(Hud { size, sent: None });
+            let hud = h.entry(conn).or_insert(Hud {
+                size,
+                sent: None,
+                view: 1.0,
+            });
             if hud.sent.as_deref() == Some(frame.as_str()) {
                 return false;
             }
@@ -184,6 +218,24 @@ impl super::super::Game<'_> {
             send_hud_part(host, conn, HudPart::Mods120, &frame);
         }
     }
+}
+
+/// The field-of-view scale a frame carries (its `fov` operation), 1 without one.
+fn view_scale(frame: &str) -> f32 {
+    if !frame.contains("\"fov\"") {
+        return 1.0;
+    }
+    serde_json::from_str::<Value>(frame)
+        .ok()
+        .and_then(|ops| {
+            ops.as_array()?
+                .iter()
+                .find(|o| o["op"] == "fov")
+                .and_then(|o| o["factor"].as_f64())
+        })
+        .map(|f| f as f32)
+        .filter(|f| f.is_finite() && *f > 0.0)
+        .unwrap_or(1.0)
 }
 
 /// A HUD that can't be drawn, said once: it would fail every tick.

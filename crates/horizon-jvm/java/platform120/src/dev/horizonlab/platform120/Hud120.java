@@ -75,6 +75,11 @@ public final class Hud120 {
             part("renderExperienceBar", () -> access.horizon$renderExperienceBar(graphics, width / 2 - 91));
             part("renderEffects", () -> access.horizon$renderEffects(graphics));
             renderHandlers(gui, graphics);
+            part("field of view", () -> {
+                double factor = fovFactor(minecraft);
+                if (DEBUG) System.out.println("Hud120: field of view x" + factor + ", keys held " + Keys120.held(player.getUUID()));
+                if (Math.abs(factor - 1.0) > 1e-3) recording.fov(factor);
+            });
             if (DEBUG) {
                 System.out.println("Hud120: " + recording.dropped + " vanilla operations left out, kept "
                         + recording.finishedCount());
@@ -268,6 +273,7 @@ public final class Hud120 {
                     + minecraft.hitResult.getLocation() + ", tick listeners "
                     + Events120.listeners(net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents.END_CLIENT_TICK));
         }
+        Keys120.holdFor(player.getUUID());
         if (Events120.listeners(net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents.START_CLIENT_TICK) != 0
                 || Events120.listeners(net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents.END_CLIENT_TICK) != 0) {
             Events120.fire(net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents.START_CLIENT_TICK,
@@ -323,6 +329,28 @@ public final class Hud120 {
             made.setCustomName(net.minecraft.network.chat.Component.literal(target.get("name").getAsString()));
         }
         return made;
+    }
+
+    /**
+     * The field of view the mods make, over the player's setting: GameRenderer.getFov with its
+     * mixins (Logical Zoom's, Zoomify's), the renderer's own modifier at 1, so only the mods'
+     * scale is left (and under water, vanilla's, which Horizon applies itself: left out).
+     */
+    private static double fovFactor(Minecraft minecraft) {
+        if (minecraft.gameRenderer == null || minecraft.options == null) return 1.0;
+        var renderer = (dev.horizonlab.platform120.mixin.GameRendererAccess) minecraft.gameRenderer;
+        renderer.horizon$setMinecraft(minecraft);
+        renderer.horizon$setFov(1f);
+        renderer.horizon$setOldFov(1f);
+        var camera = minecraft.gameRenderer.getMainCamera();
+        double setting = minecraft.options.fov().get();
+        double made = renderer.horizon$getFov(camera, 1f, true);
+        double vanilla = setting;
+        if (camera.getFluidInCamera() == net.minecraft.world.level.material.FogType.WATER
+                || camera.getFluidInCamera() == net.minecraft.world.level.material.FogType.LAVA) {
+            vanilla *= net.minecraft.util.Mth.lerp(minecraft.options.fovEffectScale().get(), 1.0, 0.85714287F);
+        }
+        return vanilla > 0 && Double.isFinite(made) && made > 0 ? made / vanilla : 1.0;
     }
 
     /**

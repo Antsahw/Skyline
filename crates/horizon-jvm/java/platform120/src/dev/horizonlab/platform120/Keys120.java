@@ -65,6 +65,29 @@ final class Keys120 {
         }
     }
 
+    /**
+     * The mods' mappings as the player's keys leave them now (held ones down), for what reads
+     * them outside a client tick of keys (Hud120's frame: a zoom mod's key while held).
+     */
+    static void holdFor(UUID player) {
+        KeyMapping.releaseAll();
+        var held = DOWN.getOrDefault(player, Set.of());
+        if (held.isEmpty()) return;
+        var options = Minecraft.getInstance().options;
+        if (options == null) return;
+        // Every mapping bound to a held key, not only the one 1.20.1's key map keeps per key
+        // (a mod's zoom on C shares it with vanilla's toolbar key, which would win).
+        for (var mapping : options.keyMappings) {
+            var key = ((dev.horizonlab.platform120.mixin.KeyMappingAccess) mapping).horizon$key();
+            if (key.getType() == InputConstants.Type.KEYSYM && held.contains(key.getValue())) mapping.setDown(true);
+        }
+    }
+
+    /** The player's keys held now. */
+    static Set<Integer> held(UUID player) {
+        return DOWN.getOrDefault(player, Set.of());
+    }
+
     static void forget(UUID player) {
         DOWN.remove(player);
         CLICKS.remove(player);

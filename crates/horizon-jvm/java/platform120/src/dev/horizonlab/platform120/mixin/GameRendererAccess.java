@@ -12,4 +12,18 @@ public interface GameRendererAccess {
     @Mutable
     @Accessor("mainCamera")
     void horizon$setMainCamera(Camera camera);
+
+    @org.spongepowered.asm.mixin.Mutable
+    @Accessor("minecraft")
+    void horizon$setMinecraft(net.minecraft.client.Minecraft minecraft);
+
+    @Accessor("fov")
+    void horizon$setFov(float fov);
+
+    @Accessor("oldFov")
+    void horizon$setOldFov(float fov);
+
+    /** The field of view, with what mods inject into it (a zoom mod's). */
+    @org.spongepowered.asm.mixin.gen.Invoker("getFov")
+    double horizon$getFov(net.minecraft.client.Camera camera, float partialTick, boolean useFovSetting);
 }

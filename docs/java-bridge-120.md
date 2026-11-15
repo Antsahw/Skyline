@@ -849,6 +849,24 @@ their stacks go down to 1.20.1's form (`count` to `Count`) before the runtime lo
 (`stacks_to_120`); they loaded empty before. `HORIZON_120_PACKETS` prints the mods' packets
 each way. Not yet: minimaps (they read client chunks).
 
+## Zoom mods: the mods' field of view (2026-11-15)
+
+Zoom mods change `GameRenderer.getFov`'s answer while their key is held (Logical Zoom
+multiplies it by 0.23; Zoomify, Ok Zoomer likewise). Each HUD frame now:
+
+- gives the mods' key mappings the player's held keys (`Keys120.holdFor`): every mapping
+  bound to a held key is down, not only the one 1.20.1's key map keeps per key (Logical
+  Zoom's C is also vanilla's toolbar key, which would win);
+- calls `getFov` with its mixins (`GameRendererAccess` invoker), the renderer's own modifier
+  at 1, and divides by the player's setting (and vanilla's under-water scale, which Horizon
+  applies itself): the mods' factor, as a `fov` operation in the frame;
+- on the server (`hud.rs`), sends that factor to the player's game on the 26.3 bridge's view
+  channel when it changes; the game scales its field of view by it (`fov.rs`, eased over the
+  tick as the 26.3 bridge's Zoomify).
+
+Checked in a game with the 34-mod pack and Logical Zoom 0.0.20: holding C zooms in (x0.23),
+letting go zooms back out.
+
 ## Phase 5i status: the mods' HUD (2026-11-14)
 
 What the mods draw on the HUD is drawn over Horizon's: AppleSkin's saturation and exhaustion
