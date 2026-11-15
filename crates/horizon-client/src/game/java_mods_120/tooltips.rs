@@ -41,6 +41,44 @@ struct Answer {
     at: Instant,
     hover: Vec<Text>,
     after: Vec<Text>,
+    /// A mod item's tooltip image: its size and what it draws at the origin.
+    image: Option<Image>,
+}
+
+/// A mod item's tooltip image (`getTooltipImage`): drawn under the lines, as 1.20.1 draws a
+/// `ClientTooltipComponent`.
+#[derive(Clone)]
+pub(in crate::game) struct Image {
+    pub size: [f32; 2],
+    pub ops: Vec<Value>,
+}
+
+fn image(value: &Value) -> Option<Image> {
+    let (w, h) = (value["w"].as_f64()?, value["h"].as_f64()?);
+    let ops = value["ops"].as_array()?.clone();
+    (w > 0.0 && h > 0.0).then_some(Image {
+        size: [w as f32, h as f32],
+        ops,
+    })
+}
+
+/// `ops` moved by `origin`: their GUI pose's translation, or one where they have none.
+pub(in crate::game) fn moved(ops: &[Value], origin: [f32; 2]) -> Vec<Value> {
+    ops.iter()
+        .map(|o| {
+            let mut o = o.clone();
+            let mut pose = match o.get("pose").and_then(Value::as_array) {
+                Some(p) if p.len() == 6 => p.iter().map(|v| v.as_f64().unwrap_or(0.0)).collect(),
+                _ => vec![1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+            };
+            pose[4] += f64::from(origin[0]);
+            pose[5] += f64::from(origin[1]);
+            if let Some(map) = o.as_object_mut() {
+                map.insert("pose".into(), json!(pose));
+            }
+            o
+        })
+        .collect()
 }
 
 #[derive(Default)]
@@ -78,7 +116,12 @@ fn stack_key(stack: &ItemStack) -> String {
     }
     let extra =
         horizon_world::snbt_text::to_snbt(&horizon_world::nbt::Tag::Compound(custom.clone()));
-    let inner = extra.trim().trim_start_matches('{').trim_end_matches('}');
+    // Only its own braces: nested compounds end in more of them.
+    let extra = extra.trim();
+    let inner = extra
+        .strip_prefix('{')
+        .and_then(|e| e.strip_suffix('}'))
+        .unwrap_or(extra);
     if inner.is_empty() {
         return base;
     }
@@ -88,7 +131,10 @@ fn stack_key(stack: &ItemStack) -> String {
             let head = &base[..at + ",tag:{".len()];
             format!("{head}{inner},{}", &base[at + ",tag:{".len()..])
         }
-        None => format!("{},tag:{{{inner}}}}}", base.trim_end_matches('}')),
+        None => format!(
+            "{},tag:{{{inner}}}}}",
+            base.strip_suffix('}').unwrap_or(&base)
+        ),
     }
 }
 
@@ -125,6 +171,22 @@ impl Game<'_> {
                 lines.extend(answer.after.iter().map(|t| (t.clone(), u32::MAX)));
             }
         });
+    }
+
+    /// The game: a mod item's tooltip image for `stack`, when its answer has one (asked for
+    /// with its lines, by [`Self::java120_tooltip`]).
+    pub(in crate::game) fn java120_tooltip_image(&self, stack: &ItemStack) -> Option<Image> {
+        if !ON.load(Ordering::Relaxed) || stack.item.starts_with("minecraft:") {
+            return None;
+        }
+        let key = (stack_key(stack), false);
+        let advanced = (stack_key(stack), true);
+        client(|c| {
+            c.answers
+                .get(&key)
+                .or_else(|| c.answers.get(&advanced))
+                .and_then(|a| a.image.clone())
+        })
     }
 
     /// The game, each tick: the stacks to ask about, to the server.
@@ -175,6 +237,7 @@ impl Game<'_> {
                     at: Instant::now(),
                     hover: texts(&message["hover"]),
                     after: texts(&message["after"]),
+                    image: image(&message["image"]),
                 },
             );
         });
@@ -228,17 +291,20 @@ impl Game<'_> {
             };
             runtime.tooltip(stack, advanced)
         };
-        let (hover, after) = match answer {
-            Ok((hover, after)) => (
+        let (hover, after, image) = match answer {
+            Ok((hover, after, image)) => (
                 serde_json::from_str::<Value>(&hover).unwrap_or(json!([])),
                 serde_json::from_str::<Value>(&after).unwrap_or(json!([])),
+                serde_json::from_str::<Value>(&image).unwrap_or(Value::Null),
             ),
             Err(e) => {
                 log::warn!("1.20.1 mods: a tooltip failed: {e}");
-                (json!([]), json!([]))
+                (json!([]), json!([]), Value::Null)
             }
         };
-        let reply = json!({"stack": stack, "advanced": advanced, "hover": hover, "after": after});
+        let reply = json!({
+            "stack": stack, "advanced": advanced, "hover": hover, "after": after, "image": image,
+        });
         host.hub.send_to(
             conn,
             &C::CustomPayload(CustomPayload {
@@ -276,6 +342,18 @@ mod tests {
         let key = stack_key(&stack);
         assert!(key.contains("tag:{energy:1200,Damage:3}"), "{key}");
         horizon_world::nbt::parse_snbt(&key).expect("SNBT the runtime reads");
+        // Nested compounds keep their braces (a cooking pot's meal under BlockEntityTag).
+        let mut pot = ItemStack::new("farmersdelight:cooking_pot", 1);
+        let custom = horizon_world::nbt::parse_snbt(
+            r#"{BlockEntityTag:{Inventory:{Items:[{Slot:6b,id:"farmersdelight:beef_stew",Count:2b}]}}}"#,
+        )
+        .expect("snbt")
+        .0;
+        pot.data_mut()
+            .set_other("minecraft:custom_data", Some(custom));
+        let key = stack_key(&pot);
+        horizon_world::nbt::parse_snbt(&key).expect("SNBT the runtime reads");
+        assert!(key.contains("Count:2b"), "{key}");
         // A stack with nothing of its own is as before.
         let plain = ItemStack::new("minecraft:bread", 3);
         assert_eq!(stack_key(&plain), stack_to_120(&plain));

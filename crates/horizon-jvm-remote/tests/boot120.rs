@@ -2677,7 +2677,7 @@ fn the_mods_machines_pass_energy_between_them() {
 
     // Phase 5n: a mod item's own tooltip lines. Farmer's Delight lists a meal's effects
     // under its name (its ConsumableItem's appendHoverText), which Horizon doesn't draw.
-    let (hover, after) = runtime
+    let (hover, after, _) = runtime
         .tooltip("{id:\"farmersdelight:beef_stew\",Count:1b}", false)
         .expect("the tooltip");
     eprintln!("beef stew's tooltip: {hover} / {after}");
@@ -2686,10 +2686,29 @@ fn the_mods_machines_pass_energy_between_them() {
         hover.to_string().contains("farmersdelight.comfort"),
         "its effect under its name: {hover}"
     );
-    let (vanilla, _) = runtime
+    let (vanilla, _, image) = runtime
         .tooltip("{id:\"minecraft:bread\",Count:1b}", false)
         .expect("the tooltip");
     assert_eq!(vanilla, "[]", "vanilla's own lines are Horizon's");
+    assert_eq!(image, "", "and no image");
+    // A mod item's tooltip image: Farmer's Delight's cooking pot shows the meal it holds
+    // (CookingPotTooltip, made by its TooltipComponentCallback), drawn as an item.
+    let (_, _, image) = runtime
+        .tooltip(
+            "{id:\"farmersdelight:cooking_pot\",Count:1b,tag:{BlockEntityTag:{Inventory:{Items:[{Slot:6b,id:\"farmersdelight:beef_stew\",Count:2b}]}}}}",
+            false,
+        )
+        .expect("the tooltip");
+    eprintln!("cooking pot's tooltip image: {image}");
+    // Only Refabricated's Farmer's Delight has it (1.4.3, the other port, shows none).
+    if !image.is_empty() {
+        let image: serde_json::Value = serde_json::from_str(&image).expect("an image");
+        assert!(image["w"].as_i64().unwrap_or(0) > 0, "{image}");
+        assert!(
+            image["ops"].to_string().contains("farmersdelight:beef_stew"),
+            "the meal drawn: {image}"
+        );
+    }
 
     // Phase 5i: what the mods draw on the HUD, over Horizon's. A hungry player in survival:
     // AppleSkin's saturation and exhaustion over the food bar, from Horizon's numbers; none

@@ -681,8 +681,18 @@ of its own data (`minecraft:custom_data`: a battery's charge) back under its `ta
 
 Checked: in the runtime test, beef stew's own line is Comfort for 3:00 and bread has none from
 the runtime (vanilla's lines are Horizon's); in a game, the stew's tooltip shows it in blue under
-its name. Not yet: tooltip images (`TooltipComponent`: AppleSkin's food preview, shulker box
-contents), which draw rather than add lines.
+its name.
+
+**Tooltip images (2026-11-15).** A mod item's `getTooltipImage` comes with its lines: the
+runtime makes its `ClientTooltipComponent` (asking Fabric's `TooltipComponentCallback` first,
+then vanilla's `create`), records what `renderImage` draws through the GuiGraphics recorder and
+what `renderText` draws through `TextRecorder120` (a font whose `drawInBatch` becomes text
+operations), and answers `{w, h, ops}` as a third value of `tooltip`. The game draws the ops
+under the lines and any native component, in a box made that much larger (`stations.rs`,
+`draw_java_ops` moved by the image's origin). Checked in a game: Farmer's Delight's cooking pot
+holding beef stew shows "Holds 2 servings of:" and the stew's icon and name. Only mod items'
+images (vanilla's own, like a bundle's, are Horizon's); images a mod gives vanilla items through
+mixins (AppleSkin's food preview) are not asked for.
 
 ## Phase 5m status: the mods' tools, weapons and armour (2026-11-14)
 

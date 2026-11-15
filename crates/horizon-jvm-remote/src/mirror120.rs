@@ -1380,13 +1380,25 @@ impl Runtime120 {
     /// of components. `hover` is a mod item's own lines (`appendHoverText`, under the name),
     /// `after` what tooltip mods append to any stack (Fabric's `ItemTooltipCallback`). `snbt`
     /// is the stack as 1.20.1 saves it (`{id,Count,tag}`); `advanced`: F3+H's tooltips.
-    pub fn tooltip(&mut self, snbt: &str, advanced: bool) -> Result<(String, String), String> {
+    ///
+    /// The third is a mod item's tooltip image (`getTooltipImage`) as JSON `{w, h, ops}`: its
+    /// size and the drawing operations of its `renderImage` at the origin; empty when none.
+    pub fn tooltip(
+        &mut self,
+        snbt: &str,
+        advanced: bool,
+    ) -> Result<(String, String, String), String> {
         let answers = self.call_answers(
             "tooltip",
             &[Value::Str(snbt.to_owned()), Value::I32(i32::from(advanced))],
         )?;
         match answers.as_slice() {
-            [Value::Str(hover), Value::Str(after)] => Ok((hover.clone(), after.clone())),
+            [Value::Str(hover), Value::Str(after), Value::Str(image)] => {
+                Ok((hover.clone(), after.clone(), image.clone()))
+            }
+            [Value::Str(hover), Value::Str(after)] => {
+                Ok((hover.clone(), after.clone(), String::new()))
+            }
             other => Err(format!("tooltip: answer {other:?}")),
         }
     }

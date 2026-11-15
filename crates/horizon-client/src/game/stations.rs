@@ -2738,9 +2738,14 @@ impl Game<'_> {
         let mut component = None;
         self.native_tooltip_component(stack, &mut component);
         let component = tooltip_component_size(component);
-        let extra = bundle_extra + component.map_or(0.0, |size| size[1] + 2.0);
+        // A 1.20.1 mod item's tooltip image (java_mods_120/tooltips.rs), under the others.
+        let java_image = self.java_tooltip_image(stack);
+        let java_size = java_image.as_ref().map(|i| i.0);
+        let component_extra = component.map_or(0.0, |size| size[1] + 2.0);
+        let extra = bundle_extra + component_extra + java_size.map_or(0.0, |size| size[1] + 2.0);
         let min_width = (if probe.is_some() { 96.0_f32 } else { 0.0 })
-            .max(component.map_or(0.0, |size| size[0]));
+            .max(component.map_or(0.0, |size| size[0]))
+            .max(java_size.map_or(0.0, |size| size[0]));
         let atlas = &self.gui.atlas;
         let (x, y, w, h) = Self::tooltip_geometry(
             atlas,
@@ -2766,7 +2771,32 @@ impl Game<'_> {
                 size,
             );
         }
+        if let Some((_, ops)) = java_image {
+            let origin = [x, y + text_h + bundle_extra + component_extra + 2.0];
+            self.draw_java_tooltip_image(batch, &ops, origin);
+        }
     }
+    /// A 1.20.1 mod item's tooltip image: its size and drawing operations.
+    #[cfg(feature = "java-mods-120")]
+    fn java_tooltip_image(&self, stack: &ItemStack) -> Option<([f32; 2], Vec<serde_json::Value>)> {
+        self.java120_tooltip_image(stack).map(|i| (i.size, i.ops))
+    }
+    #[cfg(not(feature = "java-mods-120"))]
+    fn java_tooltip_image(&self, _: &ItemStack) -> Option<([f32; 2], Vec<serde_json::Value>)> {
+        None
+    }
+    #[cfg(feature = "java-mods-120")]
+    fn draw_java_tooltip_image(
+        &mut self,
+        batch: &mut HudBatch,
+        ops: &[serde_json::Value],
+        origin: [f32; 2],
+    ) {
+        let ops = super::java_mods_120::tooltips::moved(ops, origin);
+        self.draw_java_ops(batch, &ops);
+    }
+    #[cfg(not(feature = "java-mods-120"))]
+    fn draw_java_tooltip_image(&mut self, _: &mut HudBatch, _: &[serde_json::Value], _: [f32; 2]) {}
     /// `ClientBundleTooltip.extractSelectedItemTooltip`: the selected item's
     /// name in a box of its own, centred over the grid (less 12) and 15 above
     /// the component, placed by `DefaultTooltipPositioner` (+12, -12, kept on

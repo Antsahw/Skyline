@@ -1375,12 +1375,77 @@ public final class Mirror120 {
             for (int i = before; i < all.size(); i++) {
                 afterJson.add(net.minecraft.network.chat.Component.Serializer.toJsonTree(all.get(i)));
             }
-            return new Object[] {hoverJson.toString(), afterJson.toString()};
+            String image = id.getNamespace().equals("minecraft") ? "" : tooltipImage(id, stack);
+            return new Object[] {hoverJson.toString(), afterJson.toString(), image};
         } catch (com.mojang.brigadier.exceptions.CommandSyntaxException e) {
-            return new Object[] {"[]", "[]"};
+            return new Object[] {"[]", "[]", ""};
         } finally {
             finish();
         }
+    }
+
+    /**
+     * A mod item's tooltip image (`Item.getTooltipImage`, made a ClientTooltipComponent by
+     * `ClientTooltipComponent.create`, where Fabric's TooltipComponentCallback answers: Farmer's
+     * Delight's cooking pot shows its meal), as JSON {w, h, ops}: its size and what its
+     * `renderImage` and `renderText` draw at the origin. "" when it has none.
+     */
+    private static String tooltipImage(ResourceLocation id, ItemStack stack) {
+        java.util.Optional<net.minecraft.world.inventory.tooltip.TooltipComponent> data;
+        try {
+            data = stack.getTooltipImage();
+        } catch (Throwable t) {
+            log(id + "'s tooltip image failed: " + t);
+            return "";
+        }
+        if (data.isEmpty()) return "";
+        synchronized (Hud120.class) {
+            Graphics120 recording = Graphics120.begin();
+            try {
+                var font = Screens120.font();
+                var component = clientTooltip(data.get());
+                int w = component.getWidth(font);
+                int h = component.getHeight();
+                component.renderImage(font, 0, 0, Screens120.recorder());
+                // What it draws with the font itself (its text), as the tooltip draws it.
+                try {
+                    component.renderText(TextRecorder120.of(font), 0, 0, new org.joml.Matrix4f(), null);
+                } catch (Throwable t) {
+                    log(id + "'s tooltip text failed: " + t);
+                }
+                var out = new com.google.gson.JsonObject();
+                out.addProperty("w", w);
+                out.addProperty("h", h);
+                out.add("ops", recording.finish());
+                return out.toString();
+            } catch (Throwable t) {
+                log(id + "'s tooltip image failed: " + t);
+                    return "";
+            } finally {
+                if (Graphics120.current() == recording) recording.finish();
+            }
+        }
+    }
+
+    /**
+     * `ClientTooltipComponent.create`, asking Fabric's TooltipComponentCallback first (its
+     * mixin into `create` may not be there: then vanilla's own knows only its bundle's).
+     */
+    private static net.minecraft.client.gui.screens.inventory.tooltip.ClientTooltipComponent clientTooltip(
+            net.minecraft.world.inventory.tooltip.TooltipComponent data) throws Exception {
+        try {
+            Class<?> callback = Class.forName("net.fabricmc.fabric.api.client.rendering.v1.TooltipComponentCallback");
+            Object eventObject = callback.getField("EVENT").get(null);
+            Object invoker = eventObject.getClass().getMethod("invoker").invoke(eventObject);
+            Object made = callback.getMethod("getComponent", net.minecraft.world.inventory.tooltip.TooltipComponent.class)
+                    .invoke(invoker, data);
+            if (made instanceof net.minecraft.client.gui.screens.inventory.tooltip.ClientTooltipComponent c) return c;
+        } catch (ClassNotFoundException e) {
+            // No Fabric rendering API: vanilla's own only.
+        } catch (java.lang.reflect.InvocationTargetException e) {
+            throw e.getCause() instanceof Exception cause ? cause : e;
+        }
+        return net.minecraft.client.gui.screens.inventory.tooltip.ClientTooltipComponent.create(data);
     }
 
     /** Whether a fluid is a mod's (its own code runs it: phase 6e). */
