@@ -15,6 +15,8 @@ The launcher can't build the 1.20.1 bridge, so this does its steps by hand:
 5. builds the game there into this checkout's `target/` (the dependencies are shared).
 
     python3 tools/skyline_native.py                  # fast profile, both Java bridges
+    HORIZON_JAVA_MODS=1 target/fast/horizon-client --resources .local/horizon-client/26.3 --world W
+                                                     # the 26.3 mods (mods-java/) run only with it
     python3 tools/skyline_native.py --release
     python3 tools/skyline_native.py --features java-mods-120
 
@@ -154,10 +156,24 @@ def link_local(stage):
                            capture_output=True)
 
 
+def rebuild_platform_if_left_out(stage, target):
+    """Has horizon-jvm's build script run again when its last run left the 26.3 platform mod out
+    (an empty `horizon-platform.jar`, built before the stage could see the prepared game) and the
+    game is there now: Cargo watches neither, so it would keep the empty jar."""
+    outs = sorted((target / "build").glob("horizon-jvm-*/out/horizon-platform.jar"),
+                  key=lambda p: p.stat().st_mtime)
+    game = list((ROOT / ".local" / "minecraft").glob("*/jars/client.jar"))
+    if outs and outs[-1].stat().st_size == 0 and game:
+        print("the last build left the 26.3 platform mod out: building it again", flush=True)
+        (stage / "crates" / "horizon-jvm" / "build.rs").touch()
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--release", action="store_true", help="the release profile instead of fast")
-    ap.add_argument("--features", default="java-mods,java-mods-120")
+    # java-mods-dev: the 26.3 bridge runs outside the launcher with HORIZON_JAVA_MODS=1
+    # (it implies java-mods); a player's build comes from the launcher, not from here.
+    ap.add_argument("--features", default="java-mods-dev,java-mods-120")
     ap.add_argument("-j", "--jobs", help="Cargo's build jobs")
     args = ap.parse_args()
 
@@ -176,6 +192,7 @@ def main():
         sync(tmp / "out", WORK / "stage")
     link_local(WORK / "stage")
     profile = "release" if args.release else "fast"
+    rebuild_platform_if_left_out(WORK / "stage", ROOT / "target" / profile)
     cmd = ["cargo", "build", "--locked", "--profile", profile, "-p", "horizon-client",
            "--bin", "horizon-client", "--target-dir", ROOT / "target"]
     if args.features:
