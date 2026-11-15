@@ -10,7 +10,9 @@ The launcher can't build the 1.20.1 bridge, so this does its steps by hand:
    newer Horizon, and `horizon-mixins` refuses them otherwise;
 3. applies the mods (`horizon-mixins apply`) and copies only what changed into
    `.local/native/stage/`, so Cargo's next build recompiles only what the mods touch;
-4. builds the game there into this checkout's `target/` (the dependencies are shared).
+4. links this checkout's `.local/minecraft` and `.local/bridge` into the stage, where the 26.3
+   bridge's build looks for the prepared game;
+5. builds the game there into this checkout's `target/` (the dependencies are shared).
 
     python3 tools/skyline_native.py                  # fast profile, both Java bridges
     python3 tools/skyline_native.py --release
@@ -127,6 +129,31 @@ def sync(src, dest):
                 (dest / rel / f).unlink()
 
 
+def link_local(stage):
+    """The checkout's prepared data where the stage's build scripts look for it.
+
+    horizon-jvm's build compiles the 26.3 bridge's platform mod against the prepared game in
+    `.local/minecraft` and Fabric API in `.local/bridge`, both beside its sources. The stage is a
+    copy without `.local`, so that build found no game and left the platform mod out: the 26.3
+    mods then ran without Horizon's hooks (their items, but no textures or names). Linked, not
+    copied: the game is large. (Links stay out of the copied source: horizon-mixins refuses them.)
+    """
+    local = stage / ".local"
+    local.mkdir(exist_ok=True)
+    for name in ("minecraft", "bridge"):
+        target, link = ROOT / ".local" / name, local / name
+        if not target.exists() or link.exists() or link.is_symlink():
+            continue
+        try:
+            link.symlink_to(target, target_is_directory=True)
+        except OSError:
+            if os.name != "nt":
+                raise
+            # Windows without the right to make links: a junction needs none.
+            subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(target)], check=True,
+                           capture_output=True)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--release", action="store_true", help="the release profile instead of fast")
@@ -147,6 +174,7 @@ def main():
         copy_mods(mods, tmp / "mods", revision)
         run([exe, "apply", "--workspace", tmp / "source", "--mods", tmp / "mods", "--out", tmp / "out"])
         sync(tmp / "out", WORK / "stage")
+    link_local(WORK / "stage")
     profile = "release" if args.release else "fast"
     cmd = ["cargo", "build", "--locked", "--profile", profile, "-p", "horizon-client",
            "--bin", "horizon-client", "--target-dir", ROOT / "target"]

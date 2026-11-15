@@ -231,7 +231,7 @@ impl Game<'_> {
         // A pack's worldgen ids join the completion registries
         // (`command-registries.json` lists only the game's own), and so do
         // its worldgen tag ids for the `#tag` completions. The packs are the
-        // ones the world's worldgen is built from.
+        // ones the world's worldgen is built from, the Java mods' included.
         let packs = horizon_client::datapack::discover_with_features(
             &self.world_root,
             &self.options.resources,
@@ -245,6 +245,12 @@ impl Game<'_> {
             .iter()
             .filter_map(|id| packs.iter().find(|p| &p.id == id))
             .collect();
+        // The Java mods' worldgen under them, as the generator has it (world_loading.rs
+        // `worldgen_overrides_of`): their structures and biomes complete too (`/locate
+        // structure mvs:campsite`).
+        let mods = Game::java_structure_packs();
+        let mods_120 = super::world_loading::mod_worldgen_packs();
+        let enabled: Vec<_> = mods.iter().chain(&mods_120).chain(enabled).collect();
         let (overrides, _) = horizon_client::datapack::worldgen_overrides(&enabled, |_| true);
         for (bundle, registry) in [
             ("biomes", "minecraft:worldgen/biome"),

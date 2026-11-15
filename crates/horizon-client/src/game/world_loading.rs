@@ -625,7 +625,7 @@ static MOD_WORLDGEN_REFUSED: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 
 /// The 1.20.1 mods' world generation as a data pack, below the world's packs.
-fn mod_worldgen_packs() -> Vec<horizon_client::datapack::DataPack> {
+pub(super) fn mod_worldgen_packs() -> Vec<horizon_client::datapack::DataPack> {
     if MOD_WORLDGEN_REFUSED.load(std::sync::atomic::Ordering::Relaxed) {
         return Vec::new();
     }
