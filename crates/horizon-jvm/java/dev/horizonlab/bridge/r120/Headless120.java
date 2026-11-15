@@ -58,6 +58,12 @@ final class Headless120 {
             java.lang.reflect.Array.set(sources, 2, folder);
             Object repository = n.construct(n.cls("net.minecraft.server.packs.repository.PackRepository", game), sources);
             set(n, minecraftClass, minecraft, "resourcePackRepository", repository);
+            // The client's resource manager, empty: mods register reload listeners on it at
+            // start (Jade's), which would otherwise fail their whole client entrypoint.
+            // Nothing reloads it; the client's resources are read elsewhere (Models120).
+            Object manager = n.construct(n.cls("net.minecraft.server.packs.resources.ReloadableResourceManager", game),
+                    n.getStatic(packType, "CLIENT_RESOURCES"));
+            set(n, minecraftClass, minecraft, "resourceManager", manager);
             return null;
         } catch (Throwable e) {
             return Boot120.root(e);

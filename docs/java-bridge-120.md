@@ -791,6 +791,37 @@ commands are listed when the world opens, and `/supplementaries roll 20` answers
 English text, `Rolled D%1$d: %2$d`, shows as written: vanilla's translations take only `%s`, so
 1.20.1 shows the same.)
 
+## The client's world, for overlays about it: Jade (2026-11-15)
+
+Overlays about what the player looks at read the client: its level, player, camera, game mode
+and a client tick. The HUD frame (`Hud120.frame`) now gives them those, from the server's:
+
+- **A client level per dimension** (`Hud120.clientLevel`): a `ClientLevel` made without its
+  constructor (no connection), client-side, whose blocks, fluids, block entities, entities,
+  light, height and biomes are its server level's (LevelMixin delegates through
+  `Hud120.serverFor`; registries, damage sources, border and dimension type are set from it).
+- **The client player where the player is**: Horizon sends the player's position and rotation
+  with each frame; the runtime's player is moved there, and the client player takes its
+  position, block, chunk, box, size and rotation.
+- **A client tick before each frame**, as `Minecraft.runTick` comes before the render: what the
+  crosshair hits (the player's pick at its mode's reach, entities included) as `hitResult`,
+  then Fabric's START and END client tick events. The frame timer counts a tick per frame
+  (`getDeltaFrameTime`, which fades take).
+- **What the client's constructor would have made** and overlays ask: the resource manager
+  (empty; mods register reload listeners at start: Jade's client entrypoint failed without
+  it), a `MultiPlayerGameMode` (mode, reach, no block being broken), a game renderer whose
+  camera is set up at the player's eyes, the GUI's boss bars, chat and player list (never
+  shown), a font set that measures (fonts made from the headless font, Jade's), and mixins'
+  `ThreadLocal` fields on objects made without constructors (`Allocate`: Porting Lib's).
+- **Colored quads drawn straight through a BufferBuilder** while a frame is recorded
+  (`BufferUploaderMixin`: Jade's panel, HUD bars) become fills or gradients.
+
+Checked in a game with the 34-mod pack and Jade 11.13.3: looking at a furnace shows Jade's
+panel with its icon, "Furnace", "Minecraft" and the harvest tool; a cooking pot shows "Cooking
+Pot", "Farmer's Delight". Not yet: Horizon's own mobs, which the runtime's level doesn't hold
+(the mods' mobs are there); Jade's server-side data (a furnace's contents, a mob's health)
+comes over its own packets, not tried yet; minimaps (they read client chunks).
+
 ## Phase 5i status: the mods' HUD (2026-11-14)
 
 What the mods draw on the HUD is drawn over Horizon's: AppleSkin's saturation and exhaustion

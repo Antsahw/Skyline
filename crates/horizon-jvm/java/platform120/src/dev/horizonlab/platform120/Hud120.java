@@ -55,8 +55,13 @@ public final class Hud120 {
         access.horizon$setTickCount(player.tickCount);
         var levelBefore = minecraft.level;
         var cameraBefore = minecraft.cameraEntity;
-        minecraft.level = level();
+        minecraft.level = clientLevel(player.serverLevel());
         minecraft.cameraEntity = local;
+        // The client's tick before its frame, as Minecraft.runTick comes before the render:
+        // what the player looks at (`hitResult`) and Fabric's client tick events, where
+        // overlays about the world find it (Jade's).
+        if (TIMER != null) TIMER.tickDelta = 1f;
+        part("client tick", () -> clientTick(minecraft, player, local));
         Graphics120 recording = Graphics120.begin();
         recording.modsOnly = true;
         try {
@@ -84,6 +89,13 @@ public final class Hud120 {
 
     /** Horizon's numbers on the runtime's player, which the client player reads. */
     static void stats(ServerPlayer player, JsonObject s) {
+        if (s.has("pos") && s.get("pos").isJsonArray() && s.getAsJsonArray("pos").size() == 3) {
+            var pos = s.getAsJsonArray("pos");
+            float yaw = s.has("yaw") ? s.get("yaw").getAsFloat() : player.getYRot();
+            float pitch = s.has("pitch") ? s.get("pitch").getAsFloat() : player.getXRot();
+            player.moveTo(pos.get(0).getAsDouble(), pos.get(1).getAsDouble(), pos.get(2).getAsDouble(), yaw, pitch);
+            player.setYHeadRot(yaw);
+        }
         var maxHealth = player.getAttribute(net.minecraft.world.entity.ai.attributes.Attributes.MAX_HEALTH);
         if (maxHealth != null && s.has("max_health")) maxHealth.setBaseValue(s.get("max_health").getAsDouble());
         if (s.has("health")) player.setHealth(s.get("health").getAsFloat());
@@ -130,6 +142,12 @@ public final class Hud120 {
         return map;
     }
 
+    /**
+     * The client's frame timer. A HUD frame here is one a tick, so each is a tick's worth of
+     * time (`getDeltaFrameTime`: what fades take as time: Jade's tooltip fading in).
+     */
+    private static net.minecraft.client.Timer TIMER;
+
     /** The client's in-game GUI, made once without its constructor. */
     private static Gui gui(Minecraft minecraft) {
         if (gui == null) {
@@ -138,13 +156,133 @@ public final class Hud120 {
             access.horizon$setMinecraft(minecraft);
             access.horizon$setRandom(net.minecraft.util.RandomSource.create());
             access.horizon$setItemRenderer(minecraft.getItemRenderer());
+            // No boss bars: what overlays that keep clear of them ask (Jade's).
+            access.horizon$setBossOverlay(new net.minecraft.client.gui.components.BossHealthOverlay(minecraft));
+            // An empty chat, never focused (Jade hides while the chat is open).
+            access.horizon$setChat(new net.minecraft.client.gui.components.ChatComponent(minecraft));
+            // The player list, never shown (Jade hides while it is).
+            access.horizon$setTabList(new net.minecraft.client.gui.components.PlayerTabOverlay(minecraft, gui));
             var client = (dev.horizonlab.platform120.mixin.MinecraftAccess) minecraft;
             client.horizon$setProfiler(net.minecraft.util.profiling.InactiveProfiler.INSTANCE);
             // A frame timer at 20 ticks a second (Minecraft's constructor makes it so).
-            client.horizon$setTimer(new net.minecraft.client.Timer(20f, 0L));
+            TIMER = new net.minecraft.client.Timer(20f, 0L);
+            client.horizon$setTimer(TIMER);
             if (minecraft.gui == null) client.horizon$setGui(gui);
         }
         return gui;
+    }
+
+    /** Each dimension's stand-in client level, by its server level; and the other way. */
+    private static final java.util.Map<net.minecraft.server.level.ServerLevel, net.minecraft.client.multiplayer.ClientLevel> CLIENT_LEVELS =
+            new java.util.IdentityHashMap<>();
+    private static final java.util.Map<net.minecraft.world.level.Level, net.minecraft.world.level.Level> SERVER_LEVELS =
+            java.util.Collections.synchronizedMap(new java.util.IdentityHashMap<>());
+
+    /**
+     * The client level a player's game would have for `server`'s dimension: made without its
+     * constructor (no connection), client-side, and reading `server`'s blocks, block entities,
+     * entities, light, biomes (LevelMixin) and registries, which are
+     * Horizon's. What client mods ask of the world they see (Jade's look at a block, a
+     * minimap's chunks) is answered from there.
+     */
+    static synchronized net.minecraft.client.multiplayer.ClientLevel clientLevel(net.minecraft.server.level.ServerLevel server) {
+        var made = CLIENT_LEVELS.get(server);
+        if (made != null) return made;
+        var level = Allocate.make(net.minecraft.client.multiplayer.ClientLevel.class);
+        var data = Allocate.make(net.minecraft.client.multiplayer.ClientLevel.ClientLevelData.class);
+        ((dev.horizonlab.platform120.mixin.ClientLevelAccess) level).horizon$setLevelData(data);
+        var access = (dev.horizonlab.platform120.mixin.LevelAccess) level;
+        access.horizon$setClientSide(true);
+        access.horizon$setDimension(server.dimension());
+        access.horizon$setDimensionType(server.dimensionTypeRegistration());
+        access.horizon$setRandom(net.minecraft.util.RandomSource.create());
+        access.horizon$setThreadSafeRandom(net.minecraft.util.RandomSource.createThreadSafe());
+        access.horizon$setWorldBorder(server.getWorldBorder());
+        access.horizon$setLevelData(data);
+        access.horizon$setProfiler(() -> net.minecraft.util.profiling.InactiveProfiler.INSTANCE);
+        access.horizon$setDamageSources(server.damageSources());
+        access.horizon$setRegistryAccess(server.registryAccess());
+        SERVER_LEVELS.put(level, server);
+        CLIENT_LEVELS.put(server, level);
+        return level;
+    }
+
+    /** The server level a stand-in client level reads, or null for any other level. */
+    public static net.minecraft.world.level.Level serverFor(net.minecraft.world.level.Level level) {
+        return level instanceof net.minecraft.client.multiplayer.ClientLevel ? SERVER_LEVELS.get(level) : null;
+    }
+
+    /**
+     * One client tick for the HUD's player: what the crosshair hits (GameRenderer.pick, at the
+     * reach of the player's mode) as `hitResult`, then Fabric's START and END client tick events.
+     */
+    private static void clientTick(Minecraft minecraft, ServerPlayer player, net.minecraft.client.player.LocalPlayer local) {
+        place(player, local);
+        // The client's game mode, made without its connection: the player's mode, which its
+        // reach (getPickRange) and the mods ask.
+        if (minecraft.gameMode == null) {
+            minecraft.gameMode = Allocate.make(net.minecraft.client.multiplayer.MultiPlayerGameMode.class);
+            var made = (dev.horizonlab.platform120.mixin.MultiPlayerGameModeAccess) minecraft.gameMode;
+            made.horizon$setMinecraft(minecraft);
+            // What its constructor's field initializers set: no block being broken.
+            made.horizon$setDestroyBlockPos(new net.minecraft.core.BlockPos(-1, -1, -1));
+            made.horizon$setDestroyingItem(net.minecraft.world.item.ItemStack.EMPTY);
+        }
+        // The game renderer's camera at the player's eyes, as the frame before sets it up
+        // (Jade traces from it). Render120 makes the renderer the same way when it comes first.
+        if (minecraft.gameRenderer == null) {
+            var renderer = Allocate.make(net.minecraft.client.renderer.GameRenderer.class);
+            ((dev.horizonlab.platform120.mixin.GameRendererAccess) renderer).horizon$setMainCamera(new net.minecraft.client.Camera());
+            ((dev.horizonlab.platform120.mixin.MinecraftAccess) minecraft).horizon$setGameRenderer(renderer);
+        }
+        minecraft.gameRenderer.getMainCamera().setup(minecraft.level, local, false, false, 1f);
+        var mode = (dev.horizonlab.platform120.mixin.MultiPlayerGameModeAccess) minecraft.gameMode;
+        mode.horizon$setMode(player.gameMode.getGameModeForPlayer());
+        mode.horizon$setPreviousMode(player.gameMode.getPreviousGameModeForPlayer());
+        double reach = player.getAbilities().instabuild ? 5.0 : 4.5;
+        var block = player.pick(reach, 1f, false);
+        var eye = player.getEyePosition(1f);
+        var look = player.getViewVector(1f);
+        double far = block.getType() == net.minecraft.world.phys.HitResult.Type.MISS ? reach : block.getLocation().distanceTo(eye);
+        var end = eye.add(look.scale(far));
+        var box = player.getBoundingBox().expandTowards(look.scale(far)).inflate(1.0);
+        var entity = net.minecraft.world.entity.projectile.ProjectileUtil.getEntityHitResult(player, eye, end, box,
+                e -> !e.isSpectator() && e.isPickable() && e != player, far * far);
+        minecraft.hitResult = entity != null ? entity : block;
+        minecraft.crosshairPickEntity = entity != null ? entity.getEntity() : null;
+        if (DEBUG) {
+            System.out.println("Hud120: client tick, looking at " + minecraft.hitResult.getType() + " "
+                    + minecraft.hitResult.getLocation() + ", tick listeners "
+                    + Events120.listeners(net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents.END_CLIENT_TICK));
+        }
+        if (Events120.listeners(net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents.START_CLIENT_TICK) != 0
+                || Events120.listeners(net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents.END_CLIENT_TICK) != 0) {
+            Events120.fire(net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents.START_CLIENT_TICK,
+                    "client tick start", l -> l.onStartTick(minecraft));
+            Events120.fire(net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents.END_CLIENT_TICK,
+                    "client tick end", l -> l.onEndTick(minecraft));
+        }
+    }
+
+    /**
+     * The client player where the server player is, looking where it looks: its position, block
+     * and chunk, box, size and rotation (what client mods read of `Minecraft.player`).
+     */
+    private static void place(ServerPlayer player, net.minecraft.client.player.LocalPlayer local) {
+        var entity = (dev.horizonlab.platform120.mixin.EntityAccess) (Object) local;
+        entity.horizon$setPosition(player.position());
+        entity.horizon$setBlockPosition(player.blockPosition());
+        entity.horizon$setChunkPosition(player.chunkPosition());
+        entity.horizon$setBoundingBox(player.getBoundingBox());
+        entity.horizon$setDimensions(player.getDimensions(player.getPose()));
+        entity.horizon$setEyeHeight(player.getEyeHeight());
+        local.setYRot(player.getYRot());
+        local.setXRot(player.getXRot());
+        local.yRotO = player.yRotO;
+        local.xRotO = player.xRotO;
+        local.xo = player.xo;
+        local.yo = player.yo;
+        local.zo = player.zo;
     }
 
     /** An empty client level, for what the HUD asks of the world (hardcore hearts). */

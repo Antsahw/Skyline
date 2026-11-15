@@ -97,20 +97,31 @@ impl super::super::Game<'_> {
         let Some(mut host) = self.lan.take() else {
             return;
         };
-        let players: Vec<(u32, String, String)> = host
+        let players: Vec<(u32, String, String, Value)> = host
             .hub
             .guests
             .iter()
             .filter(|g| g.placed)
-            .map(|g| (g.conn, uuid_string(g.uuid), g.name.clone()))
+            .map(|g| {
+                // Where the player is and looks: what the client's tick picks (Jade's target).
+                let at = json!({"pos": g.position, "yaw": g.yaw, "pitch": g.pitch});
+                (g.conn, uuid_string(g.uuid), g.name.clone(), at)
+            })
             .collect();
-        for (conn, uuid, name) in players {
-            self.send_java120_hud(&mut host, conn, &uuid, &name);
+        for (conn, uuid, name, at) in players {
+            self.send_java120_hud(&mut host, conn, &uuid, &name, &at);
         }
         self.lan = Some(host);
     }
 
-    fn send_java120_hud(&mut self, host: &mut LanHost, conn: u32, uuid: &str, name: &str) {
+    fn send_java120_hud(
+        &mut self,
+        host: &mut LanHost,
+        conn: u32,
+        uuid: &str,
+        name: &str,
+        at: &Value,
+    ) {
         let size = huds(|h| h.get(&conn).map_or(FIRST_SIZE, |hud| hud.size));
         let drawn = self.as_guest(host, conn, |g| {
             let (dimension, mode, experience) = (
@@ -119,7 +130,11 @@ impl super::super::Game<'_> {
                 (g.experience.level, g.experience.progress),
             );
             let player = g.player.as_mut()?;
-            let state = state(&dimension, player, mode, experience).to_string();
+            let mut state = state(&dimension, player, mode, experience);
+            if let (Some(state), Some(at)) = (state.as_object_mut(), at.as_object()) {
+                state.extend(at.clone());
+            }
+            let state = state.to_string();
             // Busy (a click is being run): this tick's frame is skipped, the next one comes.
             let Ok(mut guard) = RUNTIME.try_lock() else {
                 return None;

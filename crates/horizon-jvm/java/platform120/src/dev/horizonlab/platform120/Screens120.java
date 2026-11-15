@@ -129,6 +129,8 @@ public final class Screens120 {
         access.horizon$setLineHeight(9);
         access.horizon$setSplitter(new net.minecraft.client.StringSplitter(
                 (codePoint, style) -> advance(codePoint) + (style.isBold() ? 1 : 0)));
+        var glyphs = MeasureFontSet120.make();
+        access.horizon$setFonts(id -> glyphs);
         ((dev.horizonlab.platform120.mixin.MinecraftAccess) minecraft).horizon$setFont(font);
         return font;
     }

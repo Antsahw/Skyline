@@ -15,6 +15,24 @@ public interface EntityAccess {
     @Accessor("entityData")
     void horizon$setEntityData(net.minecraft.network.syncher.SynchedEntityData data);
 
+    @Accessor("position")
+    void horizon$setPosition(net.minecraft.world.phys.Vec3 position);
+
+    @Accessor("blockPosition")
+    void horizon$setBlockPosition(net.minecraft.core.BlockPos position);
+
+    @Accessor("chunkPosition")
+    void horizon$setChunkPosition(net.minecraft.world.level.ChunkPos position);
+
+    @Accessor("bb")
+    void horizon$setBoundingBox(net.minecraft.world.phys.AABB box);
+
+    @Accessor("dimensions")
+    void horizon$setDimensions(net.minecraft.world.entity.EntityDimensions dimensions);
+
+    @Accessor("eyeHeight")
+    void horizon$setEyeHeight(float height);
+
     @Accessor("level")
     void horizon$setLevel(net.minecraft.world.level.Level level);
 

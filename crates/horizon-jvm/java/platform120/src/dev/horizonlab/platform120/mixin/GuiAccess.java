@@ -25,6 +25,18 @@ public interface GuiAccess {
     @Accessor("itemRenderer")
     void horizon$setItemRenderer(net.minecraft.client.renderer.entity.ItemRenderer items);
 
+    @org.spongepowered.asm.mixin.Mutable
+    @Accessor("bossOverlay")
+    void horizon$setBossOverlay(net.minecraft.client.gui.components.BossHealthOverlay overlay);
+
+    @org.spongepowered.asm.mixin.Mutable
+    @Accessor("chat")
+    void horizon$setChat(net.minecraft.client.gui.components.ChatComponent chat);
+
+    @org.spongepowered.asm.mixin.Mutable
+    @Accessor("tabList")
+    void horizon$setTabList(net.minecraft.client.gui.components.PlayerTabOverlay tabList);
+
     @Accessor("screenWidth")
     void horizon$setScreenWidth(int width);
 

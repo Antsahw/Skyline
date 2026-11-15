@@ -41,6 +41,14 @@ public interface LevelAccess {
     void horizon$setProfiler(java.util.function.Supplier<net.minecraft.util.profiling.ProfilerFiller> profiler);
 
     @Mutable
+    @Accessor("registryAccess")
+    void horizon$setRegistryAccess(net.minecraft.core.RegistryAccess registries);
+
+    @Mutable
+    @Accessor("isClientSide")
+    void horizon$setClientSide(boolean clientSide);
+
+    @Mutable
     @Accessor("damageSources")
     void horizon$setDamageSources(net.minecraft.world.damagesource.DamageSources sources);
 }

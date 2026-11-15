@@ -23,20 +23,41 @@ public abstract class LevelMixin {
         return !((Level) (Object) this).isClientSide;
     }
 
+    /** The server level a stand-in client level reads (Hud120.clientLevel), or null. */
+    private Level horizon$server() {
+        return dev.horizonlab.platform120.Hud120.serverFor((Level) (Object) this);
+    }
+
     @Inject(method = "getBlockState", at = @At("HEAD"), cancellable = true)
     private void horizon$blockState(BlockPos pos, CallbackInfoReturnable<BlockState> cir) {
-        if (horizon$mirror()) cir.setReturnValue(Mirror120.blockState((Level) (Object) this, pos));
+        Level server = horizon$server();
+        if (server != null) cir.setReturnValue(server.getBlockState(pos));
+        else if (horizon$mirror()) cir.setReturnValue(Mirror120.blockState((Level) (Object) this, pos));
+    }
+
+    /** The entities a stand-in client level holds: its server level's. */
+    @Inject(method = "getEntities(Lnet/minecraft/world/entity/Entity;Lnet/minecraft/world/phys/AABB;Ljava/util/function/Predicate;)Ljava/util/List;",
+            at = @At("HEAD"), cancellable = true)
+    private void horizon$entities(net.minecraft.world.entity.Entity except, net.minecraft.world.phys.AABB box,
+            java.util.function.Predicate<? super net.minecraft.world.entity.Entity> test,
+            CallbackInfoReturnable<java.util.List<net.minecraft.world.entity.Entity>> cir) {
+        Level server = horizon$server();
+        if (server != null) cir.setReturnValue(server.getEntities(except, box, test));
     }
 
     /** Its light is Horizon's (Light120): vanilla's engine lights chunks a mirror level doesn't hold. */
     @Inject(method = "getLightEngine", at = @At("HEAD"), cancellable = true)
     private void horizon$light(CallbackInfoReturnable<net.minecraft.world.level.lighting.LevelLightEngine> cir) {
-        if (horizon$mirror()) cir.setReturnValue(Mirror120.lightEngine((Level) (Object) this));
+        Level server = horizon$server();
+        if (server != null) cir.setReturnValue(server.getLightEngine());
+        else if (horizon$mirror()) cir.setReturnValue(Mirror120.lightEngine((Level) (Object) this));
     }
 
     @Inject(method = "getFluidState", at = @At("HEAD"), cancellable = true)
     private void horizon$fluidState(BlockPos pos, CallbackInfoReturnable<FluidState> cir) {
-        if (horizon$mirror()) cir.setReturnValue(Mirror120.blockState((Level) (Object) this, pos).getFluidState());
+        Level server = horizon$server();
+        if (server != null) cir.setReturnValue(server.getFluidState(pos));
+        else if (horizon$mirror()) cir.setReturnValue(Mirror120.blockState((Level) (Object) this, pos).getFluidState());
     }
 
     @Inject(method = "setBlock(Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/block/state/BlockState;II)Z",
@@ -48,7 +69,9 @@ public abstract class LevelMixin {
     /** Block entities are Horizon's too: loaded from its NBT, one object per call. */
     @Inject(method = "getBlockEntity", at = @At("HEAD"), cancellable = true)
     private void horizon$blockEntity(BlockPos pos, CallbackInfoReturnable<BlockEntity> cir) {
-        if (horizon$mirror()) cir.setReturnValue(Mirror120.blockEntity((Level) (Object) this, pos));
+        Level server = horizon$server();
+        if (server != null) cir.setReturnValue(server.getBlockEntity(pos));
+        else if (horizon$mirror()) cir.setReturnValue(Mirror120.blockEntity((Level) (Object) this, pos));
     }
 
     /**
@@ -123,20 +146,25 @@ public abstract class LevelMixin {
      */
     @Inject(method = "getChunkForCollisions", at = @At("HEAD"), cancellable = true)
     private void horizon$collisions(int x, int z, CallbackInfoReturnable<net.minecraft.world.level.BlockGetter> cir) {
-        if (horizon$mirror()) cir.setReturnValue((Level) (Object) this);
+        if (horizon$server() != null) cir.setReturnValue((Level) (Object) this);
+        else if (horizon$mirror()) cir.setReturnValue((Level) (Object) this);
     }
 
     /** Heightmaps are Horizon's (a mod's feature placed on the surface asks them). */
     @Inject(method = "getHeight(Lnet/minecraft/world/level/levelgen/Heightmap$Types;II)I", at = @At("HEAD"), cancellable = true)
     private void horizon$height(net.minecraft.world.level.levelgen.Heightmap.Types type, int x, int z,
             CallbackInfoReturnable<Integer> cir) {
-        if (horizon$mirror()) cir.setReturnValue(Mirror120.height((Level) (Object) this, type, x, z));
+        Level server = horizon$server();
+        if (server != null) cir.setReturnValue(server.getHeight(type, x, z));
+        else if (horizon$mirror()) cir.setReturnValue(Mirror120.height((Level) (Object) this, type, x, z));
     }
 
     /** Biomes are Horizon's: a mirror level's biome manager asks it (Biomes120). */
     @Inject(method = "getBiomeManager", at = @At("HEAD"), cancellable = true)
     private void horizon$biomes(CallbackInfoReturnable<net.minecraft.world.level.biome.BiomeManager> cir) {
-        if (horizon$mirror()) cir.setReturnValue(Mirror120.biomeManager((Level) (Object) this));
+        Level server = horizon$server();
+        if (server != null) cir.setReturnValue(server.getBiomeManager());
+        else if (horizon$mirror()) cir.setReturnValue(Mirror120.biomeManager((Level) (Object) this));
     }
 
     @Inject(method = "isLoaded", at = @At("HEAD"), cancellable = true)

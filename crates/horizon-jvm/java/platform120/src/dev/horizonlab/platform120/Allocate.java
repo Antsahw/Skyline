@@ -42,7 +42,7 @@ public final class Allocate {
      * Minecraft declares has at run time): Fabric API's own mixins name theirs plainly
      * (ServerLevel's {@code loadedChunks}, which its chunk-load listener adds to). Only empty
      * collections are made, of the kind the field's type names -- which is what such an
-     * initializer is, nearly always. Anything else stays null.
+     * initializer is, nearly always, and empty ThreadLocals. Anything else stays null.
      */
     static void mixinCollections(Object made) {
         for (Class<?> c = made.getClass(); c != null && c != Object.class; c = c.getSuperclass()) {
@@ -69,6 +69,8 @@ public final class Allocate {
     /** An empty collection of the kind `type` names, or null for a type that isn't one. */
     private static Object emptyOf(Class<?> type) {
         String name = type.getName();
+        // A per-thread holder (Porting Lib's Player.pl$destroySpeedContext), empty.
+        if (type == ThreadLocal.class) return new ThreadLocal<>();
         if (type == java.util.Map.class) return new java.util.HashMap<>();
         if (type == java.util.List.class || type == java.util.Collection.class) return new java.util.ArrayList<>();
         if (type == java.util.Set.class) return new java.util.HashSet<>();
