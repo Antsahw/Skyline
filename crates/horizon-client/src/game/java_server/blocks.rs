@@ -855,7 +855,7 @@ impl Game<'_> {
                     continue;
                 }
             };
-            if let Err(e) = self.place_state(pos, parsed, false) {
+            if let Err(e) = self.place_state(pos, parsed, false, false) {
                 log::debug!("Java mods: a mod's block at {pos:?}: {e:?}");
             }
         }

@@ -99,6 +99,11 @@ impl Game<'_> {
             {
                 continue;
             }
+            // Held by a Java mod's block (crushing wheels pulling it in): the mods' mirror
+            // ticks it, with their blocks' shapes for it.
+            if merging && Game::java_holds_item(item.id) {
+                continue;
+            }
             // `Entity.baseTick` reads the fluid the item starts the tick in,
             // before `ItemEntity.tick` moves it.
             let (start, start_in_lava) =

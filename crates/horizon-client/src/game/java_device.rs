@@ -414,7 +414,7 @@ impl Game<'_> {
             horizon_client::command::args::GameMode::Adventure => 2,
             horizon_client::command::args::GameMode::Spectator => 3,
         };
-        let sneaking = self.keys.contains(&winit::keyboard::KeyCode::ShiftLeft);
+        let sneaking = self.keys.held(horizon_client::actions::Action::Sneak);
         let (w, h) = *GUI_SIZE.lock().unwrap_or_else(|e| e.into_inner());
         let mut state = json!({
             "tick": self.ticks, "dim": self.dim.id(),

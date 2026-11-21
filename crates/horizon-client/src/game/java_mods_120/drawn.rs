@@ -168,7 +168,8 @@ impl super::super::Game<'_> {
     /// The quads a mod's code drew, as the mesher's model: each quad on the sprite it names
     /// (the missing texture when the block atlas lacks it), its colour when not white.
     fn baked_from_code(&self, quads: &[CodeQuad]) -> horizon_client::models::catalog::BakedModel {
-        use horizon_client::models::catalog::{BakedFace, BakedModel, BakedQuad};
+        use horizon_assets::bake::ModelQuad;
+        use horizon_client::models::catalog::{BakedFace, BakedModel};
         let layers = &self.pack.render.sprite_layers;
         let missing = layers.get("minecraft:missingno").copied().unwrap_or(0);
         let faces = quads
@@ -177,12 +178,16 @@ impl super::super::Game<'_> {
                 let positions = q.corners.map(|c| [c[0], c[1], c[2]]);
                 let layer = layers.get(&q.sprite).copied().unwrap_or(missing);
                 let color = q.colors[0];
-                BakedFace {
-                    quad: BakedQuad {
+                BakedFace::new(
+                    ModelQuad {
                         positions,
                         uv: q.corners.map(|c| [c[3], c[4]]),
                         facing: facing(&positions),
                         cull: None,
+                        material: horizon_assets::model::Material {
+                            sprite: q.sprite.clone(),
+                            force_translucent: false,
+                        },
                         tint_index: -1,
                         shade_direction_override: None,
                         light_emission: 0,
@@ -193,17 +198,15 @@ impl super::super::Game<'_> {
                         shade: true,
                     },
                     layer,
-                    opaque: false,
-                    translucent: self
-                        .pack
+                    false,
+                    self.pack
                         .render
                         .translucent_layers
                         .get(layer as usize)
                         .copied()
                         .unwrap_or(false),
-                    force_translucent: false,
-                    fusion: None,
-                }
+                    None,
+                )
             })
             .collect();
         BakedModel {

@@ -138,7 +138,6 @@ pub(super) struct CoreTables {
 }
 /// The block facts and the tables read from them.
 pub(super) struct GameplayTables {
-    pub(super) behaviour_json: serde_json::Value,
     pub(super) facts: BlockFacts,
     pub(super) gameplay_projection: Vec<horizon_client::blocks::GameplayProjection>,
     pub(super) light: LightTables,
@@ -308,6 +307,9 @@ pub(super) fn gameplay_tables(
     let (facts, gameplay_projection) =
         BlockFacts::load_with_projection(root, assets.registry, &behaviour_json, parallel)
             .map_err(|e| e.to_string())?;
+    // The behaviours read their own file again later, so this copy goes at once (hundreds of MB
+    // for a modded pack, kept until the world rest before).
+    drop(behaviour_json);
     horizon_client::block_contact::set_mod_blocks(
         facts
             .states
@@ -332,7 +334,6 @@ pub(super) fn gameplay_tables(
     Ok(GameplayTables {
         light: light?,
         motion: motion?,
-        behaviour_json,
         facts,
         gameplay_projection,
     })
@@ -435,7 +436,6 @@ pub(super) fn load_resources(
         visibility,
         gameplay:
             GameplayTables {
-                behaviour_json,
                 facts,
                 gameplay_projection,
                 light,
@@ -516,7 +516,6 @@ pub(super) fn load_resources(
                     &root,
                     &resources,
                     &assets,
-                    &behaviour_json,
                     &gameplay_projection,
                     entity_models.as_deref(),
                     item_defaults.as_ref(),
@@ -549,7 +548,6 @@ pub(super) fn load_resources(
             &root,
             &resources,
             &assets,
-            &behaviour_json,
             &gameplay_projection,
             entity_models.as_deref(),
             item_defaults.as_ref(),

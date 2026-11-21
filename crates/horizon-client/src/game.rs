@@ -257,9 +257,6 @@ mod mace;
 mod machines;
 mod maps;
 mod melee;
-mod mod_block_shape;
-mod mod_menu;
-mod mod_menu_ui;
 mod memory;
 mod menu_clicks;
 mod minecarts;
@@ -273,7 +270,10 @@ mod mob_index;
 mod mob_looting;
 mod mob_sounds;
 mod mod_api_host;
+mod mod_block_shape;
 mod mod_browser;
+mod mod_menu;
+mod mod_menu_ui;
 mod mods;
 mod mount_menu;
 mod mounts;
@@ -363,7 +363,6 @@ mod native_world_read;
 mod native_world_seed;
 mod natural_spawning;
 mod nautili;
-mod replay;
 mod net_harness;
 mod nether_portal;
 mod no_resources;
@@ -427,6 +426,7 @@ mod render_control;
 mod render_settings;
 mod render_tick;
 mod replay;
+mod replay_viewer;
 mod repro;
 mod resource_load;
 mod resource_loader;
@@ -592,9 +592,6 @@ use key_codes::{
 use launch_options::Options;
 use loading_screen::{
     App, Loading, leave_fullscreen_after, missing_resources, run_event_loop, unclean_start_recovery,
-    /// `--replay FILE`: a ReplayMod recording (`.mcpr`) played at start by Horizon's replay
-    /// viewer (`lan::replay`), joined as a server.
-    replay: Option<PathBuf>,
 };
 use loading_window::{
     build_renderer, loading_frame, loading_renderer, prepare_renderer_textures, start_game,
@@ -700,6 +697,8 @@ enum Screen {
     /// Horizon Studio script screen (`studio_screen_open`): canvas draws
     /// itself, takes input through the screen hooks, does not draw chat.
     Studio,
+    /// A Java mod's client-only screen, with no menu under it (game/java_screen.rs).
+    JavaMod,
 }
 impl Screen {
     /// The id native mods see for this screen (`NativeScreenView.id`, the
@@ -731,6 +730,7 @@ impl Screen {
             Screen::Mod => "mod",
             Screen::HudEditor => "hud_editor",
             Screen::Studio => "studio",
+            Screen::JavaMod => "java_mod",
         }
     }
 }
@@ -746,7 +746,6 @@ enum FallStep {
     Falling,
     Gone,
     /// Gave up falling: drops itself as an item here.
-            replay: None,
     Dropped(Vec3),
     /// Hit the ground in this block.
     Landed([i32; 3]),
@@ -787,8 +786,6 @@ struct GameLevel<'w> {
     world: &'w mut World,
     redstone_experiments: bool,
     facts: &'w BlockFacts,
-                // Fabric mods on for this run, in a build with them (game/java_mods.rs, `opted_in`).
-                "--java-mods" => {}
     collision: &'w BlockCollisionRegistry<'w>,
     events: &'w mut Vec<LevelEvent>,
     dimension: LevelDimension,
@@ -856,7 +853,6 @@ struct GameLevel<'w> {
     /// The containers players have open at this moment, by position: the local
     /// player's and the guests' (`getEntitiesWithContainerOpen`). A double
     /// chest is in it as both halves.
-                            "--replay" => o.replay = Some(value.into()),
     open_containers: &'w [(i32, i32, i32)],
     /// The chests copper golems have open, a double chest as both halves. They
     /// keep their own count (`chest_openers`), so they stay out of `open_containers`.
@@ -927,8 +923,6 @@ fn server_only_block_use(
     branch == horizon_world::level::UseBranch::WithoutItem
         && [
             "AbstractBedBlock",
-    /// A Java mod's client-only screen, with no menu under it (game/java_screen.rs).
-    JavaMod,
             "LightBlock",
             "RespawnAnchorBlock",
             "SignBlock",
@@ -957,7 +951,6 @@ impl GameLevel<'_> {
     /// `LIVING` only the living ones; a constant so a list of other kinds
     /// compiles to no loop at all.
     fn count_triggers<const LIVING: bool>(&self, area: Aabb) -> usize {
-            Screen::JavaMod => "java_mod",
         use entity::{Entity as _, for_each_entity};
         let mut count = 0;
         for_each_entity!(self.entities, entity => {
@@ -1051,6 +1044,30 @@ impl GameLevel<'_> {
     }
 }
 impl LevelAccess for GameLevel<'_> {
+    fn foreign_fluid(&self, state: BlockStateId) -> bool {
+        #[cfg(feature = "java-mods-120")]
+        if java_mods_120::is_fluid(state) {
+            return true;
+        }
+        Game::java_fluid(state)
+    }
+    fn foreign_fluid_changed(&mut self, pos: BlockPos) {
+        // Either bridge's: each takes only its own fluids' positions when it runs them.
+        #[cfg(feature = "java-mods-120")]
+        if java_mods_120::is_fluid(self.block_state(pos)) {
+            java_mods_120::fluid_changed(pos);
+            return;
+        }
+        Game::java_fluid_changed(pos);
+    }
+    fn liquid_interaction(&mut self, pos: BlockPos) -> bool {
+        Game::java_liquid_interaction(pos)
+    }
+    fn observe_neighbours_updated(&self, source: BlockPos) {
+        Game::java_neighbours_updated(source, |p| self.block_state(p));
+        #[cfg(feature = "java-mods-120")]
+        Game::java120_neighbours_updated(source, |p| self.block_state(p));
+    }
     fn within_world_border(&self, pos: BlockPos) -> bool {
         self.border
             .is_within_bounds(f64::from(pos.x), f64::from(pos.z), 0.0)
@@ -1246,30 +1263,6 @@ impl LevelAccess for GameLevel<'_> {
                 pos,
                 from,
                 to,
-    fn foreign_fluid(&self, state: BlockStateId) -> bool {
-        #[cfg(feature = "java-mods-120")]
-        if java_mods_120::is_fluid(state) {
-            return true;
-        }
-        Game::java_fluid(state)
-    }
-    fn foreign_fluid_changed(&mut self, pos: BlockPos) {
-        // Either bridge's: each takes only its own fluids' positions when it runs them.
-        #[cfg(feature = "java-mods-120")]
-        if java_mods_120::is_fluid(self.block_state(pos)) {
-            java_mods_120::fluid_changed(pos);
-            return;
-        }
-        Game::java_fluid_changed(pos);
-    }
-    fn liquid_interaction(&mut self, pos: BlockPos) -> bool {
-        Game::java_liquid_interaction(pos)
-    }
-    fn observe_neighbours_updated(&self, source: BlockPos) {
-        Game::java_neighbours_updated(source, |p| self.block_state(p));
-        #[cfg(feature = "java-mods-120")]
-        Game::java120_neighbours_updated(source, |p| self.block_state(p));
-    }
                 reason,
                 &mut cancel,
             );
@@ -2626,6 +2619,8 @@ struct Game<'a> {
     narration: horizon_client::screen_narrator::ScreenNarrator,
     /// Where the options screen returns: true = title, false = pause menu.
     options_from_title: bool,
+    /// A mod's settings opened with their key from the game: Done returns to the game.
+    options_to_game: bool,
     dragging: bool,
     /// `ClientAvatarState`: walked distance and view bob.
     avatar: horizon_client::camera::AvatarBob,
@@ -3512,15 +3507,6 @@ impl Game<'_> {
             }
         }
         Some(b)
-        // A block whose shape only its mod knows says so itself, rather than through the
-        // registry (`mod_block_shape`): a Wired Redstone cable is a thin plate on the face it
-        // was put on, and the registry has every LibMultiPart container as shapeless.
-        if let Some(boxes) = self.mod_block_shape(pos) {
-            return boxes
-                .iter()
-                .map(|b| std::array::from_fn(|i| f64::from(pos[i % 3]) + b[i]))
-                .collect();
-        }
     }
     fn outline_context_kind(&self) -> horizon_world::collision_context::EntityContextKind {
         if self.camera_entity().is_some() {
@@ -3532,6 +3518,15 @@ impl Game<'_> {
     /// A block's outline boxes in world space (`getShape` plus the random offset).
     fn outline_boxes(&self, pos: [i32; 3]) -> Vec<[f64; 6]> {
         let state = self.world.block(pos[0], pos[1], pos[2]);
+        // A block whose shape only its mod knows says so itself, rather than through the
+        // registry (`mod_block_shape`): a Wired Redstone cable is a thin plate on the face it
+        // was put on, and the registry has every LibMultiPart container as shapeless.
+        if let Some(boxes) = self.mod_block_shape(pos) {
+            return boxes
+                .iter()
+                .map(|b| std::array::from_fn(|i| f64::from(pos[i % 3]) + b[i]))
+                .collect();
+        }
         let declared = self
             .collision
             .cached_shapes()
@@ -3773,8 +3768,9 @@ impl Game<'_> {
     ) -> horizon_world::loot::NativeLootPlace {
         let (rain, thunder) = self.world.weather.levels(1.0);
         // Level.canHaveWeather: sky light, no ceiling and not the End.
-        let weather =
-            self.world.shape.sky_light && !self.world.shape.has_ceiling && self.dim.vanilla() != Dim::End;
+        let weather = self.world.shape.sky_light
+            && !self.world.shape.has_ceiling
+            && self.dim.vanilla() != Dim::End;
         horizon_world::loot::NativeLootPlace {
             origin: Some(origin),
             block_entity,
@@ -4343,11 +4339,6 @@ impl Game<'_> {
             }
             let Some(section) = self.section_of(pos) else {
                 continue;
-            // Held by a Java mod's block (crushing wheels pulling it in): the mods' mirror
-            // ticks it, with their blocks' shapes for it.
-            if merging && Game::java_holds_item(item.id) {
-                continue;
-            }
             };
             if *pending
                 .entry(section)
@@ -5128,6 +5119,17 @@ impl Game<'_> {
         // on the client): a GameMasterBlock stays when the player cannot use
         // game master blocks (Player.canUseGameMasterBlocks).
         let state = self.world.block(pos[0], pos[1], pos[2]);
+        // Java mods may stop the break or run it themselves (java_server.rs, `JavaBreak`).
+        let Some(after_java) = self.java_break(pos, state).horizon() else {
+            return Ok(false);
+        };
+        // The same for the 1.20.1 mods: their own block is broken by their code; another is
+        // Horizon's to break, with their break events around it.
+        #[cfg(feature = "java-mods-120")]
+        let after_120 = match self.java120_break(pos, state) {
+            java_mods_120::Break120::Stopped | java_mods_120::Break120::Done => return Ok(false),
+            java_mods_120::Break120::Horizon { after } => after,
+        };
         if !self.can_use_game_master_blocks()
             && is_game_master_block(&self.res.facts().get(state).name)
         {
@@ -5204,6 +5206,9 @@ impl Game<'_> {
                 correct_tool,
             )
         });
+        if removed {
+            self.java_block_event(pos, broken, false);
+        }
         if removed && !creative {
             let held = self.held().cloned();
             self.mine_block_with_held(&facts.name, facts.hardness);
@@ -5233,8 +5238,8 @@ impl Game<'_> {
                     let bees = if silk { hive.bees.len() as i64 } else { 0 };
                     if !silk {
                         self.hive_broken_by_player(pos, hive, honey, facing);
-        // Random ticks of blocks only Java mods know (their crops), run by the mods.
-        self.java_random_ticks();
+                        // Random ticks of blocks only Java mods know (their crops), run by the mods.
+                        self.java_random_ticks();
                     }
                     self.trigger_bee_nest_destroyed(broken, held.as_ref(), bees);
                 }
@@ -5290,6 +5295,13 @@ impl Game<'_> {
         }
         self.pending.clear(pos);
         self.process_level_events()?;
+        if after_java && removed {
+            self.java_after_break(pos, broken);
+        }
+        #[cfg(feature = "java-mods-120")]
+        if after_120 && removed {
+            self.java120_after_break(pos, broken);
+        }
         Ok(removed)
     }
     /// The `ItemStack.interactLivingEntity` fallback in `Player.interactOn`,
@@ -5718,6 +5730,37 @@ impl Game<'_> {
         span("tick_command_extras", || self.tick_command_extras());
         span("mods_tick", || self.native_tick());
         span("mods_tick", || self.tell_native_now());
+        self.tick_java_server();
+        #[cfg(feature = "java-mods-120")]
+        self.tick_java120_neighbours();
+        #[cfg(feature = "java-mods-120")]
+        self.tick_java120_block_entities();
+        #[cfg(feature = "java-mods-120")]
+        self.tick_java120_fluids();
+        #[cfg(feature = "java-mods-120")]
+        self.tick_java120_screens();
+        #[cfg(feature = "java-mods-120")]
+        self.tick_java120_hud();
+        #[cfg(feature = "java-mods-120")]
+        self.tick_java120_commands();
+        #[cfg(feature = "java-mods-120")]
+        self.tell_java120_tooltips();
+        #[cfg(feature = "java-mods-120")]
+        self.tick_java120_events();
+        #[cfg(feature = "java-mods-120")]
+        self.tell_java120_keys();
+        #[cfg(feature = "java-mods-120")]
+        self.tell_java120_config();
+        #[cfg(feature = "java-mods-120")]
+        self.java120_command_types();
+        #[cfg(feature = "java-mods-120")]
+        self.tick_java120_mobs();
+        #[cfg(feature = "java-mods-120")]
+        self.tick_java120_block_renders();
+        #[cfg(feature = "java-mods-120")]
+        self.tick_java120_effects();
+        #[cfg(feature = "java-mods-120")]
+        self.tick_java120_drawn();
         self.tick_world(running)
     }
     /// What the tick runs after the local player's own update: effects, the
@@ -6269,17 +6312,6 @@ impl Game<'_> {
                 }
                 if contextual == ContextualBar::Locator {
                     let draws = g.locator_bar_draws(wi, hi);
-        // Java mods may stop the break or run it themselves (java_server.rs, `JavaBreak`).
-        let Some(after_java) = self.java_break(pos, state).horizon() else {
-            return Ok(());
-        };
-        // The same for the 1.20.1 mods: their own block is broken by their code; another is
-        // Horizon's to break, with their break events around it.
-        #[cfg(feature = "java-mods-120")]
-        let after_120 = match self.java120_break(pos, state) {
-            java_mods_120::Break120::Stopped | java_mods_120::Break120::Done => return Ok(()),
-            java_mods_120::Break120::Horizon { after } => after,
-        };
                     hud_layout::paint(batch, &g.gui.atlas, &draws);
                 }
             });
@@ -6295,6 +6327,7 @@ impl Game<'_> {
             hud_layout::paint(batch, &g.gui.atlas, &draws);
         });
         if show_hud {
+            self.draw_java_hud(&mut batch);
             self.gui_layer("minecraft:overlay_message", &mut batch, |g, batch| {
                 g.draw_overlay_message(batch);
             });
@@ -6357,9 +6390,6 @@ impl Game<'_> {
                     &self.gui.atlas,
                     &title,
                     ((batch.width / 2.0).floor() - (tw / 2.0).floor()).floor(),
-        if removed {
-            self.java_block_event(pos, broken, false);
-        }
                     10.0,
                     u32::MAX,
                     true,
@@ -6459,13 +6489,6 @@ impl Game<'_> {
                 Some(BlockEntity::Chest(_)) => self.draw_chest_screen(batch, ox, oy),
                 Some(BlockEntity::Furnace(f)) => {
                     let (tex, key, fallback) = match f.kind {
-        if after_java && removed {
-            self.java_after_break(pos, broken);
-        }
-        #[cfg(feature = "java-mods-120")]
-        if after_120 && removed {
-            self.java120_after_break(pos, broken);
-        }
                         horizon_client::containers::FurnaceKind::Furnace => {
                             ("gui/container/furnace", "container.furnace", "Furnace")
                         }
@@ -6851,6 +6874,11 @@ impl Game<'_> {
         laps.lap("eg_items_misc");
         // Mobs and their projectiles (a span each).
         self.mob_geometry(camera, alpha, &mut out);
+        self.java_entity_geometry(camera, alpha, &mut out);
+        #[cfg(feature = "java-mods-120")]
+        self.java120_mob_geometry(camera, alpha, &mut out);
+        #[cfg(feature = "java-mods-120")]
+        self.java120_block_render_geometry(camera, &mut out);
         self.mark_motion(out.len(), 0);
         laps.lap("eg_mobs");
         // In first person only a shader pack's shadow pass draws the player.
@@ -6914,6 +6942,8 @@ impl Game<'_> {
                     .iter()
                     .map(|o| (lerp(o.previous, o.position), orb.0, orb.1)),
             );
+            // Java mods' entities: the radius their renderers give.
+            casters.extend(self.java_entity_shadows(alpha));
             // Text, block and item displays (DisplayRenderer's shadow radius).
             casters.extend(self.text_displays.values().filter_map(|d| d.shadow(a)));
             // Packs may move vertices or draw from another view.
@@ -7094,8 +7124,6 @@ impl Game<'_> {
                         r.block_entity_revision(),
                         Some(&section_revision),
                         &mut out,
-        // Java mods (java_server.rs), then native ones.
-        self.java_block_event(target, state, true);
                         |pos, state, start| {
                             self.mark_block_entity(start, state);
                             self.mark_motion(start, motion_block_entity(pos));
@@ -7397,6 +7425,12 @@ impl Game<'_> {
             let o = (glam::DVec3::new(f64::from(pos[0]), f64::from(pos[1]), f64::from(pos[2]))
                 - camera)
                 .as_vec3();
+            // A block whose shape only its mod knows (`mod_block_shape`): the crack on those
+            // boxes, as its own model is the mod's drawing and the registry's is a stand-in.
+            if let Some(boxes) = self.mod_block_shape(pos) {
+                horizon_client::breaking::box_geometry(&boxes, o, stage, &mut out);
+                continue;
+            }
             let state = self.world.block(pos[0], pos[1], pos[2]);
             if self.res.facts().get(state).render_shape
                 == horizon_client::blocks::RenderShape::Model
@@ -7708,6 +7742,7 @@ impl Game<'_> {
             .as_ref()
             .map(respawn_anchor::RespawnConfig::from_saved);
         self.spawn_origin = None;
+        self.java.spawn_origin_asked = false;
         self.spawn_spiral = Default::default();
         self.player_spawn = None;
         self.creatures.reset_trader();
@@ -7874,37 +7909,6 @@ impl Game<'_> {
                             inside: false,
                         });
                     }
-        self.tick_java_server();
-        #[cfg(feature = "java-mods-120")]
-        self.tick_java120_neighbours();
-        #[cfg(feature = "java-mods-120")]
-        self.tick_java120_block_entities();
-        #[cfg(feature = "java-mods-120")]
-        self.tick_java120_fluids();
-        #[cfg(feature = "java-mods-120")]
-        self.tick_java120_screens();
-        #[cfg(feature = "java-mods-120")]
-        self.tick_java120_hud();
-        #[cfg(feature = "java-mods-120")]
-        self.tick_java120_commands();
-        #[cfg(feature = "java-mods-120")]
-        self.tell_java120_tooltips();
-        #[cfg(feature = "java-mods-120")]
-        self.tick_java120_events();
-        #[cfg(feature = "java-mods-120")]
-        self.tell_java120_keys();
-        #[cfg(feature = "java-mods-120")]
-        self.tell_java120_config();
-        #[cfg(feature = "java-mods-120")]
-        self.java120_command_types();
-        #[cfg(feature = "java-mods-120")]
-        self.tick_java120_mobs();
-        #[cfg(feature = "java-mods-120")]
-        self.tick_java120_block_renders();
-        #[cfg(feature = "java-mods-120")]
-        self.tick_java120_effects();
-        #[cfg(feature = "java-mods-120")]
-        self.tick_java120_drawn();
                     let above = self.world.block(b[0], b[1] + 1, b[2]);
                     let same_above = self.res.facts().get(above).fluid == f.fluid;
                     if let Some((face, point)) =
@@ -8349,12 +8353,6 @@ impl Game<'_> {
             }
         }
         if item == "flint_and_steel" || item == "fire_charge" {
-            // LevelLoadingScreen is a screen in vanilla (pauseIfInactive pauses only with
-            // none): a pause here held the server's chunks back, and the terrain never came.
-            && !self
-                .remote
-                .as_ref()
-                .is_some_and(|r| r.level_load.is_active())
             if !self.may_build() && !self.can_place_on_in_adventure(hit.pos) {
                 return Ok(UseResult::Fail);
             }
@@ -9067,7 +9065,6 @@ impl Game<'_> {
         }
         let deadline = self
             .server_tick_deadline
-            self.draw_java_hud(&mut batch);
             .unwrap_or_else(|| Instant::now() + self.clock.tick_duration());
         let mut modified = std::mem::take(&mut self.world.modified);
         modified.save_eagerly(
@@ -9368,8 +9365,8 @@ impl Game<'_> {
                     horizon_world::dimension_type::Skybox::End => 2,
                     horizon_world::dimension_type::Skybox::None => 0,
                 },
-                dimension: match self.dim {
-                    Dim::Overworld => "minecraft:overworld",
+                dimension: match self.dim.vanilla() {
+                    Dim::Overworld | Dim::Extra(_) => "minecraft:overworld",
                     Dim::Nether => "minecraft:the_nether",
                     Dim::End => "minecraft:the_end",
                 }
@@ -9521,6 +9518,22 @@ impl Game<'_> {
                         [0.0; 3]
                     };
                     let p = h.pos.map(f64::from);
+                    // A block whose shape only its mod knows (`mod_block_shape`): each of its
+                    // boxes' edges, where the registry has a full cube or nothing.
+                    if let Some(boxes) = self.mod_block_shape(h.pos) {
+                        let edges = horizon_client::blocks::cube_edges();
+                        return boxes
+                            .iter()
+                            .flat_map(|b| {
+                                edges.iter().map(move |e| {
+                                    std::array::from_fn(|i| {
+                                        let k = i % 3;
+                                        p[k] + b[k] + e[i] * (b[k + 3] - b[k])
+                                    })
+                                })
+                            })
+                            .collect();
+                    }
                     if let Some(edges) = self
                         .collision
                         .cached_shapes()
@@ -9834,7 +9847,8 @@ impl Game<'_> {
                 .get("environment/end_sky")
                 .map(|r| [r.u0, r.v0, r.u1, r.v1]),
             boss_world_fog: self.boss_overlay.should_create_world_fog(),
-            environment_fog: (self.dim.vanilla() == Dim::Nether).then_some((sky.fog_start, sky.fog_end)),
+            environment_fog: (self.dim.vanilla() == Dim::Nether)
+                .then_some((sky.fog_start, sky.fog_end)),
             cave_culling,
             water_fog,
             fog: Some(self.frame_fog(camera, &sky, biome, water_fog)),
@@ -10363,7 +10377,6 @@ impl Game<'_> {
                     );
                 }
                 if canceled {
-        let crafted_takes = std::mem::take(&mut menu.crafted_takes);
                     return Ok(());
                 }
             }
@@ -10384,7 +10397,6 @@ impl Game<'_> {
                 // Input method composition: the committed text types like a key's text.
                 WindowEvent::Ime(winit::event::Ime::Commit(text)) => self.ime_commit(&text),
                 WindowEvent::Ime(winit::event::Ime::Preedit(text, cursor)) => {
-            self.java_crafted(&crafted_takes);
                     self.ime_preedit(&text, cursor)
                 }
                 WindowEvent::Ime(winit::event::Ime::Disabled) => {
@@ -10545,6 +10557,10 @@ impl Game<'_> {
                         if canceled {
                             return Ok(());
                         }
+                    }
+                    // A Java mod's own screen scrolls itself.
+                    if self.java_screen_scroll(scaled(raw_x), scaled(raw_y)) {
+                        return Ok(());
                     }
                     // A prompt is vanilla's `Minecraft.screen`, the only one MouseHandler.onScroll
                     // tells: the top one hears the wheel, as the click arms below pick it, and
@@ -10725,9 +10741,6 @@ impl Game<'_> {
                         let rules = t.press_rules(atlas, self.cursor, (b.width, b.height));
                         (clicked.0, clicked.1 || rules)
                     });
-        if self.java_screen_mouse("drag", false) {
-            return;
-        }
                     self.save_title_options();
                     if sound {
                         self.audio.play_button_click();
@@ -10942,6 +10955,7 @@ impl Game<'_> {
                             self.stats_click(size);
                         }
                         Screen::Stats if button == MouseButton::Left => self.stats_release(),
+                        Screen::JavaMod => self.java_screen_click(pressed, button),
                         Screen::GameModeSwitcher if !pressed => self.switcher_release(button),
                         _ => {}
                     }
@@ -11349,11 +11363,6 @@ impl Game<'_> {
                         Vec::new()
                     };
                     let mut perf_times = None;
-        self.java_entity_geometry(camera, alpha, &mut out);
-        #[cfg(feature = "java-mods-120")]
-        self.java120_mob_geometry(camera, alpha, &mut out);
-        #[cfg(feature = "java-mods-120")]
-        self.java120_block_render_geometry(camera, &mut out);
                     if let Some(r) = self.renderer.as_mut() {
                         let cpu = now.elapsed().saturating_sub(r.last_wait);
                         horizon_threads::work::tick_end(cpu.as_nanos() as u64);
@@ -11419,8 +11428,6 @@ impl Game<'_> {
                         .and_then(|r| r.screenshot_result.take());
                     if let Some(result) = &finished
                         && let Some(reply) = self.pending_screenshot.take()
-            // Java mods' entities: the radius their renderers give.
-            casters.extend(self.java_entity_shadows(alpha));
                     {
                         let _ = reply.send(
                             match result {
@@ -11820,12 +11827,6 @@ impl<'a> Game<'a> {
             experience: Experience::default(),
             orbs: Default::default(),
             xp_delay: 0,
-            // A block whose shape only its mod knows (`mod_block_shape`): the crack on those
-            // boxes, as its own model is the mod's drawing and the registry's is a stand-in.
-            if let Some(boxes) = self.mod_block_shape(pos) {
-                horizon_client::breaking::box_geometry(&boxes, o, stage, &mut out);
-                continue;
-            }
             ordered: Default::default(),
             level_up_sound: Default::default(),
             swing: Default::default(),
@@ -11845,6 +11846,7 @@ impl<'a> Game<'a> {
             narrator_toast: None,
             narration: Default::default(),
             options_from_title: false,
+            options_to_game: false,
             dragging: false,
             avatar: Default::default(),
             flash: 0,
@@ -12397,6 +12399,7 @@ fn load_world_rest(
     let (animate, fog) = animate?;
     let (mob_types, mob_data) = mobs?;
     let (transformers, (player_type, player_arm, player_arm_slim, spin_attack)) = transformers?;
+    mem_mark("items, behaviours, block entities, animate, mobs");
     let nether_environment = nether_environment?;
     let end_environment = end_environment?;
     log::info!(
@@ -12668,7 +12671,6 @@ fn outline_stop(
 /// `Direction.getApproximateNearest(dir)`; from above it, a ray going down
 /// enters through the top while still in this block.
 fn clip_start_source(
-        mem_mark("world rest joined");
     eye: [f64; 3],
     dir: [f64; 3],
     reach: f64,
@@ -12833,7 +12835,6 @@ fn write_level_for_role(
     level: &mut Level,
     dir: &std::path::Path,
     role: execution_role::ExecutionRole,
-        self.java.spawn_origin_asked = false;
 ) -> Result<()> {
     if role.writes_singleplayer_player() {
         level.write(dir)
@@ -12917,27 +12918,6 @@ mod test_pos_guest_tests;
 mod vibration_source_tests;
 #[cfg(test)]
 mod vibration_tests;
-        self.save_java_mods();
-                    // A block whose shape only its mod knows (`mod_block_shape`): each of its
-                    // boxes' edges, where the registry has a full cube or nothing.
-                    if let Some(boxes) = self.mod_block_shape(h.pos) {
-                        let edges = horizon_client::blocks::cube_edges();
-                        return boxes
-                            .iter()
-                            .flat_map(|b| {
-                                edges.iter().map(move |e| {
-                                    std::array::from_fn(|i| {
-                                        let k = i % 3;
-                                        p[k] + b[k] + e[i] * (b[k + 3] - b[k])
-                                    })
-                                })
-                            })
-                            .collect();
-                    }
-                    } else if self.java_screen_scroll(scaled(raw_x), scaled(raw_y)) {
-                        // A Java mod's own screen scrolls itself.
-                        Screen::JavaMod => self.java_screen_click(pressed, button),
-    mem_mark("items, behaviours, block entities, animate, mobs");
 
 /// [`horizon_client::mem_log::mark`].
 pub(crate) fn mem_mark(stage: &str) {

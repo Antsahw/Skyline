@@ -5,7 +5,6 @@
 use super::{Game, spill, storage::is_shulker_box};
 
 mod crafter;
-mod dropper;
 mod java;
 pub(in crate::game) mod native_energy;
 pub(in crate::game) mod native_fluids;

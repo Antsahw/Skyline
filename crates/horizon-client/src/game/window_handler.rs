@@ -161,6 +161,9 @@ impl Game<'_> {
             } else {
                 self.physical_keys.remove(&key);
             }
+            if !event.repeat {
+                self.java_bind_key(key, event.state == ElementState::Pressed);
+            }
         }
         if matches!(
             &event,
@@ -594,9 +597,6 @@ mod tests {
                     Unclaimed::Passes,
                     "{event:?}"
                 );
-            }
-            if !event.repeat {
-                self.java_bind_key(key, event.state == ElementState::Pressed);
             }
         }
     }

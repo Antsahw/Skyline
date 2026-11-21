@@ -1,50 +1,7 @@
 //! Java mods' hooks in what guests do (game/java_server.rs answers them): their cancels of a
-//! teleport, a slot change, a ride, a jump, and their own item and orb pickups and fall damage.
+//! teleport, a slot change, a ride, and their own item and orb pickups and fall damage.
 use super::*;
 use horizon_client::lan::guest::Guest;
-
-/// The jumps of a guest's moves the Java mods cancel (`LivingEntity.jumpFromGround`'s heads),
-/// asked before the moves, and where the first cancelled one took off: the guest is put back
-/// there.
-#[derive(Default)]
-pub(super) struct JumpsRefused {
-    refused: std::vec::IntoIter<bool>,
-    from: Option<[f64; 3]>,
-}
-
-impl JumpsRefused {
-    /// Asks the mods about each jump `moves` make (java_server.rs).
-    pub(super) fn ask(&mut self, game: &mut Game, from_ground: bool, moves: &[([f64; 3], bool)]) {
-        let mut refused = Vec::new();
-        let mut ground = from_ground;
-        for (moved, on_ground) in moves {
-            if ground && !on_ground && moved[1] > 0.0 {
-                refused.push(game.java_jump_refused());
-            }
-            ground = *on_ground;
-        }
-        self.refused = refused.into_iter();
-    }
-
-    /// The next jump, taking off at `from`: false when a mod cancelled it (no jump on the
-    /// server, and the guest goes back to where it took off).
-    pub(super) fn allows(&mut self, from: Vec3) -> bool {
-        if self.refused.next().unwrap_or(false) {
-            self.from.get_or_insert([from.x, from.y, from.z]);
-            return false;
-        }
-        true
-    }
-
-    /// Puts the guest back where a cancelled jump took off.
-    pub(super) fn put_back(self, host: &mut LanHost, conn: u32) {
-        if let Some(at) = self.from
-            && let Some(i) = host.hub.guests.iter().position(|g| g.conn == conn)
-        {
-            host.hub.teleport(i, Some(at));
-        }
-    }
-}
 
 /// Java mods' hooks are about guest `uuid` while it acts: the player they were about before.
 pub(super) fn set_actor(uuid: u128) -> Option<String> {

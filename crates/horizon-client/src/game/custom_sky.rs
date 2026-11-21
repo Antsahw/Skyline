@@ -29,8 +29,8 @@ impl Game<'_> {
             return;
         };
         draws.clear();
-        let world = match self.dim {
-            Dim::Overworld => Some(0),
+        let world = match self.dim.vanilla() {
+            Dim::Overworld | Dim::Extra(_) => Some(0),
             Dim::End => Some(1),
             Dim::Nether => None,
         };

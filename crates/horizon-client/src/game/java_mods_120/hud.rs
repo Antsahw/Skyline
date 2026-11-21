@@ -147,8 +147,8 @@ impl super::super::Game<'_> {
             // are told of it here.
             let target = g
                 .mob_hit()
-                .filter(|&(_, d)| g.before_block(d))
-                .map(|(i, _)| {
+                .filter(|&(_, d, _)| g.before_block(d))
+                .map(|(i, _, _)| {
                     let m = &g.mobs[i];
                     json!({
                         "id": m.id,

@@ -263,6 +263,9 @@ impl Game<'_> {
     }
     /// Mouse movement while a quick craft drag is running.
     pub(super) fn inventory_drag_move(&mut self) {
+        if self.java_screen_mouse("drag", false) {
+            return;
+        }
         if self.tweaks_on() && self.tweak_drag_move(self.inventory_target().0) {
             return;
         }

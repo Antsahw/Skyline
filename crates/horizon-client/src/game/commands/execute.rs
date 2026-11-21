@@ -690,10 +690,16 @@ impl Game<'_> {
                 let Some(dimension) = Dim::known(dim) else {
                     return Err(err("argument.dimension.invalid", &[dim]));
                 };
-                let scale = DimensionFacts::teleportation_scale(
-                    self.dimension_type_of(s.dimension),
-                    self.dimension_type_of(dimension),
-                );
+                // A mod's level has the scale its mod gave it; the others read their dimension type.
+                let scale =
+                    if matches!(s.dimension, Dim::Extra(_)) || matches!(dimension, Dim::Extra(_)) {
+                        s.dimension.coordinate_scale() / dimension.coordinate_scale()
+                    } else {
+                        DimensionFacts::teleportation_scale(
+                            self.dimension_type_of(s.dimension),
+                            self.dimension_type_of(dimension),
+                        )
+                    };
                 vec![Source {
                     pos: [s.pos[0] * scale, s.pos[1], s.pos[2] * scale],
                     dimension,

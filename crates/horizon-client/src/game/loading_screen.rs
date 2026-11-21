@@ -70,6 +70,8 @@ pub(super) struct Loading {
     pub(super) title_drawn: bool,
     pub(super) menu: startup_menu::StartupMenu,
     pub(super) error: Option<Box<dyn std::error::Error>>,
+    /// When the last offscreen frame was drawn (`about_to_wait` paces them).
+    pub(super) drawn_at: Option<Instant>,
 }
 /// How long the handoff waits for the first title frame before building the
 /// world renderer anyway (a hidden window may never be asked to redraw).
@@ -559,5 +561,3 @@ pub(super) fn unclean_start_recovery(settings: &mut Settings) -> bool {
     }
     unclean
 }
-    /// When the last offscreen frame was drawn (`about_to_wait` paces them).
-    drawn_at: Option<Instant>,

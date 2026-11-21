@@ -658,13 +658,13 @@ impl Game<'_> {
         for (k, dim) in dims.into_iter().enumerate() {
             // Each level's share of the tick (the first one also reads the network and runs the
             // tick's shared parts): `horizon-report`'s `level_*` spans.
-            horizon_threads::work::set_dim(match dim {
-                Dim::Overworld => 1,
+            horizon_threads::work::set_dim(match dim.vanilla() {
+                Dim::Overworld | Dim::Extra(_) => 1,
                 Dim::Nether => 2,
                 Dim::End => 3,
             });
-            let _level_span = horizon_client::spans::guard(match dim {
-                Dim::Overworld => "level_overworld",
+            let _level_span = horizon_client::spans::guard(match dim.vanilla() {
+                Dim::Overworld | Dim::Extra(_) => "level_overworld",
                 Dim::Nether => "level_the_nether",
                 Dim::End => "level_the_end",
             });
@@ -874,13 +874,6 @@ impl Game<'_> {
             return Some(behind);
         }
         None
-    }
-
-    /// The level whose id is exactly `id` (`MinecraftServer.getLevel` of a `ResourceKey`).
-    pub(super) fn known_level(&self, id: &str) -> Option<Dim> {
-        [Dim::Overworld, Dim::Nether, Dim::End]
-            .into_iter()
-            .find(|d| d.id() == id)
     }
 
     /// The levels this server tick runs, in `MinecraftServer.levels` order

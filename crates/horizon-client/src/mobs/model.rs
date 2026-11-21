@@ -144,7 +144,7 @@ impl Part {
             child.set_cull_back();
         }
     }
-    pub(super) fn parse(name: &str, v: &Value) -> Self {
+    pub fn parse(name: &str, v: &Value) -> Self {
         let pose: Vec<f32> = v["pose"]
             .as_array()
             .into_iter()

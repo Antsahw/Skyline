@@ -1180,6 +1180,7 @@ mod unused_feature_startup_tests {
                 259,
                 horizon_client::save::WorldGen {
                     preset: horizon_client::save::WorldPreset::Flat,
+                    mod_preset: None,
                     structures: false,
                     bonus_chest: false,
                 },
@@ -1280,6 +1281,7 @@ mod unused_feature_preservation_tests {
             259,
             horizon_client::save::WorldGen {
                 preset: horizon_client::save::WorldPreset::Flat,
+                mod_preset: None,
                 structures: false,
                 bonus_chest: false,
             },

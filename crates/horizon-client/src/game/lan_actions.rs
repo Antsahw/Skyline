@@ -40,9 +40,9 @@ use horizon_protocol::{
 use horizon_world::entity_move::EntityMoveWorld;
 use winit::keyboard::KeyCode;
 
-mod java;
 mod guest_body;
 mod horizon_channels;
+mod java;
 
 #[cfg(test)]
 mod crack_feedback_tests;
@@ -53,8 +53,6 @@ pub(super) struct GuestPlay {
     /// The window of a menu a server mod opened (a Java mod's `/workbench`): no block
     /// behind it, so it stays valid wherever the guest goes (the mod's `stillValid`).
     pub(super) mod_window: Option<i32>,
-    /// The sign this guest may write on (`SignBlockEntity.playerWhoMayEdit`).
-    pub(super) sign_editing: Option<[i32; 3]>,
     mining: Option<Mining>,
     destroy_delay: u32,
     using: Option<(usize, u32)>,
@@ -546,7 +544,6 @@ impl Game<'_> {
         motion.yaw = g.yaw;
         motion.pitch = g.pitch;
         motion.sprinting = g.sprinting;
-        let mode_flies = g.creative() || g.game_mode == SPECTATOR;
         motion.may_fly = g.may_fly();
         motion.flying_speed = g.speeds().0;
         motion.flying = g.flying;
@@ -4863,7 +4860,14 @@ impl Game<'_> {
         } else {
             host.hub.guest(conn).map(|g| (g.uuid, g.name.clone()))
         };
+        // Java mods may cancel the jump (`LivingEntity.jumpFromGround`'s heads): there is none on
+        // the server, and the guest goes back to where it took off.
+        let mut refused = false;
         self.as_guest(host, conn, |game| {
+            if game.java_jump_refused() {
+                refused = true;
+                return;
+            }
             let Some(player) = game.player.as_mut() else {
                 return;
             };
@@ -4890,6 +4894,9 @@ impl Game<'_> {
                 game.native_player_jump(uuid, &name);
             }
         });
+        if refused && let Some(i) = host.hub.guests.iter().position(|g| g.conn == conn) {
+            host.hub.teleport(i, Some(from));
+        }
     }
 
     /// ServerGamePacketListenerImpl.handlePlayerCommand START_FALL_FLYING:

@@ -1195,7 +1195,7 @@ impl MeshTables {
         &self,
         state: BlockStateId,
         pos: [i32; 3],
-        quad: &crate::models::catalog::BakedQuad,
+        quad: &horizon_assets::bake::ModelQuad,
         light: impl Fn([i32; 3]) -> u8,
     ) -> u32 {
         let own = self.info.get(state.0 as usize);

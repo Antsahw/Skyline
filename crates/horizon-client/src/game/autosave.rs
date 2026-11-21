@@ -105,6 +105,7 @@ impl Game<'_> {
             self.lan = Some(host);
         }
         self.save_world_state();
+        self.save_java_mods();
         self.message = Some(("Saved the game".into(), Instant::now()));
         Ok(())
     }

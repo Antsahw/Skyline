@@ -331,8 +331,50 @@ pub(super) trait LevelHost {
     /// The game's mobs, scanned for a box query before the grid is built.
     fn mobs(&self) -> &[Mob];
     fn potential_spawns(&self, category: Category, pos: [i32; 3], entries: &mut Vec<SpawnEntry>);
+    /// The 1.20.1 mods' natural spawn of one of their types (`NaturalLevel::foreign_spawn`).
+    #[cfg(feature = "java-mods-120")]
+    fn java120_spawn_natural(
+        &self,
+        _entity: &str,
+        _position: [f64; 3],
+        _yaw: f32,
+        _distance: f64,
+    ) -> Option<(Aabb, u32)> {
+        None
+    }
+    /// The same for a chunk-generation spawn (`NaturalLevel::foreign_generation_spawn`).
+    #[cfg(feature = "java-mods-120")]
+    fn java120_spawn_generated(
+        &self,
+        _entity: &str,
+        _column: [i32; 2],
+        _chunk: (i32, i32),
+        _yaw: f32,
+    ) -> bool {
+        false
+    }
 }
 impl LevelHost for &Game<'_> {
+    #[cfg(feature = "java-mods-120")]
+    fn java120_spawn_natural(
+        &self,
+        entity: &str,
+        position: [f64; 3],
+        yaw: f32,
+        distance: f64,
+    ) -> Option<(Aabb, u32)> {
+        Game::java120_spawn_natural(self, entity, position, yaw, distance)
+    }
+    #[cfg(feature = "java-mods-120")]
+    fn java120_spawn_generated(
+        &self,
+        entity: &str,
+        column: [i32; 2],
+        chunk: (i32, i32),
+        yaw: f32,
+    ) -> bool {
+        Game::java120_spawn_generated(self, entity, column, chunk, yaw)
+    }
     fn mobs(&self) -> &[Mob] {
         &self.mobs
     }

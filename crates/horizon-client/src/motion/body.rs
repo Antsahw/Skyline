@@ -22,6 +22,7 @@ impl PlayerMotion {
             status: crate::effects::StatusFlags::default(),
             impulse: ImpulseContext::default(),
             spawn_extra_particles_on_fall: false,
+            route_fall: false,
             position,
             velocity: Vec3::ZERO,
             ground: GroundState::default(),

@@ -52,8 +52,8 @@ impl Game<'_> {
         };
         Activity::World {
             play,
-            dimension: match self.dim {
-                Dim::Overworld => Dimension::Overworld,
+            dimension: match self.dim.vanilla() {
+                Dim::Overworld | Dim::Extra(_) => Dimension::Overworld,
                 Dim::Nether => Dimension::Nether,
                 Dim::End => Dimension::End,
             },

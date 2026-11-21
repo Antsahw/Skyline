@@ -484,7 +484,7 @@ impl Game<'_> {
                     &uuid,
                     dim,
                     [p.x, p.y, p.z],
-                    orb.value as i32,
+                    orb.value,
                     orb.count as i32,
                     xp.level,
                     xp.progress,
@@ -500,15 +500,14 @@ impl Game<'_> {
                     self.experience.total = t.total.max(0);
                     // giveExperienceLevels' level-up sound every fifth level.
                     if self.experience.level > level_before
-                        && self.experience.level % 5 == 0
-                        && self.ticks > self.last_level_up + 100
+                        && let Some(volume) = self.level_up_sound.give_levels(
+                            self.experience.level - level_before,
+                            self.experience.level,
+                        )
                     {
-                        self.last_level_up = self.ticks;
-                        let level = self.experience.level;
-                        let volume = if level > 30 { 1.0 } else { level as f32 / 30.0 };
                         let at = self.eye_position();
                         self.audio
-                            .play("minecraft:entity.player.levelup", at, volume * 0.75, 1.0);
+                            .play("minecraft:entity.player.levelup", at, volume, 1.0);
                     }
                     Some((t.count.max(0) as u32, t.delay))
                 }

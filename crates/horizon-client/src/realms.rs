@@ -1564,7 +1564,7 @@ fn create_temporary_world(world: &CreatedWorld) -> std::result::Result<PathBuf, 
         crate::save::write_world_gen_settings_with(
             &dir,
             level.seed,
-            world.world_gen,
+            world.world_gen.clone(),
             world.flat_settings.clone(),
             world.single_biome.as_deref(),
         )

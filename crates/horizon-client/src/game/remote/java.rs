@@ -93,7 +93,7 @@ impl Game<'_> {
     /// entity is aimed at; else what `remote_use_entity` answers.
     pub(super) fn remote_use_java_entity(&mut self, hand: Hand, sneaking: bool) -> Option<bool> {
         let (id, distance) = self.java_entity_hit()?;
-        if !(self.mob_hit().is_none_or(|(_, d)| distance < d) && self.before_block(distance)) {
+        if !(self.mob_hit().is_none_or(|(_, d, _)| distance < d) && self.before_block(distance)) {
             return None;
         }
         if hand == Hand::Off {
@@ -120,7 +120,7 @@ impl Game<'_> {
     /// (Player.attack). False when none is.
     pub(super) fn remote_attack_java_entity(&mut self) -> bool {
         if let Some((id, distance)) = self.java_entity_hit()
-            && self.mob_hit().is_none_or(|(_, d)| distance < d)
+            && self.mob_hit().is_none_or(|(_, d, _)| distance < d)
             && self.before_block(distance)
         {
             self.send(S::Attack(play::Attack { id }));

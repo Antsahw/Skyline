@@ -80,6 +80,7 @@ pub(super) fn build_renderer(
         shader_pack.frame(),
         display,
     ))?;
+    mem_mark("renderer");
     // The loading renderer may have been built before the saved graphics settings were
     // adopted. Configure the world swapchain before its first gameplay frame instead of
     // waiting for `Game::apply_settings` after the handoff.
@@ -440,4 +441,3 @@ pub(super) fn start_game<'a>(
     }
     Ok(Some(game))
 }
-    mem_mark("renderer");

@@ -15,7 +15,7 @@ use crate::{
     gamepad::{self, GlyphStyle},
     hdr_calibration::Picture,
     hud::{HudAtlas, HudBatch, rgba},
-    keybinds::{self, CATEGORIES, KeyBinds, all_mappings},
+    keybinds::{self, CATEGORIES, all_mappings},
     lang::{self, LanguageInfo},
     settings::{SOUND_SOURCES, Settings},
     settings_shell as shell,

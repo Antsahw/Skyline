@@ -884,7 +884,7 @@ impl super::Game<'_> {
             match super::render_control::parse_state(registry, &worldgen::state_from_120(&s.state))
             {
                 Ok(state) => {
-                    if let Err(e) = self.place_state(s.pos, state, false) {
+                    if let Err(e) = self.place_state(s.pos, state, false, false) {
                         log::warn!("1.20.1 mods: placing {}: {e:?}", s.state);
                     }
                 }

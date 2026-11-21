@@ -1293,7 +1293,7 @@ pub fn spawn_category_for_position<L: NaturalLevel, R: RandomSource>(
             // (the type's placement and spawn rules, the mob's) and the spawn.
             if kind.is_none() && l.foreign(&entry.entity) {
                 let passed = state.can_spawn(l, &entry.entity, [x, y, z]);
-                trace(Event::Test(entry.entity.clone(), [x, y, z], passed));
+                trace(Event::Test(&entry.entity, [x, y, z], passed));
                 if !passed {
                     continue;
                 }
@@ -1307,11 +1307,7 @@ pub fn spawn_category_for_position<L: NaturalLevel, R: RandomSource>(
                 spawned.push(bounds);
                 cluster += 1;
                 state.after_spawn(l, &entry.entity, category, [x, y, z]);
-                trace(Event::Spawn(
-                    entry.entity.clone(),
-                    [xx, f64::from(y), zz],
-                    yaw,
-                ));
+                trace(Event::Spawn(&entry.entity, [xx, f64::from(y), zz], yaw));
                 if cluster >= most {
                     return;
                 }

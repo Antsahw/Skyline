@@ -3,7 +3,7 @@
 //! dropped items (`ItemEntityRenderer`) and items posed in the world (hands,
 //! frames, armour stands). This binds the resolver's host services
 //! (`ItemEnv`) and the special renderers' registries to the game.
-use super::{Dim, Game, entity_culling::EntityCullDecision};
+use super::{Game, entity_culling::EntityCullDecision};
 use horizon_assets::item_model::{
     Components, ComponentsView, DisplayContext, GlobalPos, ItemEnv, LevelState, OwnerState,
     StackView,

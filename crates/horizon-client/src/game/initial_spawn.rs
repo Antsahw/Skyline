@@ -2,7 +2,7 @@
 //! setInitialSpawn walks a chunk spiral around NoiseBasedChunkGenerator.
 //! getOrigin, then PlayerSpawnFinder.findSpawn picks a free column around
 //! the world spawn within the respawn radius.
-use super::{Game, dispenser::entity_random};
+use super::Game;
 
 mod java;
 use horizon_client::{

@@ -22,7 +22,7 @@ impl Game<'_> {
                     at.z.floor() as i32,
                 ),
                 discrete: false,
-                style: None,
+                marks: Marks::default(),
             });
         }
     }

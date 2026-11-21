@@ -3221,7 +3221,7 @@ impl HudRenderer {
                     Blend::Image(id, linear) => {
                         if let Some(image) = self.images.get(id) {
                             pass.set_bind_group(0, &image.groups[usize::from(*linear)], &[]);
-                            pass.set_pipeline(&self.pipeline);
+                            pass.set_pipeline(self.pipeline.get(coverage.is_some()));
                             pass.draw(range.clone(), 0..1);
                             pass.set_bind_group(0, &self.group, &[]);
                         }

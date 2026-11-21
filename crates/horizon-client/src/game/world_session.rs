@@ -155,6 +155,7 @@ impl Game<'_> {
     /// integrated-server selection. Server startup must use this entry point.
     pub(super) fn load_world(&mut self, request: world_loading::WorldRequest) -> Result<()> {
         self.join_world_rest()?;
+        mem_mark("world rest joined");
         self.perf.world_opening();
         let prepared = request.prepare(
             &self.res,
