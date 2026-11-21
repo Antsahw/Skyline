@@ -220,7 +220,7 @@ bindings = []
 
 [[injection]]
 id = "screen_creative"
-target = "horizon_client::game::Game<'_>::draw_creative"
+target = "horizon_client::game::creative_screen::Game<'_>::draw_creative"
 kind = "HEAD"
 helper = "h_screen_creative.rs"
 bindings = []
