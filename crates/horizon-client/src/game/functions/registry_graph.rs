@@ -209,6 +209,23 @@ pub(super) fn check(packs: &[&DataPack]) -> Result<BoundTags, Error> {
                 let key = Key::element(registry, id);
                 match serde_json::from_slice(&bytes) {
                     Ok(value) => {
+                        // A Fabric mod's data (`mod/...`) is written for the version it was
+                        // made for: a 1.20.1 predicate says `condition`, not `type`. Vanilla
+                        // would not load the pack at all; for a mod, one file Horizon can't
+                        // read is left out with a warning so the world still starts.
+                        if pack.id.starts_with("mod/")
+                            && let Err(problems) = fields::references(&value, registry)
+                        {
+                            log::warn!(
+                                "Java mods: {} of {} not used: {}",
+                                key.path(),
+                                pack.id,
+                                problems.join("; ")
+                            );
+                            errors.remove(&key);
+                            graph.values.remove(&key);
+                            continue;
+                        }
                         errors.remove(&key);
                         graph.values.insert(key, value);
                     }
