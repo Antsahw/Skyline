@@ -17,17 +17,3 @@ pub fn preset_dimensions(root: &Path, preset: &str) -> Option<Tag> {
         .is_object()
         .then(|| horizon_client_core::scoreboard::json_to_tag(dimensions))
 }
-
-/// The vanilla dimensions `world_gen_settings` writes, or a mod's preset's in their place.
-pub(super) trait PresetDimensions {
-    /// A mod's world preset's dimensions ([`preset_dimensions`]) in place of these, when
-    /// `options.mod_preset` names one.
-    fn or_mod_preset(self, preset_dimensions: Option<Tag>, options: &WorldGen) -> Tag;
-}
-impl PresetDimensions for Tag {
-    fn or_mod_preset(self, preset_dimensions: Option<Tag>, options: &WorldGen) -> Tag {
-        preset_dimensions
-            .filter(|_| options.mod_preset.is_some())
-            .unwrap_or(self)
-    }
-}

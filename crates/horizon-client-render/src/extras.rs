@@ -19,49 +19,40 @@ pub const MINIMAP_SIZES: [(u8, &str); 3] = [(64, "Small"), (96, "Medium"), (128,
 pub const MINIMAP_ZOOMS: [f32; 4] = [0.5, 1.0, 2.0, 4.0];
 
 /// A screen corner for an overlay.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Corner {
-    TopLeft,
-    TopRight,
-    BottomLeft,
-    BottomRight,
-}
-impl Corner {
-    pub const ALL: [Corner; 4] = [
-        Corner::TopLeft,
-        Corner::TopRight,
-        Corner::BottomLeft,
-        Corner::BottomRight,
-    ];
-    pub fn name(self) -> &'static str {
-        match self {
-            Corner::TopLeft => "top_left",
-            Corner::TopRight => "top_right",
-            Corner::BottomLeft => "bottom_left",
-            Corner::BottomRight => "bottom_right",
-        }
-    }
-    pub fn label(self) -> &'static str {
-        match self {
-            Corner::TopLeft => "Top left",
-            Corner::TopRight => "Top right",
-            Corner::BottomLeft => "Bottom left",
-            Corner::BottomRight => "Bottom right",
-        }
-    }
-    pub fn parse(s: &str, default: Corner) -> Corner {
-        Self::ALL
-            .into_iter()
-            .find(|c| c.name() == s)
-            .unwrap_or(default)
-    }
-    pub fn top(self) -> bool {
-        matches!(self, Corner::TopLeft | Corner::TopRight)
-    }
-    pub fn left(self) -> bool {
-        matches!(self, Corner::TopLeft | Corner::BottomLeft)
-    }
-}
+pub use mod_api::client::extras::Corner;
+
+/// The extras official mods took over, by the mod's `horizon-mod.toml` id, with the keys of
+/// this file that held the extra's settings. A port reads them once to carry the player's
+/// choices over (`Extras::moved_settings`, the mod API's `official_extra_settings`).
+/// `lodZoomDetail` stays with the renderer, not the Zoom mod.
+pub const MOVED_KEYS: &[(&str, &[&str])] = &[
+    ("fps_overlay", &["fps", "fpsCorner", "fpsLows"]),
+    (
+        "keystrokes",
+        &["keystrokes", "keystrokesCorner", "keystrokesCps"],
+    ),
+    (
+        "minimap",
+        &[
+            "minimap",
+            "minimapCorner",
+            "minimapSize",
+            "minimapShape",
+            "minimapZoom",
+            "minimapRotate",
+        ],
+    ),
+    (
+        "zoom",
+        &[
+            "zoom",
+            "zoomKey",
+            "zoomLevel",
+            "zoomSmooth",
+            "zoomSensitivity",
+        ],
+    ),
+];
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Extras {
@@ -119,6 +110,10 @@ pub struct Extras {
     pub ui_sound_reserve: bool,
     /// The player's own name tag over its model in third person.
     pub own_name_tag: bool,
+    /// NeoForge's `skipModdedSplashesIfVanillaModified`, on by default: a
+    /// pack's own `minecraft` splashes replace every namespace's
+    /// (`horizon_client::splashes::pool`). No Extras page entry.
+    pub skip_modded_splashes_if_vanilla_modified: bool,
     /// No particles from breaking or mining a block (other particles stay).
     pub hide_block_particles: bool,
     /// Mouse Tweaks-style drags in the inventory and storage containers.
@@ -202,6 +197,7 @@ impl Default for Extras {
             auto_reconnect: false,
             ui_sound_reserve: false,
             own_name_tag: false,
+            skip_modded_splashes_if_vanilla_modified: true,
             hide_block_particles: false,
             mouse_tweaks: false,
             mouse_tweaks_wheel: true,
@@ -225,10 +221,70 @@ impl Default for Extras {
         }
     }
 }
+/// The largest file `Extras::moved_settings_in` reads: far above any extras file the game
+/// writes (a few KiB), so a huge or hostile file can't exhaust memory.
+pub const MOVED_READ_MAX: u64 = 1 << 20;
+/// `path` as text when it is a regular file (a link to one counts) of at most
+/// `MOVED_READ_MAX` bytes in UTF-8. Checked before opening, so a device or pipe is never
+/// opened, and again on the open file, in case it was swapped in between.
+fn read_bounded(path: &Path) -> Option<String> {
+    use std::io::Read;
+    let small = |meta: fs::Metadata| meta.is_file() && meta.len() <= MOVED_READ_MAX;
+    if !small(fs::metadata(path).ok()?) {
+        return None;
+    }
+    let file = fs::File::open(path).ok()?;
+    if !small(file.metadata().ok()?) {
+        return None;
+    }
+    let mut bytes = Vec::new();
+    file.take(MOVED_READ_MAX + 1).read_to_end(&mut bytes).ok()?;
+    if bytes.len() as u64 > MOVED_READ_MAX {
+        return None;
+    }
+    String::from_utf8(bytes).ok()
+}
 fn bool_text(v: bool) -> &'static str {
     if v { "true" } else { "false" }
 }
 impl Extras {
+    /// The settings official mod `mod_id` took over (`MOVED_KEYS`), from this file's `text`:
+    /// each of its keys that has a line there, with the value the extra took from it, as
+    /// `serialize` writes it: the last line it can read wins, and a key with no readable line
+    /// gives its default.
+    /// Empty for any other mod.
+    pub fn moved_settings(text: &str, mod_id: &str) -> Vec<(String, String)> {
+        let Some(&(_, keys)) = MOVED_KEYS.iter().find(|(id, _)| *id == mod_id) else {
+            return Vec::new();
+        };
+        let written = |key: &str| {
+            text.lines()
+                .any(|line| line.split_once(':').is_some_and(|(k, _)| k.trim() == key))
+        };
+        Self::parse(text)
+            .serialize()
+            .lines()
+            .filter_map(|line| line.split_once(':'))
+            .filter(|(key, _)| keys.contains(key) && written(key))
+            .map(|(key, value)| (key.to_owned(), value.to_owned()))
+            .collect()
+    }
+    /// `moved_settings` of this file in `dir`. The file is read only for a mod with a
+    /// `MOVED_KEYS` row, and only when it is a regular file of at most `MOVED_READ_MAX` bytes
+    /// in UTF-8; anything else gives nothing.
+    pub fn moved_settings_in(dir: &Path, mod_id: &str) -> Vec<(String, String)> {
+        Self::moved_settings_read(dir, mod_id, read_bounded)
+    }
+    fn moved_settings_read(
+        dir: &Path,
+        mod_id: &str,
+        read: fn(&Path) -> Option<String>,
+    ) -> Vec<(String, String)> {
+        if !MOVED_KEYS.iter().any(|(id, _)| *id == mod_id) {
+            return Vec::new();
+        }
+        read(&dir.join(FILE)).map_or_else(Vec::new, |text| Self::moved_settings(&text, mod_id))
+    }
     pub fn load(dir: &Path) -> Self {
         fs::read_to_string(dir.join(FILE))
             .map(|t| Self::parse(&t))
@@ -294,6 +350,10 @@ impl Extras {
                 "autoReconnect" => e.auto_reconnect = flag(e.auto_reconnect),
                 "uiSoundReserve" => e.ui_sound_reserve = flag(e.ui_sound_reserve),
                 "ownNameTag" => e.own_name_tag = flag(e.own_name_tag),
+                "skipModdedSplashesIfVanillaModified" => {
+                    e.skip_modded_splashes_if_vanilla_modified =
+                        flag(e.skip_modded_splashes_if_vanilla_modified)
+                }
                 "hideBlockParticles" => e.hide_block_particles = flag(e.hide_block_particles),
                 "mouseTweaks" => e.mouse_tweaks = flag(e.mouse_tweaks),
                 "mouseTweaksWheel" => e.mouse_tweaks_wheel = flag(e.mouse_tweaks_wheel),
@@ -333,7 +393,7 @@ impl Extras {
     }
     pub fn serialize(&self) -> String {
         let mut text = format!(
-            "packBrowser:{}\npregen:{}\nfullbright:{}\ndynamicLights:{}\nzoom:{}\nzoomKey:{}\nzoomLevel:{}\nzoomSmooth:{}\nzoomSensitivity:{}\nlodZoomDetail:{}\nfps:{}\nfpsCorner:{}\nfpsLows:{}\nkeystrokes:{}\nkeystrokesCorner:{}\nkeystrokesCps:{}\nmovedToMods:{}\nminimap:{}\nminimapCorner:{}\nminimapSize:{}\nminimapShape:{}\nminimapZoom:{}\nminimapRotate:{}\nautoReconnect:{}\nuiSoundReserve:{}\nownNameTag:{}\nhideBlockParticles:{}\nmouseTweaks:{}\nmouseTweaksWheel:{}\nsort:{}\nsortKey:{}\nchatAnimation:{}\nchatIndicator:{}\n{}:{}\nagentControl:{}\nreproKeys:{}\nsplitscreen:{}\nsplitscreenTwo:{}\nsplitscreenThree:{}\nsplitscreenNames:{}\nwheelCyclesListSettings:{}\nmusicOff:{}\nmusicPage:{}\n{}:{}\n",
+            "packBrowser:{}\npregen:{}\nfullbright:{}\ndynamicLights:{}\nzoom:{}\nzoomKey:{}\nzoomLevel:{}\nzoomSmooth:{}\nzoomSensitivity:{}\nlodZoomDetail:{}\nfps:{}\nfpsCorner:{}\nfpsLows:{}\nkeystrokes:{}\nkeystrokesCorner:{}\nkeystrokesCps:{}\nmovedToMods:{}\nminimap:{}\nminimapCorner:{}\nminimapSize:{}\nminimapShape:{}\nminimapZoom:{}\nminimapRotate:{}\nautoReconnect:{}\nuiSoundReserve:{}\nownNameTag:{}\nskipModdedSplashesIfVanillaModified:{}\nhideBlockParticles:{}\nmouseTweaks:{}\nmouseTweaksWheel:{}\nsort:{}\nsortKey:{}\nchatAnimation:{}\nchatIndicator:{}\n{}:{}\nagentControl:{}\nreproKeys:{}\nsplitscreen:{}\nsplitscreenTwo:{}\nsplitscreenThree:{}\nsplitscreenNames:{}\nwheelCyclesListSettings:{}\nmusicOff:{}\nmusicPage:{}\n{}:{}\n",
             bool_text(self.pack_browser),
             bool_text(self.pregen),
             bool_text(self.fullbright),
@@ -364,6 +424,7 @@ impl Extras {
             bool_text(self.auto_reconnect),
             bool_text(self.ui_sound_reserve),
             bool_text(self.own_name_tag),
+            bool_text(self.skip_modded_splashes_if_vanilla_modified),
             bool_text(self.hide_block_particles),
             bool_text(self.mouse_tweaks),
             bool_text(self.mouse_tweaks_wheel),
@@ -864,6 +925,57 @@ impl Item {
 mod tests {
     use super::*;
 
+    /// An official mod gets its own extra's written keys, as the extra read them; any other
+    /// mod, and a key the file lacks, gets nothing.
+    #[test]
+    fn moved_settings_are_the_calling_mods_written_keys() {
+        let owned = |pairs: &[(&str, &str)]| -> Vec<(String, String)> {
+            pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect()
+        };
+        let text = "fps:true\nfpsCorner:nowhere\nkeystrokes:true\nzoomLevel:7\n";
+        assert_eq!(
+            Extras::moved_settings(text, "fps_overlay"),
+            owned(&[("fps", "true"), ("fpsCorner", "top_left")])
+        );
+        let twice = "fpsCorner:top_right\nfpsCorner:bottom_right\n";
+        assert_eq!(
+            Extras::moved_settings(twice, "fps_overlay"),
+            owned(&[("fpsCorner", "bottom_right")])
+        );
+        assert_eq!(
+            Extras::moved_settings(text, "zoom"),
+            owned(&[("zoomLevel", "7")])
+        );
+        assert!(Extras::moved_settings(text, "minimap").is_empty());
+        assert!(Extras::moved_settings(text, "coords_hud").is_empty());
+        assert!(Extras::moved_settings("", "fps_overlay").is_empty());
+    }
+    /// The file is read only for an official mod, and only as a small regular file.
+    #[test]
+    fn moved_settings_in_reads_only_a_small_file_for_an_official_mod() {
+        let dir = tempfile::tempdir().unwrap();
+        let unread = Extras::moved_settings_read(dir.path(), "coords_hud", |_| {
+            panic!("read for a mod without moved keys")
+        });
+        assert!(unread.is_empty());
+        let file = dir.path().join(FILE);
+        fs::write(&file, "fpsLows:true\n").unwrap();
+        assert_eq!(
+            Extras::moved_settings_in(dir.path(), "fps_overlay"),
+            [("fpsLows".to_owned(), "true".to_owned())]
+        );
+        let mut huge = "fpsLows:true\n".to_owned();
+        huge.push_str(&"#".repeat(MOVED_READ_MAX as usize));
+        fs::write(&file, huge).unwrap();
+        assert!(Extras::moved_settings_in(dir.path(), "fps_overlay").is_empty());
+        fs::remove_file(&file).unwrap();
+        assert!(Extras::moved_settings_in(dir.path(), "fps_overlay").is_empty());
+        fs::create_dir(&file).unwrap();
+        assert!(Extras::moved_settings_in(dir.path(), "fps_overlay").is_empty());
+    }
     #[test]
     fn a_saved_wheel_setting_from_before_the_default_changed_is_dropped() {
         assert!(!Extras::parse("wheelCyclesSettings:true\n").wheel_cycles_settings);

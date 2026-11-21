@@ -7,13 +7,30 @@ use crate::{
 use flate2::{Compress, Compression, Decompress, FlushCompress, FlushDecompress, Status};
 use std::cell::RefCell;
 
-mod wide;
-pub use wide::wide_header;
-
 /// Frames are at most three VarInt bytes long (21 bits).
 pub const MAX_FRAME: usize = (1 << 21) - 1;
 /// CompressionDecoder.MAXIMUM_UNCOMPRESSED_LENGTH.
 pub const MAX_UNCOMPRESSED: usize = 8_388_608;
+
+/// Which whole-packet boundary refused an outgoing packet.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FrameSize {
+    /// Packet contents after the compression header and optional compression.
+    Encoded,
+    /// Packet bytes before compression, including the packet id.
+    Uncompressed,
+}
+
+/// A named pre-write refusal, not a registered-payload body limit.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FrameTooLarge {
+    /// Which stage's bound was exceeded.
+    pub stage: FrameSize,
+    /// Actual whole-packet byte count at that stage.
+    pub size: usize,
+    /// Inclusive maximum at that stage.
+    pub limit: usize,
+}
 
 /// Build the frame for one packet body (`id` + payload already concatenated):
 /// length prefix, and with compression enabled the uncompressed-length
@@ -22,23 +39,36 @@ pub fn encode(body: &[u8], threshold: Option<usize>) -> Result<Vec<u8>> {
     Ok(prefixed(&contents(body, threshold)?))
 }
 
+/// Consume an uncompressed body without copying it; compressed framing uses [`contents`].
+pub fn contents_owned(body: Vec<u8>, threshold: Option<usize>) -> Result<Vec<u8>> {
+    if threshold.is_none() {
+        check_body_size(&body, threshold)?;
+        Ok(body)
+    } else {
+        contents(&body, threshold)
+    }
+}
+
+fn check_body_size(body: &[u8], threshold: Option<usize>) -> Result<()> {
+    let (stage, limit) = if threshold.is_some() {
+        (FrameSize::Uncompressed, MAX_UNCOMPRESSED)
+    } else {
+        (FrameSize::Encoded, MAX_FRAME)
+    };
+    if body.len() > limit {
+        return Err(Error::frame_too_large(FrameTooLarge {
+            stage,
+            size: body.len(),
+            limit,
+        }));
+    }
+    Ok(())
+}
+
 /// What [`encode`] puts after the length prefix: the same for every
 /// connection with the same threshold.
 pub fn contents(body: &[u8], threshold: Option<usize>) -> Result<Vec<u8>> {
-    let inner = unbounded_contents(body, threshold)?;
-    if inner.len() > MAX_FRAME {
-        return Err(Error::new(format!(
-            "packet too large: {} bytes",
-            inner.len()
-        )));
-    }
-    Ok(inner)
-}
-
-/// [`contents`] without the 21-bit frame limit: an in-memory connection's
-/// (vanilla's LocalChannel passes packets as objects, with no frame at all), read
-/// back with [`wide_header`].
-pub fn unbounded_contents(body: &[u8], threshold: Option<usize>) -> Result<Vec<u8>> {
+    check_body_size(body, threshold)?;
     let inner = match threshold {
         None => body.to_vec(),
         // CompressionEncoder: a body over the other side's CompressionDecoder maximum is not sent,
@@ -64,6 +94,13 @@ pub fn unbounded_contents(body: &[u8], threshold: Option<usize>) -> Result<Vec<u
             v
         }
     };
+    if inner.len() > MAX_FRAME {
+        return Err(Error::frame_too_large(FrameTooLarge {
+            stage: FrameSize::Encoded,
+            size: inner.len(),
+            limit: MAX_FRAME,
+        }));
+    }
     Ok(inner)
 }
 
@@ -209,6 +246,10 @@ pub fn body(frame: &[u8], threshold: Option<usize>, inflater: &mut Inflater) -> 
         .inflate(&frame[r.position()..], size)
         .map(Body::Inflated)
 }
+
+#[cfg(test)]
+#[path = "frame/limits_tests.rs"]
+mod limits_tests;
 
 #[cfg(test)]
 mod tests {

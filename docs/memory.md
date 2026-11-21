@@ -31,7 +31,7 @@ The reply is built in `crates/horizon-client/src/game/memory.rs`. Sizes are MiB 
 | `far_tiles` | Far terrain tiles: `active` and `cached`, and the tiles `kept` for a return with their `kept_mb` |
 | `renderer.section_arenas_mb`, `section_vertices_mb` | The GPU buffers of the section vertex arenas, and the vertices that resident sections and far tiles hold in them |
 | `renderer.cpu` | The renderer's CPU-side bookkeeping: `resident_sections_mb`, `far_tiles_mb`, `block_entities_mb`, `light_sources_mb` |
-| `renderer.gpu` | The GPU allocator's `allocated_mb` and `reserved_mb`, and the 40 largest resources as `["label", mb]` rows in `by_label_mb`; `null` without Vulkan or DirectX 12 |
+| `renderer.gpu` | The GPU allocator's `allocated_mb` and `reserved_mb`, and the 40 largest resources as `["label", mb]` rows in `by_label_mb`, and `blocks`, each block of device memory as `[size_mb, used_mb, its largest allocations]` (reserved memory sitting empty shows as `used_mb` below `size_mb`); `null` without Vulkan or DirectX 12 |
 | `named_mb`, `unattributed_mb` | `named_mb` adds up the columns (a section both the window and its server thread hold once), `server_generation`, `entities`, `players`, `chunk_send`, the two queues, `renderer.cpu` and the far tiles' `kept_mb`. `unattributed_mb` is `process.resident_mb` less that; it can be negative where a census overlaps another, and `null` where the resident set is not read |
 | `heap_by_tag_mb` | Only in an `alloc-census` build, otherwise `null`: see [the heap census](#who-allocated-it-the-heap-census) |
 
@@ -49,7 +49,7 @@ F3 shows three vanilla memory lines on Linux and Windows, read every half second
 `alloc-count` makes the game's allocator count blocks. Each thread owns a slot of four counters (allocations, bytes allocated, frees, bytes freed) that only it writes, so counting is two loads and stores per allocation and per free, with no atomic read-modify-write and no shared cache line. A `realloc` counts as a free of the old size and an allocation of the new one, so a growing `Vec` shows as churn. Slots are never reused: a finished thread's counts stay in the total. Beyond 1023 threads the rest share slot 0.
 
 ```sh
-cargo build --profile fast -p horizon-client --features alloc-count
+cargo build --profile fast -p horizon-game --features alloc-count
 ```
 
 Without the feature `horizon_threads::GameAllocator` is plain mimalloc: nothing is counted and nothing is added to the allocation path. `alloc-census` includes `alloc-count`. With `system-allocator` nothing counts, and `alloc` is `null` as in a build without the feature.
@@ -86,7 +86,7 @@ On the game, three alternating runs of `--benchmark standard` with and without t
 Build it and read it:
 
 ```sh
-cargo build --profile fast -p horizon-client --features alloc-census
+cargo build --profile fast -p horizon-game --features alloc-census
 target/fast/horizon-client --resources .local/horizon-client/26.3 --world T &
 target/fast/horizon-ctl memory | jq '.heap_by_tag_mb'
 ```
@@ -143,6 +143,6 @@ See [Graphics](graphics.md) for how the spans are used to chase a slow frame.
 `--features system-allocator` sends Rust's allocations to the system heap instead of mimalloc, so profilers that replace `malloc` (heaptrack, valgrind's massif) see them. Use it on small probes only: the whole game is far too large for them (heaptrack needed more than 7 GB to follow it), and the system heap is slower than mimalloc. `system-allocator` wins over `alloc-census` when both are given.
 
 ```sh
-cargo build --profile fast -p horizon-client --features system-allocator
+cargo build --profile fast -p horizon-game --features system-allocator
 heaptrack target/fast/horizon-client --resources .local/horizon-client/26.3 --world T
 ```

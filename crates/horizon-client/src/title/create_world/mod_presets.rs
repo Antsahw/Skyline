@@ -155,15 +155,8 @@ mod tests {
         };
         let dimensions = crate::save::preset_dimensions(&root, "oneblock:oneblock");
         assert!(dimensions.is_some());
-        crate::save::write_world_gen_settings_preset(
-            &dir,
-            7,
-            options.clone(),
-            None,
-            None,
-            dimensions,
-        )
-        .unwrap();
+        crate::save::write_world_gen_settings_with(&dir, 7, options.clone(), None, None, dimensions)
+            .unwrap();
         assert_eq!(crate::save::WorldGen::read(&dir), Some(options));
         let settings = crate::save::world_gen_settings(&dir).unwrap();
         assert_eq!(

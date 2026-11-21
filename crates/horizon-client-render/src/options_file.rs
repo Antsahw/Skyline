@@ -391,7 +391,7 @@ impl Spec {
 
     /// `codec.encodeStart(JsonOps.INSTANCE, value)` rendered by Gson.
     fn encode(self, v: &V) -> Option<String> {
-        let double = |x: f64| java_text::double_to_string(x);
+        let double = |x: f64| horizon_core::java_number::double_to_string(x);
         Some(match (self, v) {
             (Spec::Bool, V::Bool(b)) => b.to_string(),
             (Spec::Int(lo, hi), V::Int(x)) => {
@@ -492,6 +492,8 @@ pub struct OptionsFile {
     /// Mods' key mappings (`key_<name>:<key>` of mappings vanilla doesn't have), by name:
     /// written after vanilla's, as `Options.keyMappings` holds the mods' after them.
     pub mod_keys: std::collections::BTreeMap<String, String>,
+    /// Startup-only wasm compile setting, preserved verbatim, validated by the mod host.
+    pub wasm_compile_timeout_secs: Option<String>,
 }
 
 impl Default for OptionsFile {
@@ -500,6 +502,7 @@ impl Default for OptionsFile {
             values: TABLE.iter().map(|d| d.default.clone()).collect(),
             fullscreen_resolution: None,
             mod_keys: std::collections::BTreeMap::new(),
+            wasm_compile_timeout_secs: None,
         }
     }
 }
@@ -600,6 +603,7 @@ impl OptionsFile {
                 raw.insert(k.to_owned(), v.to_owned());
             }
         }
+        file.wasm_compile_timeout_secs = raw.get("wasm.compile_timeout_secs").cloned();
         let version = raw
             .get("version")
             .and_then(|v| crate::options_fixes::java_parse_int(v))
@@ -673,6 +677,11 @@ impl OptionsFile {
     /// `Options.save`.
     pub fn serialize(&self) -> String {
         let mut out = format!("version:{}\n", horizon_world::DATA_VERSION);
+        if let Some(value) = &self.wasm_compile_timeout_secs {
+            out.push_str("wasm.compile_timeout_secs:");
+            out.push_str(value);
+            out.push('\n');
+        }
         for (i, (d, v)) in TABLE.iter().zip(&self.values).enumerate() {
             // The mods' mappings after vanilla's last.
             if i > 0 && matches!(TABLE[i - 1].kind, Kind::Key) && !matches!(d.kind, Kind::Key) {
@@ -923,6 +932,24 @@ mod control_tests {
             f.set_text("nope", "1")
                 .unwrap_err()
                 .contains("unknown option")
+        );
+    }
+    #[test]
+    fn preserves_startup_compile_setting_without_adding_an_unset_value() {
+        for value in ["120", "0", "not-numeric"] {
+            let input = format!("wasm.compile_timeout_secs:{value}\n");
+            let saved = OptionsFile::parse(&input).serialize();
+            assert_eq!(
+                OptionsFile::parse(&saved)
+                    .wasm_compile_timeout_secs
+                    .as_deref(),
+                Some(value)
+            );
+        }
+        assert!(
+            OptionsFile::parse(&OptionsFile::default().serialize())
+                .wasm_compile_timeout_secs
+                .is_none()
         );
     }
 }

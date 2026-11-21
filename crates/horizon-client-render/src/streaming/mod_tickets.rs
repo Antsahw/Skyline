@@ -8,8 +8,10 @@ impl Streaming {
     /// New ones are ranked for decoration and generation looks again, as `/forceload add`'s are.
     pub fn set_ticketed(&mut self, chunks: impl IntoIterator<Item = (i32, i32)>) {
         let chunks: HashSet<(i32, i32)> = chunks.into_iter().collect();
-        for c in self.ticketed.difference(&chunks) {
-            self.mod_forced.remove(c);
+        let dropped: Vec<(i32, i32)> = self.ticketed.difference(&chunks).copied().collect();
+        for c in dropped {
+            self.mod_forced.remove(&c);
+            self.settle(c);
         }
         let mut new: Vec<(i32, i32)> = chunks
             .iter()
@@ -18,6 +20,7 @@ impl Streaming {
             .collect();
         new.sort_unstable();
         for (x, z) in new {
+            self.settle((x, z));
             self.rank_forced(x, z, x, z);
         }
         self.ticketed = chunks;

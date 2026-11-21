@@ -40,6 +40,12 @@ struct Globals {
     hdr_light: vec4<f32>,
     // What `hdr_written` reads (hdr_light.wgsl): the display's headroom, the look and debug.
     hdr_settings: vec4<f32>,
+    // The eye fog is measured from, camera-relative: zero but in a mod's world view.
+    view_origin: vec4<f32>,
+    // A mod's world view's own, zero outside one (gfx/world_views.rs's `ViewCamera`): x -1 when
+    // mirrored (its screen runs right to left), else 1; y the clip-space depth its clip plane's
+    // entities come forward (`fs_entity_clipped`), 0 without one; z 1 with a clip plane.
+    world_view: vec4<f32>,
 }
 @group(0) @binding(0) var<uniform> globals: Globals;
 @group(0) @binding(1) var sprites: texture_2d_array<f32>;
@@ -199,11 +205,10 @@ struct TerrainOut {
     color: vec4<f32>,
     spherical: f32,
     cylindrical: f32,
-    // How the face shines in HDR output (mesher.rs's `EMISSION_BITS`): 0 not
+    // How the face shines in HDR output (mesher.rs's `TIER_BITS`): 0 not
     // at all, 1 to 4 the tier with its bright parts, 5 to 8 the tier all over.
     emission: u32,
-    // Block and sky light over 16, the light a world warp's fragment is given
-    // (gfx/world_warp_fragment.wgsl).
+    // Block and sky light over 16.
     scene: vec2<f32>,
     fade: u32,
     // A distant tile's tile-relative position, for its fade (`faded`).
@@ -213,10 +218,6 @@ struct TerrainOut {
     // The camera-relative height, for the water mirror's cut at the plane.
     height: f32,
     emissive_layer: u32,
-    // [world warp varyings]
-    // (a native mod's world warp adds its own here, and in `TerrainWire`, `to_wire` and
-    // `from_wire`: gfx/world_warp.rs)
-    // [end world warp varyings]
 }
 // `TerrainOut` in 5 interpolant locations instead of 12. A GPU's vertex stage pays for each
 // location it exports (AMD's parameter cache gives one a whole slot, however few of its four
@@ -235,8 +236,6 @@ struct TerrainWire {
     @location(3) d: vec4<f32>,
     // `layer`, `emission`, `fade` and `emissive_layer`.
     @location(4) @interpolate(flat) e: vec4<u32>,
-    // [world warp wire]
-    // [end world warp wire]
 }
 fn to_wire(o: TerrainOut) -> TerrainWire {
     var w: TerrainWire;
@@ -246,8 +245,6 @@ fn to_wire(o: TerrainOut) -> TerrainWire {
     w.c = vec4(o.uv, o.scene);
     w.d = vec4(o.spherical, o.cylindrical, o.height, 0.0);
     w.e = vec4(o.layer, o.emission, o.fade, o.emissive_layer);
-    // [world warp to wire]
-    // [end world warp to wire]
     return w;
 }
 fn from_wire(w: TerrainWire) -> TerrainOut {
@@ -265,8 +262,6 @@ fn from_wire(w: TerrainWire) -> TerrainOut {
     o.emission = w.e.y;
     o.fade = w.e.z;
     o.emissive_layer = w.e.w;
-    // [world warp from wire]
-    // [end world warp from wire]
     return o;
 }
 // Whether a fading tile or section leaves this pixel out (gfx/lod.rs's
@@ -327,6 +322,12 @@ fn fade_depth(clip: vec4<f32>, w: f32) -> vec4<f32> {
         // little out of the real ones, and the tile coming in under it hid it
         // at once, before its fade.
         scale *= 1.02;
+    }
+    // A world view's clip plane is its near plane, `z = w` (gfx/world_views.rs's `near_plane_on`):
+    // there the offset scales the depth in front of the plane, `w - z`, which keeps the plane
+    // where it is.
+    if globals.world_view.z != 0.0 {
+        return vec4(clip.xy, clip.w - (clip.w - clip.z) / scale, clip.w);
     }
     return vec4(clip.xy, clip.z * scale, clip.w);
 }
@@ -672,10 +673,7 @@ fn corner_vertex(c: ArenaCorner, origin: vec4<f32>) -> TerrainOut {
 }
 fn terrain_vertex(position: vec3<f32>, uv: vec2<f32>, layer: u32, color: vec4<f32>,
     light: vec2<u32>, origin: vec3<f32>, w: f32) -> TerrainOut {
-    // [world warp vertex]
-    // (a world warp's pipelines put the point through the mod's `world_warp`: gfx/world_warp.rs)
     let pos = position + origin;
-    // [end world warp vertex]
     var out: TerrainOut;
     out.clip = fade_depth(globals.view_proj * vec4(pos, 1.0), w);
     out.local = position;
@@ -700,16 +698,15 @@ fn terrain_vertex(position: vec3<f32>, uv: vec2<f32>, layer: u32, color: vec4<f3
     if globals.colored_count.x > 0u {
         out.color = vec4(min(out.color.rgb + color.rgb * native_colored_light(pos), vec3(1.0)), out.color.a);
     }
-    out.emission = 15u - (u32(round(color.a * 255.0)) & 15u);
+    out.emission = 7u - (u32(round(color.a * 255.0)) & 7u);
     out.height = pos.y;
-    out.spherical = length(pos);
-    out.cylindrical = max(length(pos.xz), abs(pos.y));
+    let eye = pos - globals.view_origin.xyz;
+    out.spherical = length(eye);
+    out.cylindrical = max(length(eye.xz), abs(eye.y));
     out.fade = fade_code(w);
     const CHUNK_FULLY_VISIBLE_RANGE: f32 = 16.0;
     out.visibility = mix(1.0, instance_visibility(w),
         clamp((length(pos) - CHUNK_FULLY_VISIBLE_RANGE) / CHUNK_FULLY_VISIBLE_RANGE, 0.0, 1.0));
-    // [world warp out]
-    // [end world warp out]
     return out;
 }
 fn linear_fog(d: f32, start: f32, end: f32) -> f32 {
@@ -725,6 +722,27 @@ fn apply_fog(color: vec4<f32>, spherical: f32, cylindrical: f32) -> vec4<f32> {
 @fragment fn fs_solid(wire: TerrainWire) -> @location(0) vec4<f32> {
     let in = from_wire(wire);
     return solid_color(in);
+}
+// Shader alpha-to-coverage leaves colour alpha available for HDR's light codes.
+// Smooth the cutout threshold over its pixel footprint, then retain 0..4 samples.
+fn cutout_coverage(alpha: f32, opaque: bool) -> u32 {
+    let width = max(fwidth(alpha), 0.0001);
+    let coverage = clamp((alpha - 0.5) / width + 0.5, 0.0, 1.0);
+    // Masks 0, 1, 5, 13, 15 in four bits each, without a dynamically indexed private
+    // constant array (some Adreno Vulkan compilers cannot link those; see `faded`).
+    let mask = (0xfd510u >> (u32(round(coverage * 4.0)) * 4u)) & 15u;
+    return select(mask, 15u, opaque);
+}
+struct TerrainMsaa {
+    @location(0) color: vec4<f32>,
+    @builtin(sample_mask) coverage: u32,
+}
+// 4x MSAA's solid terrain (gfx/msaa.rs): `solid_color` with its cutout as sample coverage.
+@fragment fn fs_solid_msaa(wire: TerrainWire) -> TerrainMsaa {
+    let in = from_wire(wire);
+    let s = solid_uncut(in);
+    let mask = cutout_coverage(s.color.a, (in.layer & 0x8000u) != 0u);
+    return TerrainMsaa(solid_finish(in, s.texel, s.color), mask);
 }
 // `fs_solid` for the opaque pass (`opaque_quad`): no fade, no cutout, no discard.
 @fragment fn fs_opaque(wire: TerrainWire) -> @location(0) vec4<f32> {
@@ -742,16 +760,26 @@ fn apply_fog(color: vec4<f32>, spherical: f32, cylindrical: f32) -> vec4<f32> {
     return solid_color(in);
 }
 fn solid_color(in: TerrainOut) -> vec4<f32> {
+    let s = solid_uncut(in);
+    // Bit 15 of the layer marks opaque leaves (forceOpaque): no alpha cutout.
+    if s.color.a < 0.5 && (in.layer & 0x8000u) == 0u { discard; }
+    return solid_finish(in, s.texel, s.color);
+}
+// A solid pixel's sprite texel and colour before its cutout, which `solid_color` discards
+// below half alpha and `fs_solid_msaa` turns into coverage.
+struct SolidUncut {
+    texel: vec4<f32>,
+    color: vec4<f32>,
+}
+fn solid_uncut(in: TerrainOut) -> SolidUncut {
     let dx = dpdx(in.local);
     let dy = dpdy(in.local);
     if faded(in.fade, in.local, dx, dy) { discard; }
-    // Bit 15 of the layer marks opaque leaves (forceOpaque): no alpha cutout.
     let texel = sprite(in.uv, in.layer & 0x7fffu);
     var color = texel * in.color;
     // terrain.fsh: the fade-in mixes toward the fog colour.
     color = mix(globals.fog_color * vec4(1.0, 1.0, 1.0, color.a), color, in.visibility);
-    if color.a < 0.5 && (in.layer & 0x8000u) == 0u { discard; }
-    return solid_finish(in, texel, color);
+    return SolidUncut(texel, color);
 }
 // The rest of a solid pixel's colour once it is kept: emission and fog.
 fn solid_finish(in: TerrainOut, texel: vec4<f32>, color: vec4<f32>) -> vec4<f32> {
@@ -853,7 +881,7 @@ struct NativeFluidOut {
 @fragment fn fs_native_fluid(in: NativeFluidOut) -> @location(0) vec4<f32> {
     // The source translucent shader has no alpha discard; transparent texels write depth too.
     let color = sprite_grad(in.uv, in.sprite, dpdx(in.uv), dpdy(in.uv)) * in.color;
-    return apply_fog(color, in.spherical, in.cylindrical);
+    return frame_stored(apply_fog(color, in.spherical, in.cylindrical));
 }
 
 // Native terrain models retain floating-point transformed normals. Fullbright still receives
@@ -893,7 +921,7 @@ struct NativeModelOut {
         color = vec4(color.rgb * shade, color.a);
     }
     let finished = apply_fog(color, in.spherical, in.cylindrical);
-    return vec4(finished.rgb, select(finished.a, 1.0, HDR_WRITE_LIGHT));
+    return frame_stored(vec4(finished.rgb, select(finished.a, 1.0, HDR_WRITE_LIGHT)));
 }
 
 // Sky (SkyRenderer): the 10-vertex sky disc fan at y = 16 (radius 512) in

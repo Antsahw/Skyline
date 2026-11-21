@@ -10,7 +10,7 @@ pub(crate) fn release_digest(release: &Release, asset: &str) -> Result<String, S
         // served under its own GitHub tag. A title that doesn't parse strictly is refused: nothing
         // signs GitHub's publication time.
         Some(github_tag) => {
-            let version = horizon_release_sign::nightly_title_version(&release.name)
+            let version = crate::signed::title_version(github_tag, &release.name)
                 .filter(|v| *v == release.tag)
                 .ok_or_else(|| {
                     crate::i18n::trf(
@@ -19,11 +19,11 @@ pub(crate) fn release_digest(release: &Release, asset: &str) -> Result<String, S
                         &[("title", &format!("{:?}", release.name))],
                     )
                 })?;
-            crate::signed::nightly_digest(
+            crate::signed::build_digest(
                 github_tag,
                 &version,
                 asset,
-                &horizon_release_sign::trusted_keys(),
+                &horizon_release_sign::trusted_keys_for(REPO),
                 fetch_small,
             )
         }
