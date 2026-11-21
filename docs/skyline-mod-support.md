@@ -15,6 +15,10 @@ Status words mean one thing each:
 The phases themselves are in [java-bridge-120.md](java-bridge-120.md); this page is the view
 from the mod's side rather than the bridge's.
 
+> **After the merge of Horizon's `main` (2026-11-21):** the statuses below were last checked
+> before it. The merge compiles and lints clean but has not been played, so read **done** as
+> "done before the merge" until a mod set has been tried on it.
+
 ## Tier 1 — a mod is unusable without these
 
 | What the mod does | Status | Where |

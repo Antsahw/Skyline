@@ -1546,6 +1546,28 @@ approximate widths; a stack's components other than damage don't reach the runti
 enchanted tool put *into* a machine loses its enchantments); what the cursor holds is lost if
 the server stops with the screen open. Those are the rest of phase 4.
 
+## Upstream merge status (2026-11-21)
+
+Horizon's `main` (10,834 commits since 5 November) is merged into branch `upstream-sync`; it
+builds, and clippy `-D warnings` is clean for `java-mods,java-mods-120`, `java-mods-120` and no
+features. **Not yet run in a game:** the merge has been compiled, not played. Until a 1.20.1 mod
+set and the 26.3 bridge have been tried on it, treat everything in the phases below as
+"was done before the merge".
+
+What changed for the bridge, and what is lost or only reconnected:
+
+- Code-drawn models (`java_mods_120/drawn.rs`) build upstream's `ModelQuad`; `force_translucent`
+  stays `false` (the sprite's own translucency decides the layer).
+- Guests: a Java mod's cancelled jump is asked in `guest_jump` (upstream moved the jump out of
+  the tick); fall routing is in `lan_actions/guest_body.rs`.
+- Natural spawns of the mods' own mobs go through upstream's `LevelHost`.
+- `Dim::Extra` (a mod's level) has its own coordinate scale in `/execute in`; for the rest
+  upstream's dimension types read the vanilla level it stands for.
+- Lost, to be redone: the heap trim after a world's rest finishes; `behaviour_json` is dropped
+  right after the block facts are read (kept as before).
+- The launcher took upstream's owner and session model, so the offline names and `dev_offline`
+  of iaxivers may not work.
+
 ## Phase 3d status: the shape only the mod knows (2026-11-10)
 
 A block's shape is one per state in Horizon's registry, exported by asking each state with no

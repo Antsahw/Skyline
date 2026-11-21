@@ -178,6 +178,28 @@ python3 tools/java_bridge/check_no_fabric.py --tree # no Fabric/Mixin/ASM jars
   (step 2), the content cache is stale, or the change is on the server side and never reaches
   the client. All three have cost a day here.
 
+## Syncing with Horizon
+
+Skyline was cut off from Horizon for a while (the first merge, in November 2026, was 10,834
+commits and 197 conflicted files). Keep up with `tools/sync_upstream.sh`: it fetches upstream's
+`main`, merges it into the `upstream-sync` branch, stops at conflicts, and when the merge is clean
+runs the public-tree checks and clippy `-D warnings` for the three feature sets. It never pushes.
+Then build the game once (`python3 tools/skyline_native.py -j 2`), try a 1.20.1 and a 26.3 mod,
+and fast-forward `multiversion`.
+
+What to look for after a merge, because the compiler does not always say:
+
+- **Fragments of a patch far from their place.** A merge resolved with a fuzzy `patch` leaves
+  lines at the end of a file or inside another function. Most stop the build; one that still
+  compiles is worse. Compare the hook inventory before and after: every `java_*` and `java120_*`
+  call of `multiversion` must still be there (a script in the merge's commit message of
+  2026-11-21 does it in twenty lines).
+- **Upstream splitting a file.** `game.rs` was cut into dozens of files; Skyline's changes went
+  to the new homes, and `Game`'s fields, `Options` and `Screen` lost nothing.
+- **Our dimension types.** A mod's level is `Dim::Extra`; upstream's data-driven dimension types
+  know only vanilla's, so `self.dim.vanilla()` stands in wherever upstream reads the dimension.
+- **Quads.** Upstream's `ModelQuad` replaced `BakedQuad`; code-drawn models build `ModelQuad`.
+
 ## Where to read next
 
 [skyline.md](skyline.md) for what the fork is and how the bridges work ·
