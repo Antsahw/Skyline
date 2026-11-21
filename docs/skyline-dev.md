@@ -191,9 +191,8 @@ What to look for after a merge, because the compiler does not always say:
 
 - **Fragments of a patch far from their place.** A merge resolved with a fuzzy `patch` leaves
   lines at the end of a file or inside another function. Most stop the build; one that still
-  compiles is worse. Compare the hook inventory before and after: every `java_*` and `java120_*`
-  call of `multiversion` must still be there (a script in the merge's commit message of
-  2026-11-21 does it in twenty lines).
+  compiles is worse. `python3 tools/java_bridge/hook_inventory.py multiversion` compares every
+  `java_*` and `java120_*` call with the branch's: none may be fewer.
 - **Upstream splitting a file.** `game.rs` was cut into dozens of files; Skyline's changes went
   to the new homes, and `Game`'s fields, `Options` and `Screen` lost nothing.
 - **Our dimension types.** A mod's level is `Dim::Extra`; upstream's data-driven dimension types
