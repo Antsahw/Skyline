@@ -60,7 +60,7 @@ DebugLoggedPrintStream.logLine	skip:debug		debug-only stream logging
 Eula.saveDefaults	port	crates/horizon-server-files/src/eula.rs::default_file	default eula.txt content; the write happens in agreed()
 net/minecraft/server/Main#createNewWorldData	port	crates/horizon-client/src/game/dedicated.rs::Game::write_world_gen	gap: minor: writes the world gen settings for a new world; --bonusChest is accepted and ignored (preflight); level settings come from the save code
 net/minecraft/server/Main#writePidFile	port	crates/horizon-client/src/game/dedicated.rs::preflight	--pidFile writes the process id while the options are read
-net/minecraft/server/Main#loadOrCreateConfig	port	crates/horizon-client/src/game/functions.rs::Game::reload_datapacks	gap: minor: reads the saved datapack settings; no feature-flag check and no new-world default config
+net/minecraft/server/Main#loadOrCreateConfig	port	crates/horizon-client/src/game/functions/loading.rs::Game::try_reload_datapacks	gap: minor: reads the saved datapack settings; no feature-flag check and no new-world default config
 net/minecraft/server/Main#forceUpgrade	missing		minor: --forceUpgrade is accepted and ignored (dedicated.rs preflight); worlds are upgraded on open (save.rs upgrade_older_world)
 MinecraftServer.<init>	inline	crates/horizon-client/src/game/dedicated.rs::Game::run_dedicated	gap: minor: setup is spread over run_dedicated and the Game fields
 MinecraftServer.loadLevel	inline	crates/horizon-client/src/game/dedicated.rs::Game::run_dedicated	gap: minor: the world is opened in run_dedicated; no JFR load profiling
@@ -72,14 +72,14 @@ MinecraftServer.constructOrExtractCrashReport	skip:debug		crash report wrapping
 MinecraftServer.haveTime	inline	crates/horizon-client/src/game/levels.rs::Game::wait_for_next_server_tick	gap: minor: no time budget for queued tasks
 MinecraftServer.waitUntilNextTick	port	crates/horizon-client/src/game/levels.rs::Game::wait_for_next_server_tick	gap: minor: queued tasks are not run before the wait
 MinecraftServer.waitForTasks	inline	crates/horizon-client/src/game/levels.rs::Game::wait_for_next_server_tick	idle sleep until the next tick
-MinecraftServer.shouldRun	missing		minor: no per-task deferral; queued tasks run in one pass
+MinecraftServer.shouldRun	skip:other		Horizon has no haveTime budget to defer against: the only queued-task pass (IntegratedServer::run_tasks) drains the window's requests once per tick with no tick stamp and no clock, so tasks are never starved; a faithful port is a server-loop redesign
 MinecraftServer.pollTaskInternal	inline	crates/horizon-client/src/game/integrated.rs::Game::run_tasks	gap: minor: only the task queue; chunk-source tasks are not polled here
 MinecraftServer.loadStatusIcon	inline	crates/horizon-client/src/game/dedicated.rs::Game::run_dedicated	gap: minor: only server-icon.png; no world icon fallback
 MinecraftServer.processPacketsAndTick	port	crates/horizon-client/src/game/levels.rs::Game::tick_server	reads the network, then ticks the levels
 MinecraftServer.autoSave	inline	crates/horizon-client/src/game.rs::Game::tick	gap: minor: the save runs every 6000 ticks; /save-off is checked in the dedicated loop, where the check does nothing, so it does not stop the save
 MinecraftServer.logTickMethodTime	skip:server		tick timing log for the profiler
-MinecraftServer.computeNextAutosaveInterval	port	crates/horizon-client/src/game.rs::Game::next_autosave_interval	Math.max(100, (int)(rate * 300.0F)) ticks counted down a tick at a time, at the tick rate or the measured rate while /tick sprint runs; twenty a second is still the six thousand a world autosaved on
-MinecraftServer.onTickRateChanged	port	crates/horizon-client/src/game.rs::Game::on_tick_rate_changed	/tick rate recomputes the wait and shortens the one already running when the new rate asks for less
+MinecraftServer.computeNextAutosaveInterval	port	crates/horizon-client/src/game/autosave.rs::Game::next_autosave_interval	Math.max(100, (int)(rate * 300.0F)) ticks counted down a tick at a time, at the tick rate or the measured rate while /tick sprint runs; twenty a second is still the six thousand a world autosaved on
+MinecraftServer.onTickRateChanged	port	crates/horizon-client/src/game/autosave.rs::Game::on_tick_rate_changed	/tick rate recomputes the wait and shortens the one already running when the new rate asks for less
 MinecraftServer.buildPlayerStatus	port	crates/horizon-client/src/lan/mod.rs::Shared::status_json	up to 12 sampled player names in the status JSON
 MinecraftServer.updateEffectiveRespawnData	inline	crates/horizon-client/src/game/initial_spawn.rs::Game::spawn_finder	gap: minor: no cached respawn data; the radius is clamped to the border when the spawn is found
 MinecraftServer.forceGameTimeSynchronization	port	crates/horizon-client/src/lan/hub.rs::Hub::sync_world	game time sent to guests with SetTime
@@ -90,8 +90,8 @@ MinecraftServer.sendDifficultyUpdate	inline	crates/horizon-client/src/lan/hub.rs
 MinecraftServer.enforceGameTypeForPlayers	inline	crates/horizon-client/src/game/lan.rs::enforce_guest_game_mode	applies the default mode to online players when force game mode is enabled
 MinecraftServer.executeIfPossible	skip:java		rejects tasks during shutdown
 MinecraftServer.reloadResources	port	crates/horizon-client/src/game/functions.rs::Game::cmd_reload	gap: minor: data packs only, via reload_datapacks
-MinecraftServer.configurePackRepository	port	crates/horizon-client/src/game/functions.rs::Game::reload_datapacks	gap: minor: the enabled packs are picked and new ones added through datapack::enabled_ids, feature flags and all; no safe mode
-MinecraftServer.configureRepositoryWithSelection	inline	crates/horizon-client/src/game/functions.rs::Game::reload_datapacks	gap: minor: sets the enabled list only; the forced feature packs come from datapack::enabled_ids
+MinecraftServer.configurePackRepository	port	crates/horizon-client/src/game/functions/loading.rs::Game::try_reload_datapacks	gap: minor: the enabled packs are picked and new ones added through datapack::enabled_ids, feature flags and all; no safe mode
+MinecraftServer.configureRepositoryWithSelection	inline	crates/horizon-client/src/game/functions/loading.rs::Game::try_reload_datapacks	gap: minor: sets the enabled list only; the forced feature packs come from datapack::enabled_ids
 MinecraftServer.enableForcedFeaturePacks	inline	crates/horizon-client-render/src/datapack.rs::enabled_ids	the last loop forces on every feature pack whose flags the world enables, whatever the world's selection says; a pack's flags are its pack.mcmeta features.enabled
 MinecraftServer.getSelectedPacks	port	crates/horizon-client/src/game/functions.rs::Game::save_datapack_settings	gap: minor: writes the enabled and disabled lists; no feature check
 MinecraftServer.findRespawnDimension	inline	crates/horizon-client/src/game/server_travel.rs::Game::world_spawn_trip	gap: minor: always the Overworld; /setworldspawn keeps no dimension
@@ -134,7 +134,7 @@ ReloadableServerRegistries.createAndValidateFullContext	skip:data		registry cont
 ReloadableServerRegistries.validateLootRegistries	skip:data		loot table validation at load
 ReloadableServerResources.loadResources	skip:data		server resource loading
 ServerAdvancementManager.validate	skip:data		advancement validation logging at load
-ServerFunctionLibrary.reload	port	crates/horizon-client/src/game/functions.rs::Game::rebuild_store	rebuilds the function store from the data packs
+ServerFunctionLibrary.reload	port	crates/horizon-client/src/game/functions/loading.rs::Game::try_reload_datapacks	loads a candidate store, refreshes explicit-reload content, validates ordinary commands, then commits accepted functions
 ServerFunctionLibrary.readLines	inline	crates/horizon-client-render/src/datapack.rs::parse_function	splits the function text into lines
 ServerFunctionManager.executeTagFunctions	port	crates/horizon-client/src/game/functions.rs::Game::tick_functions	runs the functions of a tag
 ServerFunctionManager.execute	port	crates/horizon-client/src/game/functions.rs::Game::run_function	runs one function as the sender

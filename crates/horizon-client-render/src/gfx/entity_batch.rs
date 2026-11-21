@@ -1,5 +1,8 @@
 //! Stable entity material grouping with renderer-owned, reusable CPU scratch.
 use super::Vertex;
+use super::native_entity::EntityRuns;
+use super::surface_setup::ray_query::ray_scene::GEOMETRIES;
+use horizon_shader_api::stages::RAY_ENTITY_QUAD;
 
 /// Entity materials by a quad's overlay (`Vertex::layer`), in draw order:
 /// ordinary entities, world text drawn with a depth bias (35,
@@ -14,8 +17,28 @@ use super::Vertex;
 /// material at the end: the render types vanilla gives an `OitPipelineSet`
 /// (translucent, emissive, eyes and breeze wind entity models). Off, the tag is
 /// ignored and they stay in the first one, in their order.
-/// Two native world-canvas text materials follow it, NORMAL then POLYGON_OFFSET.
-const MATERIALS: usize = 12;
+/// Sorted still-fluid geometry follows, then the two native world-canvas text materials,
+/// NORMAL and POLYGON_OFFSET. Material storage order is independent of their draw stages.
+const MATERIALS: usize = 16;
+pub const TERRAIN_MODEL_SOLID_OVERLAY: u32 = 42;
+pub const TERRAIN_MODEL_CUTOUT_OVERLAY: u32 = 43;
+pub const TERRAIN_MODEL_CUTOUT_MIPPED_OVERLAY: u32 = 44;
+/// The overlay of a resource pack's Polytone custom particle drawn additively
+/// (`additive_translucent`): fog tints its colour as vanilla's particle shader does, which the
+/// other additive geometry does not take.
+pub const ADDITIVE_PARTICLE_OVERLAY: u32 = 45;
+/// Native terrain-array UV/payloads must never enter a shared-atlas shader-pack pass.
+pub fn is_native_terrain(layer: u32) -> bool {
+    matches!(
+        layer & 0xffff,
+        FLUID_OVERLAY
+            | TERRAIN_MODEL_SOLID_OVERLAY
+            | TERRAIN_MODEL_CUTOUT_OVERLAY
+            | TERRAIN_MODEL_CUTOUT_MIPPED_OVERLAY
+    )
+}
+/// Sorted depth-writing still fluid, sampling terrain sprite arrays rather than the shared atlas.
+pub const FLUID_OVERLAY: u32 = 41;
 /// A bit of `Vertex::layer`, above the overlay (low 16 bits) and the HDR tier
 /// (bits 16 to 23): the quad's render type has an `OitPipelineSet`
 /// (`RenderTypes.entityTranslucent`, `entityTranslucentEmissive`, `eyes`,
@@ -31,7 +54,9 @@ pub const DISSOLVE_OVERLAY: u32 = 38;
 /// (`OIT_ENTITY`): improved transparency draws them in its stages.
 pub fn mark_oit(quads: &mut [Vertex]) {
     for vertex in quads {
-        vertex.layer |= OIT_ENTITY;
+        if !is_native_terrain(vertex.layer) {
+            vertex.layer |= OIT_ENTITY;
+        }
     }
 }
 /// The overlay of depth-only quads that hide water (`RenderTypes.waterMask`).
@@ -59,13 +84,22 @@ pub const WORLD_TEXT_POLYGON_OFFSET_OVERLAY: u32 = 40;
 
 /// The material of a quad by its overlay (`MATERIALS` order): the overlay is the layer's low 16
 /// bits, as entity.wgsl reads it; HDR output's tier rides in the high ones.
-fn material(layer: u32, oit: bool) -> usize {
+pub(in crate::gfx) fn material(layer: u32, oit: bool) -> usize {
+    match layer & 0xffff {
+        TERRAIN_MODEL_SOLID_OVERLAY => return 13,
+        TERRAIN_MODEL_CUTOUT_OVERLAY => return 14,
+        TERRAIN_MODEL_CUTOUT_MIPPED_OVERLAY => return 15,
+        _ => {}
+    }
+    if layer & 0xffff == FLUID_OVERLAY {
+        return 10;
+    }
     if oit && layer & OIT_ENTITY != 0 {
         return 9;
     }
     match layer & 0xffff {
-        WORLD_TEXT_OVERLAY => 10,
-        WORLD_TEXT_POLYGON_OFFSET_OVERLAY => 11,
+        WORLD_TEXT_OVERLAY => 11,
+        WORLD_TEXT_POLYGON_OFFSET_OVERLAY => 12,
         TEXT_POLYGON_OFFSET_OVERLAY => 1,
         11 => 2,
         12 => 3,
@@ -89,12 +123,49 @@ pub(super) struct EntityBatch {
     /// last material (improved transparency on): the dragon's eyes, which share
     /// the additive buffer with its rays.
     pub(super) moved_additive: u32,
+    /// For a native pack's `[entity]` stage (`native_entity.rs`) and the ray scene's entity
+    /// layer: the runs of the next `update`'s entities that they take.
+    pub(super) kinds: EntityRuns,
+    /// The ordinary quads, the improved transparency ones and the ray-only ones in `combined`,
+    /// as (first quad, quads): the entity layer's geometries (gfx/ray_scene.rs).
+    pub(super) ray_ranges: [(u32, u32); GEOMETRIES],
+    /// The entities the camera doesn't draw within the ray scene's reach, which the game moved
+    /// out of the stream (`Renderer::take_ray_only`), and their runs: what `ray_only_quads`
+    /// takes of them.
+    pub(super) ray_only: Vec<Vertex>,
+    pub(super) ray_kinds: EntityRuns,
+    /// The last `update`'s `oit`.
+    oit: bool,
 }
 
 impl EntityBatch {
-    /// After `update`: quads only a native pack's shadow pass draws, at the buffer's end.
+    /// After `update`: the ray-only quads, then the quads only a native pack's shadow pass draws,
+    /// at the buffer's end (it draws them from there).
     pub(super) fn append_shadow_only(&mut self, shadow_only: &[Vertex]) {
+        self.append_ray_only();
         self.combined.extend_from_slice(shadow_only);
+    }
+
+    /// Appends the quads of `ray_only` the entity layer takes, marked as `tag_kinds` marks the
+    /// stream's: those in a run, of the ordinary material or improved transparency's. No pass
+    /// draws them: they lie past every material, the hand and the see-through quads, and before
+    /// the shadow-only ones, which the native shadow pass counts back to from the end.
+    fn append_ray_only(&mut self) {
+        let first = self.combined.len() / 4;
+        let quads = self.ray_only.as_chunks::<4>().0;
+        let bits = self.ray_kinds.bits((0..quads.len() as u32).map(|q| q * 4));
+        for (quad, bits) in quads.iter().zip(bits) {
+            if bits != 0 && matches!(material(quad[0].layer, self.oit), 0 | 9) {
+                let layer = |v: &Vertex| v.layer | bits | RAY_ENTITY_QUAD;
+                self.combined.extend(quad.iter().map(|v| Vertex {
+                    layer: layer(v),
+                    ..*v
+                }));
+            }
+        }
+        self.ray_ranges[2] = (first as u32, (self.combined.len() / 4 - first) as u32);
+        self.ray_only.clear();
+        self.ray_kinds.clear();
     }
 
     pub(super) fn update(
@@ -148,10 +219,10 @@ impl EntityBatch {
                 }
             }
         }
-        // RenderType.text sorts alpha-blended quads from far to near. Keep
-        // both world-canvas layers after existing materials (including eyes
-        // moved out of additive); front text uses polygon offset.
-        for runs in &self.runs[10..] {
+        // Fluid and RenderTypes.text sort their own alpha-blended quads far to
+        // near. Fluid precedes both world-canvas layers, after existing materials
+        // (including eyes moved out of additive).
+        for runs in &self.runs[10..13] {
             let start = self.combined.len();
             for &(first, count) in runs {
                 self.combined
@@ -169,6 +240,13 @@ impl EntityBatch {
                     distance(b).total_cmp(&distance(a))
                 });
         }
+        // Native solid/cutout models are depth writing and keep their submission order.
+        for runs in &self.runs[13..] {
+            for &(first, count) in runs {
+                self.combined
+                    .extend_from_slice(&entities[first * 4..(first + count) * 4]);
+            }
+        }
         if self.moved_additive == 0 {
             self.combined.extend_from_slice(additive);
         } else {
@@ -180,7 +258,40 @@ impl EntityBatch {
         }
         self.combined.extend_from_slice(hand);
         self.combined.extend_from_slice(see_through);
+        let oit_first: usize = counts[..9].iter().sum();
+        let end = self.combined.len() / 4;
+        self.ray_ranges = [(0, counts[0]), (oit_first, counts[9]), (end, 0)]
+            .map(|(first, quads)| (first as u32, quads as u32));
+        self.oit = oit;
+        self.tag_kinds(oit_first);
         counts.map(|count| count as u32)
+    }
+
+    /// Writes into each ordinary or improved transparency quad's layer the kind of the run of
+    /// `kinds` it is in, and that it is in the ray scene's entity layer (`RAY_ENTITY_QUAD`), and
+    /// forgets the runs: they are one frame's. The other materials' quads take none, in a run
+    /// or not: each has a pipeline of its own, the same with the stage as without (so a
+    /// translucent item an entity holds is Horizon's until items draw through the stage).
+    /// `oit_first` is the first improved transparency quad in `combined`.
+    fn tag_kinds(&mut self, oit_first: usize) {
+        if self.kinds.is_empty() {
+            return;
+        }
+        let combined = self.combined.as_chunks_mut::<4>().0;
+        // Each material's quads are together in `combined`, in the order the game drew them.
+        for (material, first) in [(0, 0), (9, oit_first)] {
+            let quads = self.runs[material]
+                .iter()
+                .flat_map(|&(first, count)| first..first + count);
+            let bits = self.kinds.bits(quads.map(|quad| quad as u32 * 4));
+            for (quad, bits) in combined[first..].iter_mut().zip(bits) {
+                let bits = if bits == 0 { 0 } else { bits | RAY_ENTITY_QUAD };
+                for vertex in quad {
+                    vertex.layer |= bits;
+                }
+            }
+        }
+        self.kinds.clear();
     }
 }
 
@@ -189,7 +300,57 @@ mod tests {
     use super::*;
     use std::{hint::black_box, time::Instant};
     #[test]
-    fn world_canvas_sorts_after_oit_eyes_before_frame_tails() {
+    fn native_models_keep_opaque_order_and_do_not_move_existing_materials_or_tails() {
+        let quad = |layer, x| {
+            [Vertex {
+                layer,
+                pos: [x, 0.0, 0.0],
+                ..geometry(1, false)[0]
+            }; 4]
+        };
+        let entities: Vec<_> = [
+            (FLUID_OVERLAY, 10.0),
+            (WORLD_TEXT_OVERLAY, 11.0),
+            (TERRAIN_MODEL_SOLID_OVERLAY | 279 << 16, 3.0),
+            (TERRAIN_MODEL_SOLID_OVERLAY, 1.0),
+            (TERRAIN_MODEL_CUTOUT_OVERLAY, 4.0),
+            (TERRAIN_MODEL_CUTOUT_MIPPED_OVERLAY, 5.0),
+            (OIT_ENTITY, 6.0),
+            (0, 7.0),
+        ]
+        .into_iter()
+        .flat_map(|(layer, x)| quad(layer, x))
+        .collect();
+        let mut batch = EntityBatch::default();
+        let counts = batch.update(
+            &entities,
+            &quad(0, 8.0),
+            &quad(0, 9.0),
+            &quad(0, 12.0),
+            true,
+        );
+        assert_eq!(counts, [1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 2, 1, 1]);
+        let xs: Vec<_> = batch.combined.iter().step_by(4).map(|v| v.pos[0]).collect();
+        assert_eq!(
+            xs,
+            [7.0, 6.0, 10.0, 11.0, 3.0, 1.0, 4.0, 5.0, 8.0, 9.0, 12.0]
+        );
+        assert_eq!(
+            batch.combined[16].layer,
+            TERRAIN_MODEL_SOLID_OVERLAY | 279 << 16
+        );
+    }
+    #[test]
+    fn tagging_oit_does_not_corrupt_a_native_models_sprite_index() {
+        let mut vertices = [geometry(1, false)[0]; 2];
+        vertices[0].layer = TERRAIN_MODEL_CUTOUT_OVERLAY | 17 << 16;
+        vertices[1].layer = 3;
+        mark_oit(&mut vertices);
+        assert_eq!(vertices[0].layer, TERRAIN_MODEL_CUTOUT_OVERLAY | 17 << 16);
+        assert_eq!(vertices[1].layer, 3 | OIT_ENTITY);
+    }
+    #[test]
+    fn fluid_and_world_canvas_sort_after_oit_eyes_before_frame_tails() {
         let quad = |layer, x| {
             [Vertex {
                 layer,
@@ -204,6 +365,8 @@ mod tests {
             (WORLD_TEXT_OVERLAY, 4.0),
             (WORLD_TEXT_OVERLAY, 5.0),
             (WORLD_TEXT_POLYGON_OFFSET_OVERLAY, 6.0),
+            (FLUID_OVERLAY, 11.0),
+            (FLUID_OVERLAY | OIT_ENTITY, 12.0),
         ]
         .into_iter()
         .flat_map(|(layer, x)| quad(layer, x))
@@ -215,12 +378,14 @@ mod tests {
         let mut batch = EntityBatch::default();
         assert_eq!(
             batch.update(&entities, &additive, &quad(0, 9.0), &quad(0, 10.0), true),
-            [1, 1, 0, 0, 0, 0, 0, 0, 0, 2, 2, 1]
+            [1, 1, 0, 0, 0, 0, 0, 0, 0, 2, 2, 2, 1, 0, 0, 0]
         );
         let positions: Vec<_> = batch.combined.iter().step_by(4).map(|v| v.pos[0]).collect();
         assert_eq!(
             positions,
-            [1.0, 2.0, 3.0, 7.0, 5.0, 4.0, 6.0, 8.0, 9.0, 10.0]
+            [
+                1.0, 2.0, 3.0, 7.0, 12.0, 11.0, 5.0, 4.0, 6.0, 8.0, 9.0, 10.0
+            ]
         );
     }
 
@@ -320,12 +485,12 @@ mod tests {
         let mut batch = EntityBatch::default();
         // Off: the tag changes nothing, the quads keep their place.
         let counts = batch.update(&entities, &[], &[], &[], false);
-        assert_eq!(counts, [4, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0]);
+        assert_eq!(counts, [4, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
         let xs: Vec<f32> = batch.combined.iter().step_by(4).map(|v| v.pos[0]).collect();
         assert_eq!(xs, [0.0, 1.0, 2.0, 4.0, 3.0]);
         // On: the tagged quads come last, in order.
         let counts = batch.update(&entities, &[], &[], &[], true);
-        assert_eq!(counts, [2, 0, 0, 0, 0, 0, 1, 0, 0, 2, 0, 0]);
+        assert_eq!(counts, [2, 0, 0, 0, 0, 0, 1, 0, 0, 2, 0, 0, 0, 0, 0, 0]);
         let xs: Vec<f32> = batch.combined.iter().step_by(4).map(|v| v.pos[0]).collect();
         assert_eq!(xs, [0.0, 2.0, 3.0, 1.0, 4.0]);
     }

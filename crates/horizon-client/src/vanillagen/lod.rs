@@ -45,6 +45,30 @@ struct Requests {
     current: FxHashSet<(i32, i32)>,
     finished: FxHashSet<(i32, i32)>,
 }
+impl Requests {
+    /// What the far terrain wants built now (`Builder::request`): the chunks
+    /// it draws without their detail, nearest `center` first, as
+    /// `Lod::request_detail` asks for them, without those being built or
+    /// built already. They replace the ones asked for before: what an earlier
+    /// request had and this one leaves out is behind the player, out of view,
+    /// or under the near chunks. Kept, it was built first, being the nearest,
+    /// while the columns ahead waited: flying at 40 blocks a second, two thirds
+    /// of the far columns built had been left behind by the time they were.
+    fn ask(&mut self, chunks: &[(i32, i32)], center: [i32; 2]) {
+        self.center = center;
+        self.chunks.clear();
+        for &key in chunks {
+            if !self.current.contains(&batch_origin(key)) && !self.finished.contains(&key) {
+                self.chunks.insert(key);
+            }
+        }
+        if self.chunks.len() > REQUESTS {
+            let mut sorted: Vec<_> = self.chunks.iter().copied().collect();
+            sorted.sort_unstable_by_key(|&key| (distance(key, center), key));
+            self.chunks = sorted.into_iter().take(REQUESTS).collect();
+        }
+    }
+}
 struct Shared {
     requests: Mutex<Requests>,
     wake: Condvar,
@@ -61,7 +85,7 @@ struct Builder {
     threads: Vec<thread::JoinHandle<()>>,
 }
 impl Builder {
-    fn new(terrain: Arc<VanillaTerrain>) -> Self {
+    fn new(terrain: Arc<VanillaTerrain>, background: bool) -> Self {
         let shared = Arc::new(Shared {
             requests: Mutex::new(Requests::default()),
             wake: Condvar::new(),
@@ -74,7 +98,7 @@ impl Builder {
         // time while the far trees and structures came in).
         let count = horizon_threads::worker_count().div_ceil(3).clamp(1, 12);
         let threads = (0..count)
-            .map(|_| Self::spawn(terrain.clone(), shared.clone(), tx.clone()))
+            .map(|_| Self::spawn(terrain.clone(), shared.clone(), tx.clone(), background))
             .collect();
         Self {
             shared,
@@ -86,11 +110,14 @@ impl Builder {
         terrain: Arc<VanillaTerrain>,
         worker: Arc<Shared>,
         tx: mpsc::Sender<LodDetail>,
+        background: bool,
     ) -> thread::JoinHandle<()> {
         thread::Builder::new()
             .name("Far decoration".into())
             .spawn(move || {
-                horizon_threads::idle_current();
+                if background {
+                    horizon_threads::idle_current();
+                }
                 // A superflat world's far ring is its flat ground (`FlatTerrain::lod_surface`);
                 // a normal overworld rebuilt here would draw hills, oceans and trees.
                 if terrain.is_flat() {
@@ -162,18 +189,7 @@ impl Builder {
         if self.shared.stop.load(Ordering::Relaxed) {
             return;
         }
-        let mut requests = self.shared.requests.lock().unwrap();
-        requests.center = center;
-        for &key in chunks {
-            if !requests.current.contains(&batch_origin(key)) && !requests.finished.contains(&key) {
-                requests.chunks.insert(key);
-            }
-        }
-        if requests.chunks.len() > REQUESTS {
-            let mut sorted: Vec<_> = requests.chunks.iter().copied().collect();
-            sorted.sort_unstable_by_key(|&key| (distance(key, center), key));
-            requests.chunks = sorted.into_iter().take(REQUESTS).collect();
-        }
+        self.shared.requests.lock().unwrap().ask(chunks, center);
         self.shared.wake.notify_all();
     }
 }
@@ -509,7 +525,7 @@ pub(super) struct VanillaLodSampler {
 impl VanillaLodSampler {
     pub(super) fn new(generator: Arc<VanillaTerrain>) -> Self {
         let worker = generator.generator.worker();
-        let builder = Some(Builder::new(generator.clone()));
+        let builder = Some(Builder::new(generator.clone(), true));
         let vegetation = Arc::new(Vegetation::new(
             generator.generator.data(),
             &generator.biome_map,
@@ -815,6 +831,22 @@ mod tests {
     }
 
     use super::*;
+    /// The far decoration threads build what the latest request asks for:
+    /// the columns an earlier one asked for, left behind since, are not built.
+    #[test]
+    fn far_detail_follows_the_latest_request() {
+        let mut requests = Requests::default();
+        requests.ask(&[(0, 0), (1, 0), (40, 0)], [0, 0]);
+        // Flown on east: the columns at the start are behind, out of the request.
+        requests.current.insert(batch_origin((48, 0)));
+        requests.finished.insert((41, 0));
+        requests.ask(&[(40, 0), (41, 0), (48, 1), (60, 3)], [640, 0]);
+        let mut pending: Vec<_> = requests.chunks.iter().copied().collect();
+        pending.sort_unstable();
+        // Neither what is being built nor what is done is asked for again.
+        assert_eq!(pending, [(40, 0), (60, 3)]);
+        assert_eq!(requests.center, [640, 0]);
+    }
     #[test]
     #[ignore = "requires prepared worldgen data in HORIZON_TEST_RESOURCES"]
     fn decorated_lod_refines_real_seed_canopies_and_all_dimensions() -> crate::Result<()> {
@@ -830,6 +862,9 @@ mod tests {
             1234,
         )?);
         let mut sampler = VanillaLodSampler::new(terrain.clone());
+        // This bounded test waits for decoration. Idle workers can be starved
+        // by other tests, so keep the real request/result path at normal priority.
+        sampler.builder = Some(Builder::new(terrain.clone(), false));
         let mut fork = sampler.fork().expect("independent far sampler");
         let direct = sampler.grid(-1024, 0, 32, 16);
         assert_eq!(

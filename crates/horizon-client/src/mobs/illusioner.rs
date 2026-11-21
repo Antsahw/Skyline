@@ -27,6 +27,7 @@ pub struct Illusions {
 pub const MIRROR: u8 = 4;
 pub const BLINDNESS_SPELL: u8 = 5;
 
+/// `Illusioner.registerGoals`.
 pub fn register(m: &mut Mob) {
     let g = &mut m.ai.goals;
     g.add(0, Float);
@@ -52,13 +53,17 @@ pub fn register(m: &mut Mob) {
         Species::Ravager,
     ];
     m.ai.targets.add(1, hurt);
-    m.ai.targets.add(2, NearestTarget::player(true));
+    m.ai.targets
+        .add(2, NearestTarget::player(true).unseen_memory(300));
     m.ai.targets.add(
         3,
-        NearestTarget::species(&[Species::Villager, Species::WanderingTrader], false),
+        NearestTarget::species(&[Species::Villager, Species::WanderingTrader], false)
+            .unseen_memory(300),
     );
-    m.ai.targets
-        .add(3, NearestTarget::species(&[Species::IronGolem], false));
+    m.ai.targets.add(
+        3,
+        NearestTarget::species(&[Species::IronGolem], false).unseen_memory(300),
+    );
 }
 
 /// `Illusioner.finalizeSpawn`: a bow in the main hand.
@@ -163,6 +168,7 @@ impl Goal for Spell {
 /// in for the effect the server holds, which draws the mirror images.
 pub fn set_invisible(m: &mut Mob, on: bool) {
     m.extra.effects.retain(|e| e.0 != INVISIBILITY);
+    m.extra.effect_fallbacks.retain(|h| h.id != INVISIBILITY);
     if on {
         m.extra.effects.push((INVISIBILITY, i32::MAX, 0));
     }
@@ -301,7 +307,7 @@ mod tests {
                 0.0,
             );
             m.extra.counter = 20;
-            let (mut lr, mut events) = (horizon_core::random::LegacyRandom::new(0), Vec::new());
+            let (mut lr, mut events) = (crate::mobs::world::level_random(0), Vec::new());
             for _ in 0..5 {
                 crate::mobs::ai::tick(&mut m, w, &mut lr, &mut events);
             }
@@ -333,7 +339,7 @@ mod tests {
                 m.ai.target = Some(target);
                 let mut spell = Spell::new(BLINDNESS_SPELL);
                 spell.warmup = 1;
-                let (mut lr, mut events) = (horizon_core::random::LegacyRandom::new(0), Vec::new());
+                let (mut lr, mut events) = (crate::mobs::world::level_random(0), Vec::new());
                 spell.tick(
                     &mut m,
                     &mut Cx {

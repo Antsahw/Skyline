@@ -1,11 +1,13 @@
 //! Where blocks' textures are in the block sprite arrays, for a client mod drawing blocks with the player's own
 //! textures (resource packs included) in its own pass: with `WorldDrawn::block_sprites`, the arrays themselves.
+//! Also every block state's facts and looks, and the resources' files, for a mod working on them off the main thread.
 use super::Game;
 use horizon_client::block_sprites::{BlockSprites, Lookup, SpriteRef};
+use horizon_client::block_states::BlockStates;
+use horizon_client::client_resources::ClientResources;
 use horizon_core::geometry::Direction;
 use horizon_world::registry::BlockStateId;
 
-#[allow(dead_code)]
 impl Game<'_> {
     /// For a client mod: what each block (`minecraft:grass_block`, `oak_log[axis=x]`; properties left out take the
     /// block's default) draws on each of its six sides, as the mesher bakes its model: each face's sprite (array and
@@ -31,7 +33,7 @@ impl Game<'_> {
     /// `native_draw_quad` take, and that face's
     /// tint index (-1 for none): a copycat block drawing a box of its material's textures with `native_draw_cube`,
     /// kept with `BlockEntityDraw::keep`. The face culled against that side comes first, else the first facing it;
-    /// None when the model has no face that way or isn't baked. API @API:block_face_sprite@.
+    /// None when the model has no face that way or isn't baked. API 420.
     pub(super) fn native_block_face_sprite(
         &self,
         state: BlockStateId,
@@ -56,12 +58,30 @@ impl Game<'_> {
     pub(super) fn native_block_sprites_version(&self) -> u64 {
         self.pack.context.render.generation
     }
+    /// For a client mod: every block state by its id, with its facts, what its model draws on each side and the
+    /// texture behind each sprite, as the resources loaded now; a copy to keep and use on any thread. Ask again when
+    /// `native_block_sprites_version` changes. API 457.
+    pub(super) fn native_block_states(&self) -> BlockStates {
+        BlockStates::new(
+            self.res.facts(),
+            self.res.collision(),
+            self.pack.context.clone(),
+            self.native_sprite_split(),
+        )
+    }
+    /// For a client mod: the files of the resources loaded now, resource packs' over vanilla's, to read textures
+    /// and other resources on any thread. Ask again when `native_block_sprites_version` changes. API
+    /// 457.
+    pub(super) fn native_client_resources(&self) -> ClientResources {
+        ClientResources::new(self.options.resources.clone())
+    }
     fn native_sprite_lookup(&self) -> Lookup<'_> {
+        Lookup::new(&self.pack.context, self.native_sprite_split())
+    }
+    fn native_sprite_split(&self) -> u32 {
         // (no renderer, no arrays: every layer counts as array 0's)
-        let split = self
-            .renderer
+        self.renderer
             .as_ref()
-            .map_or(u32::MAX, |r| r.sprite_split());
-        Lookup::new(&self.pack.context, split)
+            .map_or(u32::MAX, |r| r.sprite_split())
     }
 }

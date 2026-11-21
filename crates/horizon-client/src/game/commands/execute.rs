@@ -1,13 +1,14 @@
 //! `/execute` (ExecuteCommand): walk the parsed redirect chain, forking and
 //! filtering command sources, then run the final command once per source,
 //! reporting each result to the `store` callbacks of its source.
-use super::{Arg, Context, Dim, Game, R, Target, data::DataRef, err};
+use super::{Arg, Context, Dim, Game, R, Target, data::DataRef, err, wrap_degrees};
 use horizon_client::{
     command::{CommandError, vanilla},
     nbt_path::NbtPath,
     text::Text,
 };
-use horizon_world::nbt::Tag;
+use horizon_core::geometry::trig;
+use horizon_world::{dimension_type::DimensionFacts, nbt::Tag};
 
 /// `CommandSourceStack` fields Horizon models: the executing entity (None for
 /// the server), position, rotation, anchor, whether feedback is suppressed
@@ -64,6 +65,7 @@ pub(in crate::game) struct ExecState {
     pub returned: Option<Option<i32>>,
     /// Depth of function calls.
     pub function_depth: u32,
+    pub prepared_function: Option<super::super::functions::PreparedFunctionCall>,
 }
 
 /// A modifier that brings the sources to `max_command_forks` ends the chain
@@ -226,6 +228,16 @@ impl Game<'_> {
         self.command_source = previous;
         out
     }
+    /// `CommandSourceStack.getLevel`: the source's own level (`execute in`,
+    /// which `with_source` puts in place), the console's Overworld, or the
+    /// acting body's level.
+    pub(super) fn source_level(&self) -> Dim {
+        match self.command_source.and_then(|s| s.level) {
+            Some(level) => level,
+            None if self.source_entity().is_none() => Dim::Overworld,
+            None => self.dim,
+        }
+    }
 
     // ---- running commands -----------------------------------------------
 
@@ -265,6 +277,9 @@ impl Game<'_> {
         let outcome = match (&result, custom) {
             (_, Some(c)) => c,
             (Ok(v), None) => Some((true, *v)),
+            // `ContextChain.runExecutable` reports a `CommandSyntaxException`
+            // to the result consumer; any other exception skips it.
+            (Err(e), None) if e.unexpected => None,
             (Err(_), None) => Some((false, 0)),
         };
         if let Some((success, value)) = outcome {
@@ -332,6 +347,9 @@ impl Game<'_> {
         // on, a non-terminal if/unless) makes later errors silent
         // (CommandSourceStack.handleError with `forked`).
         let mut forked = false;
+        // Nested execute/conditional/other modifier variants retain the old path.
+        let mut function_batch_path = ctx.range.0 <= 1 && self.exec.function_depth == 0;
+        let mut function_as_seen = false;
         loop {
             let word = c
                 .literals
@@ -348,13 +366,41 @@ impl Game<'_> {
                     if last.command.is_none() {
                         return Err(err("command.unknown.command", &[]));
                     }
+                    let mut prepared = if function_batch_path
+                        && function_as_seen
+                        && command.literals.first().map(String::as_str) == Some("function")
+                    {
+                        self.prepare_function_batch(last, &sources)
+                            .map(Vec::into_iter)
+                    } else {
+                        None
+                    };
                     let mut total = 0;
                     let many = sources.len() > 1;
                     let mut failure = None;
                     for s in sources {
-                        match self.with_source(s, |g| g.run_chain(command, last)) {
+                        let result = if let Some(tasks) = prepared.as_mut() {
+                            self.exec.prepared_function = tasks.next();
+                            let result = self.with_source(s, |g| g.run_chain(command, last));
+                            // Includes a command-cost rejection before the leaf and
+                            // a return/error after the slot was consumed.
+                            self.exec.prepared_function = None;
+                            result
+                        } else {
+                            self.with_source(s, |g| g.run_chain(command, last))
+                        };
+                        match result {
                             Ok(n) => total += n,
-                            Err(_) if forked => {}
+                            // `handleError` with `forked` silences a command
+                            // syntax error.
+                            Err(e) if forked && !e.unexpected => {}
+                            // Not a `CommandSyntaxException`: it escapes to
+                            // `Commands.performCommand`'s catch, once, and the
+                            // chain stops there.
+                            Err(e) if e.unexpected => {
+                                failure = Some(e);
+                                break;
+                            }
                             // Several sources: report each failure and carry on.
                             Err(e) if many => self.command_failure(e.message),
                             Err(e) => failure = Some(e),
@@ -369,14 +415,23 @@ impl Game<'_> {
                     };
                 }
                 "if" | "unless" => {
+                    function_batch_path = false;
                     let want = word == "if";
                     if c.child.is_none() {
-                        return self.run_conditional_terminal(c, sources, want);
+                        return self.run_conditional_terminal(c, sources, want, forked);
                     }
                     forked = true;
                     let mut kept = Vec::new();
                     for s in sources {
-                        let (keep, _) = self.with_source(s, |g| g.condition(c, want))?;
+                        // `BuildContexts`: an error in a fork modifier is
+                        // silent and drops its source (`handleError` with
+                        // `forked`); one that is not a `CommandSyntaxException`
+                        // still reaches `Commands.performCommand`.
+                        let (keep, _) = match self.with_source(s, |g| g.condition(c, want)) {
+                            Ok(v) => v,
+                            Err(e) if !e.unexpected => continue,
+                            Err(e) => return Err(e),
+                        };
                         if kept.len() + usize::from(keep) >= fork_limit {
                             return fork_limit_reached(forked, fork_limit);
                         }
@@ -387,6 +442,12 @@ impl Game<'_> {
                     sources = kept;
                 }
                 _ => {
+                    if word == "as" {
+                        function_batch_path &= !function_as_seen;
+                        function_as_seen = true;
+                    } else if word != "store" {
+                        function_batch_path = false;
+                    }
                     forked |= match word {
                         "as" | "at" | "on" => true,
                         "positioned" | "rotated" => c.has("as"),
@@ -411,11 +472,14 @@ impl Game<'_> {
         }
     }
     /// A conditional that ends the chain runs as a command: a test per source.
+    /// `CommandSourceStack.handleError`: error delivery depends on the fork flag,
+    /// including a fork that yielded only one source; success feedback is unchanged.
     fn run_conditional_terminal(
         &mut self,
         c: &Context,
         sources: Vec<Source>,
         want: bool,
+        forked: bool,
     ) -> R<i32> {
         let numeric = ["entity", "data", "blocks", "items", "slots"]
             .iter()
@@ -429,10 +493,12 @@ impl Game<'_> {
                 Ok(v) => v,
                 Err(e) => {
                     self.deliver(s.store, false, 0);
-                    if many {
-                        self.command_failure(e.message);
-                    } else {
-                        failure = Some(e);
+                    if !forked {
+                        if many {
+                            self.command_failure(e.message);
+                        } else {
+                            failure = Some(e);
+                        }
                     }
                     continue;
                 }
@@ -457,10 +523,12 @@ impl Game<'_> {
                 } else {
                     err("commands.execute.conditional.fail", &[])
                 };
-                if many {
-                    self.command_failure(e.message);
-                } else {
-                    failure = Some(e);
+                if !forked {
+                    if many {
+                        self.command_failure(e.message);
+                    } else {
+                        failure = Some(e);
+                    }
                 }
             }
         }
@@ -619,11 +687,13 @@ impl Game<'_> {
                 let Some(Arg::Resource(dim)) = c.get("dimension") else {
                     return Ok(vec![s]);
                 };
-                // The server's levels: vanilla's and the extra ones (mods' dimensions).
                 let Some(dimension) = Dim::known(dim) else {
                     return Err(err("argument.dimension.invalid", &[dim]));
                 };
-                let scale = s.dimension.coordinate_scale() / dimension.coordinate_scale();
+                let scale = DimensionFacts::teleportation_scale(
+                    self.dimension_type_of(s.dimension),
+                    self.dimension_type_of(dimension),
+                );
                 vec![Source {
                     pos: [s.pos[0] * scale, s.pos[1], s.pos[2] * scale],
                     dimension,
@@ -635,10 +705,7 @@ impl Game<'_> {
                 let Some(Arg::Resource(kind)) = c.get("entity").cloned() else {
                     return Ok(vec![s]);
                 };
-                let target = self.summon_with_nbt(&kind, s.pos, "{}")?;
-                let Some(t) = target else {
-                    return Err(err("commands.summon.failed", &[]));
-                };
+                let t = self.summon_for_execute(&kind, s.pos)?;
                 vec![Source {
                     entity: Some(t),
                     ..s
@@ -768,8 +835,19 @@ impl Game<'_> {
                     .collect(),
                 _ => Vec::new(),
             },
-            Some("vehicle") => self.ride_vehicle(entity).into_iter().collect(),
-            Some("controller") | Some("passengers") => match entity {
+            Some("vehicle") => self.passenger_vehicle_target(entity).into_iter().collect(),
+            Some("passengers") => {
+                let mut passengers = self.player_passengers(entity);
+                if let Some(id) = super::super::native_entities::target_id(entity) {
+                    passengers.extend(
+                        self.ordered_live_passengers(id)
+                            .into_iter()
+                            .filter_map(|id| self.level_entity(id as i32)),
+                    );
+                }
+                passengers
+            }
+            Some("controller") => match entity {
                 Target::Mob(id) if self.mobs.iter().any(|m| m.id == id && m.rider.is_some()) => {
                     vec![Target::Player]
                 }
@@ -820,6 +898,34 @@ impl Game<'_> {
             })
             .collect()
     }
+    /// The players among `Entity.getPassengers` of `vehicle`: the player in
+    /// place when it rides it, then the other players of the server riding it.
+    /// A server's players are its guests, so a datapack running with no player
+    /// in place still finds them.
+    fn player_passengers(&self, vehicle: Target) -> Vec<Target> {
+        let id = match vehicle {
+            Target::Mob(id) | Target::Boat(id) | Target::Cart(id) => id,
+            _ => return Vec::new(),
+        };
+        let in_place = self.player.is_some() && self.riding == Some(id);
+        let guests = self.lan.iter().flat_map(|host| {
+            host.hub
+                .guests
+                .iter()
+                .filter(move |g| {
+                    g.placed
+                        && Some(g.conn) != self.lan_acting
+                        && host.hub.here(g)
+                        && g.vehicle == Some(id)
+                })
+                .map(|g| Target::Guest(g.conn))
+        });
+        in_place
+            .then_some(Target::Player)
+            .into_iter()
+            .chain(guests)
+            .collect()
+    }
     /// `ServerLevel.getEntity(UUID)`: any entity of the level in place, not
     /// only mobs (displays, armor stands, items...). The map is keyed by id,
     /// so a killed entity and a later summon of the same UUID can both be
@@ -838,12 +944,15 @@ impl Game<'_> {
     /// The highest block of a heightmap type at a column (`Level.getHeight`).
     fn heightmap_at(&self, kind: &str, x: i32, z: i32) -> i32 {
         let top = self.world.top_y();
+        let facts = self.res.facts();
         for y in (self.world.bottom_y()..top).rev() {
             let state = self.world.block(x, y, z);
-            if state == self.world.air {
+            // `Heightmap.NOT_AIR` is `!state.isAir()`, so cave air and void
+            // air are skipped as well as air.
+            if facts.is_air(state) {
                 continue;
             }
-            let facts = self.res.facts().get(state);
+            let facts = facts.get(state);
             let blocks = facts.legacy_solid || facts.fluid != horizon_client::blocks::Fluid::None;
             let leaves = self
                 .pack
@@ -923,10 +1032,13 @@ impl Game<'_> {
         let from = self.anchor_position(&s);
         let (dx, dy, dz) = (to[0] - from[0], to[1] - from[1], to[2] - from[2]);
         let horizontal = (dx * dx + dz * dz).sqrt();
-        let pitch = (-(dy.atan2(horizontal).to_degrees())) as f32;
-        let yaw = (dz.atan2(dx).to_degrees() - 90.0) as f32;
+        // `CommandSourceStack.facing`: `Mth.atan2` times the folded
+        // `Mth.RAD_TO_DEG`, cast to float, then `Mth.wrapDegrees`. The yaw
+        // stays in -180..180, so a south-east target is -135 and not 225.
+        let pitch = wrap_degrees(-trig::atan2_degrees(dy, horizontal));
+        let yaw = wrap_degrees(trig::atan2_degrees(dz, dx) - 90.0);
         Source {
-            rot: [yaw.rem_euclid(360.0), pitch],
+            rot: [yaw, pitch],
             ..s
         }
     }
@@ -942,16 +1054,17 @@ impl Game<'_> {
         let (matched, count) = self.condition_matches(c)?;
         Ok((matched == want, count))
     }
-    /// `if function`/`unless function`: the source stays when a function
-    /// returns a non-zero (`if`) or zero (`unless`) value; one that does not
-    /// return leaves it out either way.
+    /// `FallthroughTask.execute`: a fallthrough supplies failure/zero to the
+    /// function-condition continuation. Preserve explicit-result decisions
+    /// and direct function callbacks.
     fn condition_function(&mut self, c: &Context, want: bool) -> R<(bool, i32)> {
         let Some(Arg::Resource(name)) = c.get("name").cloned() else {
             return Ok((false, 0));
         };
         let results = self.call_function_ref(&name, None)?;
         let keep = results.iter().any(|r| r.is_some_and(|v| (v != 0) == want));
-        Ok((keep, 0))
+        let fallthrough = !results.is_empty() && results.iter().all(Option::is_none);
+        Ok((keep || (!want && fallthrough), 0))
     }
     /// `ExecuteCommand.isChunkLoaded`: an entity-ticking loading status and
     /// completed entity loading, rather than merely a retained lit column.
@@ -1006,8 +1119,7 @@ impl Game<'_> {
             let Some(Arg::Block(b)) = c.get("block").cloned() else {
                 return Ok((false, 0));
             };
-            let state = self.world.block(p[0], p[1], p[2]);
-            return Ok(flag(self.block_matches(&b, state)));
+            return Ok(flag(self.block_matches(&b, p)));
         }
         if c.has("biome") {
             let p = self.block_pos_arg(c, "pos")?;
@@ -1025,7 +1137,7 @@ impl Game<'_> {
         if c.has("blocks") {
             return self.condition_blocks(c);
         }
-        if c.has("range") && c.has("id") {
+        if c.has("stopwatch") {
             return self.condition_stopwatch(c).map(flag);
         }
         if c.has("predicate") {
@@ -1056,15 +1168,15 @@ impl Game<'_> {
         if self.score.board.objective(&to).is_none() {
             return Err(err("arguments.objective.notFound", &[&to]));
         }
-        let Some(a) = target
-            .first()
-            .and_then(|t| self.score.board.score(t, &to))
-            .map(|s| s.value)
-        else {
-            return Ok(false);
-        };
         if c.has("matches") {
             let Some(Arg::IntRange((lo, hi))) = c.get("range") else {
+                return Ok(false);
+            };
+            let Some(a) = target
+                .first()
+                .and_then(|t| self.score.board.score(t, &to))
+                .map(|s| s.value)
+            else {
                 return Ok(false);
             };
             return Ok(lo.is_none_or(|l| a >= l) && hi.is_none_or(|h| a <= h));
@@ -1076,6 +1188,13 @@ impl Game<'_> {
         if self.score.board.objective(&so).is_none() {
             return Err(err("arguments.objective.notFound", &[&so]));
         }
+        let Some(a) = target
+            .first()
+            .and_then(|t| self.score.board.score(t, &to))
+            .map(|s| s.value)
+        else {
+            return Ok(false);
+        };
         let Some(b) = source
             .first()
             .and_then(|t| self.score.board.score(t, &so))
@@ -1144,7 +1263,7 @@ impl Game<'_> {
         Ok((true, count))
     }
     /// The biome name at a block position.
-    fn biome_name_at_block(&self, p: [i32; 3]) -> Option<String> {
+    pub(in crate::game) fn biome_name_at_block(&self, p: [i32; 3]) -> Option<String> {
         let chunk = self.world.chunks.get(&(p[0] >> 4, p[2] >> 4))?;
         // The world's table (`world_biomes!`): a packed biome's id is past
         // the built-in list, and `Biomes::get` would clamp it to the last
@@ -1187,6 +1306,10 @@ fn is_player_in_place(
 }
 
 #[cfg(test)]
+#[path = "execute_facing_tests.rs"]
+mod execute_facing_tests;
+
+#[cfg(test)]
 mod tests {
     use super::is_player_in_place;
     use horizon_client::lan::playerdata::ints_uuid;
@@ -1210,5 +1333,466 @@ mod tests {
         assert!(!is_player_in_place(GUEST, a, Some(OWNER)));
         // No level player at all (a dedicated server): nobody is in place without a guest.
         assert!(!is_player_in_place(OWNER, None, None));
+    }
+}
+
+#[cfg(test)]
+mod passenger_relation_tests {
+    use super::*;
+    use crate::game::native_machines::tests::server_game;
+    use horizon_core::position::BlockPos;
+    use horizon_world::nbt::Tag;
+
+    fn actor(i: usize) -> String {
+        format!("00000096-0000-0002-0000-{i:012x}")
+    }
+    fn value(game: &Game<'_>, i: usize, objective: &str) -> i32 {
+        game.score.board.score(&actor(i), objective).unwrap().value
+    }
+    fn vehicle(game: &mut Game<'_>, child: usize, parent: usize) {
+        assert!(game.run_command("scoreboard players set #r h150u 91"));
+        assert!(game.run_command("scoreboard players set #s h150u 17"));
+        assert!(game.run_command(&format!(
+            "execute store result score #r h150u store success score #s h150u as {} on vehicle if entity @s[nbt={{UUID:[I;150,2,0,{parent}]}}]", actor(child)
+        )));
+        assert_eq!(game.score.board.score("#r", "h150u").unwrap().value, 1);
+        assert_eq!(game.score.board.score("#s", "h150u").unwrap().value, 1);
+    }
+    #[test]
+    #[ignore = "needs prepared resources and scratch homes/cwd"]
+    fn h150_actual_registered_passengers_select_direct_live_mob_and_boat_children() {
+        let mut game = server_game();
+        game.build_registries();
+        game.set_allow_commands(true);
+        game.block_ticks
+            .add_empty_chunk(BlockPos::new(0, 0, 0).chunk())
+            .unwrap();
+        assert!(game.run_command("forceload add 0 0"));
+        assert!(game.run_command("fill 0 199 0 15 199 15 stone"));
+        for objective in ["h150u", "h150ur", "h150us"] {
+            assert!(game.run_command(&format!("scoreboard objectives add {objective} dummy")));
+        }
+        let clock = game.world.game_time;
+        // 1->2->3 is a nested mob tree; 4->5 a boat; 6->7,8 two direct children.
+        let kinds = [
+            "cow", "pig", "chicken", "oak_boat", "cow", "cow", "pig", "chicken", "pig", "cow",
+        ];
+        let mut ids = Vec::new();
+        for (offset, kind) in kinds.into_iter().enumerate() {
+            let i = offset + 1;
+            let extra = if kind == "oak_boat" {
+                ""
+            } else {
+                ",NoAI:1b,Health:1f"
+            };
+            assert!(game.run_command(&format!(
+                "summon {kind} 8.5 200 8.5 {{UUID:[I;150,2,0,{i}],Tags:[\"h150u\"],NoGravity:1b,Silent:1b,Motion:[0d,0d,0d]{extra}}}"
+            )));
+            let words = [150, 2, 0, i as i32];
+            let id = *game
+                .persist
+                .uuids
+                .iter()
+                .find(|(_, u)| **u == words)
+                .unwrap()
+                .0;
+            let target = if kind == "oak_boat" {
+                Target::Boat(id)
+            } else {
+                Target::Mob(id)
+            };
+            assert_eq!(game.target_type(target), format!("minecraft:{kind}"));
+            assert_eq!(game.target_position(target), Some([8.5, 200.0, 8.5]));
+            let saved = game.entity_nbt(target).unwrap();
+            assert_eq!(saved.get("UUID"), Some(&Tag::IntArray(words.to_vec())));
+            if kind != "oak_boat" {
+                assert_eq!(saved.get("Health"), Some(&Tag::Float(1f32.to_bits())));
+                assert_eq!(saved.get("NoAI"), Some(&Tag::Byte(1)));
+            }
+            assert!(game.world.loaded(8, 8));
+            assert!(game.run_command("execute if block 8 199 8 stone"));
+            // Membership must come from runtime links; no retained Passengers body remains.
+            game.persist.raw.remove(&id);
+            ids.push(id);
+        }
+        for (child, parent) in [(2, 1), (3, 2), (5, 4), (7, 6), (8, 6)] {
+            assert!(game.run_command(&format!("ride {} mount {}", actor(child), actor(parent))));
+            assert_eq!(
+                game.mobs
+                    .iter()
+                    .find(|m| m.id == ids[child - 1])
+                    .unwrap()
+                    .extra
+                    .mount,
+                Some(ids[parent - 1])
+            );
+            vehicle(&mut game, child, parent);
+        }
+        let mut failures = Vec::new();
+        for (phase, parent, depth, selected) in [
+            ("direct", 1, 1, vec![2]),
+            ("nested", 1, 2, vec![3]),
+            ("boat", 4, 1, vec![5]),
+            ("multiple", 6, 1, vec![7, 8]),
+            ("empty", 9, 1, vec![]),
+        ] {
+            for (objective, n) in [("h150u", 0), ("h150ur", 91), ("h150us", 17)] {
+                for i in 1..=10 {
+                    assert!(game.run_command(&format!(
+                        "scoreboard players set {} {objective} {n}",
+                        actor(i)
+                    )));
+                }
+            }
+            let nested = if depth == 2 { " on passengers" } else { "" };
+            game.cmds.results = Some(Vec::new());
+            game.chat_capture = Some(Vec::new());
+            assert!(game.run_command(&format!(
+                "execute as {} on passengers{nested} store result score @s h150ur store success score @s h150us run scoreboard players add @s h150u 1", actor(parent)
+            )));
+            let callbacks = game.cmds.results.take().unwrap();
+            let messages: Vec<_> = game
+                .chat_capture
+                .take()
+                .unwrap()
+                .iter()
+                .map(|t| t.plain())
+                .collect();
+            println!("H150 actual {phase}: callbacks={callbacks:?}, feedback={messages:?}");
+            let expected = vec![(true, 1); selected.len()];
+            if selected.is_empty() {
+                assert_eq!(callbacks, expected, "independent empty parent callback");
+            } else if callbacks != expected {
+                failures.push(format!("{phase} callbacks {callbacks:?} != {expected:?}"));
+            }
+            for i in 1..=10 {
+                let yes = selected.contains(&i);
+                let got = (
+                    value(&game, i, "h150u"),
+                    value(&game, i, "h150ur"),
+                    value(&game, i, "h150us"),
+                );
+                let want = if yes { (1, 1, 1) } else { (0, 91, 17) };
+                if phase == "empty" || !yes {
+                    assert_eq!(
+                        got, want,
+                        "independent empty/unrelated/no-descendant control: {phase} {i}"
+                    );
+                } else if got != want {
+                    failures.push(format!("{phase} {i}: {got:?} != {want:?}"));
+                }
+            }
+        }
+        assert!(game.run_command(&format!("ride {} dismount", actor(2))));
+        assert_eq!(
+            game.mobs
+                .iter()
+                .find(|m| m.id == ids[1])
+                .unwrap()
+                .extra
+                .mount,
+            None
+        );
+        vehicle(&mut game, 3, 2);
+        for phase in ["dismounted", "remounted"] {
+            if phase == "remounted" {
+                assert!(game.run_command(&format!("ride {} mount {}", actor(2), actor(1))));
+                vehicle(&mut game, 2, 1);
+            }
+            for (objective, n) in [("h150u", 0), ("h150ur", 91), ("h150us", 17)] {
+                for i in 1..=10 {
+                    assert!(game.run_command(&format!(
+                        "scoreboard players set {} {objective} {n}",
+                        actor(i)
+                    )));
+                }
+            }
+            assert!(game.run_command(&format!(
+                "execute as {} on passengers store result score @s h150ur store success score @s h150us run scoreboard players add @s h150u 1", actor(1)
+            )));
+            for i in [1, 2, 3, 10] {
+                let got = (
+                    value(&game, i, "h150u"),
+                    value(&game, i, "h150ur"),
+                    value(&game, i, "h150us"),
+                );
+                let want = if phase == "remounted" && i == 2 {
+                    (1, 1, 1)
+                } else {
+                    (0, 91, 17)
+                };
+                if phase == "dismounted" || i != 2 {
+                    assert_eq!(
+                        got, want,
+                        "independent dismount/unrelated control: {phase} {i}"
+                    );
+                } else if got != want {
+                    failures.push(format!("{phase} {i}: {got:?} != {want:?}"));
+                }
+            }
+        }
+        assert_eq!(game.world.game_time, clock, "zero actual observation ticks");
+        assert!(
+            failures.is_empty(),
+            "actual registered direct passenger branch/callback/store failures: {failures:?}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod terminal_fork_tests {
+    use super::Game;
+    use crate::game::{Audio, Options, Progress, Settings, load_resources};
+    use horizon_client::chunk::Chunk;
+    use horizon_core::position::ChunkPos;
+    use std::sync::Arc;
+
+    fn capture(game: &mut Game<'_>, command: &str) -> (Vec<String>, Vec<(bool, i32)>) {
+        game.chat_capture = Some(Vec::new());
+        game.cmds.results = Some(Vec::new());
+        game.as_console(|g| g.run_command(command));
+        let messages = game
+            .chat_capture
+            .take()
+            .unwrap()
+            .iter()
+            .map(|t| t.plain())
+            .collect();
+        (messages, game.cmds.results.take().unwrap())
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn terminal_conditions_keep_the_fork_state_and_callbacks() {
+        let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+        let settings = Settings::default();
+        let loaded = load_resources(
+            root.clone(),
+            None,
+            &root,
+            &settings,
+            std::time::Instant::now(),
+            false,
+            true,
+            &Progress::new(),
+            &mut |_, _| unreachable!(),
+        )
+        .unwrap();
+        let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
+        options.resources = root.clone();
+        options.game_dir = Some(std::env::current_dir().unwrap().join("game"));
+        options.execution_role = crate::game::execution_role::ExecutionRole::IntegratedServer;
+        let mut game = Game::new(
+            &loaded.resources,
+            loaded.pack,
+            loaded.gui.unwrap(),
+            options,
+            settings,
+            Audio::silent(&root),
+            None,
+        )
+        .unwrap();
+        game.build_registries();
+        game.set_allow_commands(true);
+        let mut chunk = Chunk::empty(0, 0);
+        let stone = game
+            .pack
+            .assets
+            .registry
+            .default_state("minecraft:stone")
+            .unwrap();
+        for x in 0..16 {
+            for z in 0..16 {
+                chunk.set(x, 199, z, stone.0);
+            }
+        }
+        game.world.chunks.insert((0, 0), Arc::new(chunk));
+        game.block_ticks
+            .add_empty_chunk(ChunkPos::new(0, 0))
+            .unwrap();
+        assert!(game.run_command("forceload add 0 0"));
+        assert!(game.run_command("scoreboard objectives add h147 dummy"));
+        assert!(game.run_command("scoreboard players set zero h147 0"));
+        for n in [1, 2] {
+            assert!(game.run_command(&format!("summon pig {} 200 4.5 {{UUID:[I;147,0,0,{n}],Health:10f,NoAI:1b,NoGravity:1b,Tags:[\"h147\"]}}", n as f64 + 0.5)));
+            assert!(
+                game.mobs
+                    .iter()
+                    .any(|m| game.persist.uuids.get(&m.id) == Some(&[147, 0, 0, n])
+                        && m.kind.id == "minecraft:pig"
+                        && m.health == 10.0)
+            );
+        }
+        let time = game.world.game_time;
+        let a = "00000093-0000-0000-0000-000000000001";
+        let positive = capture(
+            &mut game,
+            &format!("execute as {a} if score zero h147 matches 0"),
+        );
+        assert_eq!(positive.0.len(), 1);
+        assert_eq!(positive.1, vec![(true, 1)]);
+        let direct = capture(&mut game, "execute if score zero h147 matches 1");
+        assert_eq!(direct.0.len(), 1);
+        assert_eq!(direct.1, vec![(false, 0)]);
+        for tail in [
+            format!("as {a} if score zero h147 matches 1"),
+            format!("at {a} if block ~ ~-1 ~ air"),
+            format!("as {a} if score zero h147_missing matches 1"),
+        ] {
+            assert!(game.run_command("scoreboard players set result h147 -99"));
+            assert!(game.run_command("scoreboard players set success h147 -99"));
+            let (messages, callbacks) = capture(
+                &mut game,
+                &format!(
+                    "execute store result score result h147 store success score success h147 {tail}"
+                ),
+            );
+            assert_eq!(callbacks, vec![(false, 0)]);
+            assert_eq!(
+                game.score.board.score("result", "h147").map(|s| s.value),
+                Some(0)
+            );
+            assert_eq!(
+                game.score.board.score("success", "h147").map(|s| s.value),
+                Some(0)
+            );
+            assert!(messages.is_empty(), "forked terminal error: {messages:?}");
+        }
+        let many = capture(
+            &mut game,
+            "execute as @e[type=pig,tag=h147] if score zero h147 matches 1",
+        );
+        assert!(many.0.is_empty());
+        assert_eq!(many.1, vec![(false, 0), (false, 0)]);
+        let missing = capture(&mut game, "execute if score zero h147_missing matches 1");
+        assert_eq!(missing.0.len(), 1);
+        assert_eq!(missing.1, vec![(false, 0)]);
+        let empty = capture(
+            &mut game,
+            "execute as @e[tag=h147_none] if score zero h147 matches 1",
+        );
+        assert!(empty.0.is_empty() && empty.1.is_empty());
+        assert_eq!(game.world.game_time, time);
+    }
+}
+
+#[cfg(test)]
+mod score_condition_tests {
+    use super::*;
+    use crate::game::native_machines::tests::server_game;
+
+    fn game() -> Game<'static> {
+        let mut game = server_game();
+        game.build_registries();
+        game.set_allow_commands(true);
+        game
+    }
+
+    fn say(game: &mut Game<'_>, command: &str) -> (bool, Vec<String>) {
+        game.chat_capture = Some(Vec::new());
+        let ok = game.run_command(command);
+        let said = game.chat_capture.take().unwrap_or_default();
+        (
+            ok,
+            said.iter().map(horizon_client::text::Text::plain).collect(),
+        )
+    }
+
+    /// `checkScore` resolves the source holder and objective before it reads
+    /// the target's score, so a terminal condition names the bad objective
+    /// even when the target has no score at all.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn an_unknown_source_objective_fails_a_terminal_condition() {
+        let mut game = game();
+        assert!(game.run_command("scoreboard objectives add a dummy"));
+        for sign in ["if", "unless"] {
+            let (ok, said) = say(
+                &mut game,
+                &format!("execute {sign} score zero a = zero nope"),
+            );
+            assert!(!ok, "{sign}: {said:?}");
+            assert!(
+                said.iter().any(|m| m.contains("nope")),
+                "{sign}: the source objective is named: {said:?}"
+            );
+        }
+    }
+
+    /// A non-terminal `if`/`unless` is a fork: its error is silent and its
+    /// source is dropped (`CommandSourceStack.handleError` with `forked`), so
+    /// `unless` does not run the branch either.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn an_unknown_source_objective_drops_a_forked_condition_silently() {
+        let mut game = game();
+        assert!(game.run_command("scoreboard objectives add a dummy"));
+        for sign in ["if", "unless"] {
+            let (ok, said) = say(
+                &mut game,
+                &format!("execute {sign} score zero a = zero nope run say hi"),
+            );
+            assert!(ok, "{sign}: {said:?}");
+            assert!(said.is_empty(), "{sign}: {said:?}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod stopwatch_condition_tests {
+    use super::*;
+    use crate::game::native_machines::tests::server_game;
+
+    fn game() -> Game<'static> {
+        let mut game = server_game();
+        game.build_registries();
+        game.set_allow_commands(true);
+        game
+    }
+
+    fn say(game: &mut Game<'_>, command: &str) -> (bool, Vec<String>) {
+        game.chat_capture = Some(Vec::new());
+        let ok = game.run_command(command);
+        let said = game.chat_capture.take().unwrap_or_default();
+        (
+            ok,
+            said.iter().map(horizon_client::text::Text::plain).collect(),
+        )
+    }
+
+    /// `ExecuteCommand.checkStopwatch` reads the id, throws when the stopwatch
+    /// is missing and tests the elapsed seconds against the range. The
+    /// condition is recognised by its `stopwatch` literal, not by the argument
+    /// names `id` and `range`.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn an_existing_stopwatch_matches_its_range_and_a_missing_one_errors() {
+        let mut game = game();
+        assert!(game.run_command("stopwatch create foo"));
+        let (ok, said) = say(&mut game, "execute if stopwatch foo 0.. run say in-range");
+        assert!(
+            ok && said.len() == 1 && said[0].ends_with("in-range"),
+            "{said:?}"
+        );
+        let (ok, said) = say(
+            &mut game,
+            "execute unless stopwatch foo 0.. run say not-range",
+        );
+        assert!(ok && said.is_empty(), "{said:?}");
+        // The range is read too: a minute has not passed since the creation.
+        let (ok, said) = say(&mut game, "execute if stopwatch foo 60.. run say early");
+        assert!(ok && said.is_empty(), "{said:?}");
+        // A terminal condition throws; a fork drops its source silently.
+        let (ok, said) = say(&mut game, "execute if stopwatch nope 0..");
+        assert!(!ok, "a missing stopwatch is an error: {said:?}");
+        assert!(said.iter().any(|m| m.contains("nope")), "{said:?}");
+        for sign in ["if", "unless"] {
+            let (ok, said) = say(
+                &mut game,
+                &format!("execute {sign} stopwatch nope 0.. run say hi"),
+            );
+            assert!(ok, "{sign}: {said:?}");
+            assert!(said.is_empty(), "{sign}: {said:?}");
+        }
     }
 }

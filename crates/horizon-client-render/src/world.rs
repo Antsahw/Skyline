@@ -5,7 +5,7 @@ use crate::{
     fast_hash::{FxHashMap, FxHashSet},
     section_mask::SectionMask,
 };
-use horizon_core::random::LegacyRandom;
+use horizon_core::random::{LegacyRandom, LevelRandom};
 use horizon_world::registry::BlockStateId;
 use std::sync::Arc;
 
@@ -13,6 +13,11 @@ use std::sync::Arc;
 /// keeps those of blocks only Java mods know, whose block entities then exist as vanilla's do.
 pub static SET_HOOK: std::sync::OnceLock<fn((i32, i32, i32), u32, u32)> =
     std::sync::OnceLock::new();
+mod pending_entity;
+pub use pending_entity::{EntityLoadReason, PendingEntity};
+
+mod modified;
+pub use modified::ModifiedChunks;
 
 /// Sections (x, section index, z) waiting to be remeshed, kept by column
 /// (a bit per section index), so the mesh scheduler looks at each column once
@@ -25,6 +30,10 @@ impl DirtySections {
     pub fn insert(&mut self, (x, sy, z): (i32, i32, i32)) {
         debug_assert!((0..SectionMask::CAPACITY as i32).contains(&sy));
         self.columns.entry((x, z)).or_default().insert(sy as usize);
+    }
+    /// Mark all sections in `mask` dirty for column `(x, z)`.
+    pub fn insert_column_mask(&mut self, (x, z): (i32, i32), mask: SectionMask) {
+        *self.columns.entry((x, z)).or_default() |= mask;
     }
     pub fn contains(&self, &(x, sy, z): &(i32, i32, i32)) -> bool {
         (0..SectionMask::CAPACITY as i32).contains(&sy)
@@ -67,7 +76,7 @@ pub struct World {
     pub shape: LevelShape,
     pub fast_lava: bool,
     pub chunks: crate::chunk_map::ChunkMap,
-    pub random: LegacyRandom,
+    pub random: LevelRandom,
     pub revision: u64,
     pub health_rules: HealthRules,
     pub air: BlockStateId,
@@ -79,19 +88,23 @@ pub struct World {
     /// incrementally by streaming.
     pub light_edits: Vec<((i32, i32, i32), u32, u32)>,
     /// Saved entities of chunks that just loaded, spawned by the game.
-    pub loaded_entities: Vec<((i32, i32), Vec<horizon_world::nbt::Tag>)>,
+    pub loaded_entities: Vec<((i32, i32), Vec<PendingEntity>)>,
+    /// Chunks loaded since the level's last pass, their entity sections not
+    /// ready yet (`PersistentEntitySectionManager`'s PENDING), empty ones too:
+    /// the pass ends by readying them (`processPendingLoads`).
+    pub entities_pending: FxHashSet<(i32, i32)>,
     /// Chunks that just came into this level from a worker, and whether each
     /// was generated rather than read from the save: the game tells native mods.
     pub loaded_chunks: Vec<(i32, i32, bool)>,
     /// Chunks changed since the last save.
-    pub modified: FxHashSet<(i32, i32)>,
+    pub modified: ModifiedChunks,
     /// Block entities, and the order they tick in.
     pub block_entities: crate::block_entities::BlockEntities,
     /// Each chest's `ContainerOpenersCounter`: opener count and largest
     /// interaction range.
     pub chest_openers: FxHashMap<(i32, i32, i32), (i32, f64)>,
     /// `BaseContainerBlockEntity.name`: custom names of container block entities.
-    pub block_names: FxHashMap<(i32, i32, i32), String>,
+    pub block_names: FxHashMap<(i32, i32, i32), horizon_world::nbt::Tag>,
     /// States (by id) whose writes are recorded in `watched_writes` (sculk
     /// blocks, which need a block entity).
     pub watched: Vec<bool>,
@@ -102,6 +115,9 @@ pub struct World {
     pub inhabited: FxHashMap<(i32, i32), i64>,
     pub game_time: i64,
     pub day_time: i64,
+    /// The End's world clock (`WorldClocks.THE_END`, the End sky flash's), saved apart from
+    /// the game time and, like every clock, still while `advance_time` is off.
+    pub end_clock: i64,
     pub weather: Weather,
     /// Every block position written since the log was last drained, kept
     /// only while the world is open to the network (see `lan`).
@@ -189,6 +205,14 @@ impl Weather {
         self.rain_level.1 =
             (self.rain_level.1 + if self.raining { 0.01 } else { -0.01 }).clamp(0.0, 1.0);
     }
+    /// The levels at their targets at once (rain 1 while it rains, else 0, and thunder the
+    /// same), both halves, so the frame shows them at any partial tick: a frozen world under
+    /// `HORIZON_STILL`, which would otherwise have to run about a hundred ticks to fade them.
+    pub fn settle_levels(&mut self) {
+        let target = |on: bool| if on { 1.0 } else { 0.0 };
+        self.rain_level = (target(self.raining), target(self.raining));
+        self.thunder_level = (target(self.thundering), target(self.thundering));
+    }
     /// Level.getRainLevel / getThunderLevel (thunder scales with rain).
     pub fn levels(&self, partial: f32) -> (f32, f32) {
         let rain = self.rain_level.0 + (self.rain_level.1 - self.rain_level.0) * partial;
@@ -198,11 +222,17 @@ impl Weather {
     }
 }
 impl World {
+    /// Queue ordinary NBT; transient transfer state is never decoded from it.
+    pub fn queue_entity_nbt(&mut self, key: (i32, i32), tags: Vec<horizon_world::nbt::Tag>) {
+        self.loaded_entities
+            .push((key, tags.into_iter().map(PendingEntity::from).collect()));
+    }
+
     pub fn new(air: BlockStateId, seed: i64) -> Self {
         Self {
             shape: LevelShape::OVERWORLD,
             chunks: Default::default(),
-            random: LegacyRandom::new(seed),
+            random: LevelRandom::for_level(LegacyRandom::new(seed)),
             revision: 0,
             health_rules: HealthRules::default(),
             air,
@@ -211,8 +241,9 @@ impl World {
             dirty_light: Default::default(),
             light_edits: Vec::new(),
             loaded_entities: Vec::new(),
+            entities_pending: FxHashSet::default(),
             loaded_chunks: Vec::new(),
-            modified: FxHashSet::default(),
+            modified: ModifiedChunks::default(),
             attachments: Default::default(),
             attachment_syncs: FxHashSet::default(),
             block_entities: Default::default(),
@@ -223,6 +254,7 @@ impl World {
             inhabited: FxHashMap::default(),
             game_time: 0,
             day_time: 1000,
+            end_clock: 0,
             weather: Weather::default(),
             block_log: None,
             block_log_held: Vec::new(),
@@ -299,6 +331,20 @@ impl World {
     /// The lowest block Y the level's chunks hold.
     pub fn bottom_y(&self) -> i32 {
         self.layout().min_y()
+    }
+    /// `Entity.checkBelowWorld`'s floor, `Level.getMinY() - 64`: the level's own
+    /// lowest Y (0 in the Nether and the End), not the chunks' widened column.
+    /// An entity below it is out of the world.
+    pub fn below_world_y(&self) -> f64 {
+        f64::from(self.shape.min_y - 64)
+    }
+    /// The biome table index of the noise cell at a block (`ChunkAccess.getNoiseBiome`): a
+    /// cell above or below the level reads its top or bottom cells, not the cells the chunks'
+    /// widened column holds there (vanilla's Nether and End save none, and read back they
+    /// hold the table's first biome). `None` where the chunk isn't loaded.
+    pub fn noise_biome(&self, x: i32, y: i32, z: i32) -> Option<u16> {
+        let y = y.clamp(self.shape.min_y, self.shape.max_y() - 1);
+        Some(self.chunks.get(&(x >> 4, z >> 4))?.biome(x, y, z))
     }
     /// One above the highest block Y the level's chunks hold.
     pub fn top_y(&self) -> i32 {
@@ -570,10 +616,30 @@ impl Default for HealthRules {
 
 #[cfg(test)]
 mod tests {
-    use super::{DirtySections, World};
+    use super::{DirtySections, Weather, World};
     use crate::chunk::{Chunk, MIN_Y, SECTIONS};
     use horizon_world::registry::BlockStateId;
     use std::sync::Arc;
+
+    /// `/weather thunder` then `/weather clear` in a frozen world: the levels sit at their
+    /// targets at every partial tick, where a tick of fading would have moved them 0.01.
+    #[test]
+    fn settled_weather_shows_its_targets_at_any_partial_tick() {
+        let mut weather = Weather {
+            raining: true,
+            thundering: true,
+            rain_level: (0.25, 0.26),
+            ..Weather::default()
+        };
+        weather.settle_levels();
+        for partial in [0.0, 0.37, 1.0] {
+            assert_eq!(weather.levels(partial), (1.0, 1.0), "{partial}");
+        }
+        weather.raining = false;
+        weather.thundering = false;
+        weather.settle_levels();
+        assert_eq!(weather.levels(0.5), (0.0, 0.0));
+    }
 
     /// Every block write marks the same section set the 27-cell loop did, but
     /// only the distinct keys: one in the interior, a neighbour section on a
@@ -621,6 +687,47 @@ mod tests {
                 assert_eq!(world.dirty_sections.len(), 8);
             }
         }
+    }
+
+    /// `ChunkAccess.getNoiseBiome` clamps the cell to the level. An End chunk read back from a
+    /// save holds the table's first biome in the sections its widened column adds below Y 0
+    /// and above 255, which a read there must not reach.
+    #[test]
+    fn noise_biome_reads_stay_inside_the_level() {
+        use crate::chunk::LevelShape;
+        let mut world = World::new(BlockStateId(0), 0);
+        world.shape = LevelShape::END;
+        // The column runs -64..320: quart rows 16..80 are the level's 0..256.
+        let mut chunk = Chunk::with_layout(0, 0, LevelShape::END.column());
+        for qy in 16..80 {
+            let biome = match qy {
+                16 => 5,
+                79 => 6,
+                _ => 7,
+            };
+            for qz in 0..4 {
+                for qx in 0..4 {
+                    chunk.set_biome_cell(qx, qy, qz, biome);
+                }
+            }
+        }
+        world.chunks.insert((0, 0), Arc::new(chunk));
+        for (y, biome) in [
+            (-64, 5),
+            (-4, 5),
+            (-1, 5),
+            (0, 5),
+            (3, 5),
+            (4, 7),
+            (251, 7),
+            (252, 6),
+            (255, 6),
+            (256, 6),
+            (319, 6),
+        ] {
+            assert_eq!(world.noise_biome(9, y, 9), Some(biome), "y {y}");
+        }
+        assert_eq!(world.noise_biome(16, 0, 0), None);
     }
 
     /// A box misses a state only where no section it reaches lists it, and

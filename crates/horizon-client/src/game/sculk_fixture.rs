@@ -18,7 +18,7 @@ use horizon_client::{
 use horizon_core::{
     geometry::{Direction, Vec3},
     position::BlockPos,
-    random::LegacyRandom,
+    random::RandomSource,
 };
 use horizon_world::{chunk::BlockState, level::Ticks, registry::BlockStateId};
 use std::{
@@ -136,7 +136,7 @@ fn parse(text: &str) -> Vec<Scenario> {
 /// first delays and its brain's `RunOne` shuffles: the oracle seeds what
 /// appeared, and so does this.
 fn seed_fresh(m: &mut Mob, seed: i64) {
-    m.random = LegacyRandom::new(seed);
+    m.random.set_seed(seed);
     horizon_client::mobs::warden::init_brain(m, seed);
 }
 fn d(v: f64) -> String {
@@ -470,7 +470,7 @@ impl Game<'_> {
                     _ => {}
                 }
             }
-            m.random = LegacyRandom::new(spec.seed);
+            m.random.set_seed(spec.seed);
             // EntityType.create equips nothing (that is finalizeSpawn's job).
             for slot in [
                 &mut m.extra.main_hand,
@@ -491,7 +491,7 @@ impl Game<'_> {
         }
         self.next_entity = self.next_entity.max(200_000);
         self.world.day_time = 6000;
-        self.world.random = LegacyRandom::new(s.level_seed);
+        self.world.random.set_seed(s.level_seed);
         self.audio.capture = Some(Vec::new());
         let mut known: HashSet<u32> = self.mobs.iter().map(|m| m.id).collect();
         let mut seeded: HashSet<u32> = HashSet::new();
@@ -748,6 +748,23 @@ impl Game<'_> {
                         m.damage(amount, horizon_client::mobs::Damage::player(at));
                     }
                     self.last_hurt_by_player.insert(id, self.lan_acting);
+                }
+                // Creeper.ignite: the next tick primes the fuse.
+                "ignite" | "ate" => {
+                    let id = sources
+                        .get(words[1][1..].parse::<usize>().unwrap_or(usize::MAX))
+                        .copied()
+                        .ok_or("no such mob")?;
+                    let mut events = Vec::new();
+                    if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
+                        if words[0] == "ignite" {
+                            m.extra.flag = true;
+                        } else {
+                            // Mob.ate.
+                            horizon_client::mobs::ai::ate(m, &mut events);
+                        }
+                    }
+                    self.handle_mob_events(events)?;
                 }
                 "set" => {
                     let n = |i: usize| words[i].parse::<i32>().unwrap_or(0);

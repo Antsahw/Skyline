@@ -1,6 +1,7 @@
 //! Argument types (Brigadier's and Minecraft's `ArgumentType`s): parsing with
 //! the vanilla error messages and completion suggestions.
 use super::{CmdResult, CommandError, Context, Reader, SuggestionsBuilder};
+use horizon_world::nbt::Tag;
 
 pub use horizon_client_core::registries::{
     CustomCompletionAction, Registries, RegistryIds, modify_custom_completions,
@@ -143,32 +144,51 @@ pub enum ArgType {
     ResourceSelector(&'static str),
 }
 
-/// FilenameUtils.wildcardMatch (case-sensitive) of `*` and `?` patterns.
+/// Apache Commons IO's case-sensitive wildcard match of `*` and `?` patterns.
 pub fn wildcard_match(text: &str, pattern: &str) -> bool {
-    let t: Vec<char> = text.chars().collect();
-    let p: Vec<char> = pattern.chars().collect();
+    // Keep the backtracking cursors as UTF-8 byte offsets.  The old port
+    // materialised both strings as `Vec<char>` for indexing, which made every
+    // resource id allocate during a selector scan.  `chars().next()` keeps
+    // the same Unicode scalar semantics for `?` while avoiding those copies.
     let (mut ti, mut pi) = (0, 0);
-    let (mut star, mut mark) = (None, 0);
-    while ti < t.len() {
-        if pi < p.len() && (p[pi] == '?' || p[pi] == t[ti]) {
-            ti += 1;
-            pi += 1;
-        } else if pi < p.len() && p[pi] == '*' {
-            star = Some(pi);
-            mark = ti;
-            pi += 1;
-        } else if let Some(s) = star {
-            pi = s + 1;
-            mark += 1;
-            ti = mark;
-        } else {
-            return false;
+    let mut star: Option<(usize, usize)> = None;
+    while ti < text.len() {
+        let tc = text[ti..]
+            .chars()
+            .next()
+            .expect("cursor always stays on a char boundary");
+        if pi < pattern.len() {
+            let pc = pattern[pi..]
+                .chars()
+                .next()
+                .expect("cursor always stays on a char boundary");
+            if pc == '?' || pc == tc {
+                ti += tc.len_utf8();
+                pi += pc.len_utf8();
+                continue;
+            }
+            if pc == '*' {
+                star = Some((pi, ti));
+                pi += 1;
+                continue;
+            }
         }
+        if let Some((s, mark)) = &mut star {
+            pi = *s + 1;
+            let c = text[*mark..]
+                .chars()
+                .next()
+                .expect("backtracking cursor stays before text end");
+            *mark += c.len_utf8();
+            ti = *mark;
+            continue;
+        }
+        return false;
     }
-    while pi < p.len() && p[pi] == '*' {
+    while pi < pattern.len() && pattern.as_bytes()[pi] == b'*' {
         pi += 1;
     }
-    pi == p.len()
+    pi == pattern.len()
 }
 /// ResourceSelectorArgument: the registry ids a pattern selects.
 pub fn select_resources<'a>(ids: &'a [String], pattern: &str) -> Vec<&'a String> {
@@ -256,14 +276,17 @@ impl Coordinates {
         match self {
             Coordinates::World(c) => [c[0].get(pos[0]), c[1].get(pos[1]), c[2].get(pos[2])],
             Coordinates::Local([left, up, forwards]) => {
-                let d = std::f32::consts::PI / 180.0;
+                use horizon_core::geometry::trig;
+                // `LocalCoordinates.apply`: widen the f32 angle for Mth's table,
+                // keep basis products f32, then sum the f64 offset before the origin.
+                let d = trig::DEG_TO_RAD;
                 let (yaw, pitch) = (rot[0], rot[1]);
-                let cos_y = ((yaw + 90.0) * d).cos();
-                let sin_y = ((yaw + 90.0) * d).sin();
-                let cos_p = (-pitch * d).cos();
-                let sin_p = (-pitch * d).sin();
-                let cos_p2 = ((-pitch + 90.0) * d).cos();
-                let sin_p2 = ((-pitch + 90.0) * d).sin();
+                let cos_y = trig::cos(f64::from((yaw + 90.0) * d));
+                let sin_y = trig::sin(f64::from((yaw + 90.0) * d));
+                let cos_p = trig::cos(f64::from(-pitch * d));
+                let sin_p = trig::sin(f64::from(-pitch * d));
+                let cos_p2 = trig::cos(f64::from((-pitch + 90.0) * d));
+                let sin_p2 = trig::sin(f64::from((-pitch + 90.0) * d));
                 let f = [
                     f64::from(cos_y * cos_p),
                     f64::from(sin_p),
@@ -281,9 +304,9 @@ impl Coordinates {
                     -(f[0] * u[1] - f[1] * u[0]),
                 ];
                 [
-                    pos[0] + f[0] * forwards + u[0] * up + l[0] * left,
-                    pos[1] + f[1] * forwards + u[1] * up + l[1] * left,
-                    pos[2] + f[2] * forwards + u[2] * up + l[2] * left,
+                    pos[0] + (f[0] * forwards + u[0] * up + l[0] * left),
+                    pos[1] + (f[1] * forwards + u[1] * up + l[1] * left),
+                    pos[2] + (f[2] * forwards + u[2] * up + l[2] * left),
                 ]
             }
         }
@@ -615,7 +638,7 @@ pub fn read_float_bounds(reader: &mut Reader) -> CmdResult<(Option<f32>, Option<
         "parsing.float.invalid",
     )
 }
-/// Integer.parseInt over number characters.
+/// Java integer parsing over number characters.
 pub fn java_parse_int(s: &str) -> Option<i32> {
     let digits = s.strip_prefix(['-', '+']).unwrap_or(s);
     if digits.is_empty() || !digits.chars().all(|c| c.is_ascii_digit()) {
@@ -623,7 +646,7 @@ pub fn java_parse_int(s: &str) -> Option<i32> {
     }
     s.parse().ok()
 }
-/// Double.parseDouble over the characters StringReader reads as a number.
+/// Java double parsing over the characters Brigadier's reader reads as a number.
 pub fn java_parse_double(s: &str) -> Option<f64> {
     let t = s.trim_matches(|c: char| c <= ' ');
     let body = t.strip_prefix(['-', '+']).unwrap_or(t);
@@ -898,7 +921,7 @@ fn parse_nbt_path(reader: &mut Reader) -> CmdResult<()> {
             '[' => {
                 reader.skip();
                 if !reader.can_read() {
-                    // StringReader.peek past the end (StringIndexOutOfBoundsException).
+                    // Brigadier's reader peek past the end (StringIndexOutOfBoundsException).
                     let len = reader.string.encode_utf16().count();
                     let message = format!("Index {len} out of bounds for length {len}");
                     return Err(CommandError::tr_at(
@@ -971,36 +994,191 @@ fn particle_fields(id: &str) -> &'static [&'static str] {
         _ => &[],
     }
 }
-/// The particle type's codec over the options (MapCodec field errors, newest first).
-fn particle_options(id: &str, t: &horizon_world::nbt::Tag) -> Result<(), String> {
-    use super::codec::{get, no_key, not_map, snbt};
+/// The particle type's codec over the options (`RecordCodecBuilder` decodes
+/// the fields last to first, and every field's error joins with `; `).
+fn particle_options(id: &str, t: &horizon_world::nbt::Tag, reg: &Registries) -> Result<(), String> {
+    use super::codec::{get, no_key, not_map};
     let horizon_world::nbt::Tag::Compound(map) = t else {
         return Err(not_map(t));
     };
-    let missing: Vec<String> = particle_fields(id)
-        .iter()
-        .rev()
-        .filter(|f| get(map, f).is_none())
-        .map(|f| no_key(f, t))
-        .collect();
-    if !missing.is_empty() {
-        return Err(missing.join("; "));
-    }
-    if particle_fields(id) == ["block_state"]
-        && let Some(state) = get(map, "block_state")
-        && !matches!(state, horizon_world::nbt::Tag::String(_))
-    {
-        // withAlternative(BlockState.CODEC, the block id codec).
-        let first = match state {
-            horizon_world::nbt::Tag::Compound(_) => {
-                super::codec::either("Not a string".into(), no_key("id", state))
-            }
-            _ => not_map(state),
+    let checks = particle_value_checks(id);
+    let mut errors: Vec<String> = Vec::new();
+    for field in particle_fields(id).iter().rev() {
+        let Some(value) = get(map, field) else {
+            errors.push(no_key(field, t));
+            continue;
         };
-        let _ = snbt;
-        return Err(super::codec::either(first, "Not a string".into()));
+        // The option class's own codec: a value it refuses fails the argument
+        // before the particle is made.
+        if let Some((_, check)) = checks.iter().find(|(name, _)| name == field)
+            && let Err(message) = check(value, reg)
+        {
+            errors.push(message);
+        }
+    }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors.join("; "))
+    }
+}
+/// How one option field's codec reads its value.
+type OptionCheck = fn(&Tag, &Registries) -> Result<(), String>;
+/// The option fields whose codec validates the value (declaration order).
+fn particle_value_checks(id: &str) -> &'static [(&'static str, OptionCheck)] {
+    const SCALE: (&str, OptionCheck) = ("scale", scale_option);
+    const ITEM: (&str, OptionCheck) = ("item", item_stack_option);
+    const BLOCK_STATE: (&str, OptionCheck) = ("block_state", block_state_option);
+    match id.trim_start_matches("minecraft:") {
+        "block" | "block_marker" | "falling_dust" | "dust_pillar" | "block_crumble" => {
+            &[BLOCK_STATE]
+        }
+        "dust" => &[("color", rgb_color_option), SCALE],
+        "dust_color_transition" => &[
+            ("from_color", rgb_color_option),
+            ("to_color", rgb_color_option),
+            SCALE,
+        ],
+        "item" => &[ITEM],
+        _ => &[],
+    }
+}
+/// `BlockParticleOption.CODEC`: `BlockState.CODEC`, or a block id.
+fn block_state_option(t: &Tag, _reg: &Registries) -> Result<(), String> {
+    use super::codec::{either, no_key, not_map};
+    if matches!(t, Tag::String(_)) {
+        return Ok(());
+    }
+    let first = match t {
+        Tag::Compound(_) => either("Not a string".into(), no_key("id", t)),
+        _ => not_map(t),
+    };
+    Err(either(first, "Not a string".into()))
+}
+/// `Codec.FLOAT`'s value for an option (`getNumberValue().floatValue()`).
+fn float_option(t: &Tag) -> Option<f32> {
+    Some(match t {
+        Tag::Byte(v) => f32::from(*v),
+        Tag::Short(v) => f32::from(*v),
+        Tag::Int(v) => *v as f32,
+        Tag::Long(v) => *v as f32,
+        Tag::Float(v) => f32::from_bits(*v),
+        Tag::Double(v) => f64::from_bits(*v) as f32,
+        _ => return None,
+    })
+}
+/// `Codec.INT`'s value for an option (`getNumberValue().intValue()`).
+fn int_option(t: &Tag) -> Option<i32> {
+    Some(match t {
+        Tag::Byte(v) => i32::from(*v),
+        Tag::Short(v) => i32::from(*v),
+        Tag::Int(v) => *v,
+        Tag::Long(v) => *v as i32,
+        Tag::Float(v) => f32::from_bits(*v) as i32,
+        Tag::Double(v) => f64::from_bits(*v) as i32,
+        _ => return None,
+    })
+}
+/// `ScalableParticleOptionsBase.SCALE`.
+fn scale_option(t: &Tag, _reg: &Registries) -> Result<(), String> {
+    let Some(v) = float_option(t) else {
+        return Err("Not a number".into());
+    };
+    if (0.01..=4.0).contains(&v) {
+        Ok(())
+    } else {
+        Err(format!(
+            "Value must be within range [0.01;4.0]: {}",
+            horizon_client_core::snbt::java_float(v)
+        ))
+    }
+}
+/// `ExtraCodecs.RGB_COLOR_CODEC`: an int, or `VECTOR3F` (three floats).
+fn rgb_color_option(t: &Tag, _reg: &Registries) -> Result<(), String> {
+    use super::codec::{either, is_number, not_list};
+    if is_number(t) {
+        return Ok(());
+    }
+    let Tag::List(items) = t else {
+        return Err(either("Not a number".into(), not_list(t)));
+    };
+    // Codec.FLOAT.listOf(): the elements that parse, and one error for each
+    // that does not; then Util.fixedSize(list, 3).
+    let bad = items.iter().filter(|i| !is_number(i)).count();
+    let parsed = items.len() - bad;
+    let mut message: Vec<String> = std::iter::repeat_n("Not a number".to_owned(), bad).collect();
+    if parsed != 3 {
+        message.push("Input is not a list of 3 elements".into());
+        let message = message.join("; ");
+        // fixedSize keeps the first three floats when it has them: that error
+        // carries a value, so the alternative reports it alone.
+        return Err(if parsed > 3 {
+            message
+        } else {
+            either("Not a number".into(), message)
+        });
+    }
+    if message.is_empty() {
+        Ok(())
+    } else {
+        Err(message.join("; "))
+    }
+}
+/// `Item.CODEC` (`BuiltInRegistries.ITEM.holderByNameCodec`, never air).
+fn item_option(t: &Tag, reg: &Registries) -> Result<(), String> {
+    let Tag::String(raw) = t else {
+        return Err("Not a string".into());
+    };
+    let raw = raw.to_string_lossy();
+    let Some(id) = parse_identifier(&raw) else {
+        return Err(format!("Not a valid resource location: {raw}"));
+    };
+    if !reg.ids("minecraft:item").contains(&id) {
+        return Err(format!(
+            "Unknown registry key in ResourceKey[minecraft:root / minecraft:item]: {id}"
+        ));
+    }
+    if id == "minecraft:air" {
+        return Err("Item must not be minecraft:air".into());
     }
     Ok(())
+}
+/// `ItemStackTemplate.CODEC`: `{id, count, components}` or a bare item id.
+fn item_stack_option(t: &Tag, reg: &Registries) -> Result<(), String> {
+    use super::codec::{either, get, no_key, not_map};
+    let Tag::Compound(map) = t else {
+        // Not a map, then Item.CODEC over the value itself.
+        let first = not_map(t);
+        return match item_option(t, reg) {
+            Ok(()) => Ok(()),
+            Err(second) => Err(either(first, second)),
+        };
+    };
+    // The fields decode last to first, so `count` (ExtraCodecs.intRange(1, 99))
+    // reports before `id` (Item.CODEC). Only a `count` error on its own keeps
+    // the record's partial value: then the alternative reports it alone, and
+    // every other failure joins both branches.
+    let count_error = match get(map, "count") {
+        None => None,
+        Some(count) => match int_option(count) {
+            Some(n) if (1..=99).contains(&n) => None,
+            Some(n) => Some(format!("Value must be within range [1;99]: {n}")),
+            None => Some("Not a number".to_owned()),
+        },
+    };
+    let id_error = match get(map, "id") {
+        None => Some(no_key("id", t)),
+        Some(id) => item_option(id, reg).err(),
+    };
+    match (count_error, id_error) {
+        (None, None) => Ok(()),
+        (Some(count), None) => Err(count),
+        (count, id) => {
+            let first: Vec<String> = count.into_iter().chain(id).collect();
+            let second = item_option(t, reg).expect_err("a compound is not an item id");
+            Err(either(first.join("; "), second))
+        }
+    }
 }
 /// TimeArgument units.
 fn time_unit(unit: &str) -> Option<i32> {
@@ -1309,7 +1487,7 @@ impl ArgType {
                         reader,
                     ));
                 }
-                // Integer.parseInt(s, begin, end, 16) per channel: a bad digit
+                // The Java hexadecimal parse (s, begin, end, 16) per channel: a bad digit
                 // escapes Brigadier as a dispatcher parse exception.
                 let width = text.len() / 3;
                 for chunk in text.as_bytes().chunks(width) {
@@ -1410,7 +1588,7 @@ impl ArgType {
                 Arg::Str(reader.string[start..reader.cursor].to_owned())
             }
             ArgType::Component | ArgType::Style => {
-                // ParserBasedArgument.withCodec: SNBT, then the codec (errors at the start).
+                // CommandArgumentParser.withCodec: SNBT, then the codec (errors at the start).
                 let tag = super::snbt::parse_tag_argument(reader)?;
                 let (decoded, key) = if matches!(self, ArgType::Style) {
                     (
@@ -1583,7 +1761,7 @@ impl ArgType {
                 } else {
                     horizon_world::nbt::Tag::Compound(Default::default())
                 };
-                if let Err(m) = particle_options(&id, &options) {
+                if let Err(m) = particle_options(&id, &options, reg) {
                     return Err(CommandError::tr("particle.invalidOptions", &[&m]));
                 }
                 Arg::Str(reader.string[start..reader.cursor].to_owned())

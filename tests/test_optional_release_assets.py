@@ -15,6 +15,12 @@ REQUIRED = {
     "horizon-macos-x64.zip", "horizon-server-linux-x86_64.tar.gz", "horizon-source.tar.gz",
 }
 OPTIONAL = ("horizon-windows-arm64.zip", "horizon-linux-musl-x86_64.tar.gz")
+# The bash on PATH, as in test_pr_ready: Windows' CreateProcess looks in System32 before PATH, so a bare "bash"
+# there is WSL's, which gets none of the steps' env and none of the host's paths. WSL from the Microsoft Store puts
+# its bash on PATH as an app alias in WindowsApps instead (#16860).
+BASH = shutil.which("bash")
+POSIX_BASH = BASH is not None and not (
+    os.name == "nt" and os.path.basename(os.path.dirname(os.path.normcase(BASH))) in ("system32", "windowsapps"))
 
 
 def run_step(containing):
@@ -26,8 +32,8 @@ def run_step(containing):
     raise AssertionError(f"no workflow step containing {containing}")
 
 
-@unittest.skipUnless(shutil.which("bash") and shutil.which("openssl") and shutil.which("sha256sum"),
-                     "release shell checks require bash, OpenSSL and sha256sum")
+@unittest.skipUnless(POSIX_BASH and shutil.which("openssl") and shutil.which("sha256sum"),
+                     "release shell checks require a bash that is not WSL's, OpenSSL and sha256sum")
 class OptionalReleaseAssetsTests(unittest.TestCase):
     def test_sign_and_publish_with_each_optional_archive_combination(self):
         for mask in range(4):
@@ -41,15 +47,20 @@ class OptionalReleaseAssetsTests(unittest.TestCase):
                 script_dir = root / "tools/ci"
                 script_dir.mkdir(parents=True)
                 shutil.copy(ROOT / "tools/ci/sign_release.sh", script_dir)
-                env = dict(os.environ, EPHEMERAL="yes", SHA="0123456789abcdef", DATE="2026-11-04",
-                           SOURCE_TAG="nightly-test", RELEASE_SIGNING_KEY="", RELEASE_SIGNING_KEY_NEXT="")
-                signed = subprocess.run(["bash", "-e", "-c", run_step("sign_release.sh nightly")],
+                # The steps' own env from nightly-build.yml: SHORT is the commit the title and
+                # SHA256SUMS.v2.sig name (ALSO_FOR, nightly-<date>-<short>).
+                env = dict(os.environ, EPHEMERAL="yes", SHA="0123456789abcdef", SHORT="0123456", DATE="2026-11-04",
+                           ALSO_FOR="nightly-2026-11-04-0123456", SOURCE_TAG="nightly-test",
+                           RELEASE_SIGNING_KEY="", RELEASE_SIGNING_KEY_NEXT="")
+                signed = subprocess.run([BASH, "-e", "-c", run_step("sign_release.sh nightly")],
                                         cwd=root, env=env, text=True, capture_output=True)
                 self.assertEqual(signed.returncode, 0, signed.stderr)
-                sums = {name: digest for digest, name in
+                # `name` or `*name`: sha256sum on Windows (Git Bash) marks binary mode with `*`.
+                sums = {name.removeprefix("*"): digest for digest, name in
                         (line.split() for line in (dist / "SHA256SUMS").read_text().splitlines())}
                 self.assertEqual(sums, {name: hashlib.sha256(name.encode()).hexdigest() for name in present})
                 self.assertTrue((dist / "SHA256SUMS.sig").stat().st_size)
+                self.assertTrue((dist / "SHA256SUMS.v2.sig").stat().st_size)
                 (dist / "smoke-test.json").write_text("{}")
                 (dist / "nightly-notes.md").write_text("test")
                 # Isolate GitHub and tag rotation; validate the exact attachment arguments
@@ -66,11 +77,12 @@ gh() {
   done
 }
 '''
-                published = subprocess.run(["bash", "-e", "-c", stubs + run_step("gh release create nightly")],
+                published = subprocess.run([BASH, "-e", "-c", stubs + run_step("gh release create nightly")],
                                            cwd=root, env=env, text=True, capture_output=True)
                 self.assertEqual(published.returncode, 0, published.stderr)
                 files = {Path(name).name for name in (root / "published").read_text().splitlines()}
-                self.assertEqual(files, present | {"SHA256SUMS", "SHA256SUMS.sig", "smoke-test.json", "nightly-notes.md"})
+                self.assertEqual(files, present | {"SHA256SUMS", "SHA256SUMS.sig", "SHA256SUMS.v2.sig", "smoke-test.json",
+                                                   "nightly-notes.md"})
                 for name in set(OPTIONAL) - present:
                     self.assertIn(f"::warning::{name} is missing", signed.stdout)
                     self.assertIn(f"::warning::{name} is missing", published.stdout)

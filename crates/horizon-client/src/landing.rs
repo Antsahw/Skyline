@@ -2,6 +2,7 @@
 //! Health, sound/particle playback and network delivery remain event consumers.
 use crate::{
     Result,
+    blocks::BlockFacts,
     collisions::SceneCollisions,
     motion::{MotionEvent, MotionWorld},
 };
@@ -23,7 +24,7 @@ use horizon_world::{
     movement_properties::MovementProperties,
     registry::BlockStateId,
 };
-use std::{collections::BTreeMap, fs, path::Path};
+use std::{collections::BTreeMap, fs, path::Path, sync::Arc};
 mod routed_fall;
 
 /// A living entity is about to handle a fall (`LivingFallEvent`). Mods may
@@ -161,7 +162,10 @@ pub enum FallEvent {
         volume: f32,
         pitch: f32,
     },
-    BlockFallSound,
+    /// `LivingEntity.playBlockFallSound`: the block 0.2 below the feet.
+    BlockFallSound {
+        state: BlockStateId,
+    },
     /// A landing for Java mods to judge (`PlayerMotion::route_fall`): vanilla's
     /// `causeFallDamage` arguments and the player's own answers to `calculateFallDamage`.
     Routed {
@@ -176,6 +180,9 @@ pub enum FallEvent {
     Broadcast(u8),
     Write {
         position: BlockPos,
+        /// The block it replaced, so a mod that cancels the change
+        /// (`native_entity_change_block_v2`) can have it put back.
+        from: BlockStateId,
         state: BlockStateId,
         flags: u32,
     },
@@ -198,6 +205,31 @@ pub enum FallEvent {
     },
 }
 impl FallEvent {
+    /// The sound the landing player's fall plays (name, volume, pitch):
+    /// `causeFallDamage`'s fall or honey sound, and `playBlockFallSound`'s
+    /// block fall sound at half volume and three quarters pitch (none for air).
+    pub fn heard_fall_sound(self, facts: &BlockFacts) -> Option<(Arc<str>, f32, f32)> {
+        match self {
+            Self::Sound {
+                sound,
+                volume,
+                pitch,
+                ..
+            } => sound
+                .player_fall_sound()
+                .or_else(|| sound.honey_landing_sound())
+                .map(|name| (Arc::from(name), volume, pitch)),
+            Self::BlockFallSound { state } if !facts.is_air(state) => {
+                let sounds = &facts.get(state).sounds;
+                Some((
+                    sounds.fall.clone(),
+                    sounds.volume * 0.5,
+                    sounds.pitch * 0.75,
+                ))
+            }
+            _ => None,
+        }
+    }
     /// Exact-bit diagnostic representation shared by the headless scene probe.
     pub fn trace(self) -> String {
         fn p(v: BlockPos) -> String {
@@ -247,7 +279,7 @@ impl FallEvent {
                 volume.to_bits(),
                 pitch.to_bits()
             ),
-            Self::BlockFallSound => "block-fall-sound".into(),
+            Self::BlockFallSound { .. } => "block-fall-sound".into(),
             Self::Routed {
                 distance,
                 multiplier,
@@ -262,6 +294,7 @@ impl FallEvent {
                 position,
                 state,
                 flags,
+                ..
             } => format!("write {} {} {}", p(position), state.0, flags),
             Self::Destroy {
                 position, drops, ..
@@ -532,6 +565,15 @@ impl BlockLandingWorld for MotionWorld<'_, '_, '_> {
     fn under_spawn_protection(&mut self, _: BlockPos) -> Result<bool> {
         Ok(false)
     }
+    fn trample_allowed(&mut self, position: BlockPos, distance: f64) -> Result<bool> {
+        let id = self.player.entity_id;
+        Ok(crate::block_contact::trample_allowed(
+            id,
+            "minecraft:player",
+            position,
+            distance,
+        ))
+    }
     fn mob_griefing(&mut self) -> Result<bool> {
         Ok(true)
     }
@@ -611,9 +653,11 @@ impl BlockLandingWorld for MotionWorld<'_, '_, '_> {
         Ok(true)
     }
     fn set_block(&mut self, position: BlockPos, state: BlockStateId, flags: u32) -> Result<bool> {
+        let from = self.scene.block(position.x, position.y, position.z);
         self.scene.set(position.x, position.y, position.z, state)?;
         self.fall_event(FallEvent::Write {
             position,
+            from,
             state,
             flags,
         });
@@ -691,7 +735,15 @@ impl LivingFallWorld for FallCall<'_, '_, '_, '_> {
         self.world.entity_sound(sound, 1.0, 1.0)
     }
     fn play_block_fall_sound(&mut self) -> Result<()> {
-        self.world.fall_event(FallEvent::BlockFallSound);
+        // LivingEntity.playBlockFallSound: the state at floor(y - 0.2F); the
+        // listeners skip air and scale volume and pitch (`heard_fall_sound`).
+        let p = self.world.player.position;
+        let state = self.world.scene.block(
+            p.x.floor() as i32,
+            (p.y - f64::from(0.2_f32)).floor() as i32,
+            p.z.floor() as i32,
+        );
+        self.world.fall_event(FallEvent::BlockFallSound { state });
         Ok(())
     }
     fn hurt(&mut self, amount: f32) -> Result<()> {

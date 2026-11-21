@@ -16,7 +16,7 @@ use crate::{
 use horizon_core::{
     geometry::{Aabb, Direction, Vec3, sweep_intersected_blocks},
     position::BlockPos,
-    random::{LegacyRandom, RandomSource},
+    random::{EntityRandom, RandomSource},
 };
 use horizon_world::{
     block_collision::BlockCollisionRegistry,
@@ -25,8 +25,9 @@ use horizon_world::{
         FluidSections, FluidTagId,
     },
     entity_fluid_tick::{self, EntityFluidTickWorld},
-    fluid::{FluidHeightWorld, FluidKind, FluidState},
+    fluid::{FluidHeightWorld, FluidKind, FluidState, FluidTemplate},
     fluid_flow::{FluidFlowWorld, flow_at},
+    nbt::Tag,
     registry::BlockStateId,
     water_splash::{self, SplashParticle, WaterSplashWorld},
 };
@@ -172,10 +173,15 @@ pub struct ArrowState {
     pub pickup: Pickup,
     /// Its entity type is `SpectralArrow` (the type is its own, not the pickup item's).
     pub spectral: bool,
+    /// `SpectralArrow` saved duration; its constructor default is 200.
+    pub spectral_duration: i32,
     /// `pickupItemStack`: what picking the arrow up gives.
     pub pickup_item: crate::items::ItemStack,
     /// `AbstractArrow.firedFromWeapon`: the crossbow or bow it was shot from.
     pub fired_from_weapon: Option<crate::items::ItemStack>,
+    /// `AbstractArrow.soundEvent` is `item.crossbow.hit` (`CrossbowItem.createProjectile`)
+    /// until the first block hit sets it back to `entity.arrow.hit`.
+    pub crossbow_hit_sound: bool,
     pub no_physics: bool,
     /// `Arrow.ID_EFFECT_COLOR` as a client has it from its server (-1: none).
     pub effect_color: i32,
@@ -194,12 +200,15 @@ pub struct ArrowState {
     pub was_eye_in_water: bool,
     pub first_tick: bool,
     pub has_been_shot: bool,
+    /// `Projectile.canBreak`: the decoded top-level projectile predicate,
+    /// independent of its pickup item and firing weapon.
+    pub can_break: Option<horizon_world::nbt::Tag>,
     /// `ThrownTrident.dealtDamage`: it has hit an entity (or sat in a block
     /// for over 4 ticks) and hits no more.
     pub dealt_damage: bool,
     pub removed: bool,
     /// The arrow's own random (`Entity.random`).
-    pub random: LegacyRandom,
+    pub random: EntityRandom,
     pub events: Vec<ArrowEvent>,
     /// The speed (`deltaMovement.length()`) it hit a block at, before it stuck.
     pub hit_speed: f64,
@@ -229,8 +238,37 @@ impl PartialEq for ArrowState {
             && self.synced_fire == other.synced_fire
     }
 }
+const ARROW_HIT: &str = "minecraft:entity.arrow.hit";
+const CROSSBOW_HIT: &str = "minecraft:item.crossbow.hit";
+
 impl ArrowState {
-    pub fn new(random: LegacyRandom) -> Self {
+    /// `AbstractArrow.addAdditionalSaveData`'s `SoundEvent`: the crossbow's
+    /// until the first block hit, else the loaded one (a trident's own) or
+    /// `entity.arrow.hit`.
+    pub fn saved_sound_event(&self, loaded: Option<&Tag>) -> Tag {
+        let loaded = match loaded {
+            Some(Tag::String(s)) => s.to_string_lossy(),
+            _ => ARROW_HIT.into(),
+        };
+        let sound = match (self.crossbow_hit_sound, loaded.as_ref()) {
+            (true, _) => CROSSBOW_HIT,
+            (false, CROSSBOW_HIT) => ARROW_HIT,
+            (false, other) => other,
+        };
+        Tag::String(sound.into())
+    }
+    /// `AbstractArrow.readAdditionalSaveData`'s `weapon` and `SoundEvent`.
+    pub fn load_weapon_and_sound(
+        &mut self,
+        tag: &Tag,
+        item: impl FnOnce(&Tag) -> Option<crate::items::ItemStack>,
+    ) {
+        self.fired_from_weapon = tag.get("weapon").and_then(item);
+        let saved = tag.get("SoundEvent");
+        self.crossbow_hit_sound =
+            matches!(saved, Some(Tag::String(s)) if s.to_string_lossy() == CROSSBOW_HIT);
+    }
+    pub fn new(random: EntityRandom) -> Self {
         Self {
             in_ground: false,
             canceled_impact_inside: false,
@@ -240,8 +278,10 @@ impl ArrowState {
             last_state: None,
             pickup: Pickup::Disallowed,
             spectral: false,
+            spectral_duration: 200,
             pickup_item: crate::items::ItemStack::new("minecraft:arrow", 1),
             fired_from_weapon: None,
+            crossbow_hit_sound: false,
             no_physics: false,
             effect_color: -1,
             pierce: 0,
@@ -254,6 +294,7 @@ impl ArrowState {
             was_eye_in_water: false,
             first_tick: true,
             has_been_shot: false,
+            can_break: None,
             dealt_damage: false,
             removed: false,
             random,
@@ -267,8 +308,22 @@ impl ArrowState {
     /// `Arrow.getColor` of the server's own arrow: the colour of the potion on
     /// its pickup item, None for a plain arrow (`PotionContents.EMPTY`).
     pub fn potion_color(&self) -> Option<u32> {
-        let potion = self.pickup_item.potion()?;
-        Some(crate::brewing::potion_color(Some(potion)))
+        (!crate::brewing::contents_empty(&self.pickup_item))
+            .then(|| crate::brewing::contents_color(&self.pickup_item))
+    }
+    /// Its entity type is `SpectralArrow`: the type it loaded with, or the
+    /// item it was fired as (a bow's spectral ammo).
+    pub fn is_spectral_type(&self) -> bool {
+        self.spectral || &*self.pickup_item.item == "minecraft:spectral_arrow"
+    }
+    /// `SpectralArrow.readAdditionalSaveData`: the glow `Duration` of the
+    /// compound being loaded, 200 when it has none. `getIntOr` is
+    /// `NumericTag.intValue`, so a float or double one floors.
+    pub fn read_spectral_duration(&mut self, tag: &Tag) {
+        self.spectral_duration = tag
+            .get("Duration")
+            .and_then(crate::nbt_path::int_value)
+            .unwrap_or(200);
     }
     /// The `AbstractArrow` constructor's `pickupItemStack`: the drawn ammo
     /// (one item). Ammo drawn without being used up (`INTANGIBLE_PROJECTILE`)
@@ -331,9 +386,20 @@ pub struct ArrowScene<'a, 'r> {
     /// The `mob_griefing` and `tnt_explodes` game rules.
     pub mob_griefing: bool,
     pub tnt_explodes: bool,
+    pub owners: &'a dyn OwnerLookup,
+}
+/// `EntityReference.getEntity` for an owner the arrow only knows by UUID.
+pub trait OwnerLookup {
+    /// A loaded entity other than a player has this UUID.
+    fn non_player_entity(&self, uuid: [i32; 4]) -> bool;
+}
+impl OwnerLookup for () {
+    fn non_player_entity(&self, _: [i32; 4]) -> bool {
+        false
+    }
 }
 impl ArrowScene<'_, '_> {
-    fn block(&self, p: BlockPos) -> BlockStateId {
+    pub fn block(&self, p: BlockPos) -> BlockStateId {
         self.world.block(p.x, p.y, p.z)
     }
     fn is_air(&self, state: BlockStateId) -> bool {
@@ -370,6 +436,8 @@ impl ArrowScene<'_, '_> {
             binding: self.collision,
             subject: None,
         };
+        // CollisionContext.of(arrow): scaffolding is open from below.
+        let context = horizon_world::collision_context::CollisionContext::position(from.y);
         let hit = horizon_core::geometry::traverse_blocks(from, to, 1024, |p: BlockPos| {
             if Some(p) == ignored {
                 return None;
@@ -380,7 +448,7 @@ impl ArrowScene<'_, '_> {
             }
             let shape = self
                 .collision
-                .collision_shape(&mut scene, state, [p.x, p.y, p.z])
+                .collision_shape_with_context(&mut scene, state, p, &context)
                 .ok()?;
             shape.clip(from, to, p)
         });
@@ -388,7 +456,7 @@ impl ArrowScene<'_, '_> {
         Some((hit.location, hit.block, hit.direction.normal()))
     }
     /// `CollisionGetter.noCollision(null, box)` over blocks.
-    fn no_block_collision(&self, b: Aabb) -> bool {
+    pub fn no_block_collision(&self, b: Aabb) -> bool {
         let (lo, hi) = (b.min_position(), b.max_position());
         for x in (lo.x.floor() as i32 - 1)..=(hi.x.floor() as i32 + 1) {
             for y in (lo.y.floor() as i32 - 1)..=(hi.y.floor() as i32 + 1) {
@@ -447,13 +515,15 @@ pub fn clip_block_hit(
         binding: collision,
         subject: None,
     };
+    // CollisionContext.of(projectile): scaffolding is open from below.
+    let context = horizon_world::collision_context::CollisionContext::position(from.y);
     let hit = horizon_core::geometry::traverse_blocks(from, to, 1024, |p: BlockPos| {
         let state = world.block(p.x, p.y, p.z);
         if facts.is_air(state) {
             return None;
         }
         let shape = collision
-            .collision_shape(&mut scene, state, [p.x, p.y, p.z])
+            .collision_shape_with_context(&mut scene, state, p, &context)
             .ok()?;
         shape.clip(from, to, p)
     })
@@ -840,7 +910,7 @@ impl Ticker<'_, '_, '_, '_> {
         if !self.st.first_tick && self.st.fluids.is_in_fluid(&Tags, LAVA) {
             self.st.fall_distance *= 0.5;
         }
-        if self.position().y < f64::from(self.scene.world.bottom_y() - 64) {
+        if self.position().y < self.scene.world.below_world_y() {
             self.st.removed = true;
         }
         self.st.first_tick = false;
@@ -877,11 +947,8 @@ impl Ticker<'_, '_, '_, '_> {
     /// `AbstractArrow.startFalling`.
     fn start_falling(&mut self) {
         self.st.in_ground = false;
-        let v = self.p.velocity;
-        let x = f64::from(self.st.random.next_float() * 0.2);
-        let y = f64::from(self.st.random.next_float() * 0.2);
-        let z = f64::from(self.st.random.next_float() * 0.2);
-        self.p.velocity = Vec3::new(v.x * x, v.y * y, v.z * z);
+        self.p.velocity =
+            crate::projectiles::start_falling_velocity(self.p.velocity, &mut self.st.random);
         self.st.life = 0;
     }
     /// `AbstractArrow.stepMoveAndHit`: the nearest entity on the way, else the
@@ -989,11 +1056,7 @@ impl Ticker<'_, '_, '_, '_> {
     fn hit_sound(&mut self) {
         let pitch = 1.2 / (self.st.random.next_float() * 0.2 + 0.9);
         // CrossbowItem.createProjectile: its arrows hit with the crossbow's sound.
-        let crossbow = self
-            .st
-            .fired_from_weapon
-            .as_ref()
-            .is_some_and(|s| &*s.item == "minecraft:crossbow");
+        let crossbow = self.st.crossbow_hit_sound;
         let sound = if self.trident() {
             ArrowSound::TridentHitGround
         } else if crossbow {
@@ -1057,13 +1120,23 @@ impl Ticker<'_, '_, '_, '_> {
         self.hit_sound();
         self.st.in_ground = true;
         self.st.shake = 7;
+        // setSoundEvent(SoundEvents.ARROW_HIT): later hits and the save.
+        self.st.crossbow_hit_sound = false;
         self.p.set_critical(false);
         self.st.pierce = 0;
         self.st.pierced.clear();
     }
-    /// `Projectile.mayInteract`: a mob's arrows need `mob_griefing`.
+    /// `Projectile.mayInteract`: an arrow owned by anything but a player needs `mob_griefing`.
     fn may_interact(&self) -> bool {
-        !matches!(self.p.owner, Some(Who::Mob(_))) || self.scene.mob_griefing
+        let by_entity = match self.p.owner {
+            Some(Who::Mob(_)) => true,
+            Some(Who::Player) => false,
+            None => self
+                .p
+                .owner_uuid
+                .is_some_and(|u| self.scene.owners.non_player_entity(u)),
+        };
+        !by_entity || self.scene.mob_griefing
     }
     /// `onProjectileHit` of the blocks a burning projectile lights.
     fn block_reaction(&self, state: BlockStateId) -> Option<BlockReaction> {
@@ -1291,15 +1364,15 @@ impl ArrowScene<'_, '_> {
             }
             if inside_fluid {
                 effects.advance(step);
-                match fluid.kind() {
+                match fluid.kind().template() {
                     // WaterFluid.entityInside.
-                    FluidKind::Water | FluidKind::FlowingWater => effects.apply(Effect::Extinguish),
+                    FluidTemplate::Water => effects.apply(Effect::Extinguish),
                     // LavaFluid.entityInside (lavaHurt does nothing to arrows).
-                    FluidKind::Lava | FluidKind::FlowingLava => {
+                    FluidTemplate::Lava => {
                         effects.apply(Effect::ClearFreeze);
                         effects.apply(Effect::LavaIgnite);
                     }
-                    FluidKind::Empty => {}
+                    FluidTemplate::Empty => {}
                 }
             }
         }

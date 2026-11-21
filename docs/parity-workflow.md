@@ -5,9 +5,16 @@
 > works and why the code is shaped this way. For building and testing here, see
 > [skyline-dev.md](skyline-dev.md).
 
-How parity work is run, checked and merged. The harnesses themselves are described in [Rust rewrite status](rust-parity.md).
+How parity work is run, checked and merged. What is ported and where it is checked: [Rust rewrite status](rust-parity.md).
 
 ## Running the vanilla harnesses
+
+Same-machine fixtures created with `lab.game_env` use `HORIZON_TEST_LOOPBACK=1`: Horizon
+listens on loopback and does not scan or announce LAN worlds. This avoids Windows Firewall
+permission prompts for newly compiled fixture executables. Set `HORIZON_TEST_LOOPBACK=0`
+explicitly when testing real network interfaces or multicast discovery. Local vanilla server
+fixtures also set `server-ip=127.0.0.1`; use one installed JDK via `JAVA_HOME` and its `bin`
+on `PATH`, rather than copying Java to each fixture directory. Keep the firewall enabled.
 
 `tools/parity.py` runs the `tools/test_*_parity.py` harnesses in parallel and reruns only what a change can affect:
 
@@ -43,6 +50,8 @@ All runners on a machine share `PARITY_MACHINE_JOBS` slots (default: half the CP
 
 The game logs into `HORIZON_HOME` and falls back to the player's own game folder when it is unset, so a harness that starts the game, `horizon-ctl`, the launcher or the dedicated server builds the environment with `lab.game_env(**extra)`: no audio, and fresh scratch folders for `HORIZON_HOME`, `HORIZON_LAUNCHER_HOME`, `XDG_DATA_HOME` and `XDG_CONFIG_HOME`, removed when the harness exits (a folder you pass, or that the environment already has, is kept). The runner also gives each harness its own `HORIZON_HOME` under `.local/parity-runner/game-home/`. `tests/test_game_home.py` fails for a script in `tools/` that starts the game without it.
 
+`frame_identity` (`tools/test_frame_identity_parity.py`) holds the picture where a change shouldn't move it, as the HDR design note's first tests ask ([design/hdr-linear-light.md](design/hdr-linear-light.md#tests)). Its oracle is the base build, not vanilla: pictures of the game hold Minecraft's textures and can't be committed. It builds `BASE_SHA` (else the merge-base with `origin/main`) in a worktree and target folder of its own under `.local/frame-identity/`, kept between runs so a later base rebuilds incrementally, draws fixed scenes offscreen with each build under `HORIZON_STILL=1` (HDR off; the Golden Hour pack in SDR and with offscreen HDR output; HDR turned off in a running game), and requires identical pixels, writing `diff-<scene>.png` where they aren't. Both builds draw on lavapipe where Mesa's Vulkan driver is installed, else on the machine's default adapter. When the change touches only `tools/`, `tests/`, `.github/` or Markdown outside `crates/`, the base reuses the change's binaries (`--build-base` builds it anyway), so the run checks that two runs of one build agree. It is `named_only` in `tools/parity_hosts.json`, since it fails any change that moves the picture on purpose: a pull request that must leave it alone carries the `frame-identity` label (docs/release-flow.md), and `python3 tools/parity.py frame_identity` runs it by name.
+
 ### Other machines
 
 Harnesses can also run on the Mac mini, the desktop and playhorizon (`tools/parity_hosts.json` describes them; `desktop` and `playhorizon` use their CI runner's environment and vanilla data, the desktop's entry describes its 10-26 setup, retired, and refuses work: docs/release-flow.md, "The desktop's runner"; its `default` list is empty, so pass `--hosts macmini,playhorizon` or set `PARITY_HOSTS`, after copying `shared-local/` to `~/code/horizon-parity/shared-local` on each host). The runner mirrors the worktree there with rsync (not `.git`, `.local`, `target` or ignored files) into `~/code/horizon-parity/remote/<host><path>`, whose `.local` links to the vanilla data in `~/code/horizon-parity/shared-local`, and starts `tools/parity.py --worker` over ssh. The worker builds the probes (about 80 s the first time) and runs what it is sent under the same tracer, admitting harnesses against its own free memory. One queue, longest first, feeds every machine, remote ones first: the Mac takes up to 14 harnesses, the desktop 8, playhorizon 3 (on CPUs 0-3: its CI runner has 4-7). Each pass comes back with the content hash of every file it depended on, so it is keyed on exactly what ran, and logs come back to `.local/parity-runner/logs/`; state, sharing and `gate.py` work as before. If a host can't be reached, or drops out, its harnesses run here.
@@ -68,6 +77,7 @@ A harness can declare, at the top level of its script:
 
 - `PARITY_SHARDS = N`: it runs as `NAME#1` to `NAME#N`, in parallel, each told its share in `PARITY_SHARD=i/N` (`test_datafix_parity.py` upgrades every sixth world). `NAME` on the command line or in `--known-failures` means all of them.
 - `PARITY_RUST_SCOPE = [...]`: the Rust sources its probes can reach, as path prefixes. Cargo's dep-info names every file of every crate a probe links, so without it a probe of `horizon-world` depends on all 350 of its files. The runner keeps only the scope's files if the scope is closed: nothing in it names a module, crate-root re-export or macro outside it (`crate::`, `super::`, other workspace crates; comments and strings ignored), declares a module it doesn't cover, or includes source, and nothing outside it implements anything for a type it defines. Crate roots then count without their declarations of other modules, so adding a module elsewhere doesn't rerun the harness. If the scope isn't closed the runner says why and keeps every file. `datafix` depends on 41 files this way, not 354.
+- `PARITY_MANUAL = "<how to run it>"`: the script is a proof someone runs by hand with arguments (a Java side, then a native side against its reference), not a harness. `parity.py` leaves it out of every run, `--changed` and parity-main included, and names that text when it is asked for it by name.
 
 ### Which harnesses a change affects
 
@@ -126,9 +136,62 @@ The LAN checks open and fill machines through the guest's inventory packets, obs
 powered dispenser's projectile on both clients, and open a chest to activate a sculk sensor
 and shrieker. They supplement the deterministic component comparisons.
 
+A new `command_exec` group goes into a file of its own under `tools/command_exec_groups/`: a module
+with `GROUP` (its name) and `cases(cmd, setup)` (its ops). The corpus finds it by file name, so two
+pull requests that each add a group don't touch the same lines (#16833). Most existing groups are
+still functions in `tools/command_exec_corpus.py`.
+
+### Randoms that repeat
+
+Vanilla seeds every unseeded random (`RandomSource.create()`: each entity's own, the level's, a raid's...) from `RandomSupport.generateUniqueSeed`, a shared uniquifier XORed with `System.nanoTime()`, and numbers entities from `ServerLevel.ENTITY_COUNTER`; Horizon ports both (`random_source::unique_seed`, `Game.next_entity`). A command script can make what they decide comparable exactly: a dropped item's position, primed TNT's kick, a dispensed item's motion, which tick of four a resting item moves on.
+
+- `{"op": "sync_randoms", "uniquifier": U, "entity_id": E, "level_seed": S}`, run on the server thread of both engines, sets that thread's uniquifier to `U`, the entity-id counter to `E` (the next entity is `E + 1`) and the random of the player's level to seed `S`. Startup creates a different number of randoms in each engine, so sync right before what you compare, and give each case its own values (Horizon keeps an entity's UUID by id).
+- A script with this step runs vanilla under `tools/seed_agent.py`'s agent (`SeedAgent.java`, built with the JDK's class-file API): `generateUniqueSeed` steps a uniquifier of the calling thread's own, from vanilla's start and by vanilla's factor, without the clock. Horizon runs with `HORIZON_TEST_SEEDS=1`, which does the same in `unique_seed`; the step fails without it. Per thread, so worker threads and Horizon's client don't shift the server thread's seeds. The agent jar is an oracle input (`tools/parity_shim.py`).
+- `tools/seed_sync_corpus.py` is the example and the proof, a harness of its own (`python3 tools/parity.py seed_sync`): a script that syncs runs on fixed seeds to its end, so the groups after a sync would draw from them, and a group that passes on most seeds could fail on those every time. `--unsynced-randoms` leaves the steps out, and the same fields then differ run to run.
+
+One draw too many or too few shifts every later value, so read the first field that differs. Not covered: randoms on other threads (worldgen and chunk loading: keep scenarios in loaded chunks), the levels other than the player's, randoms created before the step (the server's, the level's sound seeds) except the level's own, `Level.randValue` (random-tick positions) and other `ThreadLocalRandom` or `Math.random` draws, and anything a tick draws from the level's random before what you read (each tick shuffles the chunks near players with it, even with `spawn_mobs` off).
+
+### Fuzzing scenarios
+
+`tools/parity_fuzz.py` runs small generated scenarios in vanilla and Horizon and reports each divergence once, shrunk, with a reproduction (#12498). A batch of scenarios runs as one command-exec script (`test_command_exec_parity.py --groups-file`). It is a tool to run by hand, not a harness: `parity.py` never selects it.
+
+```sh
+python3 tools/parity_fuzz.py --smoke --binary target/fast/horizon-client.exe   # fixed scenarios that must match (~30 s)
+python3 tools/parity_fuzz.py persist --seed 1 --count 60                          # summon or place, unload and reload, read
+python3 tools/parity_fuzz.py spawn --seed 1 --count 60                            # each spawn mechanism, read tick by tick
+python3 tools/parity_fuzz.py --replay scenarios.json                               # run these scenarios (a report's, edited)
+```
+
+- **Scenarios.** A scenario is a seed and steps: summon (with NBT), place a block (with NBT), a command, ticks, a dispenser activation, an unload and reload, and reads (`/data get`). Each gets a chunk of its own far from the player (x 4096 and up, y 300, on a stone floor), forceloaded, and syncs both engines' randoms first ("Randoms that repeat"). A reload removes the forced ticket, ticks until both engines saved and dropped the chunk (a guard checks vanilla did), and loads it back: a real save and load through each engine's chunk and entity storage. Summoned entities get fixed UUIDs, so reads find them without selectors.
+- **Families** (`tools/parity_fuzz_scenarios.py`). `persist` summons an entity or places a block entity with changed fields, maybe beside other blocks, and reads it before and after a reload. `spawn` makes an entity one way (summon, dispenser, dispenser on a redstone signal, a block broken, an explosion, a piston) and reads it before its first tick and after each of a few. Field names are vanilla's own: the first run summons every entity type and places every block entity bare and caches what vanilla saves for each in the work directory (`defaults.json`); mutations change those fields' values and keep their NBT types. A run of 60 scenarios takes a few minutes; shrinking adds one or two batches per round.
+- **Comparison.** A `/data get` read is parsed as SNBT and compared field by field, so a difference names its field. Key order is not compared, nor the order of `attributes` (vanilla's own order changes run to run). Other commands compare like the harness (feedback, styles, results). `ALLOWED` in the script lists the differences that are not bugs, each with its reason.
+- **Grouping and shrinking.** Each diverging read is grouped by family, subject type, whether the read came after a reload, and first differing field. Each group's smallest scenario is shrunk (steps and NBT keys dropped, tick counts halved) while that group's divergence stays, trying all edits of a round in one batch. `report.json` in the work directory lists the groups, largest first, each with its seeds, its shrunk scenario as commands, and its differences.
+- **Triage before filing.** A group is a lead, not a bug: read the vanilla source for the field, check it isn't a seed-sync limit (above) or harness noise, and search existing issues first.
+
 ## Reading vanilla
 
-Besides the Vineflower sources in `.local/minecraft/<version>/sources/`, `tools/rea_vanilla.py` queries the shipped bytecode through REA (callers through lambdas, overloads, a second decompiler); see [decompilation status](decompilation-status.md#querying-the-shipped-bytecode-with-rea).
+Game jars, decompiled sources and reports live in the gitignored `.local/`, rebuilt from your own copy of the game;
+nothing of Mojang's is committed or downloaded by the tools ([README](native-client.md#run-from-a-checkout)):
+
+```sh
+python3 tools/lab.py prepare --server-jar ~/Downloads/server.jar   # checks the pinned jars (research-lock.json)
+python3 tools/lab.py decompile    # Vineflower: .local/minecraft/26.3/sources/{client,server}/
+python3 tools/lab.py status       # coverage reports under .local/minecraft/26.3/reports/
+```
+
+`tools/rea_vanilla.py` queries the shipped bytecode through [REA](https://github.com/morluto/rea) (a headless JADX)
+for what text search misses: every caller of a method including lambdas and bridges, every overload, or a second
+decompiler's view of a method whose Vineflower output looks wrong:
+
+```sh
+python3 tools/rea_vanilla.py class net.minecraft.world.level.block.DispenserBlock
+python3 tools/rea_vanilla.py method net.minecraft.world.level.block.DispenserBlock dispenseFrom
+python3 tools/rea_vanilla.py callers net.minecraft.server.level.ServerLevel tickChunk
+python3 tools/rea_vanilla.py --jar server-game classes DedicatedServer
+```
+
+REA and JADX are pinned in `research-lock.json` and downloaded into `.local/tools/` on first use; each query takes
+about five seconds. Decompiled bodies are a reading aid: the bytecode and the oracle harnesses are the reference.
 
 ## Player-facing integration and deterministic fixtures
 

@@ -37,6 +37,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+pub(super) mod capture;
+
 /// How long the window waits for the server thread to answer a `call`.
 const CALL_TIMEOUT: Duration = Duration::from_secs(10);
 /// The error of a `call` without an answer: the server stopped, or it was
@@ -50,9 +52,12 @@ const PLAYER_CHUNKS: usize = 49;
 /// What the window tells its server thread.
 #[derive(Default)]
 struct Flags {
+    #[cfg(test)]
+    fail_tick: AtomicBool,
     /// `Minecraft.pause`: a single-player pause screen is open.
     paused: AtomicBool,
     stop: AtomicBool,
+    finished: AtomicBool,
     failure: Mutex<Option<String>>,
     /// `IntegratedServer.getPort`: the port it is open to the LAN on, 0
     /// while it is not.
@@ -65,6 +70,8 @@ struct Flags {
     /// `options.entityDistanceScaling` (an `f32`'s bits), which
     /// `IntegratedServer.getScaledTrackingDistance` reads on every call.
     entity_distance: AtomicU32,
+    /// The PvP page's legacy combat rules, which the server's hits follow from the next tick.
+    legacy_rules: AtomicBool,
     /// `MinecraftServer.isCurrentlySaving`: the server is autosaving.
     saving: AtomicBool,
     /// Splitscreen players joined through memory (offline uuids): let in although the world is
@@ -87,6 +94,36 @@ struct Flags {
     debug: Mutex<super::debug_lines::ServerDebug>,
 }
 
+impl Flags {
+    fn emergency_save(&self, server: std::thread::ThreadId, timeout: Duration) -> bool {
+        if std::thread::current().id() == server || self.finished.load(Ordering::Acquire) {
+            return true;
+        }
+        log::warn!("Horizon: saving the world before the crash");
+        self.stop.store(true, Ordering::Relaxed);
+        let started = Instant::now();
+        while !self.finished.load(Ordering::Acquire) {
+            let Some(left) = timeout.checked_sub(started.elapsed()) else {
+                log::warn!(
+                    "Horizon: the world did not save within {} s",
+                    timeout.as_secs()
+                );
+                return false;
+            };
+            std::thread::sleep(left.min(Duration::from_millis(10)));
+        }
+        true
+    }
+}
+
+// Signal even if serve returns an error or unwinds; no game data is touched here.
+struct Finished(Arc<Flags>);
+impl Drop for Finished {
+    fn drop(&mut self) {
+        self.0.finished.store(true, Ordering::Release);
+    }
+}
+
 /// Work the window hands its server thread (`MinecraftServer.execute`).
 type Task = Box<dyn FnOnce(&mut Game<'_>) + Send>;
 
@@ -94,11 +131,23 @@ type Task = Box<dyn FnOnce(&mut Game<'_>) + Send>;
 pub(super) struct Integrated {
     flags: Arc<Flags>,
     thread: Option<JoinHandle<()>>,
+    emergency_save: Option<horizon_client::crash::EmergencySave>,
     tasks: Sender<Task>,
     /// The world's name (`level.dat`'s `LevelName`), for the pause menu.
     pub world_name: String,
 }
 impl Integrated {
+    /// Queue every change, even if the currently published tree still has the requested state:
+    /// an earlier update may be waiting for a busy server thread.
+    fn queue_pregen_option(&self, enabled: bool) {
+        let _ = self.tasks.send(Box::new(move |g| {
+            use horizon_client::command::vanilla;
+            if vanilla::game_dispatcher().find("pregen").is_some() != enabled {
+                vanilla::set_horizon_commands(enabled);
+                g.resend_commands_filtered();
+            }
+        }));
+    }
     /// The generator of the server's level in `dimension`, once it has run.
     pub fn terrain(
         &self,
@@ -139,6 +188,11 @@ impl Integrated {
     pub fn set_paused(&self, paused: bool) {
         let split = !self.flags.split_players.lock().unwrap().is_empty();
         self.flags.paused.store(paused && !split, Ordering::Relaxed);
+    }
+    /// Whether splitscreen players are joined: while any is, the game runs even behind a
+    /// pause menu, so no window may stop ticking for one (`set_paused`, `pauses_game`).
+    pub fn has_split_players(&self) -> bool {
+        !self.flags.split_players.lock().unwrap().is_empty()
     }
     /// Splitscreen: `name` left; the game pauses again once every such player has. The owner's
     /// permissions it was given go with it (a LAN player could otherwise join under that name).
@@ -185,6 +239,10 @@ impl Integrated {
             .entity_distance
             .store(entity.to_bits(), Ordering::Relaxed);
     }
+    /// The window's legacy combat rules option, for the server's hits.
+    pub fn set_legacy_rules(&self, on: bool) {
+        self.flags.legacy_rules.store(on, Ordering::Relaxed);
+    }
     /// `IntegratedServer.getPort` while `isPublished`.
     pub fn published(&self) -> Option<u16> {
         Some(self.flags.published.load(Ordering::Relaxed)).filter(|&p| p != 0)
@@ -219,6 +277,11 @@ impl Integrated {
             Err(RecvTimeoutError::Disconnected) => None,
         }
     }
+    /// `execute`: run `f` on the server thread between two ticks, without
+    /// waiting for it. False once the server has stopped.
+    pub fn post(&self, f: impl FnOnce(&mut Game<'_>) + Send + 'static) -> bool {
+        self.tasks.send(Box::new(f)).is_ok()
+    }
     /// `IntegratedServer.halt(true)`: returns once the world is saved and let go.
     pub fn stop(mut self) -> Result<()> {
         self.halt()
@@ -234,6 +297,7 @@ impl Integrated {
     }
     fn halt(&mut self) -> Result<()> {
         self.request_stop();
+        self.emergency_save.take();
         if let Some(thread) = self.thread.take() {
             thread
                 .join()
@@ -327,10 +391,27 @@ struct Launch {
 }
 
 impl Game<'_> {
+    /// Only the owner window changes its integrated server's command tree. A remote
+    /// server (or a splitscreen guest) keeps its own choice and permissions.
+    pub(super) fn sync_pregen_option(&self) {
+        let Some(server) = &self.integrated else {
+            return;
+        };
+        let enabled = self.options.pregen || self.settings.extras.pregen;
+        // Check on the server, after earlier updates have run, so a later toggle
+        // wins. Do not block the window when an unrelated setting changes.
+        server.queue_pregen_option(enabled);
+    }
+
     /// `Minecraft.hasSingleplayerServer`: a world of this window's own, run
     /// in the frame or on its server thread.
     pub(super) fn has_singleplayer_server(&self) -> bool {
         self.remote.is_none() || self.integrated.is_some()
+    }
+    /// `Minecraft.isMultiplayerServer`: on another's server, or a world of one's own open to the
+    /// network.
+    pub(super) fn is_multiplayer_server(&self) -> bool {
+        !self.has_singleplayer_server() || self.is_published()
     }
     /// `IntegratedServer.isPublished`: the world is open to the network.
     pub(super) fn is_published(&self) -> bool {
@@ -339,6 +420,13 @@ impl Game<'_> {
                 .integrated
                 .as_ref()
                 .is_some_and(|s| s.published().is_some())
+    }
+    /// Splitscreen: players joined through memory play on while one opens a pause menu;
+    /// the world keeps ticking for them (`set_paused`), so this window must keep ticking too.
+    pub(super) fn has_split_players(&self) -> bool {
+        self.integrated
+            .as_ref()
+            .is_some_and(|s| s.has_split_players())
     }
     /// `Minecraft.doWorldLoad`: start the server thread on the world; the
     /// window joins it through memory once it is ready (`poll_integrated_start`).
@@ -352,19 +440,29 @@ impl Game<'_> {
     ) -> Result<()> {
         // The window's mod configs before the server's, as on NeoForge.
         self.native_configs_client_start();
+        horizon_client::command::vanilla::set_horizon_commands(
+            self.options.pregen || self.settings.extras.pregen,
+        );
         let auth = horizon_client::auth::current();
         let player = auth
             .as_ref()
             .map_or_else(|| self.options.player_name(), |a| a.name.clone());
         let new_world = create.is_some();
+        // `IntegratedServer`'s constructor: `setSingleplayerProfile(minecraft.getGameProfile())`
+        // — the signed-in account's own UUID. Only an offline start names its player by the
+        // offline profile. The owner is the world's player, so a world without
+        // `singleplayer_uuid` (a Realms download, `renameAndDropPlayer`) finds the owner's
+        // `players/data/<uuid>.dat` instead of starting a new player.
+        let owner = auth
+            .as_ref()
+            .map_or_else(|| offline_uuid(&player), |a| a.uuid);
         let launch = Launch {
             folder: folder.to_owned(),
             name: name.map(str::to_owned),
             seed,
             creative,
             create: create.cloned(),
-            // An offline-mode server names its players by their offline profile.
-            owner: offline_uuid(&player),
+            owner,
             player: player.clone(),
             owner_profile: auth.as_ref().map(|a| {
                 let id = a.uuid;
@@ -410,6 +508,7 @@ impl Game<'_> {
         ));
         self.world_biomes_base = self.world_biomes.clone();
         let (res, pack, settings) = (self.res.clone(), self.pack.clone(), self.settings.clone());
+        horizon_client::parallel::set_setting(settings.horizon.parallel_tick);
         let flags = Arc::new(Flags::default());
         flags
             .render_distance
@@ -420,12 +519,16 @@ impl Game<'_> {
         flags
             .entity_distance
             .store(settings.entity_distance.to_bits(), Ordering::Relaxed);
+        flags
+            .legacy_rules
+            .store(self.pvp_legacy_rules(), Ordering::Relaxed);
         let (ready_tx, ready) = channel();
         let (tasks, server_tasks) = channel();
         let server_flags = flags.clone();
         let thread = std::thread::Builder::new()
             .name("Server thread".into())
             .spawn(move || {
+                let _finished = Finished(server_flags.clone());
                 // MinecraftServer.spin's Thread.setPriority(8).
                 horizon_threads::favour_current();
                 let _ends = thread_end::Ends;
@@ -449,7 +552,13 @@ impl Game<'_> {
                     let _ = ready_tx.send(Err(e.to_string()));
                 }
             })?;
+        let emergency_flags = flags.clone();
+        let server_id = thread.thread().id();
+        let emergency_save = horizon_client::crash::on_emergency_save(move || {
+            emergency_flags.emergency_save(server_id, Duration::from_secs(30));
+        });
         let handle = Integrated {
+            emergency_save: Some(emergency_save),
             flags,
             thread: Some(thread),
             tasks,
@@ -515,6 +624,7 @@ impl Game<'_> {
         self.server_packs_world_pack(&folder);
         self.connect_local(pipe, &player)?;
         if let Some(r) = self.remote.as_mut() {
+            r.save_folder = Some(folder.clone());
             // `new LevelLoadTracker(newWorld ? 500L : 0L)`.
             r.level_load = horizon_client::level_loading::LevelLoadTracker::new(if new_world {
                 horizon_client::level_loading::LEVEL_LOAD_CLOSE_DELAY_MS
@@ -617,6 +727,7 @@ impl Game<'_> {
         opening: Opening,
     ) -> Result<()> {
         let result = self.run_integrated_inner(launch, flags, tasks, ready, opening);
+        self.finish_server_capture();
         if let Err(error) = &result {
             self.native_players_leaving();
             self.native_lifecycle_close_failed(&error.to_string());
@@ -650,8 +761,20 @@ impl Game<'_> {
             let stopped = self.stop_integrated();
             return result.and(stopped);
         }
+        let slow_ms = self
+            .options
+            .spikes
+            .unwrap_or(super::dedicated::SLOW_TICK_MS);
+        self.profile
+            .server
+            .get_or_insert_with(|| capture::ServerSide::new(slow_ms));
+        self.integrated_tick_loop(&flags)
+    }
+
+    fn integrated_tick_loop(&mut self, flags: &Flags) -> Result<()> {
         let mut next = Instant::now();
         let mut was_paused = false;
+        let mut failure = None;
         while !flags.stop.load(Ordering::Relaxed) {
             self.run_tasks();
             if self.agent.hold_server {
@@ -660,38 +783,99 @@ impl Game<'_> {
                 self.wait_for_next_server_tick(&mut next, true);
                 continue;
             }
+            self.server_tick_deadline = Some(next + self.clock.tick_duration());
             let paused = flags.paused.load(Ordering::Relaxed);
-            if paused && !was_paused {
-                // IntegratedServer.tickServer: the tick the game pauses saves
-                // everything (saveEverything, without flushing), as an
-                // autosave does.
-                log::info!("Saving and pausing game...");
-                self.save_game_with(false)?;
-            }
-            was_paused = paused;
-            if paused {
-                // Only the connections run.
-                self.tick_server_timed(true)?;
-            } else {
-                self.follow_distances(&flags);
-                let started = Instant::now();
-                self.tick_server_timed(false)?;
-                // MinecraftServer.tickServer's tick times, for /tick query.
-                self.clock.record(started.elapsed());
-                self.debug_charts.log_tick(started, started.elapsed());
-                flags.smoothed_tick_ms.store(
-                    self.debug_charts.smoothed_tick_ms.to_bits(),
-                    Ordering::Relaxed,
-                );
-                if let (Some(terrain), Ok(mut terrains)) =
-                    (self.end.locator(), flags.terrain.lock())
-                {
-                    terrains.insert(self.dim.id(), terrain);
+            let ticked =
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> Result<()> {
+                    #[cfg(test)]
+                    if flags.fail_tick.swap(false, Ordering::Relaxed) {
+                        self.level.name = "saved after integrated tick panic".into();
+                        self.experience.total = 37;
+                        panic!("integrated tick fixture");
+                    }
+                    if paused && !was_paused {
+                        // IntegratedServer.tickServer: the tick the game pauses saves
+                        // everything (saveEverything, without flushing), as an
+                        // autosave does.
+                        log::info!("Saving and pausing game...");
+                        self.save_game_with(false)?;
+                    }
+                    was_paused = paused;
+                    if paused {
+                        // Only the connections run.
+                        self.tick_server_measured(true)?;
+                    } else {
+                        self.follow_distances(flags);
+                        let cpu = horizon_client::spans::thread_cpu();
+                        let started = Instant::now();
+                        self.tick_server_measured(false)?;
+                        // MinecraftServer.tickServer's tick times, for /tick query.
+                        self.clock.record(started.elapsed());
+                        // Parallel Tick's Auto decides here, between ticks, how the next one runs.
+                        let on_cpu = horizon_client::spans::thread_cpu().zip(cpu);
+                        horizon_client::parallel::after_tick(
+                            started.elapsed().as_secs_f32() * 1000.0,
+                            on_cpu.map(|(end, start)| (end - start).as_secs_f32() * 1000.0),
+                        );
+                        self.debug_charts.log_tick(started, started.elapsed());
+                        flags.smoothed_tick_ms.store(
+                            self.debug_charts.smoothed_tick_ms.to_bits(),
+                            Ordering::Relaxed,
+                        );
+                        if let (Some(terrain), Ok(mut terrains)) =
+                            (self.end.locator(), flags.terrain.lock())
+                        {
+                            terrains.insert(self.dim.id(), terrain);
+                        }
+                    }
+                    Ok(())
+                }));
+            match ticked {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => {
+                    failure = Some(error);
+                    break;
+                }
+                Err(payload) => {
+                    failure = Some(
+                        format!(
+                            "the server thread panicked: {}",
+                            super::dedicated::panic_message(payload.as_ref())
+                        )
+                        .into(),
+                    );
+                    break;
                 }
             }
             self.apply_publish();
             self.publish_load_view();
             self.wait_for_next_server_tick(&mut next, paused);
+        }
+        if failure.is_none() {
+            self.finish_server_capture();
+        }
+        if let Some(error) = failure {
+            let finished = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                self.finish_server_capture();
+            }));
+            if let Err(payload) = finished {
+                log::error!(
+                    "Horizon: the server capture could not be closed after the crash: {}",
+                    super::dedicated::panic_message(payload.as_ref())
+                );
+            }
+            let stopped = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                self.stop_after_crash(&error.to_string())
+            }));
+            match stopped {
+                Ok(Ok(())) => {}
+                Ok(Err(save_error)) => log::error!("Horizon: crash shutdown: {save_error}"),
+                Err(payload) => log::error!(
+                    "Horizon: crash shutdown panicked: {}",
+                    super::dedicated::panic_message(payload.as_ref())
+                ),
+            }
+            return Err(error);
         }
         self.stop_integrated()
     }
@@ -736,6 +920,7 @@ impl Game<'_> {
         self.perf.world_opening();
         let open_step = startup::step("server.open_world");
         self.finish_open_world(opening.world?.finish()?)?;
+        self.start_datapacks()?;
         drop(open_step);
         if let Some(sync) = opening.sync {
             startup::time("server.sync_adopt", || sync.adopt(&self.pack_files()));
@@ -787,6 +972,9 @@ impl Game<'_> {
             })),
             levels: self.level_shapes,
             owner_profile: launch.owner_profile.clone(),
+            // `IntegratedServer.getSingleplayerProfile`: the window's own player logs in
+            // through memory as the account's profile, whatever the hello says.
+            singleplayer_profile: Some((launch.player.clone(), owner)),
             // IntegratedServer.initServer: the MOTD names the owner and the world.
             ..NetConfig::lan(
                 0,
@@ -823,10 +1011,11 @@ impl Game<'_> {
             pending: None,
             load: LoadPhase::default(),
         });
-        // MinecraftServer.prepareLevels: no forced chunks to load, so the
-        // stage is over at once; the player's chunks come after.
+        // MinecraftServer.prepareLevels: the saved tickets' chunks load; the
+        // player's chunks come after.
         let view = &flags.load;
         view.start(Stage::LoadInitialChunks, 0);
+        startup::time("server.prepare_levels", || self.prepare_levels())?;
         view.finish(Stage::LoadInitialChunks);
         let _ = ready.send(Ok((pipe, self.level.name.clone())));
         startup::time("server.settle_spawn", || self.settle_spawn())
@@ -834,7 +1023,7 @@ impl Game<'_> {
 
     /// `MinecraftServer.stopServer`: the players are saved and sent away,
     /// then the world is saved.
-    fn stop_integrated(&mut self) -> Result<()> {
+    pub(super) fn stop_integrated(&mut self) -> Result<()> {
         // Abort background terrain generation/decoration on shutdown, matching vanilla behavior.
         self.streaming.abort_generation();
         // The close request: lifecycle observation stops.
@@ -933,7 +1122,7 @@ impl Game<'_> {
             // Commands.performCommand runs in the player's level.
             let (back, theirs) = (self.dim, super::Dim::from_id(&dimension));
             let entered = theirs == back || self.enter_level(Some(&mut host), theirs).is_ok();
-            if entered && let Some(swap) = self.enter_guest(&mut host, conn) {
+            if entered && let Some(swap) = self.enter_guest(&mut host, conn, back) {
                 let command = command.trim_start_matches('/').to_owned();
                 // The hub is back in place while the command runs, as for a
                 // guest's own (`run_guest_commands`): selectors see every
@@ -943,7 +1132,8 @@ impl Game<'_> {
                     g.chat_capture = Some(Vec::new());
                     // A command a native mod registered goes to the mods
                     // first, as the owner's own chat does (the console is
-                    // level 4, so every registered usage is allowed).
+                    // level 4, so every registered usage is allowed; one with
+                    // a permission node asks the mods for the owner).
                     if !g.perform_native_command(conn, 4, command.trim()) {
                         g.run_command(&command);
                     }
@@ -1048,11 +1238,12 @@ impl Game<'_> {
     /// Publish or unpublish for real, once the hub is in its place (a
     /// player's `/publish` runs while it is out).
     /// IntegratedServer.tickServer: the server follows the window's render
-    /// and simulation distances when they change.
+    /// and simulation distances when they change (and Horizon's legacy combat rules).
     fn follow_distances(&mut self, flags: &Flags) {
         // IntegratedServer.getScaledTrackingDistance reads the option each time.
         self.settings.entity_distance =
             f32::from_bits(flags.entity_distance.load(Ordering::Relaxed));
+        self.set_pvp_legacy_rules(flags.legacy_rules.load(Ordering::Relaxed));
         let Some(host) = self.lan.as_mut() else {
             return;
         };
@@ -1200,6 +1391,9 @@ fn serve(
         launch.creative,
         launch.create.as_ref(),
     )
+    // `IntegratedServer.setSingleplayerProfile`: the account this world belongs to
+    // (an older world's offline owner moves to it at open).
+    .map(|request| request.owned_by(&launch.player, launch.owner))
     .and_then(|request| {
         WorldLoader::start(
             request,
@@ -1296,6 +1490,102 @@ mod tests {
     use super::*;
 
     #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn integrated_tick_panic_saves_changed_world() {
+        let mut game = super::super::native_machines::tests::server_game();
+        let root = std::env::temp_dir().join(format!(
+            "horizon-integrated-crash-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        game.world_root = root.clone();
+        game.save = Arc::new(horizon_client::save::SaveDir::new(
+            root.clone(),
+            horizon_client::save::LevelShape::OVERWORLD,
+        ));
+        game.player = Some(
+            horizon_client::motion::PlayerMotion::new(
+                game.motion,
+                horizon_core::geometry::Vec3::new(8.5, 64.0, 8.5),
+            )
+            .unwrap(),
+        );
+        let flags = Arc::new(Flags::default());
+        flags.fail_tick.store(true, Ordering::Relaxed);
+        flags.published.store(1234, Ordering::Relaxed);
+        let (_sender, tasks) = channel();
+        game.serving = Some(Serving {
+            flags: flags.clone(),
+            tasks,
+            owner: 1,
+            pending: None,
+            load: LoadPhase::default(),
+        });
+        let error = game.integrated_tick_loop(&flags).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "the server thread panicked: integrated tick fixture"
+        );
+        let saved = horizon_client::save::Level::read(&root).unwrap();
+        assert_eq!(saved.name, "saved after integrated tick panic");
+        assert_eq!(saved.xp_total, 37);
+        assert_eq!(flags.published.load(Ordering::Relaxed), 0);
+        assert!(game.session_lock.is_none());
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn emergency_save_waits_for_finished_and_times_out() {
+        let flags = Arc::new(Flags::default());
+        let saving = flags.clone();
+        let server = std::thread::spawn(move || {
+            let _finished = Finished(saving.clone());
+            while !saving.stop.load(Ordering::Relaxed) {
+                std::thread::yield_now();
+            }
+        });
+        let id = server.thread().id();
+        assert!(flags.emergency_save(id, Duration::from_secs(2)));
+        assert!(flags.finished.load(Ordering::Acquire));
+        server.join().unwrap();
+        assert!(flags.emergency_save(id, Duration::ZERO));
+        let flags = Flags::default();
+        let started = Instant::now();
+        assert!(!flags.emergency_save(id, Duration::from_millis(20)));
+        assert!(started.elapsed() < Duration::from_secs(1));
+        assert!(flags.stop.load(Ordering::Relaxed));
+        let flags = Flags::default();
+        assert!(flags.emergency_save(std::thread::current().id(), Duration::ZERO));
+        assert!(!flags.stop.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn pregen_toggle_back_is_queued_while_server_is_busy() {
+        let (tasks, waiting_server) = channel();
+        let server = Integrated {
+            emergency_save: None,
+            flags: Arc::new(Flags::default()),
+            thread: None,
+            tasks,
+            world_name: String::new(),
+        };
+        // The receiver deliberately does not run either task between the updates. In particular,
+        // the dispatcher can still show the old value when the owner toggles back.
+        server.queue_pregen_option(true);
+        server.queue_pregen_option(false);
+        assert!(
+            waiting_server.try_recv().is_ok(),
+            "enable must reach the server"
+        );
+        assert!(waiting_server.try_recv().is_ok(), "disable must follow it");
+        assert!(waiting_server.try_recv().is_err());
+    }
+
+    #[test]
     fn the_owner_and_splitscreen_seats_are_let_in_only_through_memory() {
         // (owner, published, seat, memory)
         assert!(!refused(false, false, true, true), "a local seat joins");
@@ -1327,6 +1617,7 @@ mod tests {
         let (release, wait) = channel();
         let (tasks, _) = channel();
         let server = Integrated {
+            emergency_save: None,
             flags: flags.clone(),
             thread: Some(std::thread::spawn(move || wait.recv().unwrap())),
             tasks,
@@ -1345,6 +1636,7 @@ mod tests {
         let saving = flags.clone();
         let (tasks, _) = channel();
         let server = Integrated {
+            emergency_save: None,
             flags,
             thread: Some(std::thread::spawn(move || {
                 *saving.failure.lock().unwrap() = Some("disk write failed".into());

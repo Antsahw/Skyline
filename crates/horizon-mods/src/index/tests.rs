@@ -42,6 +42,11 @@ fn reads_the_sample_and_keeps_unknown_kinds() {
     assert!(!text.contains("downloads"));
     let counted = text.replacen("\"versions\"", "\"downloads\":12345,\"versions\"", 1);
     assert_eq!(Index::parse(&counted).unwrap().projects[0].downloads, 12345);
+    // GitHub stars: the same, the source repository's.
+    assert_eq!(hud.stars, 0);
+    assert!(!text.contains("\"stars\""));
+    let starred = text.replacen("\"versions\"", "\"stars\":42,\"versions\"", 1);
+    assert_eq!(Index::parse(&starred).unwrap().projects[0].stars, 42);
 }
 
 #[test]
@@ -90,6 +95,11 @@ fn a_changed_file_key_or_manifest_is_refused() {
     let mut no_level = index.clone();
     no_level.projects[0].versions[0].api_level = None;
     assert_eq!(check(&no_level, "coords_hud", &hmod), Ok(Trust::Verified));
+    // A native mod's hook points version is listed too: a file naming another is refused.
+    let mut other_hooks = index.clone();
+    other_hooks.projects[0].versions[0].hooks = Some(3);
+    let e = check(&other_hooks, "coords_hud", &hmod).unwrap_err();
+    assert!(e.contains("isn't what the index lists"), "{e}");
 
     let mut revoked = index.clone();
     revoked.revoked.push(Revoked {
@@ -183,6 +193,62 @@ fn resource_packs_need_a_pack_mcmeta() {
 }
 
 #[test]
+fn data_packs_and_shader_folder_packs_are_read_by_their_content() {
+    use std::io::Write;
+    let dir = std::env::temp_dir().join(format!("horizon-index-dp-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut n = 0;
+    let mut pack = |files: &[&str]| {
+        n += 1;
+        let path = dir.join(format!("{n}.zip"));
+        let mut zip = zip::ZipWriter::new(std::fs::File::create(&path).unwrap());
+        for name in files {
+            zip.start_file(*name, zip::write::SimpleFileOptions::default())
+                .unwrap();
+            let text = if *name == "pack.mcmeta" {
+                r#"{"pack": {"description": "D", "pack_format": 94}}"#
+            } else {
+                ""
+            };
+            zip.write_all(text.as_bytes()).unwrap();
+        }
+        zip.finish().unwrap();
+        path
+    };
+    let data = pack(&["pack.mcmeta", "data/x/function/a.mcfunction"]);
+    assert_eq!(inspect(&Kind::DataPack, &data).unwrap().api, "94");
+    assert_eq!(zip_kind(&data), Kind::DataPack);
+    let looks = pack(&["pack.mcmeta", "assets/x/textures/a.png"]);
+    let e = inspect(&Kind::DataPack, &looks).unwrap_err();
+    assert!(e.contains("data/"), "{e}");
+    assert_eq!(zip_kind(&looks), Kind::ResourcePack);
+    let no_meta = pack(&["data/x/function/a.mcfunction"]);
+    assert!(
+        inspect(&Kind::DataPack, &no_meta)
+            .unwrap_err()
+            .contains("missing")
+    );
+    let shaders = pack(&["shaders/composite.fsh", "shaders/lang/en_us.lang"]);
+    assert_eq!(inspect(&Kind::ShaderPack, &shaders).unwrap().api, "");
+    assert_eq!(zip_kind(&shaders), Kind::ShaderPack);
+    let e = inspect(&Kind::ShaderPack, &looks).unwrap_err();
+    assert!(e.contains("shaders/"), "{e}");
+    let sneaky = pack(&["shaders/a.fsh", "../../x"]);
+    assert!(
+        inspect(&Kind::ShaderPack, &sneaky)
+            .unwrap_err()
+            .contains("plain path")
+    );
+    // Both are zips, and a reader from before them keeps them as unknown kinds.
+    for kind in [Kind::DataPack, Kind::ShaderPack] {
+        assert_eq!(kind.extension(), Some("zip"));
+        assert!(open(&kind).is_ok());
+        assert_eq!(Kind::from(kind.name().to_owned()), kind);
+    }
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
 fn the_newest_version_this_horizon_runs_is_installed() {
     let mut index = sample();
     let mut newer = index.projects[0].versions[0].clone();
@@ -208,7 +274,7 @@ fn the_newest_version_this_horizon_runs_is_installed() {
 
 #[test]
 fn shader_packs_pass_the_game_s_own_check() {
-    let manifest = "schema = 1\nid = \"glow\"\nname = \"Glow\"\nversion = \"1.0.0\"\napi = \"0.1\"\n\
+    let manifest = "schema = 1\nid = \"glow\"\nname = \"Glow\"\nversion = \"1.0.0\"\napi = \"0.2\"\n\
                     [[post]]\nfile = \"post.wgsl\"\n";
     let pack = |post: &str| {
         let files = [
@@ -247,7 +313,7 @@ fn shader_packs_pass_the_game_s_own_check() {
             facts.version.as_deref(),
             facts.api.as_str()
         ),
-        (Some("glow"), Some("1.0.0"), "0.1")
+        (Some("glow"), Some("1.0.0"), "0.2")
     );
     assert!(refused.contains("post.wgsl:1:"), "{refused}");
     assert!(

@@ -32,7 +32,7 @@ impl Properties {
         self.map.remove(key)
     }
 
-    /// Properties.load(Reader) over already decoded characters.
+    /// Java's properties loader over already decoded characters.
     pub fn load(text: &[char]) -> Result<Self, Malformed> {
         let mut out = Self::default();
         let mut reader = LineReader {
@@ -88,12 +88,12 @@ impl Properties {
         }
     }
 
-    /// Properties.load(InputStream): ISO-8859-1.
+    /// Java's properties loader for an input stream: ISO-8859-1.
     pub fn load_latin1(bytes: &[u8]) -> Result<Self, Malformed> {
         Self::load(&bytes.iter().map(|&b| char::from(b)).collect::<Vec<_>>())
     }
 
-    /// Properties.store(Writer, comments): comment, date, then the entries
+    /// Java's properties store with comments: comment, date, then the entries
     /// sorted by key, with `escUnicode` off (the Writer variant) or on (the
     /// OutputStream variant, whose bytes are ISO-8859-1).
     pub fn store(&self, comment: Option<&str>, date: &str, esc_unicode: bool) -> String {
@@ -117,7 +117,7 @@ impl Properties {
     }
 }
 
-/// System.lineSeparator().
+/// The platform line separator.
 pub fn line_separator() -> &'static str {
     if cfg!(windows) { "\r\n" } else { "\n" }
 }
@@ -127,7 +127,7 @@ struct LineReader<'a> {
     pos: usize,
 }
 impl LineReader<'_> {
-    /// LineReader.readLine: one logical line, leading whitespace skipped,
+    /// Java's logical-line reader: one logical line, leading whitespace skipped,
     /// comments and blank lines dropped, backslash-newline continuations joined.
     fn read_line(&mut self) -> Option<Vec<char>> {
         let mut line: Vec<char> = Vec::new();
@@ -247,68 +247,50 @@ fn load_convert(input: &[char]) -> Result<String, Malformed> {
 
 fn save_convert(s: &str, escape_space: bool, esc_unicode: bool) -> String {
     let mut out = String::with_capacity(s.len() * 2);
-    for (index, c) in s.encode_utf16().enumerate() {
-        if c > 61 && c < 127 {
-            if c == u16::from(b'\\') {
+    // A Rust `str` is valid UTF-8, so its UTF-16 units always pair up and one char at a time writes
+    // what Java's per-`char` loop writes: a NUL stays a character of the value instead of acting as
+    // a marker, and a character past U+FFFF is escaped as the pair of units Java escapes it as.
+    for (index, c) in s.chars().enumerate() {
+        let code = c as u32;
+        if code > 61 && code < 127 {
+            if c == '\\' {
                 out.push_str("\\\\");
             } else {
-                out.push(char::from(c as u8));
+                out.push(c);
             }
             continue;
         }
         match c {
-            0x20 => {
+            ' ' => {
                 if index == 0 || escape_space {
                     out.push('\\');
                 }
                 out.push(' ');
             }
-            0x09 => out.push_str("\\t"),
-            0x0a => out.push_str("\\n"),
-            0x0d => out.push_str("\\r"),
-            0x0c => out.push_str("\\f"),
-            0x3d | 0x3a | 0x23 | 0x21 => {
+            '\t' => out.push_str("\\t"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\u{c}' => out.push_str("\\f"),
+            '=' | ':' | '#' | '!' => {
                 out.push('\\');
-                out.push(char::from(c as u8));
+                out.push(c);
             }
             _ => {
-                if (!(0x20..=0x7e).contains(&c)) && esc_unicode {
-                    out.push_str(&format!("\\u{c:04X}"));
+                if !(0x20..=0x7e).contains(&code) && esc_unicode {
+                    let mut units = [0u16; 2];
+                    for unit in c.encode_utf16(&mut units).iter() {
+                        out.push_str(&format!("\\u{unit:04X}"));
+                    }
                 } else {
-                    push_unit(&mut out, c);
+                    out.push(c);
                 }
             }
         }
     }
-    fix_surrogates(out)
+    out
 }
 
-/// Units are pushed one at a time; surrogate halves are joined afterwards.
-fn push_unit(out: &mut String, unit: u16) {
-    match char::from_u32(u32::from(unit)) {
-        Some(c) => out.push(c),
-        None => out.push_str(&format!("\u{0}{unit:04x}\u{0}")),
-    }
-}
-fn fix_surrogates(s: String) -> String {
-    if !s.contains('\u{0}') {
-        return s;
-    }
-    let mut units: Vec<u16> = Vec::new();
-    let mut parts = s.split('\u{0}');
-    let mut odd = false;
-    for part in parts.by_ref() {
-        if odd {
-            units.push(u16::from_str_radix(part, 16).unwrap_or(0xfffd));
-        } else {
-            units.extend(part.encode_utf16());
-        }
-        odd = !odd;
-    }
-    String::from_utf16_lossy(&units)
-}
-
-/// Properties.writeComments.
+/// Java's comments writer.
 fn write_comments(out: &mut String, comments: &str, nl: &str) {
     out.push('#');
     let units: Vec<u16> = comments.encode_utf16().collect();
@@ -379,7 +361,7 @@ pub fn now_millis() -> i64 {
         .map_or(0, |d| d.as_millis() as i64)
 }
 
-/// java.util.Date.toString in UTC: "EEE MMM dd HH:mm:ss zzz yyyy".
+/// The JDK date string in UTC: "EEE MMM dd HH:mm:ss zzz yyyy".
 pub fn date_string(millis: i64) -> String {
     const DAYS: [&str; 7] = ["Thu", "Fri", "Sat", "Sun", "Mon", "Tue", "Wed"];
     const MONTHS: [&str; 12] = [
@@ -430,13 +412,29 @@ mod tests {
         p.put("motd", " A=B#".into());
         p.put("b key", "é".into());
         let s = p.store(Some("Minecraft server properties"), "DATE", false);
-        // Each line ends in System.lineSeparator(), as BufferedWriter.newLine writes it.
+        // Each line ends in the platform line separator, as Java's buffered writer newLine writes it.
         assert_eq!(
             s,
             "#Minecraft server properties\n#DATE\nb\\ key=é\nlevel-type=minecraft\\:normal\nmotd=\\ A\\=B\\#\n"
                 .replace('\n', line_separator())
         );
         assert!(p.store(None, "D", true).contains("b\\ key=\\u00E9"));
+    }
+    #[test]
+    fn a_nul_and_a_non_bmp_character_are_written_as_java_writes_them() {
+        // `\u0000` is a character of the value, not a marker of any kind, and the Writer variant
+        // (escUnicode off) writes it as it is.
+        let p = load("k=\\u0000\\uD83D\\uDE00x");
+        assert_eq!(p.get("k"), Some("\u{0}\u{1F600}x"));
+        assert_eq!(
+            p.store(None, "D", false),
+            format!("#D{nl}k=\u{0}\u{1F600}x{nl}", nl = line_separator())
+        );
+        // With escapes on, the NUL and both halves of the pair are `\u` escapes, upper-case hex.
+        assert!(
+            p.store(None, "D", true)
+                .contains("k=\\u0000\\uD83D\\uDE00x")
+        );
     }
     #[test]
     fn dates() {

@@ -55,9 +55,6 @@ fn can_attack(w: &MobWorld) -> bool {
 fn can_attack_seen(m: &mut Mob, w: &MobWorld) -> bool {
     can_attack(w) && m.sees(w, Who::Player)
 }
-fn sea_level() -> i32 {
-    63
-}
 /// `PhantomAttackPlayerTargetGoal`: every three seconds, the player
 /// within 16 blocks across and 64 up or down.
 #[derive(Clone, Debug)]
@@ -103,7 +100,7 @@ impl AttackStrategy {
             return;
         };
         let y = (t.position.y.floor() as i32 + 20 + m.random.next_int_bound(20).unwrap_or(0))
-            .max(sea_level() + 1);
+            .max(cx.w.sea_level + 1);
         m.extra.home = Some([t.position.x.floor() as i32, y, t.position.z.floor() as i32]);
     }
 }
@@ -129,9 +126,6 @@ impl Goal for AttackStrategy {
                 a[2],
             ]);
         }
-    }
-    fn every_tick(&self) -> bool {
-        true
     }
     fn tick(&mut self, m: &mut Mob, cx: &mut Cx) {
         if !m.extra.flag {
@@ -280,9 +274,19 @@ impl Goal for SweepAttack {
         if reach.intersects(t.bounds) {
             super::ai::do_hurt_target(m, who, cx);
             m.extra.flag = false;
-            // LevelEvent 1039: the bite.
-            cx.events
-                .push(MobEvent::Sound("entity.phantom.bite", m.center(), 1.0, 1.0));
+            // LevelEvent 1039: the client plays the bite at 0.3 volume, a
+            // 0.9-1.0 pitch, and a silent phantom never sends it.
+            if !m.silent {
+                cx.events.push(MobEvent::LevelEvent {
+                    id: 1039,
+                    pos: [
+                        m.position.x.floor() as i32,
+                        m.position.y.floor() as i32,
+                        m.position.z.floor() as i32,
+                    ],
+                    data: 0,
+                });
+            }
         } else if m.horizontal_collision || m.hurt_time > 0 {
             m.extra.flag = false;
         }
@@ -378,6 +382,10 @@ pub fn flap_sound(m: &Mob, events: &mut Vec<MobEvent>) {
 }
 
 #[cfg(test)]
+#[path = "phantom_dive_tests.rs"]
+mod dive_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::mobs::world::{test_player, with_built_test_world};
@@ -423,7 +431,7 @@ mod tests {
             // rule is about roofs and full walls, not foot walls).
             let mut target = AttackPlayerTarget { next_scan: 0 };
             let mut events = Vec::new();
-            let mut lr = horizon_core::random::LegacyRandom::new(0);
+            let mut lr = crate::mobs::world::level_random(0);
             let mut cx = Cx {
                 w: &w,
                 lr: &mut lr,
@@ -470,7 +478,7 @@ mod tests {
             register(&mut m);
             let mut target = AttackPlayerTarget { next_scan: 0 };
             let mut events = Vec::new();
-            let mut lr = horizon_core::random::LegacyRandom::new(0);
+            let mut lr = crate::mobs::world::level_random(0);
             let mut cx = Cx {
                 w: &w,
                 lr: &mut lr,
@@ -522,7 +530,7 @@ mod tests {
                     let mut m = Mob::new(1, kind, Vec3::new(0.5, 80.0, 0.5), 0.0);
                     let mut target = AttackPlayerTarget { next_scan: 0 };
                     let mut events = Vec::new();
-                    let mut lr = horizon_core::random::LegacyRandom::new(0);
+                    let mut lr = crate::mobs::world::level_random(0);
                     let mut cx = Cx {
                         w: &w,
                         lr: &mut lr,
@@ -539,5 +547,103 @@ mod tests {
                 },
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod anchor_save_tests {
+    use super::*;
+    use crate::entity_nbt::{mob_from_nbt, mob_to_nbt};
+    use horizon_world::nbt::Tag;
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
+    /// A phantom at (0.5, 75, 0.5) with the vanilla size 2, and `anchor_pos`
+    /// when it has one. `storeNullable` writes the key only for an anchor.
+    fn saved_phantom(anchor: Option<[i32; 3]>) -> Tag {
+        let mut fields = vec![
+            ("id", Tag::String("minecraft:phantom".into())),
+            (
+                "Pos",
+                Tag::List(vec![
+                    Tag::Double(0.5_f64.to_bits()),
+                    Tag::Double(75.0_f64.to_bits()),
+                    Tag::Double(0.5_f64.to_bits()),
+                ]),
+            ),
+            ("size", Tag::Int(2)),
+        ];
+        if let Some(anchor) = anchor {
+            fields.push(("anchor_pos", Tag::IntArray(anchor.to_vec())));
+        }
+        Tag::compound(fields)
+    }
+
+    fn phantom_types() -> HashMap<String, Arc<crate::mobs::MobType>> {
+        let mut kind = crate::mobs::sensor_scan_tests::kind();
+        let ty = Arc::make_mut(&mut kind);
+        ty.id = "minecraft:phantom".into();
+        ty.species = Species::Phantom;
+        [("minecraft:phantom".into(), kind)].into()
+    }
+
+    /// `Phantom.addAdditionalSaveData` writes `anchor_pos` with `storeNullable`
+    /// and `readAdditionalSaveData` reads it back
+    /// (`input.read("anchor_pos", BlockPos.CODEC).orElse(null)`). Horizon models
+    /// the anchor in `extra.home` (vanilla's `anchorPoint`) and neither side
+    /// carried it: a phantom saved and reloaded kept the anchor `register` gives
+    /// every new phantom — its own position five blocks up — and circled there
+    /// instead of around the anchor its save named, or around itself as vanilla
+    /// does for a save with no anchor at all.
+    #[test]
+    fn a_phantoms_circling_anchor_survives_the_chunk_save() {
+        let types = phantom_types();
+        let mut m = mob_from_nbt(&saved_phantom(Some([100, 64, -40])), &types, 1, None).unwrap();
+        assert_eq!(m.extra.home, Some([100, 64, -40]), "the loaded anchor");
+        // `PhantomCircleAroundAnchorGoal.selectNext` flies around the anchor:
+        // `anchor + (distance*cos(angle), -4 + height, distance*sin(angle))`.
+        let mut circle = CircleAroundAnchor {
+            distance: 10.0,
+            height: 2.0,
+            clockwise: 1.0,
+            angle: 0.0,
+        };
+        circle.select_next(&mut m);
+        let angle = 15.0f32.to_radians();
+        let around = [
+            100.0 + f64::from(10.0f32 * angle.mcos()),
+            64.0 + f64::from(-4.0 + 2.0f32),
+            -40.0 + f64::from(10.0f32 * angle.msin()),
+        ];
+        assert_eq!(
+            m.extra.vector, around,
+            "the circle point, 109.66 / 62 / -37.41 around the anchor"
+        );
+        // What the phantom circles now is what its chunk save keeps.
+        m.extra.home = Some([9, 70, -3]);
+        let source = saved_phantom(Some([100, 64, -40]));
+        let saved = mob_to_nbt(&m, [0; 4], Some(&source), None, |_| None);
+        assert_eq!(
+            saved.get("anchor_pos"),
+            Some(&Tag::IntArray(vec![9, 70, -3]))
+        );
+        // A phantom with no anchor: `orElse(null)` on the way in, and no
+        // `anchor_pos` on the way out even when the loaded save had one.
+        let mut loose = mob_from_nbt(&saved_phantom(None), &types, 2, None).unwrap();
+        assert_eq!(loose.extra.home, None, "a save without anchor_pos");
+        loose.extra.home = None;
+        let stale = saved_phantom(Some([100, 64, -40]));
+        let saved = mob_to_nbt(&loose, [0; 4], Some(&stale), None, |_| None);
+        assert_eq!(saved.get("anchor_pos"), None, "no anchor, no key");
+    }
+
+    #[test]
+    fn a_phantoms_look_control_keeps_the_flight_pitch() {
+        let types = phantom_types();
+        let mut m = mob_from_nbt(&saved_phantom(None), &types, 3, None).unwrap();
+        // `PhantomLookControl.tick` is empty, unlike `LookControl.tick`.
+        m.head_pitch = -22.0;
+        m.look_control_tick();
+        assert_eq!(m.head_pitch, -22.0);
     }
 }

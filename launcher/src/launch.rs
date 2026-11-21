@@ -141,7 +141,7 @@ pub struct Found {
 /// installed, on any system (for tests and screenshots).
 pub const TOOLS_ENV: &str = "HORIZON_LAUNCHER_LINUX_TOOLS";
 
-fn on_path(program: &str) -> bool {
+pub(crate) fn on_path(program: &str) -> bool {
     std::env::var_os("PATH").is_some_and(|path| {
         std::env::split_paths(&path).any(|dir| {
             let file = dir.join(program);
@@ -459,6 +459,8 @@ pub fn plan(launch: &Launch, words: Vec<OsString>, windows: bool, found: &Found)
 /// The game's command run with `launch`: a new command with the same folder and variables,
 /// plus the instance's variables. Call it last, after every argument is added.
 pub fn wrap(cmd: Command, launch: &Launch) -> Command {
+    #[cfg(windows)]
+    let cmd = crate::windows_runtime::redirect(cmd);
     if launch.is_empty() {
         return cmd;
     }

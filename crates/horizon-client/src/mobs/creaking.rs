@@ -120,6 +120,7 @@ pub fn accepts_damage(m: &mut Mob, source: &Damage) -> bool {
             | DamageKind::MaceSmash
             | DamageKind::Spear
             | DamageKind::MobAttack
+            | DamageKind::MobAttackNoAggro
             | DamageKind::Arrow
             | DamageKind::Thrown
             | DamageKind::Fireball
@@ -201,6 +202,8 @@ pub fn update(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
     // event 66.
     if m.extra.ints[INVULNERABLE] == INVULNERABILITY_TICKS {
         broadcast(m, 66, events);
+        // hurtServer: `gameEvent(ENTITY_ACTION)` right after the entity event.
+        entity_action(m, events);
     }
     animate(m);
     if m.extra.counter & HURT != 0 {
@@ -223,6 +226,8 @@ pub fn update(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
     }
     let now = check_can_move(m, w, events);
     if now != can_move(m) {
+        // Creaking.aiStep: ENTITY_ACTION, then the sound.
+        entity_action(m, events);
         if now {
             m.voice("entity.creaking.unfreeze", events);
         } else {
@@ -267,15 +272,26 @@ pub fn stop_in_place(m: &mut Mob) {
     m.velocity = horizon_core::geometry::Vec3::ZERO;
     m.extra.leash_spin = 0.0;
 }
+/// `Entity.gameEvent(GameEvent.ENTITY_ACTION)` at the creaking.
+fn entity_action(m: &Mob, events: &mut Vec<MobEvent>) {
+    events.push(MobEvent::GameEvent {
+        event: "minecraft:entity_action",
+        at: [m.position.x, m.position.y, m.position.z],
+        source: m.id,
+        state: horizon_world::registry::BlockStateId(0),
+    });
+}
 /// `Creaking.activate`.
 fn activate(m: &mut Mob, events: &mut Vec<MobEvent>) {
     monster_brain::set_attack_target(m, Some(Who::Player));
+    entity_action(m, events);
     m.voice("entity.creaking.activate", events);
     m.extra.flag = true;
 }
 /// `Creaking.deactivate`.
 fn deactivate(m: &mut Mob, events: &mut Vec<MobEvent>) {
     monster_brain::set_attack_target(m, None);
+    entity_action(m, events);
     m.voice("entity.creaking.deactivate", events);
     m.extra.flag = false;
 }
@@ -329,7 +345,7 @@ fn check_can_move(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) -> bool
         if p.alive && !p.creative && !p.spectator {
             potential = true;
             // GAZE_DISGUISE_EQUIPMENT hides the player once the creaking is awake.
-            let disguised = p.head.as_deref() == Some("minecraft:carved_pumpkin");
+            let disguised = super::enderman::wears_gaze_disguise(w, p);
             if (!active || !disguised) && looked_at_by(m, w) {
                 if active {
                     return false;
@@ -393,6 +409,13 @@ pub fn anim(m: &Mob, s: &State, p: &mut Poses, animations: &HashMap<String, Anim
 pub fn is_creaking(m: &Mob) -> bool {
     m.species() == Species::Creaking
 }
+/// The part of `Entity.canUsePortal` a mob's own state decides: it is alive,
+/// it is not a boss that never travels, and — over `Monster.canUsePortal` —
+/// it is not a creaking bound to a heart (`Creaking.canUsePortal`). The
+/// rides and the players a side carries are the caller's half.
+pub fn mob_can_use_portal(m: &Mob) -> bool {
+    m.alive() && m.species() != Species::Wither && can_use_portal(m)
+}
 /// `Creaking.canUsePortal`: a creaking bound to a heart never travels through
 /// a portal, since its heart stays behind; one without a heart goes through
 /// like any other monster.
@@ -440,6 +463,26 @@ mod tests {
     use super::*;
     use crate::mobs::sensor_scan_tests::kind;
     use std::sync::Arc;
+
+    /// Creaking.activate and deactivate post ENTITY_ACTION, for the sculk sensors and
+    /// wardens nearby.
+    #[test]
+    fn activating_and_deactivating_post_entity_action() {
+        let mut m = creaking();
+        let id = m.id;
+        let action = |events: &[MobEvent]| {
+            events.iter().any(|e| {
+                matches!(e, MobEvent::GameEvent { event, source, .. }
+                    if *event == "minecraft:entity_action" && *source == id)
+            })
+        };
+        let mut events = Vec::new();
+        activate(&mut m, &mut events);
+        assert!(action(&events), "activating posts entity_action");
+        let mut events = Vec::new();
+        deactivate(&mut m, &mut events);
+        assert!(action(&events), "deactivating posts entity_action");
+    }
 
     /// A creaking with no heart bound to it, at the origin.
     fn creaking() -> Mob {

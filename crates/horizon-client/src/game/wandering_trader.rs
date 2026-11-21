@@ -83,7 +83,7 @@ impl Game<'_> {
     }
     /// `WanderingTraderSpawner.tick`.
     pub(super) fn tick_wandering_trader(&mut self) {
-        if self.dim != Dim::Overworld || !self.ui.rules.bool("spawn_wandering_traders") {
+        if self.dim.vanilla() != Dim::Overworld || !self.ui.rules.bool("spawn_wandering_traders") {
             return;
         }
         self.load_trader_data();
@@ -161,14 +161,7 @@ impl Game<'_> {
             self.spawn_trader_llama(id, 4);
         }
         if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
-            m.extra.ints[5] = trader::DESPAWN_DELAY;
-            m.extra.point = Some([
-                f64::from(reference[0]),
-                f64::from(reference[1]),
-                f64::from(reference[2]),
-            ]);
-            m.extra.home = Some(reference);
-            m.extra.ints[4] = 16;
+            trader::start_visit(m, reference);
         }
         true
     }

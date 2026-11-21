@@ -12,6 +12,7 @@ use horizon_client::{
 use horizon_world::nbt::Tag;
 
 mod contents;
+pub(in crate::game) mod slot_sources;
 use contents::Component;
 
 /// One addressable slot.
@@ -31,6 +32,8 @@ pub(in crate::game) enum Slot {
     /// An armor stand's equipment (`ArmorStand::SLOTS` index).
     Stand(u32, usize),
     Frame(u32),
+    /// A dropped item's stack: `ItemEntity.getSlot(0)`, the `contents` slot.
+    Item(u32),
     /// A chest or hopper minecart's slot (`ContainerEntity.getChestVehicleSlot`).
     Cart(u32, usize),
     Block([i32; 3], usize),
@@ -50,6 +53,20 @@ struct SlotCandidate {
 pub(in crate::game) enum Owner {
     Entity(Target),
     Block([i32; 3]),
+}
+
+/// The standard equipment slots with existing whole-stack storage.
+fn mob_stack_slot(key: &str) -> Option<usize> {
+    use horizon_client::mobs::finalize;
+    Some(match key {
+        "mainhand" => finalize::MAINHAND,
+        "offhand" => finalize::OFFHAND,
+        "head" => finalize::HEAD,
+        "chest" => finalize::CHEST,
+        "legs" => finalize::LEGS,
+        "feet" => finalize::FEET,
+        _ => return None,
+    })
 }
 
 /// The player's slot names and the inventory index each addresses.
@@ -75,6 +92,19 @@ fn matches_name(pattern: &str, name: &str) -> bool {
 }
 
 impl Game<'_> {
+    /// The item's default `minecraft:rarity` ("common" when it has none).
+    pub(in crate::game) fn item_rarity(&self, item: &str) -> String {
+        static RARITY: std::sync::OnceLock<std::collections::HashMap<String, String>> =
+            std::sync::OnceLock::new();
+        let map = RARITY.get_or_init(|| {
+            horizon_world::item_defaults::read(&self.options.resources)
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(|(k, c)| c["minecraft:rarity"].as_str().map(|r| (k, r.to_owned())))
+                .collect()
+        });
+        map.get(item).cloned().unwrap_or_else(|| "common".into())
+    }
     fn owner_of(&mut self, ctx: &Context, prefix: &str, many: bool) -> R<Vec<Owner>> {
         let kind = ctx
             .literals
@@ -180,6 +210,16 @@ impl Game<'_> {
                     add(Slot::Frame(*id));
                 }
             }
+            // `ItemEntity.getSlot(0)`: `contents`, `container.0` and `hotbar.0`
+            // are all slot 0 (`SlotRanges`), and it holds the stack.
+            Owner::Entity(Target::Item(id)) => {
+                if matches_name(name, "contents")
+                    || matches_name(name, "container.0")
+                    || matches_name(name, "hotbar.0")
+                {
+                    add(Slot::Item(*id));
+                }
+            }
             // `getChestVehicleSlot` takes any index below `getContainerSize`.
             Owner::Entity(Target::Cart(id)) => {
                 let size = self
@@ -199,15 +239,19 @@ impl Game<'_> {
     }
     /// `ItemCommands.getSlotsFromProvider`: evaluate inline sources against
     /// the accessor's live owner. Named ranges retain their existing adapter.
-    fn command_slots(&mut self, owner: &Owner, raw: &str) -> Vec<Slot> {
-        if raw.starts_with('{') || raw.starts_with('[') {
-            let Ok((tag, _)) = horizon_world::nbt::parse_snbt(raw) else {
-                return Vec::new();
-            };
-            self.inline_slots(owner, &horizon_client::scoreboard::tag_to_json(&tag))
-        } else {
-            self.slots_named(owner, raw)
+    fn command_slots(&mut self, owner: &Owner, raw: &str) -> R<Vec<Slot>> {
+        if let Owner::Block(p) = owner
+            && self.block_container_size(*p).is_none()
+        {
+            return Err(err(
+                "commands.item.source.not_a_container",
+                &[&p[0], &p[1], &p[2]],
+            ));
         }
+        Ok(match self.resolved_slot_source(raw)? {
+            Some(source) => self.inline_slots(owner, &source),
+            None => self.slots_named(owner, raw),
+        })
     }
     /// `SlotCollection.itemCopies` / `size`: transforms apply to the
     /// collection, before a command's item predicate or item modifier.
@@ -229,7 +273,11 @@ impl Game<'_> {
                     .flat_map(|s| self.inline_slots(owner, s))
                     .collect()
             }),
-            "slot_range" => self.slots_named(owner, source["slots"].as_str().unwrap_or_default()),
+            "slot_range" => self
+                .slot_source_owner(owner, source)
+                .map_or_else(Vec::new, |owner| {
+                    self.slots_named(&owner, source["slots"].as_str().unwrap_or_default())
+                }),
             "contents" => {
                 let Some(component) = source["component"].as_str().and_then(Component::named)
                 else {
@@ -243,7 +291,7 @@ impl Game<'_> {
             }
             "limit_slots" => {
                 let mut slots = self.inline_slots(owner, &source["slot_source"]);
-                slots.truncate(source["limit"].as_u64().unwrap_or(0) as usize);
+                slots.truncate(slot_sources::limit(source));
                 slots
             }
             "filtered" => {
@@ -266,25 +314,29 @@ impl Game<'_> {
     /// live stack when visited. Limits share the command's TrackingSelector
     /// count across owners and group terms, and count selected empty slots
     /// only for replacement (not modification).
-    fn command_slot_candidates(&mut self, owner: &Owner, raw: &str) -> Vec<SlotCandidate> {
-        let source = horizon_world::nbt::parse_snbt(raw)
-            .ok()
-            .map(|(tag, _)| horizon_client::scoreboard::tag_to_json(&tag));
-        if raw.starts_with('{') || raw.starts_with('[') {
+    fn command_slot_candidates(&mut self, owner: &Owner, raw: &str) -> R<Vec<SlotCandidate>> {
+        if let Owner::Block(p) = owner
+            && self.block_container_size(*p).is_none()
+        {
+            return Err(err(
+                "commands.item.target.not_a_container",
+                &[&p[0], &p[1], &p[2]],
+            ));
+        }
+        if let Some(source) = self.resolved_slot_source(raw)? {
             let mut out = Vec::new();
-            if let Some(source) = source {
-                self.slot_candidates(owner, &source, &[], usize::MAX, &mut out);
-            }
-            out
+            self.slot_candidates(owner, &source, &[], usize::MAX, &mut out);
+            Ok(out)
         } else {
-            self.slots_named(owner, raw)
+            Ok(self
+                .slots_named(owner, raw)
                 .into_iter()
                 .map(|slot| SlotCandidate {
                     slot,
                     filters: Vec::new(),
                     limit: usize::MAX,
                 })
-                .collect()
+                .collect())
         }
     }
     /// `CompositeSlotSource.provide` and `TransformedSlotSource.provide`:
@@ -316,7 +368,10 @@ impl Game<'_> {
                 }
             }
             "slot_range" => {
-                for slot in self.slots_named(owner, source["slots"].as_str().unwrap_or_default()) {
+                let Some(owner) = self.slot_source_owner(owner, source) else {
+                    return;
+                };
+                for slot in self.slots_named(&owner, source["slots"].as_str().unwrap_or_default()) {
                     out.push(SlotCandidate {
                         slot,
                         filters: filters.to_vec(),
@@ -344,7 +399,7 @@ impl Game<'_> {
                 owner,
                 &source["slot_source"],
                 filters,
-                limit.min(source["limit"].as_u64().unwrap_or(0) as usize),
+                limit.min(slot_sources::limit(source)),
                 out,
             ),
             _ => {}
@@ -387,6 +442,23 @@ impl Game<'_> {
             Slot::Ender(i) => self.ender_items.get(*i).cloned().flatten(),
             Slot::Mob(id, key) => {
                 let m = self.mobs.iter().find(|m| m.id == *id)?;
+                if *key == "saddle" {
+                    return m.saddle_item();
+                }
+                if let Some(slot) = mob_stack_slot(key) {
+                    if let Some(stack) = horizon_client::mobs::finalize::stored_stack(m, slot) {
+                        return Some(stack);
+                    }
+                    let worn = ["head", "chest", "legs", "feet"]
+                        .iter()
+                        .position(|name| name == key);
+                    if let Some(stack) = worn.and_then(|i| m.extra.armor[i].clone()).filter(|s| {
+                        horizon_client::mobs::finalize::item(m, slot).as_ref() == Some(&s.item)
+                    }) {
+                        return Some(stack);
+                    }
+                    return horizon_client::mobs::finalize::item_stack(m, slot);
+                }
                 let item = match *key {
                     "mainhand" => &m.extra.main_hand,
                     "offhand" => &m.extra.off_hand,
@@ -413,6 +485,12 @@ impl Game<'_> {
                 .cloned()
                 .flatten(),
             Slot::Frame(id) => self.item_frames.iter().find(|f| f.id == *id)?.item.clone(),
+            Slot::Item(id) => self
+                .dropped
+                .iter()
+                .find(|e| e.id == *id)
+                .map(|e| e.stack.clone())
+                .filter(|s| &*s.item != "minecraft:air" && s.count > 0),
             Slot::Cart(id, i) => self.cart_slots(*id)?.get(*i).cloned().flatten(),
             Slot::Block(p, i) => self
                 .world
@@ -460,6 +538,9 @@ impl Game<'_> {
                 .is_some_and(|m| m.contains(&*s.item))
         });
         let recipes = world_recipes!(self);
+        // `ChiseledBookShelfBlockEntity.setItem`: the slot written is the one
+        // `updateState` takes, even when its occupancy does not change.
+        let mut shelf_slot = None;
         match self.world.block_entities.get_mut(&key) {
             Some(BlockEntity::Furnace(f)) if i == 0 => f.set_input(recipes, stack),
             Some(BlockEntity::Furnace(f)) => {
@@ -468,6 +549,15 @@ impl Game<'_> {
                 return true;
             }
             Some(BlockEntity::ChiseledBookshelf(_)) if !book => return true,
+            Some(BlockEntity::ChiseledBookshelf(b)) => {
+                // A book put in, or a stack taken out: `removeItem` only
+                // updates the state when it found something.
+                let had_book = b.items[i].is_some();
+                b.items[i] = stack;
+                if had_book || b.items[i].is_some() {
+                    shelf_slot = Some(i);
+                }
+            }
             Some(BlockEntity::Jukebox(_)) => {
                 self.jukebox_set_item(p, stack);
                 return true;
@@ -485,6 +575,9 @@ impl Game<'_> {
             Some(entity) => entity.slots_mut()[i] = stack,
             None => return false,
         }
+        if let Some(slot) = shelf_slot {
+            self.chiseled_bookshelf_update_state(p, slot);
+        }
         self.container_changed(key);
         true
     }
@@ -495,13 +588,24 @@ impl Game<'_> {
         let name = match s {
             Slot::Guest(_, inner) => return self.equipment_slot_accepts(inner, stack),
             Slot::Armor(i @ 1..=3) => ["head", "chest", "legs", "feet"][*i],
-            Slot::Mob(_, key) if matches!(*key, "chest" | "legs" | "feet") => key,
+            Slot::Mob(_, key) if matches!(*key, "chest" | "legs" | "feet" | "body" | "saddle") => {
+                key
+            }
             _ => return true,
         };
         // ItemStack.isEmpty: air or a count of 0.
         let Some(stack) = stack.filter(|s| &*s.item != "minecraft:air" && s.count > 0) else {
             return true;
         };
+        // SulfurCube.getEquipmentSlotForItem: a swallowable item is a body item.
+        if let Slot::Mob(id, "body") = s
+            && self.mobs.iter().find(|m| m.id == *id).is_some_and(|m| {
+                m.species() == horizon_client::mobs::Species::SulfurCube
+                    && horizon_client::mobs::sulfur_cube::swallowable(m, &stack.item)
+            })
+        {
+            return true;
+        }
         self.items()
             .get(&stack.item)
             .is_some_and(|info| info.equip_slot.as_deref() == Some(name))
@@ -564,9 +668,50 @@ impl Game<'_> {
                 None => false,
             },
             Slot::Mob(id, key) => {
-                let Some(m) = self.mobs.iter_mut().find(|m| m.id == *id) else {
+                let Some(index) = self.mobs.iter().position(|m| m.id == *id) else {
                     return false;
                 };
+                let m = &self.mobs[index];
+                let first_tick = m.first_tick;
+                let at = [m.position.x, m.position.y, m.position.z];
+                let old = match *key {
+                    "mainhand" => m
+                        .extra
+                        .main_hand_stack()
+                        .cloned()
+                        .or_else(|| m.extra.main_hand.as_ref().map(|i| ItemStack::new(i, 1))),
+                    "offhand" => m.extra.off_hand.as_ref().map(|i| ItemStack::new(i, 1)),
+                    "head" => m.extra.armor[0]
+                        .clone()
+                        .or_else(|| m.extra.head.as_ref().map(|i| ItemStack::new(i, 1))),
+                    "chest" => m.extra.armor[1]
+                        .clone()
+                        .or_else(|| m.extra.chest.as_ref().map(|i| ItemStack::new(i, 1))),
+                    "legs" => m.extra.armor[2]
+                        .clone()
+                        .or_else(|| m.extra.legs.as_ref().map(|i| ItemStack::new(i, 1))),
+                    "feet" => m.extra.armor[3]
+                        .clone()
+                        .or_else(|| m.extra.feet.as_ref().map(|i| ItemStack::new(i, 1))),
+                    "body" => m.extra.body.as_ref().map(|i| ItemStack::new(i, 1)),
+                    "saddle" => m.saddle_item(),
+                    _ => None,
+                };
+                let same = match (old.as_ref(), stack.as_ref()) {
+                    (None, None) => true,
+                    (Some(a), Some(b)) => a.same_item_same_components(b),
+                    _ => false,
+                };
+                let equippable = stack.as_ref().is_some_and(|s| {
+                    let data = s.data();
+                    !data.is_some_and(|d| d.other("!minecraft:equippable").is_some())
+                        && (data.is_some_and(|d| d.other("minecraft:equippable").is_some())
+                            || self
+                                .items()
+                                .get(&s.item)
+                                .is_some_and(|i| i.equip_slot.is_some()))
+                });
+                let m = &mut self.mobs[index];
                 let item = stack.as_ref().map(|s| s.item.clone());
                 // The worn armour stack goes with the id: a kept stack of the
                 // previous piece would otherwise still be what the mob wears.
@@ -580,6 +725,13 @@ impl Game<'_> {
                 if let Some(i) = worn {
                     m.extra.armor[i] = stack.clone();
                 }
+                if let Some(slot) = mob_stack_slot(key) {
+                    if let Some(stack) = stack.as_ref() {
+                        horizon_client::mobs::finalize::set_item_stack(m, slot, stack.clone());
+                    } else {
+                        horizon_client::mobs::finalize::set_slot_enchantments(m, slot, Vec::new());
+                    }
+                }
                 match *key {
                     "mainhand" => m.extra.set_main_hand_stack(stack),
                     "offhand" => m.extra.off_hand = item,
@@ -588,25 +740,71 @@ impl Game<'_> {
                     "chest" => m.extra.chest = item,
                     "legs" => m.extra.legs = item,
                     "feet" => m.extra.feet = item,
+                    "saddle" => m.set_saddle(stack),
                     _ => return false,
+                }
+                if !first_tick && !same && self.remote.is_none() {
+                    self.mob_equip_event(*id, at, equippable);
                 }
                 true
             }
-            Slot::Stand(id, i) => match self
-                .armor_stands
-                .iter_mut()
-                .find(|a| a.id == *id)
-                .and_then(|a| a.equipment.get_mut(*i))
-            {
-                Some(slot) => {
-                    *slot = stack;
+            Slot::Stand(id, i) => {
+                // LivingEntity.onEquipItem: all stand slots emit; the new
+                // stack's EQUIPPABLE presence chooses equip versus unequip.
+                let equippable = stack.as_ref().is_some_and(|s| {
+                    let data = s.data();
+                    !data.is_some_and(|d| d.other("!minecraft:equippable").is_some())
+                        && (data.is_some_and(|d| d.other("minecraft:equippable").is_some())
+                            || self
+                                .items()
+                                .get(&s.item)
+                                .is_some_and(|i| i.equip_slot.is_some()))
+                });
+                let Some(a) = self.armor_stands.iter_mut().find(|a| a.id == *id) else {
+                    return false;
+                };
+                let Some(slot) = a.equipment.get_mut(*i) else {
+                    return false;
+                };
+                let same = match (slot.as_ref(), stack.as_ref()) {
+                    (None, None) => true,
+                    (Some(old), Some(new)) => old.same_item_same_components(new),
+                    _ => false,
+                };
+                let emit = !a.first_tick && !same;
+                let at = a.position;
+                *slot = stack;
+                if emit && self.remote.is_none() {
+                    self.post_game_event(
+                        if equippable {
+                            "minecraft:equip"
+                        } else {
+                            "minecraft:unequip"
+                        },
+                        [at.x, at.y, at.z],
+                        horizon_client::sculk::Context {
+                            source: Some(horizon_client::mobs::Who::Mob(*id)),
+                            living: true,
+                            ..Default::default()
+                        },
+                    );
+                }
+                true
+            }
+            Slot::Item(id) => match self.dropped.iter_mut().find(|e| e.id == *id) {
+                Some(entity) => {
+                    // `ItemEntity.setItem`: the stack is the entity's.
+                    match stack.filter(|s| &*s.item != "minecraft:air" && s.count > 0) {
+                        Some(stack) => entity.stack = stack,
+                        None => entity.stack = ItemStack::new("minecraft:air", 0),
+                    }
                     true
                 }
                 None => false,
             },
-            Slot::Frame(id) => match self.item_frames.iter_mut().find(|f| f.id == *id) {
-                Some(f) => {
-                    f.item = stack;
+            Slot::Frame(id) => match self.item_frames.iter().position(|f| f.id == *id) {
+                Some(i) => {
+                    self.set_frame_item(i, stack);
                     true
                 }
                 None => false,
@@ -663,12 +861,83 @@ impl Game<'_> {
         if count > max_stack {
             return Err(err("arguments.item.overstacked", &[&id, &max_stack]));
         }
+        // ItemInput.createItemStack validates effective components after count.
+        // Materialization currently discards removals, so inspect the validated
+        // command patch itself without changing the stack or its saved patch.
+        let components = self.item_validation_components(&id, components.as_deref())?;
+        if components.get(&"minecraft:max_damage".to_owned()).is_some()
+            && horizon_world::datafix::dynamic::as_int(
+                components.get(&"minecraft:max_stack_size".to_owned()),
+                1,
+            ) > 1
+        {
+            return Err(err(
+                "arguments.item.malformed",
+                &[&"Item cannot be both damageable and stackable"],
+            ));
+        }
         Ok(Some(stack))
+    }
+    /// ItemInput.createItemStack: read-only view of the two prototype components used by this command
+    /// validation, with all typed patch operations (including removals).
+    fn item_validation_components(
+        &self,
+        id: &str,
+        components: Option<&str>,
+    ) -> R<horizon_world::component_patch::ComponentMap<String, Tag>> {
+        use horizon_client::command::{Reader, args::read_identifier, snbt::parse_tag_argument};
+        use horizon_world::component_patch::{ComponentMap, Patch, Prototype};
+        let mut prototype = Vec::new();
+        if let Some(item) = self.items().get(id) {
+            for (key, value) in [
+                ("minecraft:max_damage", item.max_damage),
+                ("minecraft:max_stack_size", item.max_stack),
+            ] {
+                if item.components.iter().any(|component| component == key) {
+                    prototype.push((key.to_owned(), Tag::Int(value as i32)));
+                }
+            }
+        }
+        let mut patch = Vec::new();
+        if let Some(components) = components {
+            // ItemInput has already validated IDs, values and duplicates. Reuse
+            // its token/value parsers; do not derive removals from saved output.
+            let mut reader = Reader::new(components);
+            reader.expect('[')?;
+            reader.skip_whitespace();
+            while reader.can_read() && reader.peek() != ']' {
+                let removed = reader.peek() == '!';
+                if removed {
+                    reader.skip();
+                }
+                let key = read_identifier(&mut reader)?;
+                reader.skip_whitespace();
+                let value = if removed {
+                    None
+                } else {
+                    reader.expect('=')?;
+                    reader.skip_whitespace();
+                    Some(parse_tag_argument(&mut reader)?)
+                };
+                patch.push((key, value));
+                reader.skip_whitespace();
+                if reader.peek() == ']' {
+                    break;
+                }
+                reader.expect(',')?;
+                reader.skip_whitespace();
+            }
+            reader.expect(']')?;
+        }
+        Ok(ComponentMap::from_patch(
+            Prototype::new(prototype),
+            &Patch::new(patch),
+        ))
     }
     /// One item modifier (a typed object, a list or a datapack reference)
     /// applied to a stack; `None` when the stack ends up empty.
     fn apply_item_modifier(
-        &self,
+        &mut self,
         m: &serde_json::Value,
         stack: Option<ItemStack>,
         rng: &mut horizon_core::random::LegacyRandom,
@@ -698,8 +967,8 @@ impl Game<'_> {
             Value::Array(list) => list.iter().fold(stack, |s, f| {
                 self.apply_item_modifier(f, s, rng, this, origin, depth + 1)
             }),
-            Value::String(id) => match self.fns.store.item_modifiers.get(id) {
-                Some(f) => self.apply_item_modifier(f, stack, rng, this, origin, depth + 1),
+            Value::String(id) => match self.fns.store.item_modifiers.get(id).cloned() {
+                Some(f) => self.apply_item_modifier(&f, stack, rng, this, origin, depth + 1),
                 None => stack,
             },
             Value::Object(_) => {
@@ -719,6 +988,14 @@ impl Game<'_> {
                             .fold(Some(stack), |s, f| {
                                 self.apply_item_modifier(f, s, rng, this, origin, depth + 1)
                             });
+                    }
+                    "minecraft:exploration_map" => {
+                        if stack.count > 0 {
+                            let map = horizon_world::loot::ExplorationMap::from_json(m);
+                            // A failed command search keeps the input; pending loot's
+                            // caller owns its separate filtered/drop policy.
+                            self.materialize_exploration_map(&mut stack, &map, origin);
+                        }
                     }
                     "minecraft:set_count" => {
                         let n = int(&m["count"], rng);
@@ -835,14 +1112,7 @@ impl Game<'_> {
                                 .unwrap_or(Tag::Compound(Default::default())),
                             v => horizon_client::scoreboard::json_to_tag(v),
                         };
-                        edit_components(&mut stack, |c| {
-                            let mut data = match c.get(&"minecraft:custom_data".into()) {
-                                Some(t @ Tag::Compound(_)) => t.clone(),
-                                _ => Tag::Compound(Default::default()),
-                            };
-                            merge_compound(&mut data, &tag);
-                            c.insert("minecraft:custom_data".into(), data);
-                        });
+                        set_custom_data(&mut stack, &tag);
                     }
                     "minecraft:set_components" => {
                         let patch = m["components"].clone();
@@ -950,7 +1220,7 @@ impl Game<'_> {
         }
         self.items().get(&s.item).map_or(64, |i| i.max_stack)
     }
-    /// `ResourceOrIdArgument.getItemModifier`: an inline modifier (SNBT) or
+    /// `ResourceOrIdArgument.getLootModifier`: an inline modifier (SNBT) or
     /// a registered one.
     pub(super) fn item_modifier_arg(&mut self, ctx: &Context, name: &str) -> R<serde_json::Value> {
         let raw = match ctx.get(name) {
@@ -972,7 +1242,12 @@ impl Game<'_> {
             .item_modifiers
             .get(&id)
             .cloned()
-            .ok_or_else(|| err("argument.item_modifier.unknown", &[&id]))
+            .ok_or_else(|| {
+                err(
+                    "argument.resource_or_id.no_such_element",
+                    &[&id, &"minecraft:item_modifier"],
+                )
+            })
     }
     /// `/item modify (entity|block) <target> <slot> <modifier>`.
     pub(super) fn cmd_item_modify(&mut self, ctx: &Context) -> R<i32> {
@@ -991,7 +1266,7 @@ impl Game<'_> {
         let mut tracker = Tracker::default();
         let mut selected = 0;
         for o in &targets {
-            let slots = self.command_slot_candidates(o, &slot_name);
+            let slots = self.command_slot_candidates(o, &slot_name)?;
             if slots.is_empty() {
                 if let Owner::Block(p) = o
                     && self.block_container_size(*p).is_none()
@@ -1125,7 +1400,7 @@ impl Game<'_> {
             };
             let mut found = Vec::new();
             for o in &sources {
-                for s in self.command_slots(o, &source_slots) {
+                for s in self.command_slots(o, &source_slots)? {
                     found.push(self.slot_get(&s));
                 }
             }
@@ -1171,7 +1446,7 @@ impl Game<'_> {
         let mut tracker = Tracker::default();
         let mut selected = 0;
         for o in &targets {
-            let slots = self.command_slot_candidates(o, &slot_name);
+            let slots = self.command_slot_candidates(o, &slot_name)?;
             if slots.is_empty() {
                 if let Owner::Block(p) = o
                     && self.block_container_size(*p).is_none()
@@ -1220,6 +1495,13 @@ impl Game<'_> {
             }
             let h = self.owner_holder(o);
             tracker.track(&h, changed);
+            // EntityItemAccessor: a player whose slots changed gets
+            // `containerMenu.broadcastChanges` at once, so InventoryChangeTrigger
+            // (and its announcement) comes before the command's message.
+            if changed > 0 && matches!(o, Owner::Entity(Target::Player)) && self.player.is_some() {
+                self.check_inventory_trigger();
+                self.cmds.broadcast_announced = self.adv.announced.len();
+            }
         }
         if selected == 0 {
             return Err(
@@ -1313,7 +1595,7 @@ impl Game<'_> {
                     &[&p[0], &p[1], &p[2]],
                 ));
             }
-            let slots = self.command_slots(&o, &slot_name);
+            let slots = self.command_slots(&o, &slot_name)?;
             if predicate.is_none() {
                 count += slots.len() as i32;
                 continue;
@@ -1345,6 +1627,22 @@ fn edit_components(stack: &mut ItemStack, f: impl FnOnce(&mut horizon_world::nbt
     stack.extra = extra;
     stack.tidy();
 }
+/// `SetCustomDataFunction.run`: `CustomData.update(stack, tag -> tag.merge(value))`.
+fn set_custom_data(stack: &mut ItemStack, value: &Tag) {
+    edit_components(stack, |c| {
+        let mut data = match c.get(&"minecraft:custom_data".into()) {
+            Some(t @ Tag::Compound(_)) => t.clone(),
+            _ => Tag::Compound(Default::default()),
+        };
+        merge_compound(&mut data, value);
+        // Vanilla CustomData.update removes the component when the result is empty.
+        if matches!(&data, Tag::Compound(m) if m.is_empty()) {
+            c.remove(&"minecraft:custom_data".into());
+        } else {
+            c.insert("minecraft:custom_data".into(), data);
+        }
+    });
+}
 /// `CompoundTag.merge`: nested compounds merge, other values replace.
 fn merge_compound(into: &mut Tag, from: &Tag) {
     let (Tag::Compound(a), Tag::Compound(b)) = (into, from) else {
@@ -1360,33 +1658,1363 @@ fn merge_compound(into: &mut Tag, from: &Tag) {
     }
 }
 /// `ListOperation.apply` (`mode`: replace_all, replace_section, insert,
-/// append) with a 256-entry limit.
+/// append) with a 256-entry limit (`SetLoreFunction`'s). An append, insert or section
+/// replacement that cannot be done, an offset past the end or a result over the limit, gives
+/// the old list back unchanged, as vanilla does (it logs an error). `replace_all` is the new
+/// list as it is in vanilla, whose `ItemLore` then refuses more than 256 lines; here it is cut.
 fn list_operation(m: &serde_json::Value, old: Vec<Tag>, new: Vec<Tag>) -> Vec<Tag> {
+    const LIMIT: usize = 256;
     let offset = m["offset"].as_u64().unwrap_or(0) as usize;
-    let mut out = match m["mode"].as_str().unwrap_or("") {
-        "replace_all" => new,
+    match m["mode"].as_str().unwrap_or("") {
+        "replace_all" => {
+            let mut out = new;
+            out.truncate(LIMIT);
+            out
+        }
         "insert" => {
-            let at = offset.min(old.len());
-            let mut out = old[..at].to_vec();
+            if offset > old.len() || old.len() + new.len() > LIMIT {
+                return old;
+            }
+            let mut out = old[..offset].to_vec();
             out.extend(new);
-            out.extend_from_slice(&old[at..]);
+            out.extend_from_slice(&old[offset..]);
             out
         }
         "replace_section" => {
-            let at = offset.min(old.len());
+            if offset > old.len() {
+                return old;
+            }
             let size = m["size"].as_u64().map_or(new.len(), |s| s as usize);
-            let mut out = old[..at].to_vec();
+            let mut out = old[..offset].to_vec();
             out.extend(new);
-            let end = (at + size).min(old.len());
-            out.extend_from_slice(&old[end..]);
+            let end = offset.saturating_add(size);
+            if end < old.len() {
+                out.extend_from_slice(&old[end..]);
+            }
+            if out.len() > LIMIT {
+                return old;
+            }
             out
         }
         _ => {
+            if old.len() + new.len() > LIMIT {
+                return old;
+            }
             let mut out = old;
             out.extend(new);
             out
         }
-    };
-    out.truncate(256);
-    out
+    }
 }
+
+/// `ListOperation.Append/Insert/ReplaceSection.apply` with `/item modify`'s lore limit of 256
+/// (`SetLoreFunction` passes 256): an operation that cannot be done logs an error in vanilla and
+/// gives the old list back unchanged. The expected lists are worked out from the vanilla bytecode
+/// (see the pull request), not from the code under test.
+#[cfg(test)]
+mod list_operation_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn ints(range: std::ops::Range<i32>) -> Vec<Tag> {
+        range.map(Tag::Int).collect()
+    }
+
+    #[test]
+    fn an_append_that_would_pass_256_entries_changes_nothing() {
+        let old = ints(0..250);
+        let m = json!({"mode": "append"});
+        // 250 + 7 = 257 is over the limit: the old list, whole.
+        assert_eq!(list_operation(&m, old.clone(), ints(1000..1007)), old);
+        // 250 + 6 = 256 is exactly the limit: all of it.
+        let mut full = old.clone();
+        full.extend(ints(1000..1006));
+        assert_eq!(list_operation(&m, old, ints(1000..1006)), full);
+    }
+
+    #[test]
+    fn an_insert_past_the_end_or_over_the_limit_changes_nothing() {
+        let old = ints(0..3);
+        let at = |offset| json!({"mode": "insert", "offset": offset});
+        // Offset 4 is past the end of three entries.
+        assert_eq!(list_operation(&at(4), old.clone(), ints(9..10)), old);
+        // Offset 3 is the end: an insert there is an append.
+        assert_eq!(
+            list_operation(&at(3), old.clone(), ints(9..11)),
+            [0, 1, 2, 9, 10].map(Tag::Int)
+        );
+        // Offset 1 in the middle.
+        assert_eq!(
+            list_operation(&at(1), old, ints(9..11)),
+            [0, 9, 10, 1, 2].map(Tag::Int)
+        );
+        // 255 + 2 = 257 is over the limit, at any offset.
+        let big = ints(0..255);
+        assert_eq!(list_operation(&at(0), big.clone(), ints(9..11)), big);
+    }
+
+    #[test]
+    fn a_section_replaced_past_the_end_or_over_the_limit_changes_nothing() {
+        let old = ints(0..4);
+        let section = |offset, size: Option<u64>| {
+            let mut m = json!({"mode": "replace_section", "offset": offset});
+            if let Some(size) = size {
+                m["size"] = json!(size);
+            }
+            m
+        };
+        // Offset 5 is past the end of four entries.
+        assert_eq!(
+            list_operation(&section(5, None), old.clone(), ints(9..10)),
+            old
+        );
+        // Offset 4 is the end: nothing to replace, the new entries go after.
+        assert_eq!(
+            list_operation(&section(4, None), old.clone(), ints(9..10)),
+            [0, 1, 2, 3, 9].map(Tag::Int)
+        );
+        // Entries 1 and 2 (size 2) become one entry.
+        assert_eq!(
+            list_operation(&section(1, Some(2)), old.clone(), ints(9..10)),
+            [0, 9, 3].map(Tag::Int)
+        );
+        // No size: as many entries as the new ones.
+        assert_eq!(
+            list_operation(&section(0, None), ints(0..3), ints(7..9)),
+            [7, 8, 2].map(Tag::Int)
+        );
+        // 256 entries, one replaced by two: 257 is over the limit.
+        let full = ints(0..256);
+        assert_eq!(
+            list_operation(&section(0, Some(1)), full.clone(), ints(9..11)),
+            full
+        );
+    }
+
+    #[test]
+    fn replacing_everything_gives_the_new_list() {
+        let m = json!({"mode": "replace_all"});
+        assert_eq!(
+            list_operation(&m, ints(0..3), ints(7..9)),
+            [7, 8].map(Tag::Int)
+        );
+    }
+}
+
+#[cfg(test)]
+mod stand_equip_event_tests {
+    use crate::game::{Audio, Game, Options, Progress, Settings, load_resources};
+    use horizon_client::{chunk::Chunk, containers::BlockEntity, mobs::Who, sculk::Info};
+    use horizon_core::position::ChunkPos;
+    use std::sync::Arc;
+
+    fn candidate(game: &Game<'_>) -> Option<Info> {
+        let Some(BlockEntity::Sculk(sensor)) = game.world.block_entities.get(&(9, 200, 10)) else {
+            panic!("actual sensor must be registered")
+        };
+        sensor.vibration.selector.current.map(|(info, _)| info)
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn commands_post_stand_equipment_events_after_its_first_tick() {
+        let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+        let settings = Settings::default();
+        let loaded = load_resources(
+            root.clone(),
+            None,
+            &root,
+            &settings,
+            std::time::Instant::now(),
+            false,
+            true,
+            &Progress::new(),
+            &mut |_, _| unreachable!(),
+        )
+        .unwrap();
+        let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
+        options.resources = root.clone();
+        options.game_dir =
+            Some(std::env::temp_dir().join(format!("horizon-h130-unit-{}", std::process::id())));
+        options.execution_role = crate::game::execution_role::ExecutionRole::IntegratedServer;
+        let mut game = Game::new(
+            &loaded.resources,
+            loaded.pack,
+            loaded.gui.unwrap(),
+            options,
+            settings,
+            Audio::silent(&root),
+            None,
+        )
+        .unwrap();
+        game.build_registries();
+        game.set_allow_commands(true);
+        let registry = game.pack.assets.registry;
+        let sensor = registry.default_state("minecraft:sculk_sensor").unwrap();
+        let mut chunk = Chunk::empty(0, 0);
+        chunk.set(9, 200, 10, sensor.0);
+        game.world.chunks.insert((0, 0), Arc::new(chunk));
+        game.block_ticks
+            .add_empty_chunk(ChunkPos::new(0, 0))
+            .unwrap();
+        assert!(game.run_command("forceload add 0 0"));
+        assert!(game.run_command("summon armor_stand 6.5 200 10.5 {UUID:[I;130,0,0,1],NoGravity:1b,attributes:[{id:\"minecraft:movement_speed\",base:0.1d}]}"));
+        let id = game.armor_stands[0].id;
+        assert_eq!(game.uuid_for(id), [130, 0, 0, 1]);
+        assert!(
+            game.armor_stands[0].speed_instance,
+            "a loaded attribute is not firstTick"
+        );
+        game.sculk_prepare();
+        game.sculk_sync_index();
+        assert!(candidate(&game).is_none());
+        let prefix = "item replace entity 00000082-0000-0000-0000-000000000001 ";
+        for item in ["iron_helmet", "air"] {
+            assert!(game.run_command(&format!("{prefix}armor.head with {item}")));
+            assert!(candidate(&game).is_none(), "first-tick suppression");
+        }
+        game.tick_armor_stands().unwrap();
+        assert!(
+            game.run_command(
+                "data merge entity 00000082-0000-0000-0000-000000000001 {ShowArms:1b}"
+            )
+        );
+        for (slot, item, event) in [
+            ("armor.head", "iron_helmet", Some("minecraft:equip")),
+            ("armor.head", "iron_helmet", None),
+            ("armor.head", "air", Some("minecraft:unequip")),
+            ("armor.head", "air", None),
+            ("weapon.mainhand", "stick", Some("minecraft:unequip")),
+        ] {
+            let Some(BlockEntity::Sculk(sensor)) = game.world.block_entities.get_mut(&(9, 200, 10))
+            else {
+                unreachable!()
+            };
+            sensor.vibration = Default::default();
+            assert!(game.run_command(&format!("{prefix}{slot} with {item}")));
+            let heard = candidate(&game);
+            assert_eq!(heard.map(|info| info.event), event, "{slot} -> {item}");
+            if let Some(info) = heard {
+                assert_eq!(info.source, Some(Who::Mob(id)));
+                assert_eq!(info.pos, [6.5, 200.0, 10.5]);
+                assert!(info.owner.is_none());
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod mob_equipment_command_tests {
+    use crate::game::commands::{Target, data::DataRef};
+    use crate::game::{Audio, Game, Options, Progress, Settings, load_resources};
+    use horizon_client::chunk::Chunk;
+    use horizon_core::position::ChunkPos;
+    use std::sync::Arc;
+
+    fn with_game(test: impl FnOnce(&mut Game<'_>)) {
+        let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+        let settings = Settings::default();
+        let loaded = load_resources(
+            root.clone(),
+            None,
+            &root,
+            &settings,
+            std::time::Instant::now(),
+            false,
+            true,
+            &Progress::new(),
+            &mut |_, _| unreachable!(),
+        )
+        .unwrap();
+        let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
+        options.resources = root.clone();
+        options.game_dir = Some(
+            std::path::PathBuf::from(std::env::var_os("HORIZON_HOME").unwrap())
+                .join(format!("h025-{:?}", std::thread::current().id())),
+        );
+        options.execution_role = crate::game::execution_role::ExecutionRole::IntegratedServer;
+        let mut game = Game::new(
+            &loaded.resources,
+            loaded.pack,
+            loaded.gui.unwrap(),
+            options,
+            settings,
+            Audio::silent(&root),
+            None,
+        )
+        .unwrap();
+        game.build_registries();
+        game.set_allow_commands(true);
+
+        game.world
+            .chunks
+            .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+        game.block_ticks
+            .add_empty_chunk(ChunkPos::new(0, 0))
+            .unwrap();
+        assert!(game.run_command("difficulty normal"));
+        assert!(game.run_command("forceload add 0 0"));
+        test(&mut game);
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn world_pack_enchantments_reach_actual_game_catalog() {
+        use horizon_client::enchant::EffectContext;
+        use horizon_core::random::LegacyRandom;
+        with_game(|game| {
+            let clock = game.world.game_time;
+            game.world_root = std::path::PathBuf::from(std::env::var_os("HORIZON_HOME").unwrap())
+                .join("enchantment-catalog-world");
+            let pack = game.world_root.join("datapacks/catalog");
+            let definitions = pack.join("data/wpenchant/enchantment");
+            std::fs::create_dir_all(&definitions).unwrap();
+            std::fs::write(
+                pack.join("pack.mcmeta"),
+                r#"{"pack":{"description":"World enchantment catalog fixture"}}"#,
+            )
+            .unwrap();
+            let definition = serde_json::json!({
+                "description": "World catalog loaded", "supported_items": "minecraft:diamond_sword",
+                "weight": 1, "max_level": 1,
+                "min_cost": {"base": 1, "per_level_above_first": 0},
+                "max_cost": {"base": 1, "per_level_above_first": 0},
+                "anvil_cost": 1, "slots": ["mainhand"],
+                "effects": {"minecraft:damage": [{"effect": {"type": "minecraft:add", "value": 2.0}}]}
+            });
+            std::fs::write(
+                definitions.join("loaded.json"),
+                serde_json::to_vec(&definition).unwrap(),
+            )
+            .unwrap();
+            std::fs::write(
+                game.world_root.join("datapacks.json"),
+                r#"{"enabled":["file/catalog"]}"#,
+            )
+            .unwrap();
+            let functions = pack.join("data/wpenchant/function");
+            std::fs::create_dir_all(&functions).unwrap();
+            std::fs::write(functions.join("ready.mcfunction"), "return 1\n").unwrap();
+            game.reload_datapacks(false);
+            assert!(game.fns.store.functions.contains_key("wpenchant:ready"));
+            game.reload_world_tables();
+            let raw_present = game
+                .pack_files()
+                .kind("enchantment")
+                .any(|(id, files)| id == "wpenchant:loaded" && !files.is_empty());
+            assert!(
+                raw_present,
+                "pack function admitted, but enchantment raw file absent; actual catalog entry present={}",
+                game.enchantments().get("wpenchant:loaded").is_some()
+            );
+            assert!(std::sync::Arc::ptr_eq(
+                &game.items().enchantments,
+                &game.stations().enchantments
+            ));
+            assert!(game.enchantments().get("minecraft:mending").is_some());
+            assert!(game.enchantments().get("wpenchant:missing").is_none());
+            let entry = game
+                .enchantments()
+                .get("wpenchant:loaded")
+                .expect("the active Game catalog must adopt the loaded world-pack definition");
+            assert_eq!(entry.description, "World catalog loaded");
+            assert_eq!(entry.max_level, 1);
+            assert!(game.enchantments().can_enchant(
+                game.items(),
+                "wpenchant:loaded",
+                "minecraft:diamond_sword"
+            ));
+            assert!(!game.enchantments().can_enchant(
+                game.items(),
+                "wpenchant:loaded",
+                "minecraft:stone"
+            ));
+            assert_eq!(
+                game.enchantments().modify_value_with(
+                    "wpenchant:loaded",
+                    1,
+                    "minecraft:damage",
+                    &EffectContext::default(),
+                    &mut LegacyRandom::new(0),
+                    1.0
+                ),
+                3.0
+            );
+            assert_eq!(game.world.game_time, clock);
+        });
+    }
+
+    fn actor(game: &mut Game<'_>, kind: &str, n: i32) -> (String, u32) {
+        let uuid = format!("00000019-0000-0000-0000-{n:012x}");
+        assert!(game.run_command(&format!("summon {kind} 4.5 200 5.5 {{UUID:[I;25,0,0,{n}],NoAI:1b,NoGravity:1b,Silent:1b,h025_raw:7,Tags:[h025]}}")), "{kind}/{n}: {:?}", game.ui.chat.recent_lines(3));
+        let mob = game
+            .mobs
+            .iter()
+            .find(|m| game.persist.uuid_of(m.id) == Some([25, 0, 0, n]))
+            .unwrap();
+        assert!(mob.no_ai);
+        (uuid, mob.id)
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn body_commands_reject_wrong_items_without_changing_head() {
+        with_game(|game| {
+            for (n, kind, slot, item) in [
+                (1, "horse", "armor.body", "iron_horse_armor"),
+                (2, "wolf", "armor.body", "wolf_armor"),
+                (3, "husk", "armor.head", "iron_helmet"),
+            ] {
+                let (uuid, id) = actor(game, kind, n);
+                assert!(
+                    game.run_command(&format!("item replace entity {uuid} {slot} with {item}"))
+                );
+                let mob = game.mobs.iter().find(|m| m.id == id).unwrap();
+                let actual = if slot == "armor.body" {
+                    &mob.extra.body
+                } else {
+                    &mob.extra.head
+                };
+                assert_eq!(
+                    actual.as_deref(),
+                    Some(format!("minecraft:{item}").as_str())
+                );
+            }
+            for (n, kind) in [(4, "husk"), (5, "pig")] {
+                let (uuid, id) = actor(game, kind, n);
+                assert!(
+                    game.run_command(&format!("item replace entity {uuid} armor.head with stone"))
+                );
+                assert!(
+                    !game.run_command(&format!(
+                        "item replace entity {uuid} armor.body with diamond_chestplate"
+                    )),
+                    "body must reject a chest item"
+                );
+                let mob = game.mobs.iter().find(|m| m.id == id).unwrap();
+                assert!(mob.extra.body.is_none());
+                assert_eq!(mob.extra.head.as_deref(), Some("minecraft:stone"));
+                let saved = game.data_of(&DataRef::Entity(Target::Mob(id))).unwrap();
+                assert!(saved.get("equipment").unwrap().get("body").is_none());
+                assert_eq!(
+                    saved
+                        .get("equipment")
+                        .unwrap()
+                        .get("head")
+                        .unwrap()
+                        .get("id"),
+                    Some(&horizon_world::nbt::Tag::String("minecraft:stone".into()))
+                );
+            }
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn saddle_commands_round_trip_existing_model_and_saved_equipment() {
+        use super::Slot;
+        use horizon_world::nbt::Tag;
+        with_game(|game| {
+            // Pig is the existing species saver; Husk needs the common projection.
+            for (n, kind) in [(6, "pig"), (7, "husk")] {
+                let (uuid, id) = actor(game, kind, n);
+                assert!(game.slot_get(&Slot::Mob(id, "saddle")).is_none());
+                assert!(
+                    game.run_command(&format!("item replace entity {uuid} armor.head with stone"))
+                );
+                assert!(
+                    game.run_command(&format!("item replace entity {uuid} saddle with saddle")),
+                    "command must reach the existing saddle model"
+                );
+                assert_eq!(
+                    game.slot_get(&Slot::Mob(id, "saddle"))
+                        .unwrap()
+                        .item
+                        .as_ref(),
+                    "minecraft:saddle"
+                );
+                let saved = game.data_of(&DataRef::Entity(Target::Mob(id))).unwrap();
+                assert_eq!(
+                    saved
+                        .get("equipment")
+                        .unwrap()
+                        .get("saddle")
+                        .unwrap()
+                        .get("id"),
+                    Some(&Tag::String("minecraft:saddle".into()))
+                );
+                assert_eq!(
+                    saved
+                        .get("equipment")
+                        .unwrap()
+                        .get("head")
+                        .unwrap()
+                        .get("id"),
+                    Some(&Tag::String("minecraft:stone".into()))
+                );
+                assert_eq!(saved.get("h025_raw"), Some(&Tag::Int(7)));
+                assert_eq!(saved.get("Silent"), Some(&Tag::Byte(1)));
+                assert_eq!(
+                    saved.get("Tags"),
+                    Some(&Tag::List(vec![Tag::String("h025".into())]))
+                );
+                assert!(
+                    !game.run_command(&format!("item replace entity {uuid} saddle with stick"))
+                );
+                assert_eq!(
+                    game.slot_get(&Slot::Mob(id, "saddle"))
+                        .unwrap()
+                        .item
+                        .as_ref(),
+                    "minecraft:saddle"
+                );
+                assert!(game.run_command(&format!("item replace entity {uuid} saddle with air")));
+                assert!(game.slot_get(&Slot::Mob(id, "saddle")).is_none());
+            }
+        });
+    }
+    /// `SulfurCube.getEquipmentSlotForItem`: a `#sulfur_cube_swallowable`
+    /// item is a body item, so the body's `SlotAccess` takes it (#12038).
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_sulfur_cubes_body_takes_a_swallowable_block() {
+        with_game(|game| {
+            assert!(game.run_command("summon sulfur_cube 4.5 200 4.5 {NoAI:1b,Tags:[\"cube\"]}"));
+            let body = |game: &Game<'_>| {
+                let m = game
+                    .mobs
+                    .iter()
+                    .find(|m| m.kind.id == "minecraft:sulfur_cube");
+                m.and_then(|m| m.extra.body.clone())
+            };
+            let replace = "item replace entity @e[tag=cube,limit=1] armor.body with";
+            assert!(game.run_command(&format!("{replace} white_wool")));
+            assert_eq!(body(game).as_deref(), Some("minecraft:white_wool"));
+            // An item outside the tag stays out, and the body stays on.
+            assert!(!game.run_command(&format!("{replace} diamond")));
+            assert_eq!(body(game).as_deref(), Some("minecraft:white_wool"));
+            // An empty stack always fits: the body comes off.
+            assert!(game.run_command(&format!("{replace} air")));
+            assert_eq!(body(game), None);
+        });
+    }
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn effective_item_composition_rejects_before_destination_mutation() {
+        use super::Slot;
+        with_game(|game| {
+            assert!(game.run_command("setblock 4 200 4 chest"));
+            let slot = Slot::Block([4, 200, 4], 0);
+            for item in [
+                "iron_helmet[max_stack_size=2]",
+                "iron_helmet[max_stack_size=99]",
+                "stone[max_damage=10,max_stack_size=2]",
+            ] {
+                assert!(game.run_command("item replace block 4 200 4 container.0 with emerald[custom_data={sentinel:86}] 4"));
+                let before = game.slot_get(&slot).unwrap();
+                assert!(
+                    !game.run_command(&format!(
+                        "item replace block 4 200 4 container.0 with {item}"
+                    )),
+                    "invalid effective composition must reject {item}"
+                );
+                assert_eq!(game.slot_get(&slot), Some(before));
+            }
+            for item in [
+                "iron_helmet",
+                "stone[max_stack_size=2]",
+                "stone[max_stack_size=99]",
+                "iron_helmet[!max_damage,max_stack_size=2]",
+            ] {
+                assert!(
+                    game.run_command(&format!(
+                        "item replace block 4 200 4 container.0 with {item}"
+                    )),
+                    "valid effective composition must accept {item}"
+                );
+            }
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn effective_item_validation_view_uses_loaded_prototypes_and_typed_removals() {
+        use horizon_world::nbt::Tag;
+        with_game(|game| {
+            let damage = "minecraft:max_damage".to_owned();
+            let size = "minecraft:max_stack_size".to_owned();
+            let helmet = game.items().get("minecraft:iron_helmet").unwrap();
+            assert!(helmet.components.contains(&damage));
+            let plain = game
+                .item_validation_components("minecraft:iron_helmet", None)
+                .unwrap();
+            assert_eq!(
+                plain.get(&damage),
+                Some(&Tag::Int(helmet.max_damage as i32))
+            );
+            assert_eq!(plain.get(&size), Some(&Tag::Int(helmet.max_stack as i32)));
+            let removed = game
+                .item_validation_components(
+                    "minecraft:iron_helmet",
+                    Some("[!max_damage,max_stack_size=2,custom_data={keep:86}]"),
+                )
+                .unwrap();
+            assert!(removed.get(&damage).is_none());
+            assert_eq!(removed.get(&size), Some(&Tag::Int(2)));
+            assert!(removed.get(&"minecraft:custom_data".to_owned()).is_some());
+            let fallback = game
+                .item_validation_components("minecraft:iron_helmet", Some("[!max_stack_size]"))
+                .unwrap();
+            assert!(fallback.get(&damage).is_some());
+            assert_eq!(
+                horizon_world::datafix::dynamic::as_int(fallback.get(&size), 1),
+                1
+            );
+            let stone = game
+                .item_validation_components("minecraft:stone", None)
+                .unwrap();
+            assert!(stone.get(&damage).is_none());
+            assert_eq!(
+                stone.get(&size),
+                Some(&Tag::Int(
+                    game.items().get("minecraft:stone").unwrap().max_stack as i32
+                ))
+            );
+        });
+    }
+}
+
+#[cfg(test)]
+mod mob_equipment_stack_tests {
+    use crate::game::commands::{Target, data::DataRef};
+    use crate::game::{Audio, Game, Options, Progress, Settings, load_resources};
+    use horizon_client::{chunk::Chunk, mobs::finalize};
+    use horizon_core::position::ChunkPos;
+    use horizon_world::nbt::Tag;
+    use std::sync::Arc;
+    fn with_game(test: impl FnOnce(&mut Game<'_>)) {
+        let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+        let settings = Settings::default();
+        let loaded = load_resources(
+            root.clone(),
+            None,
+            &root,
+            &settings,
+            std::time::Instant::now(),
+            false,
+            true,
+            &Progress::new(),
+            &mut |_, _| unreachable!(),
+        )
+        .unwrap();
+        let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
+        options.resources = root.clone();
+        options.game_dir = Some(
+            std::path::PathBuf::from(std::env::var_os("HORIZON_HOME").unwrap())
+                .join(format!("h023-{:?}", std::thread::current().id())),
+        );
+        options.execution_role = crate::game::execution_role::ExecutionRole::IntegratedServer;
+        let mut game = Game::new(
+            &loaded.resources,
+            loaded.pack,
+            loaded.gui.unwrap(),
+            options,
+            settings,
+            Audio::silent(&root),
+            None,
+        )
+        .unwrap();
+        game.build_registries();
+        game.set_allow_commands(true);
+
+        game.world
+            .chunks
+            .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+        game.block_ticks
+            .add_empty_chunk(ChunkPos::new(0, 0))
+            .unwrap();
+        assert!(game.run_command("difficulty normal"));
+        assert!(game.run_command("forceload add 0 0"));
+        test(&mut game);
+    }
+
+    fn actor(game: &mut Game<'_>, kind: &str, n: i32) -> (String, u32) {
+        let uuid = format!("00000017-0000-0000-0000-{n:012x}");
+        assert!(game.run_command(&format!("summon {kind} 4.5 200 5.5 {{UUID:[I;23,0,0,{n}],NoAI:1b,NoGravity:1b,Silent:1b,h023_raw:7,Tags:[h023]}}")), "{kind}/{n}: {:?}", game.ui.chat.recent_lines(3));
+        let mob = game
+            .mobs
+            .iter()
+            .find(|m| game.persist.uuid_of(m.id) == Some([23, 0, 0, n]))
+            .unwrap();
+        assert!(mob.no_ai);
+        (uuid, mob.id)
+    }
+
+    fn saved(game: &mut Game<'_>, id: u32) -> Tag {
+        game.data_of(&DataRef::Entity(Target::Mob(id))).unwrap()
+    }
+    fn audit(stack: &horizon_client::items::ItemStack, value: i32) {
+        assert_eq!(
+            stack.custom_data().and_then(|c| c.get(&"audit".into())),
+            Some(&Tag::Int(value))
+        );
+    }
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn offhand_commands_adopt_and_copy_the_whole_stack() {
+        use super::Slot;
+        with_game(|game| {
+            let (uuid, id) = actor(game, "husk", 1);
+            assert!(game.run_command("setblock 4 200 4 chest"));
+            assert!(game.slot_get(&Slot::Mob(id, "offhand")).is_none());
+            assert!(game.run_command(&format!(
+                "item replace entity {uuid} weapon.mainhand with stone"
+            )));
+            assert!(game.run_command(&format!(
+                "item replace entity {uuid} weapon.offhand with stick[custom_data={{audit:7}}] 3"
+            )));
+            let mob = game.mobs.iter().find(|m| m.id == id).unwrap();
+            assert_eq!(mob.extra.off_hand.as_deref(), Some("minecraft:stick"));
+            let adopted = finalize::item_stack(mob, finalize::OFFHAND).unwrap();
+            assert_eq!(
+                adopted.count, 3,
+                "actual command adoption must retain count"
+            );
+            audit(&adopted, 7);
+            let tag = saved(game, id);
+            assert_eq!(
+                tag.get("equipment")
+                    .unwrap()
+                    .get("offhand")
+                    .unwrap()
+                    .get("count"),
+                Some(&Tag::Int(3))
+            );
+            assert_eq!(
+                tag.get("equipment")
+                    .unwrap()
+                    .get("mainhand")
+                    .unwrap()
+                    .get("id"),
+                Some(&Tag::String("minecraft:stone".into()))
+            );
+            assert!(game.run_command(&format!(
+                "item replace block 4 200 4 container.0 from entity {uuid} weapon.offhand"
+            )));
+            let copied = game.slot_get(&Slot::Block([4, 200, 4], 0)).unwrap();
+            assert_eq!(copied.count, 3);
+            audit(&copied, 7);
+            assert!(game.run_command(&format!(
+                "item replace entity {uuid} weapon.offhand with air"
+            )));
+            assert!(game.slot_get(&Slot::Mob(id, "offhand")).is_none());
+            assert!(game.run_command(&format!(
+                "item replace entity {uuid} weapon.offhand with stick"
+            )));
+            let plain = game.slot_get(&Slot::Mob(id, "offhand")).unwrap();
+            assert_eq!(plain.count, 1);
+            assert!(
+                plain.custom_data().is_none(),
+                "stale components must not return for the same id"
+            );
+        });
+    }
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn armor_command_copy_keeps_the_already_adopted_stack() {
+        use super::Slot;
+        with_game(|game| {
+            let (uuid, id) = actor(game, "husk", 2);
+            assert!(game.run_command("setblock 4 200 4 chest"));
+            assert!(game.run_command(&format!("item replace entity {uuid} armor.head with iron_helmet[damage=3,custom_data={{audit:8}}]")));
+            let mob = game.mobs.iter().find(|m| m.id == id).unwrap();
+            let adopted = mob.extra.armor[0].as_ref().unwrap();
+            assert_eq!(
+                adopted.damage, 3,
+                "existing armor state already adopts the full stack"
+            );
+            audit(adopted, 8);
+            assert!(game.run_command(&format!(
+                "item replace block 4 200 4 container.0 from entity {uuid} armor.head"
+            )));
+            let copied = game.slot_get(&Slot::Block([4, 200, 4], 0)).unwrap();
+            assert_eq!(
+                copied.damage, 3,
+                "actual command copy must use the full stack"
+            );
+            audit(&copied, 8);
+            let tag = saved(game, id);
+            let components = tag
+                .get("equipment")
+                .unwrap()
+                .get("head")
+                .unwrap()
+                .get("components")
+                .unwrap();
+            assert_eq!(components.get("minecraft:damage"), Some(&Tag::Int(3)));
+            assert_eq!(
+                components
+                    .get("minecraft:custom_data")
+                    .unwrap()
+                    .get("audit"),
+                Some(&Tag::Int(8))
+            );
+            assert!(game.run_command(&format!(
+                "item replace entity {uuid} armor.head with iron_helmet"
+            )));
+            let plain = game.slot_get(&Slot::Mob(id, "head")).unwrap();
+            assert_eq!(plain.damage, 0);
+            assert!(plain.custom_data().is_none());
+            assert!(game.run_command(&format!("item replace entity {uuid} armor.head with air")));
+            assert!(game.slot_get(&Slot::Mob(id, "head")).is_none());
+        });
+    }
+}
+
+#[cfg(test)]
+mod builtin_component_delivery_tests {
+    use crate::game::{Game, lan::LanHost};
+    use horizon_client::{
+        items::ItemStack,
+        lan::{Joined, NetConfig, Out, PlayerSender, guest::Guest, hub::HubConfig},
+    };
+    use horizon_core::position::ChunkPos;
+    use horizon_protocol::{
+        buf::{Codec, Reader, Writer},
+        item::{Slot, component},
+        packets::{configuration::ClientInformation, play},
+    };
+    use horizon_world::nbt::Tag;
+    use std::sync::{Arc, atomic::AtomicI32, mpsc};
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn h283_actual_command_inventory_bridge_encodes_four_builtin_components() {
+        let mut game = crate::game::native_machines::tests::server_game();
+        game.build_registries();
+        game.set_allow_commands(true);
+        game.block_ticks
+            .add_empty_chunk(ChunkPos::new(0, 0))
+            .unwrap();
+        assert!(game.run_command("fill 0 199 0 15 199 15 stone"));
+        assert!(game.world.loaded(8, 8));
+        game.lan_host(
+            crate::game::lan::LanSettings {
+                port: 0,
+                guest_commands: true,
+                force_game_mode: false,
+            },
+            NetConfig {
+                announce: false,
+                ..NetConfig::loopback(0, "component-wire-test".into(), 2)
+            },
+            HubConfig {
+                default_game_mode: 0,
+                guest_commands: true,
+                force_game_mode: false,
+                hardcore: false,
+                view_distance: 2,
+                simulation_distance: 2,
+                dimension: "minecraft:overworld".into(),
+                allow_flight: false,
+                seed: 0,
+                max_players: 2,
+                integrated: false,
+                levels: Default::default(),
+            },
+        )
+        .unwrap();
+        let (tx, rx) = mpsc::channel();
+        let mut guest = Guest::new(
+            Joined {
+                conn: 2,
+                uuid: 283,
+                name: "ComponentGuest".into(),
+                properties: Vec::new(),
+                info: ClientInformation::new(2),
+                brand: "test".into(),
+                sender: PlayerSender::new(tx, Arc::default()),
+                latency: Arc::new(AtomicI32::new(0)),
+                address: "127.0.0.1:25565".parse().unwrap(),
+                expected: false,
+                configured: Default::default(),
+            },
+            2,
+            [8.5, 200.0, 8.5],
+            2,
+        );
+        guest.dimension = "minecraft:overworld".into();
+        guest.placed = true;
+        guest.loaded = true;
+        guest.selected = 1;
+        guest.permission = 2;
+        let mut host = game.lan.take().unwrap();
+        host.hub.guests.push(guest);
+        let clock = game.world.game_time;
+        let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+        let registries: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(root.join("registries.json")).unwrap()).unwrap();
+        let id = |registry: &str, name: &str| {
+            registries[registry]["entries"][name]["protocol_id"]
+                .as_i64()
+                .unwrap() as i32
+        };
+        let command = |game: &mut Game<'_>, host: &mut LanHost, input: &str| {
+            assert!(
+                game.as_guest(host, 2, |g| g.run_command(input)).unwrap(),
+                "{input}"
+            );
+        };
+        let capture = |host: &mut LanHost| {
+            while rx.try_recv().is_ok() {}
+            host.hub.send_inventory(0);
+            let mut packets = Vec::new();
+            for out in rx.try_iter() {
+                match out {
+                    Out::Packet(body) => packets.push(body),
+                    Out::Packets(bodies) => packets.extend(bodies),
+                    Out::Disconnect(_) => panic!("unexpected disconnect"),
+                }
+            }
+            let mut contents = Vec::new();
+            for body in packets {
+                let mut r = Reader::new(&body);
+                let packet = r.varint().unwrap();
+                if packet == horizon_protocol::ids::play::clientbound::CONTAINER_SET_CONTENT {
+                    let content = play::ContainerSetContent::read(&mut r).unwrap();
+                    assert_eq!(r.remaining(), 0, "complete enclosing content payload");
+                    assert_eq!(content.container, 0);
+                    assert_eq!(content.items.len(), 46);
+                    assert!(content.carried.is_none());
+                    contents.push(content);
+                }
+            }
+            assert_eq!(contents.len(), 1, "one actual inventory content packet");
+            contents.pop().unwrap().items[9].clone().unwrap()
+        };
+        command(
+            &mut game,
+            &mut host,
+            "item replace entity @s inventory.0 with stone[minecraft:custom_name=\"H283 control\"] 3",
+        );
+        let control = capture(&mut host);
+        assert_eq!(control.item, id("minecraft:item", "minecraft:stone"));
+        assert_eq!(control.count, 3);
+        assert!(control.component(component::CUSTOM_NAME).is_some());
+        command(
+            &mut game,
+            &mut host,
+            "item replace entity @s inventory.0 with gold_ingot",
+        );
+        let plain = capture(&mut host);
+        assert!(
+            plain
+                .component(id(
+                    "minecraft:data_component_type",
+                    "minecraft:provides_trim_material"
+                ))
+                .is_none()
+        );
+        assert!(plain.removed.is_empty());
+        let mut failures = Vec::new();
+        for (name, item, value, expected) in [
+            (
+                "minecraft:provides_trim_material",
+                "minecraft:diamond",
+                "\"minecraft:gold\"",
+                Tag::String("minecraft:gold".into()),
+            ),
+            (
+                "minecraft:provides_banner_patterns",
+                "minecraft:paper",
+                "\"#minecraft:pattern_item/globe\"",
+                Tag::String("#minecraft:pattern_item/globe".into()),
+            ),
+            (
+                "minecraft:can_place_on",
+                "minecraft:stone",
+                "{blocks:\"minecraft:dirt\"}",
+                Tag::compound([("blocks", Tag::String("minecraft:dirt".into()))]),
+            ),
+            (
+                "minecraft:can_break",
+                "minecraft:diamond_pickaxe",
+                "{blocks:\"minecraft:stone\",state:{}}",
+                Tag::compound([
+                    ("blocks", Tag::String("minecraft:stone".into())),
+                    ("state", Tag::compound(std::iter::empty::<(&str, Tag)>())),
+                ]),
+            ),
+        ] {
+            command(
+                &mut game,
+                &mut host,
+                &format!("item replace entity @s inventory.0 with {item}[{name}={value}]"),
+            );
+            let source: ItemStack = host.hub.guest(2).unwrap().inventory[9].clone().unwrap();
+            assert_eq!(source.item.as_ref(), item);
+            assert_eq!(source.count, 1);
+            assert_eq!(
+                source.data().unwrap().other(name),
+                Some(&expected),
+                "actual registered command adoption"
+            );
+            assert!(source.wire_patch().is_none(), "no cached wire fallback");
+            let received = capture(&mut host);
+            assert_eq!(received.item, id("minecraft:item", item));
+            assert_eq!(received.count, 1);
+            assert!(received.removed.is_empty());
+            let kind = id("minecraft:data_component_type", name);
+            let mut w = Writer::new();
+            Slot::write(&Some(received.clone()), &mut w);
+            let mut r = Reader::new(&w.data);
+            let reread = Slot::read(&mut r).unwrap().unwrap();
+            assert_eq!(r.remaining(), 0, "complete nested slot payload");
+            assert_eq!(reread.component(kind), received.component(kind));
+            if received.component(kind).is_none() {
+                failures.push((name, received));
+            }
+            assert_eq!(host.hub.guest(2).unwrap().uuid, 283);
+            assert_eq!(host.hub.guest(2).unwrap().health, 20.0);
+            assert_eq!(host.hub.guest(2).unwrap().position, [8.5, 200.0, 8.5]);
+            assert_eq!(game.world.game_time, clock);
+        }
+        assert!(
+            failures.is_empty(),
+            "actual command -> network_stack -> full protocol packet missing builtin components: {failures:?}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod registered_slot_source_read_tests {
+    use super::*;
+    #[test]
+    #[ignore = "needs prepared resources and isolated homes/cwd"]
+    fn registered_first_three_reads_match_inline_and_keep_the_chest() {
+        let mut game = crate::game::native_machines::tests::server_game();
+        game.build_registries();
+        game.set_allow_commands(true);
+        let root = std::env::current_dir()
+            .unwrap()
+            .join("registered-slot-read-world");
+        assert!(!root.exists());
+        let pack = root.join("datapacks/parity");
+        std::fs::create_dir_all(pack.join("data/parity/slot_source")).unwrap();
+        let meta = r#"{"pack":{"description":"parity slots","pack_format":121,"min_format":[121,0],"max_format":[121,0]}}"#;
+        let definition = r#"{"type":"minecraft:limit_slots","limit":3,"slot_source":{"type":"minecraft:slot_range","slots":"container.*"}}"#;
+        std::fs::write(pack.join("pack.mcmeta"), meta).unwrap();
+        std::fs::write(
+            pack.join("data/parity/slot_source/first_three.json"),
+            definition,
+        )
+        .unwrap();
+        game.world_root = root;
+        game.ensure_datapacks();
+        assert_eq!(
+            game.fns
+                .pack_file("data/parity/slot_source/first_three.json")
+                .unwrap(),
+            definition.as_bytes()
+        );
+        assert!(
+            game.ui
+                .registries
+                .datapacks_enabled
+                .iter()
+                .any(|p| p == "file/parity")
+        );
+        assert!(game.run_command("forceload add 0 0"));
+        assert!(game.run_command("setblock 0 100 0 minecraft:chest{Items:[{Slot:0b,id:\"minecraft:stone\",count:5},{Slot:1b,id:\"minecraft:dirt\",count:2},{Slot:3b,id:\"minecraft:stone\",count:7},{Slot:4b,id:\"minecraft:shulker_box\",count:1,components:{\"minecraft:container\":[{slot:0,item:{id:\"minecraft:stone\",count:9}},{slot:2,item:{id:\"minecraft:dirt\",count:1}}]}}]}"));
+        let before = game.block_entity_nbt([0, 100, 0]).unwrap();
+        for (slot, item, count) in [
+            (0, "minecraft:stone", 5),
+            (1, "minecraft:dirt", 2),
+            (3, "minecraft:stone", 7),
+            (4, "minecraft:shulker_box", 1),
+        ] {
+            let actual = game.slot_get(&Slot::Block([0, 100, 0], slot)).unwrap();
+            assert_eq!((&*actual.item, actual.count), (item, count));
+        }
+        assert!(game.run_command("scoreboard objectives add slotprobe dummy"));
+        let clock = game.world.game_time;
+        let inline =
+            r#"{type:"limit_slots",limit:3,slot_source:{type:"slot_range",slots:"container.*"}}"#;
+        let mut failures = Vec::new();
+        for source in [inline, "parity:first_three"] {
+            for (kind, suffix, count) in [
+                ("items", " minecraft:stone", 5),
+                ("items", " *", 7),
+                ("slots", "", 3),
+            ] {
+                assert!(game.run_command("scoreboard players set #r slotprobe -99"));
+                assert!(game.run_command("scoreboard players set #s slotprobe -99"));
+                let command = format!(
+                    "execute store result score #r slotprobe store success score #s slotprobe run execute if {kind} block 0 100 0 {source}{suffix}"
+                );
+                let ok = game.run_command(&command);
+                let result = game.score.board.score("#r", "slotprobe").unwrap().value;
+                let success = game.score.board.score("#s", "slotprobe").unwrap().value;
+                println!("{command}: accepted={ok}, result={result}, success={success}");
+                if (ok, result, success) != (true, count, 1) {
+                    failures.push((command, ok, result, success));
+                }
+                assert_eq!(game.block_entity_nbt([0, 100, 0]).as_ref(), Some(&before));
+                assert_eq!(game.world.game_time, clock);
+            }
+        }
+        for name in ["#r", "#s"] {
+            assert!(game.run_command(&format!("scoreboard players set {name} slotprobe -99")));
+        }
+        assert!(!game.run_command("execute store result score #r slotprobe store success score #s slotprobe run execute if slots block 0 100 0 parity:missing"));
+        for name in ["#r", "#s"] {
+            assert_eq!(
+                game.score.board.score(name, "slotprobe").unwrap().value,
+                -99
+            );
+        }
+        assert_eq!(game.block_entity_nbt([0, 100, 0]).as_ref(), Some(&before));
+        assert_eq!(game.world.game_time, clock);
+        assert!(
+            failures.is_empty(),
+            "registered real-pack reads must match inline: {failures:?}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod registered_slot_source_preservation_tests {
+    use super::*;
+
+    fn scene(name: &str) -> (Game<'static>, std::path::PathBuf) {
+        let mut game = crate::game::native_machines::tests::server_game();
+        game.build_registries();
+        game.set_allow_commands(true);
+        let root = std::env::current_dir().unwrap().join(name);
+        assert!(!root.exists());
+        let mut high = std::path::PathBuf::new();
+        for (pack, limit) in [("a-low", 1), ("parity", 3)] {
+            let dir = root.join("datapacks").join(pack);
+            std::fs::create_dir_all(dir.join("data/parity/slot_source")).unwrap();
+            std::fs::write(dir.join("pack.mcmeta"), r#"{"pack":{"description":"slot snapshot","pack_format":121,"min_format":[121,0],"max_format":[121,0]}}"#).unwrap();
+            let path = dir.join("data/parity/slot_source/first_three.json");
+            std::fs::write(&path, serde_json::json!({"type":"minecraft:limit_slots","limit":limit,"slot_source":{"type":"minecraft:slot_range","slots":"container.*"}}).to_string()).unwrap();
+            high = path;
+        }
+        game.world_root = root;
+        game.ensure_datapacks();
+        assert!(game.run_command("setblock 0 100 0 chest{Items:[{Slot:0b,id:\"stone\",count:5},{Slot:1b,id:\"dirt\",count:2},{Slot:3b,id:\"stone\",count:7}]}"));
+        assert!(game.run_command("scoreboard objectives add slotprobe dummy"));
+        (game, high)
+    }
+
+    fn count(game: &mut Game<'_>, expected: i32) {
+        assert!(game.run_command("execute store result score #r slotprobe run execute if slots block 0 100 0 parity:first_three"));
+        assert_eq!(
+            game.score.board.score("#r", "slotprobe").unwrap().value,
+            expected
+        );
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources and isolated homes/cwd"]
+    fn loaded_snapshot_changes_only_on_existing_reload_with_pack_precedence() {
+        let (mut game, file) = scene("slot-source-snapshot-world");
+        let before = game.block_entity_nbt([0, 100, 0]).unwrap();
+        let clock = game.world.game_time;
+        count(&mut game, 3); // Higher-priority pack overrides the same id.
+        std::fs::write(&file, r#"{"type":"minecraft:limit_slots","limit":2,"slot_source":{"type":"minecraft:slot_range","slots":"container.*"}}"#).unwrap();
+        count(&mut game, 3); // Disk edits do not change the loaded snapshot.
+        game.reload_datapacks(true);
+        count(&mut game, 2);
+        std::fs::write(file, "{").unwrap();
+        game.reload_datapacks(true);
+        count(&mut game, 1); // Existing policy: invalid higher JSON is skipped.
+        assert!(!game.run_command("execute if slots block 0 100 0 first_three"));
+        assert_eq!(game.block_entity_nbt([0, 100, 0]).as_ref(), Some(&before));
+        assert_eq!(game.world.game_time, clock);
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources and isolated homes/cwd"]
+    fn admitted_absent_executor_sources_fail_without_player_fallback() {
+        let (mut game, _) = scene("slot-source-unsupported-world");
+        let path = game
+            .world_root
+            .join("datapacks/parity/data/parity/slot_source/this.json");
+        std::fs::write(
+            path,
+            r#"{"type":"minecraft:slot_range","source":"this","slots":"weapon.mainhand"}"#,
+        )
+        .unwrap();
+        game.reload_datapacks(true);
+        let before = game.block_entity_nbt([0, 100, 0]).unwrap();
+        let clock = game.world.game_time;
+        count(&mut game, 3);
+        let player_was_present = game.player.is_some();
+        println!("absent executor: actual Player present={player_was_present}");
+        let mut commands = vec![
+            "item modify block 0 100 0 parity:this {type:\"minecraft:set_count\",count:1}"
+                .to_owned(),
+        ];
+        for mode in ["replace", "fill", "override"] {
+            commands.push(format!(
+                "item {mode} block 0 100 0 parity:this with diamond"
+            ));
+            commands.push(format!(
+                "item {mode} block 0 100 0 container.0 from block 0 100 0 parity:this"
+            ));
+        }
+        for command in commands {
+            let dispatcher = horizon_client::command::vanilla::game_dispatcher_with_features(
+                &game.level.enabled_features,
+            );
+            assert!(
+                dispatcher
+                    .parse(&command, &game.ui.registries)
+                    .executable()
+                    .is_ok(),
+                "registered argument must be admitted: {command}"
+            );
+            assert!(
+                !game.run_command(&command),
+                "absent executor must not fall back to a Player: {command}"
+            );
+            assert_eq!(
+                game.block_entity_nbt([0, 100, 0]).as_ref(),
+                Some(&before),
+                "{command}"
+            );
+            assert_eq!(game.player.is_some(), player_was_present);
+            assert_eq!(game.world.game_time, clock);
+        }
+    }
+
+    /// SlotSources.CODEC is a holder codec: a quoted id is the same reference
+    /// as an unquoted one, and so is a group's single quoted term.
+    /// LimitSlotSource's limit is ExtraCodecs.POSITIVE_INT: a string or 0
+    /// fails to parse, and the command changes nothing.
+    #[test]
+    #[ignore = "needs prepared resources and isolated homes/cwd"]
+    fn quoted_holders_resolve_and_a_non_int_limit_fails_to_parse() {
+        let (mut game, _) = scene("slot-source-quoted-world");
+        let before = game.block_entity_nbt([0, 100, 0]).unwrap();
+        let clock = game.world.game_time;
+        count(&mut game, 3);
+        for source in [
+            r#""parity:first_three""#,
+            r#"{type:"group",terms:"parity:first_three"}"#,
+        ] {
+            assert!(game.run_command("scoreboard players set #q slotprobe -99"));
+            assert!(game.run_command(&format!(
+                "execute store result score #q slotprobe run execute if slots block 0 100 0 {source}"
+            )));
+            assert_eq!(
+                game.score.board.score("#q", "slotprobe").unwrap().value,
+                3,
+                "{source}"
+            );
+        }
+        for limit in [r#""x""#, "0"] {
+            assert!(game.run_command("scoreboard players set #q slotprobe -99"));
+            let command = format!(
+                "execute store result score #q slotprobe run execute if slots block 0 100 0 {{type:\"limit_slots\",limit:{limit},slot_source:{{type:\"slot_range\",slots:\"container.*\"}}}}"
+            );
+            assert!(!game.run_command(&command), "{command}");
+            assert_eq!(
+                game.score.board.score("#q", "slotprobe").unwrap().value,
+                -99,
+                "{command}"
+            );
+        }
+        assert_eq!(game.block_entity_nbt([0, 100, 0]).as_ref(), Some(&before));
+        assert_eq!(game.world.game_time, clock);
+    }
+
+    /// `Codec.INT` gives `limit:1b` and `limit:2.5d` their `Number.intValue()`:
+    /// a read counts that many slots and a write changes that many.
+    #[test]
+    #[ignore = "needs prepared resources and isolated homes/cwd"]
+    fn a_byte_or_fractional_limit_selects_its_int_value() {
+        let (mut game, _) = scene("slot-source-numeric-limit-world");
+        let source = |limit: &str| {
+            format!(
+                "{{type:\"limit_slots\",limit:{limit},slot_source:{{type:\"slot_range\",slots:\"container.*\"}}}}"
+            )
+        };
+        for (limit, slots) in [("1b", 1), ("2.5d", 2)] {
+            assert!(game.run_command("scoreboard players set #q slotprobe -99"));
+            assert!(game.run_command(&format!(
+                "execute store result score #q slotprobe run execute if slots block 0 100 0 {}",
+                source(limit)
+            )));
+            assert_eq!(
+                game.score.board.score("#q", "slotprobe").unwrap().value,
+                slots,
+                "{limit}"
+            );
+        }
+        // `/item override` writes the stack over the selected slots and no further:
+        // one slot for `1b`, two for `2.5d`, the stone in the fourth slot never.
+        let held = |game: &mut Game<'_>| {
+            [0, 1, 3].map(|slot| {
+                game.slot_get(&Slot::Block([0, 100, 0], slot))
+                    .map(|stack| (stack.item.to_string(), stack.count))
+            })
+        };
+        let stack = |item: &str, count| Some((format!("minecraft:{item}"), count));
+        assert!(game.run_command(&format!(
+            "item override block 0 100 0 {} with minecraft:diamond 2",
+            source("1b")
+        )));
+        assert_eq!(
+            held(&mut game),
+            [stack("diamond", 2), stack("dirt", 2), stack("stone", 7)]
+        );
+        assert!(game.run_command(&format!(
+            "item override block 0 100 0 {} with minecraft:emerald 2",
+            source("2.5d")
+        )));
+        assert_eq!(
+            held(&mut game),
+            [stack("emerald", 2), None, stack("stone", 7)]
+        );
+    }
+
+    /// A command the player types runs as them (`CommandSourceStack.getEntity`),
+    /// so `source:"this"` is their own slots without an `execute as`.
+    #[test]
+    #[ignore = "needs prepared resources and isolated homes/cwd"]
+    fn a_command_the_player_types_binds_this_to_them() {
+        let (mut game, _) = scene("slot-source-player-this-world");
+        game.player = Some(
+            horizon_client::motion::PlayerMotion::new(
+                game.motion,
+                horizon_core::geometry::Vec3::new(0.5, 101.0, 0.5),
+            )
+            .unwrap(),
+        );
+        assert!(game.command_source.is_none());
+        assert!(game.run_command(
+            r#"item replace entity @s {type:"slot_range",source:"this",slots:"weapon.mainhand"} with minecraft:stone"#
+        ));
+        let hand = game.slot_get(&Slot::MainHand).unwrap();
+        assert_eq!((&*hand.item, hand.count), ("minecraft:stone", 1));
+    }
+}
+
+#[cfg(test)]
+mod set_custom_data_tests {
+    use super::*;
+
+    #[test]
+    fn merging_an_empty_tag_into_a_stack_without_custom_data_adds_no_component() {
+        let mut stack = ItemStack::new("minecraft:stick", 1);
+        set_custom_data(&mut stack, &Tag::Compound(Default::default()));
+        let saved = horizon_client::item_data::encode_components(&stack);
+        assert!(saved.is_none_or(|c| c.get("minecraft:custom_data").is_none()));
+    }
+}
+
+#[cfg(test)]
+mod item_entity_contents_tests;

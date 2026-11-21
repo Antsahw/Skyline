@@ -6,7 +6,7 @@
 use super::{Mob, MobEvent, MobWorld, Species, control::MoveKind, nav::NavKind, path::PathType};
 use horizon_core::{
     geometry::Vec3,
-    random::{LegacyRandom, RandomSource},
+    random::{LevelRandom, RandomSource},
 };
 
 /// `Parrot.MOB_SOUND_MAP` (the happy ghast's is `SoundEvents.EMPTY`: "").
@@ -71,7 +71,7 @@ fn imitation(species: Species) -> Option<&'static str> {
 }
 
 /// `Parrot.getPitch`.
-fn pitch(random: &mut LegacyRandom) -> f32 {
+fn pitch(random: &mut impl RandomSource) -> f32 {
     (random.next_float() - random.next_float()) * 0.2 + 1.0
 }
 
@@ -81,7 +81,7 @@ fn pitch(random: &mut LegacyRandom) -> f32 {
 pub fn ai_step(
     m: &mut Mob,
     w: &MobWorld,
-    level_random: &mut LegacyRandom,
+    level_random: &mut LevelRandom,
     events: &mut Vec<MobEvent>,
 ) {
     if let Some(at) = m.extra.party_jukebox {
@@ -102,7 +102,7 @@ pub fn ai_step(
 fn imitate_nearby_mobs(
     m: &Mob,
     w: &MobWorld,
-    random: &mut LegacyRandom,
+    random: &mut LevelRandom,
     events: &mut Vec<MobEvent>,
 ) {
     if !m.alive() || m.silent || random.next_int_bound(2).unwrap_or(1) != 0 {
@@ -135,7 +135,7 @@ fn imitate_nearby_mobs(
 /// from in vanilla's order. Returns the sound, its volume and its pitch; the
 /// happy ghast's imitation is silent (`""`).
 pub fn shoulder_sound(
-    random: &mut LegacyRandom,
+    random: &mut impl RandomSource,
     player_alive: bool,
     player_silent: bool,
     peaceful: bool,
@@ -283,6 +283,7 @@ fn tree_pos(m: &Mob, w: &MobWorld) -> Option<[f64; 3]> {
 mod tests {
     use super::*;
     use crate::mobs::sensor_scan_tests::kind;
+    use horizon_core::random::LegacyRandom;
     use std::sync::Arc;
 
     fn parrot() -> Mob {
@@ -314,17 +315,18 @@ mod tests {
         assert!(m.ai.goals.has("ParrotWander"));
     }
 
-    /// `Parrot.getVoicePitch` is `getPitch(random)`, the plain 1.0 ± 0.2, and
-    /// `getPitch` takes no age into account: a baby parrot does not get the
-    /// 1.5 that `LivingEntity.getVoicePitch` raises every other baby's voice
-    /// by. A baby chicken is the control.
+    /// `Parrot.canBeABaby` is `false`, so a negative `Age` — a `/summon` with
+    /// `Age:-24000`, a save that carried one — leaves a parrot an adult:
+    /// `isBaby()` is `canBeABaby() && getAge() < 0`, and `getVoicePitch` is
+    /// `getPitch(random)`, the plain 1.0 ± 0.2 that an adult gets anyway. A
+    /// chicken with the same age is the control.
     #[test]
-    fn a_baby_parrot_keeps_the_plain_voice_pitch() {
+    fn a_parrot_with_a_negative_age_keeps_the_plain_voice_pitch() {
         let mut parrot = parrot();
         parrot.extra.age = -24_000;
-        assert!(parrot.is_baby());
-        let mut baby = parrot.clone();
-        let pitches: Vec<f32> = (0..64).map(|_| baby.voice_pitch()).collect();
+        assert!(!parrot.is_baby());
+        let mut voice = parrot.clone();
+        let pitches: Vec<f32> = (0..64).map(|_| voice.voice_pitch()).collect();
         assert!(
             pitches.iter().all(|p| (0.8..=1.2).contains(p)),
             "{pitches:?}"

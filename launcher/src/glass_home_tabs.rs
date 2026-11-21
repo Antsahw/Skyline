@@ -4,6 +4,7 @@
 //! then what Play still needs (the launcher's rows). Dark appearance only.
 use super::*;
 use crate::glass_ui::{self as ui, white};
+use crate::scrollbar::TakeWheel;
 use home_tabs::HomeTab;
 use horizon_theme::glass::{ink, radius};
 
@@ -23,36 +24,69 @@ impl Launcher {
             .map(|(tab, _)| *tab)
             .find(|tab| *tab == self.home_tab)
             .unwrap_or(HomeTab::Overview);
+        let compact = self.window_width < crate::glass_home::SIDE_BY_SIDE;
+        let very_compact = self.window_width < crate::glass_home::NARROW;
+        let super_compact = self.window_width < crate::glass_home::NARROWEST;
+        let pad = if super_compact {
+            4.
+        } else if very_compact {
+            6.
+        } else if compact {
+            8.
+        } else {
+            14.
+        };
+        let gap = if very_compact {
+            1.
+        } else if compact {
+            2.
+        } else {
+            4.
+        };
         let strip = div()
+            .id("home-tabs-strip")
             .relative()
             .flex()
-            .flex_none()
             .items_center()
-            .gap(px(4.))
+            .gap(px(gap))
             .px(px(8.))
             .pt(px(8.))
             .pb(px(4.))
+            // At its own size the strip leaves room for `glass::tabbed`'s notch; on a narrow
+            // window it takes the panel's width and its tabs wrap onto a further row, so every
+            // tab stays in reach from the panel's left padding and nothing scrolls sideways.
+            .when(!compact, |d| d.flex_none())
+            .when(compact, |d| d.flex_wrap().w_full().min_w_0())
             .child(crate::glass::measure(self.home_strip.clone()))
             .children(tabs.into_iter().map(|(tab, count)| {
                 let (name, icon) = match tab {
-                    HomeTab::Overview => (tr("Overview"), Some("dashboard-square-01")),
-                    HomeTab::Mods => (tr("Mods"), Some("puzzle")),
-                    HomeTab::JavaMods => (tr("Java mods"), Some("puzzle")),
-                    HomeTab::Worlds => (tr("Worlds"), Some("earth")),
-                    HomeTab::Multiplayer => (tr("Multiplayer"), Some("user-multiple-02")),
+                    HomeTab::Overview => {
+                        (tr("Overview"), (!compact).then_some("dashboard-square-01"))
+                    }
+                    HomeTab::Mods => (tr("Mods"), (!compact).then_some("puzzle")),
+                    HomeTab::JavaMods => (tr("Java mods"), (!compact).then_some("puzzle")),
+                    HomeTab::Worlds => (tr("Worlds"), (!compact).then_some("earth")),
+                    HomeTab::Multiplayer => {
+                        (tr("Multiplayer"), (!compact).then_some("user-multiple-02"))
+                    }
                     HomeTab::Packs => (tr("Packs"), None),
                     HomeTab::Screenshots => (tr("Screenshots"), None),
-                    HomeTab::Console => (tr("Console"), Some("computer-terminal-01")),
+                    HomeTab::Console => {
+                        (tr("Console"), (!compact).then_some("computer-terminal-01"))
+                    }
                 };
-                ui::count_tab(
+                let mut item = ui::count_tab(
                     format!("home-tab-{tab:?}"),
                     icon,
                     name,
                     count.filter(|n| *n > 0),
                     tab == open,
                     &t,
-                )
-                .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                );
+                if compact {
+                    item = item.px(px(pad));
+                }
+                item.on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                     this.home_tab = tab;
                     cx.notify();
                 }))
@@ -76,7 +110,15 @@ impl Launcher {
             // `mt-12` under the head, of which Home's own gap gives 28.
             .mt(px(20.))
             .child(crate::glass::tabbed(self.home_strip.clone()))
-            .child(div().relative().flex().child(strip))
+            .child(
+                div()
+                    .relative()
+                    .flex()
+                    .w_full()
+                    .min_w_0()
+                    .overflow_hidden()
+                    .child(strip),
+            )
             .child(
                 div().relative().p(px(8.)).child(
                     div()
@@ -94,6 +136,14 @@ impl Launcher {
 
     /// Overview: the last screenshots and the patch log side by side, then `rows`.
     fn glass_overview(&mut self, rows: Div, cx: &mut Context<Self>) -> Div {
+        let wide = self.window_width >= crate::glass_home::SIDE_BY_SIDE;
+        let shots = self.overview_shots(cx);
+        let patch = div()
+            .relative()
+            .when(wide, |d| d.flex_none().w(px(380.)))
+            .when(!wide, |d| d.w_full())
+            .min_h(px(BODY))
+            .child(self.patch_log(cx));
         div()
             .flex()
             .flex_col()
@@ -102,16 +152,10 @@ impl Launcher {
             .child(
                 div()
                     .flex()
-                    .gap(px(20.))
-                    .child(self.overview_shots(cx))
-                    .child(
-                        div()
-                            .relative()
-                            .flex_none()
-                            .w(px(380.))
-                            .min_h(px(BODY))
-                            .child(self.patch_log(cx)),
-                    ),
+                    .when(wide, |d| d.flex_row().gap(px(20.)))
+                    .when(!wide, |d| d.flex_col().gap(px(20.)))
+                    .child(shots)
+                    .child(patch),
             )
             .child(rows)
     }
@@ -280,49 +324,45 @@ impl Launcher {
     fn patch_log(&self, cx: &mut Context<Self>) -> Stateful<Div> {
         let horizon = self.selected_instance().is_some_and(|i| i.java.is_none());
         let played = horizon.then(|| self.selected().cloned()).flatten();
-        let (note, sections) = match &self.releases {
-            Load::Ready(list) => patch_source(list, played.as_deref()),
-            _ => None,
-        }
-        .unwrap_or_else(|| (tr("No notes yet").to_string(), Vec::new()));
-        let many = sections.len() > 1;
-        let list =
-            div()
-                .flex()
-                .flex_col()
-                .gap(px(16.))
-                .mt(px(16.))
-                .children(sections.into_iter().map(|(section, items)| {
-                    div()
+        let (log, rows) = self.notes.patch_log(played.as_deref(), || {
+            let releases = match &self.releases {
+                Load::Ready(list) => Some(list.as_slice()),
+                _ => None,
+            };
+            PatchLog::new(releases, played.as_deref())
+        });
+        let note = log.note.clone();
+        let list = div().mt(px(16.)).child(rows.column(
+            &self.patch_scroll.handle,
+            log.rows.len(),
+            0.,
+            |_| false,
+            |i| {
+                match &log.rows[i] {
+                    PatchRow::Section(name, first) => ui::text(13., FontWeight::MEDIUM, ink::QUIET)
+                        .when(!first, |d| d.pt(px(16.)))
+                        .child(name.clone()),
+                    PatchRow::Item(item) => div()
                         .flex()
-                        .flex_col()
-                        .children(
-                            many.then(|| {
-                                ui::text(13., FontWeight::MEDIUM, ink::QUIET).child(section)
-                            }),
+                        .gap(px(10.))
+                        .pt(px(6.))
+                        .child(
+                            div()
+                                .flex_none()
+                                .mt(px(9.))
+                                .size(px(5.))
+                                .rounded_full()
+                                .bg(white(0.4)),
                         )
-                        .child(div().mt(px(6.)).flex().flex_col().gap(px(6.)).children(
-                            items.into_iter().map(|item| {
-                                div()
-                                    .flex()
-                                    .gap(px(10.))
-                                    .child(
-                                        div()
-                                            .flex_none()
-                                            .mt(px(9.))
-                                            .size(px(5.))
-                                            .rounded_full()
-                                            .bg(white(0.4)),
-                                    )
-                                    .child(
-                                        ui::text(14., FontWeight::NORMAL, ink::STRONG)
-                                            .line_height(px(21.))
-                                            .min_w_0()
-                                            .child(item),
-                                    )
-                            }),
-                        ))
-                }));
+                        .child(
+                            ui::text(14., FontWeight::NORMAL, ink::STRONG)
+                                .line_height(px(21.))
+                                .min_w_0()
+                                .child(item.clone()),
+                        ),
+                }
+            },
+        ));
         div()
             .id("patch-log")
             .absolute()
@@ -335,6 +375,10 @@ impl Launcher {
             .rounded(px(radius::LARGE))
             .bg(white(0.04))
             .overflow_y_scroll()
+            .track_scroll(&self.patch_scroll.handle)
+            // The list takes the wheel while it can still move that way; at an end, or when
+            // everything fits, the page behind it gets it.
+            .take_wheel(&self.patch_scroll)
             .child(
                 div()
                     .flex()
@@ -349,7 +393,7 @@ impl Launcher {
                             .hover(|s| s.text_color(white(ink::FULL)))
                             .child(tr("All notes"))
                             .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
-                                this.go(Page::Notes);
+                                this.go(Page::Versions);
                                 cx.notify();
                             })),
                     ),
@@ -365,6 +409,44 @@ impl Launcher {
 
 /// A release's changes: each section's name and its lines.
 type Sections = Vec<(String, Vec<String>)>;
+
+/// What the patch log shows: the line under its title, then its rows.
+pub(super) struct PatchLog {
+    note: String,
+    rows: Vec<PatchRow>,
+}
+
+/// A section's name (only when there are several; `true` for the first), or one of its lines.
+enum PatchRow {
+    Section(SharedString, bool),
+    Item(SharedString),
+}
+
+impl PatchLog {
+    /// From the release list, once it has loaded (see [`patch_source`]).
+    fn new(releases: Option<&[Release]>, played: Option<&str>) -> PatchLog {
+        let (note, sections) = releases
+            .and_then(|list| patch_source(list, played))
+            .unwrap_or_else(|| (tr("No notes yet").to_string(), Vec::new()));
+        let many = sections.len() > 1;
+        let mut rows = Vec::new();
+        for (i, (section, items)) in sections.into_iter().enumerate() {
+            if many {
+                rows.push(PatchRow::Section(section.into(), i == 0));
+            }
+            rows.extend(items.into_iter().map(|item| PatchRow::Item(item.into())));
+        }
+        PatchLog { note, rows }
+    }
+
+    #[cfg(test)]
+    pub(super) fn empty() -> PatchLog {
+        PatchLog {
+            note: String::new(),
+            rows: Vec::new(),
+        }
+    }
+}
 
 /// What the patch log shows from `releases` and its line under the title: the release `played`
 /// installs as when it lists changes, else the newest Nightly that does ("Nightly 2026-11-01 ·

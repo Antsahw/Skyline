@@ -9,10 +9,9 @@ use horizon_world::{
 use serde_json::Value;
 use std::{
     collections::BTreeSet,
-    fs::File,
-    io::{self, BufReader},
+    io,
     path::Path,
-    sync::Arc,
+    sync::{Arc, Mutex},
 };
 
 pub const MATERIALS: [&str; 6] = ["bedrock", "dirt", "stone", "sand", "oak_planks", "bricks"];
@@ -189,18 +188,32 @@ static GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::
 fn invalid(message: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message)
 }
+/// Every block registry [`Assets::load`] has handed out, one per distinct
+/// content. Callers keep `&'static` references, so a registry is never freed;
+/// loading equal data again (tests load the same root once per fixture)
+/// returns the one already leaked instead of leaking another (about 11 MB for
+/// vanilla).
+static REGISTRIES: Mutex<Vec<&'static BlockRegistry>> = Mutex::new(Vec::new());
+
+/// `registry` leaked, or the equal one leaked before it.
+fn intern_registry(registry: BlockRegistry) -> &'static BlockRegistry {
+    let mut leaked = REGISTRIES.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(&same) = leaked.iter().find(|&&known| *known == registry) {
+        return same;
+    }
+    let registry: &'static BlockRegistry = Box::leak(Box::new(registry));
+    leaked.push(registry);
+    registry
+}
 impl Assets {
     pub fn load(root: &Path) -> Result<Self> {
-        let manifest: Value = serde_json::from_reader(BufReader::new(File::open(
-            root.join("horizon-resources.json"),
-        )?))?;
+        let manifest: Value = horizon_world::json_file::read(&root.join("horizon-resources.json"))?;
         if manifest["data_version"].as_i64() != Some(i64::from(DATA_VERSION)) {
             return Err(invalid("resources do not match Horizon's pinned data version").into());
         }
         let (registry, flags) = horizon_world::level::data::load_registry_with_flags(root)?;
         crate::mem_log::mark("block registry");
-        let bundle: Value =
-            serde_json::from_reader(BufReader::new(File::open(root.join("block-tags.json"))?))?;
+        let bundle: Value = horizon_world::json_file::read(&root.join("block-tags.json"))?;
         let mut definitions = TagDefinitions::default();
         for (name, text) in bundle
             .as_object()
@@ -267,7 +280,7 @@ impl Assets {
         // Chunks hold every state of this registry: content mods can take it
         // past vanilla's 16-bit global palette.
         crate::chunk::set_block_states(registry.len());
-        let registry: &'static BlockRegistry = Box::leak(Box::new(registry));
+        let registry = intern_registry(registry);
         Ok(Self {
             registry,
             properties,
@@ -333,6 +346,16 @@ impl RenderAssets {
             None => crate::model_library::ParsedModels::default(),
         };
         crate::mem_log::mark("parsed models");
+        // Connected-texture rules find their faces by sprite layer: what they match by name keeps a
+        // layer of its own, decided before the models insert their textures.
+        let ctm_rules = if draws {
+            horizon_optifine::ctm::load(root)
+        } else {
+            Vec::new()
+        };
+        sprites.keep_apart(crate::connected::ConnectedTextures::matched_sprites(
+            &ctm_rules,
+        ));
         let mut models = if draws {
             let _step = crate::spans::startup::step("core.models_bake");
             crate::models::prepare_with_models(root, registry, &mut sprites, &parsed)?
@@ -374,6 +397,7 @@ impl RenderAssets {
             let mut found = Vec::new();
             crate::connected::ConnectedTextures::load(
                 root,
+                ctm_rules,
                 registry,
                 &mut sprites,
                 |state, face| {
@@ -397,8 +421,8 @@ impl RenderAssets {
         };
         // After the connected tiles: a tile identical to a block shares its layer, and the
         // overlays skip shared layers.
-        if draws {
-            emissive = crate::native_emissive::load_optifine(root, &mut sprites);
+        if draws && let Some(suffix) = crate::pack_hooks::formats().emissive_suffix(root) {
+            emissive = crate::native_emissive::load_overlays(root, &suffix, &mut sprites);
         }
         // Every block texture of the mods: a model a mod's code makes (LibMultipart's container,
         // drawn per position by the 1.20.1 runtime) names sprites no model file names.
@@ -517,6 +541,29 @@ mod tests {
             chicken.consumable.as_ref().unwrap().effects[..],
             [ConsumeEffect::ApplyEffects { probability, .. }] if probability == 0.3
         ));
+    }
+
+    #[test]
+    fn equal_registries_are_leaked_once() {
+        use horizon_world::registry::BlockRegistry;
+        let registry = |extra: &str| {
+            let facts = format!(
+                r#"{{"defaults":{{"minecraft:air":0,"fixture:{extra}":1}},"states":[
+                    ["air",true,false,"","minecraft:air"],
+                    ["{extra}",false,false,"","fixture:{extra}"]
+                ]}}"#
+            );
+            BlockRegistry::from_facts_json(facts.as_bytes()).unwrap()
+        };
+        let first = super::intern_registry(registry("interned_once"));
+        let again = super::intern_registry(registry("interned_once"));
+        let other = super::intern_registry(registry("interned_other"));
+        assert!(std::ptr::eq(first, again), "equal content leaked twice");
+        assert!(!std::ptr::eq(first, other), "different content shared");
+        assert_eq!(
+            other.default_state("fixture:interned_other"),
+            Some(horizon_world::registry::BlockStateId(1))
+        );
     }
 
     #[test]

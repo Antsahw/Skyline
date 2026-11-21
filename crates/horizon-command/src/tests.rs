@@ -109,6 +109,60 @@ fn reader_matches_brigadier() {
     assert_eq!(e.message.plain(), "parsing.int.invalid");
     assert_eq!(e.context().unwrap(), "<--[HERE]");
 }
+
+#[test]
+fn resource_selector_wildcards_preserve_unicode_and_backtracking() {
+    let cases = [
+        ("minecraft:stone", "minecraft:*", true),
+        ("minecraft:stone", "minecraft:s?one", true),
+        ("minecraft:stone", "minecraft:s?on", false),
+        ("éclair", "?clair", true),
+        ("éclair", "??clair", false),
+        ("abc", "a**c", true),
+        ("abc", "*b*", true),
+        ("", "*", true),
+        ("", "?", false),
+    ];
+    for (text, pattern, expected) in cases {
+        assert_eq!(
+            wildcard_match(text, pattern),
+            expected,
+            "{text:?} vs {pattern:?}"
+        );
+    }
+}
+
+#[test]
+fn resource_selector_scans_normalized_ids() {
+    let ids = [
+        "minecraft:stone".to_owned(),
+        "minecraft:oak_stairs".to_owned(),
+        "example:stone".to_owned(),
+        "minecraft:éclair".to_owned(),
+    ];
+    assert_eq!(
+        select_resources(&ids, "stone")
+            .into_iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+        ["minecraft:stone"]
+    );
+    assert_eq!(
+        select_resources(&ids, "minecraft:*stairs")
+            .into_iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+        ["minecraft:oak_stairs"]
+    );
+    assert_eq!(
+        select_resources(&ids, "minecraft:?clair")
+            .into_iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+        ["minecraft:éclair"]
+    );
+}
+
 #[test]
 fn parses_vanilla_commands() {
     assert_eq!(run("gamemode creative").unwrap().0, "gamemode");
@@ -873,7 +927,7 @@ fn only_a_dedicated_server_has_the_dedicated_commands() {
 #[test]
 fn a_dedicated_servers_admins_send_players_to_another_server() {
     // TransferCommand.register: LEVEL_ADMINS, `<hostname> [<port> [<players>]]`
-    // with IntegerArgumentType.integer(1, 65535) for the port.
+    // with Brigadier's integer argument bounded to 1..=65535 for the port.
     let server = vanilla::game_tree(false, false, true);
     assert!(
         vanilla::game_tree(false, false, false)
@@ -910,7 +964,7 @@ fn a_dedicated_servers_admins_send_players_to_another_server() {
             "level {level}"
         );
     }
-    // IntegerArgumentType.integer(1, 65535): port 0 is low, 65536 big.
+    // Brigadier's integer argument bounded to 1..=65535: port 0 is low, 65536 big.
     let e = server
         .parse("transfer example.net 0", &at(3))
         .executable()
@@ -979,7 +1033,7 @@ fn a_dedicated_server_keeps_seed_and_version_for_game_masters() {
 #[test]
 fn a_dedicated_servers_admins_set_the_idle_timeout() {
     // SetPlayerIdleTimeoutCommand.register: LEVEL_ADMINS, and
-    // IntegerArgumentType.integer(0) — zero turns the timeout off, and a
+    // Brigadier's integer argument bounded to 0 — zero turns the timeout off, and a
     // negative count of minutes is out of range.
     let server = vanilla::game_tree(false, false, true);
     let integrated = vanilla::game_tree(false, false, false);
@@ -1012,7 +1066,7 @@ fn a_dedicated_servers_admins_set_the_idle_timeout() {
             "setidletimeout"
         );
     }
-    // IntegerArgumentType.integer(0): argument.integer.low for -1 below 0.
+    // Brigadier's integer argument bounded to 0: argument.integer.low for -1 below 0.
     let e = server
         .parse("setidletimeout -1", &at(3))
         .executable()
@@ -1037,7 +1091,7 @@ fn time_argument_rounds_like_math_round_float() {
             ref other => panic!("{other:?}"),
         }
     };
-    // 0.49999997 + 0.5 rounds up to 1.0 in f32, but Math.round is exact.
+    // 0.49999997 + 0.5 rounds up to 1.0 in f32, but Java's float rounding is exact.
     assert_eq!(ticks("time set 0.49999997t"), 0);
     assert_eq!(ticks("time set 0.5t"), 1);
     assert_eq!(ticks("time add -2.5t"), -2);
@@ -1104,4 +1158,176 @@ fn deeply_nested_execute_run_is_rejected_not_overflowed() {
 fn shallow_execute_run_still_parses() {
     assert!(run("execute if entity @s run say hi").is_ok());
     assert!(run("execute as @a at @s run tp @s 0 0 0").is_ok());
+}
+
+#[test]
+fn h149_cardinal_local_positions_use_exact_table_values() {
+    let mut failures = Vec::new();
+    let got = Coordinates::Local([0.75, 0.5, 1.25])
+        .position([8.5, 202.25, 8.5], [0.0f32, 0.0f32])
+        .map(f64::to_bits);
+    let want = [
+        0x4022800000000000u64,
+        0x4069580000000000u64,
+        0x4023800000000000u64,
+    ];
+    if got != want {
+        failures.push(("south", got, want));
+    }
+    let got = Coordinates::Local([0.75, 0.5, 1.25])
+        .position([8.5, 202.25, 8.5], [90.0f32, 0.0f32])
+        .map(f64::to_bits);
+    let want = [
+        0x401d000000000000u64,
+        0x4069580000000000u64,
+        0x4022800000000000u64,
+    ];
+    if got != want {
+        failures.push(("west", got, want));
+    }
+    let got = Coordinates::Local([0.75, 0.5, 1.25])
+        .position([8.5, 202.25, 8.5], [180.0f32, 0.0f32])
+        .map(f64::to_bits);
+    let want = [
+        0x401f000000000000u64,
+        0x4069580000000000u64,
+        0x401d000000000000u64,
+    ];
+    if got != want {
+        failures.push(("north", got, want));
+    }
+    let got = Coordinates::Local([0.75, 0.5, 1.25])
+        .position([8.5, 202.25, 8.5], [270.0f32, 0.0f32])
+        .map(f64::to_bits);
+    let want = [
+        0x4023800000000000u64,
+        0x4069580000000000u64,
+        0x401f000000000000u64,
+    ];
+    if got != want {
+        failures.push(("east", got, want));
+    }
+    assert!(
+        failures.is_empty(),
+        "exact cardinal local-coordinate bit mismatches: {failures:#?}"
+    );
+}
+
+#[test]
+fn h149_oblique_local_offsets_are_grouped_before_the_origin() {
+    let world = Coordinates::World([
+        Coord {
+            relative: true,
+            value: 0.75,
+        },
+        Coord {
+            relative: true,
+            value: 0.5,
+        },
+        Coord {
+            relative: true,
+            value: 1.25,
+        },
+    ]);
+    assert_eq!(
+        world
+            .position([8.5, 202.25, 8.5], [37.5, -22.25])
+            .map(f64::to_bits),
+        [9.25f64, 202.75, 9.75].map(f64::to_bits),
+        "unchanged world/relative control before local failures"
+    );
+    let mut failures = Vec::new();
+    let got = Coordinates::Local([0.1, 0.1, 0.1])
+        .position([8.5, 202.25, 8.5], [37.5f32, -22.25f32])
+        .map(f64::to_bits);
+    let want = [
+        0x402117934a6314b9u64,
+        0x40694c2c5ee98f58u64,
+        0x40213562572e889au64,
+    ];
+    if got != want {
+        failures.push(("oblique", got, want));
+    }
+    let got = Coordinates::Local([0.1, 0.1, 0.1])
+        .position([8.5, 202.25, 8.5], [123.75f32, 47.125f32])
+        .map(f64::to_bits);
+    let want = [
+        0x4020a7648c7aa86bu64,
+        0x406947d514129374u64,
+        0x4021025e8b180036u64,
+    ];
+    if got != want {
+        failures.push(("positioned_oblique", got, want));
+    }
+    assert!(
+        failures.is_empty(),
+        "exact oblique local-coordinate bit mismatches: {failures:#?}"
+    );
+}
+
+#[test]
+fn profiler_commands_parse_and_complete_for_a_player_without_operator_permission() {
+    let reg = Registries {
+        permission: 0,
+        ..reg()
+    };
+    let tree = vanilla::game_dispatcher().with_profiler();
+    for line in [
+        "profiler start",
+        "profiler start client",
+        "profiler start gpu",
+        "profiler start client gpu_detail",
+        "profiler stop server",
+        "profiler status",
+        "profiler share",
+        "profiler share profile-20251107-143844Z",
+        "profiler open",
+        "profiler open profile-20251107-143844Z",
+        "profiler mark slow frame",
+    ] {
+        assert_eq!(
+            tree.parse(line, &reg).executable().unwrap().1,
+            PROFILER_COMMAND,
+            "{line}"
+        );
+    }
+    let input = "profiler start ";
+    let parse = tree.parse(input, &reg);
+    let sides: Vec<_> = tree
+        .client_suggestions(&parse, input.len(), &reg)
+        .1
+        .into_iter()
+        .map(|s| s.text)
+        .collect();
+    assert_eq!(sides, ["client", "gpu", "gpu_detail", "server"]);
+    for line in [
+        "profiler start --gpu",
+        "profiler stop gpu",
+        "profiler start gpu client",
+    ] {
+        assert!(tree.parse(line, &reg).executable().is_err(), "{line}");
+    }
+    assert!(vanilla::game_dispatcher().find("profiler").is_none());
+    assert!(tree.has_horizon_profiler());
+}
+
+#[test]
+fn a_servers_own_profiler_keeps_its_node_and_is_not_horizons() {
+    let mut server = vanilla::game_dispatcher().clone();
+    let node = server.literal(0, "profiler");
+    server.executes(node, "server:profiler");
+    let open = server.literal(node, "open");
+    server.executes(open, "server:profiler");
+    let tree = server.with_profiler();
+    assert!(!tree.has_horizon_profiler());
+    let input = "profiler ";
+    let parse = tree.parse(input, &reg());
+    let offered: Vec<_> = tree
+        .client_suggestions(&parse, input.len(), &reg())
+        .1
+        .into_iter()
+        .map(|s| s.text)
+        .collect();
+    assert_eq!(offered, ["open"]);
+    assert!(!vanilla::game_dispatcher().has_horizon_profiler());
 }

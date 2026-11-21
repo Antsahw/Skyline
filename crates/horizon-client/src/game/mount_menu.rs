@@ -192,8 +192,11 @@ impl Game<'_> {
     pub(super) fn mount_menu_columns(&self) -> Option<usize> {
         self.mount_menu.open.as_ref().map(|o| o.columns)
     }
-    /// The menu ends when the mount dies or is more than 4 blocks away
-    /// (`AbstractMountInventoryMenu.stillValid`).
+    /// The menu ends when the mount dies or its box leaves the entity
+    /// interaction range plus 4 of the player's eyes
+    /// (`AbstractMountInventoryMenu.stillValid` with
+    /// `Player.isWithinEntityInteractionRange(mount, 4.0)`: 7 blocks away, 9
+    /// in creative).
     pub(super) fn tick_mount_menu(&mut self) {
         // A server's menu ends when the server closes it.
         if self.remote.is_some() {
@@ -202,15 +205,14 @@ impl Game<'_> {
         let Some(open) = self.mount_menu.open.as_ref() else {
             return;
         };
-        let valid = self.mount_mob_index(open.mob).is_some_and(|i| {
-            let m = &self.mobs[i];
-            let c = m.center();
-            m.alive()
-                && self.eye_position().is_some_and(|e| {
-                    let d = (e[0] - c[0]).powi(2) + (e[1] - c[1]).powi(2) + (e[2] - c[2]).powi(2);
-                    d <= 16.0 + 4.0
-                })
-        });
+        let mob = open.mob;
+        let mount = self
+            .mount_mob_index(mob)
+            .map(|i| (self.mobs[i].alive(), self.mobs[i].bounds()));
+        let valid = match mount {
+            Some((true, bounds)) => self.within_entity_interaction_range(&bounds, 4.0),
+            _ => false,
+        };
         if !valid {
             self.close_container();
             self.screen = Screen::Playing;
@@ -281,14 +283,20 @@ impl Game<'_> {
             Some(format!("minecraft:{}", nautilus::saddle_sound(m)))
         } else {
             put_on.map(|s| {
-                self.res
-                    .items()
-                    .get(&s.item)
-                    .and_then(|i| i.equip_sound.clone())
+                horizon_client::item_sync::equip_sound(s, self.res.items())
                     .unwrap_or_else(|| "minecraft:item.armor.equip_generic".into())
             })
         };
         let m = &mut self.mobs[index];
+        let id = m.id;
+        let pos = m.position;
+        let saddle_off = m.extra.saddled && saddle.is_none();
+        let body_off = body
+            .as_ref()
+            .is_some_and(|b| b.is_none() && m.extra.body.is_some());
+        let body_on = body
+            .as_ref()
+            .is_some_and(|b| b.is_some() && m.extra.body.is_none());
         m.set_saddle(saddle);
         if let Some(body) = body {
             m.extra.body = body.map(|a| a.item);
@@ -300,7 +308,12 @@ impl Game<'_> {
         let (x, z) = (at[0].floor() as i32 >> 4, at[2].floor() as i32 >> 4);
         self.world.modified.insert((x, z));
         if let Some(sound) = sound {
-            self.audio.play(&sound, Some(at), 0.5, 1.0);
+            self.audio.play(&sound, Some(at), 1.0, 1.0);
+        }
+        if saddle_put_on || body_on {
+            self.mob_equip_event(id, [pos.x, pos.y, pos.z], true);
+        } else if saddle_off || body_off {
+            self.mob_equip_event(id, [pos.x, pos.y, pos.z], false);
         }
     }
     pub(super) fn mount_slots(&self) -> Option<Vec<usize>> {
@@ -589,6 +602,10 @@ impl Game<'_> {
         batch.clip_since(start, x0, y0, x1, y1);
     }
 }
+
+#[cfg(test)]
+#[path = "mount_menu_reach_tests.rs"]
+mod reach_tests;
 
 #[cfg(test)]
 mod tests {

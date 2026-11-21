@@ -1,7 +1,11 @@
 //! The game's side of `NaturalSpawner` (`mobs::spawn_selection`): the level
 //! it reads, the spawning chunks and caps of `ServerChunkCache.tickChunks`,
 //! and the mobs it adds (finalized with the game's `finalizeSpawn`).
-use super::{Dim, Game};
+use super::{
+    Dim, Game,
+    creatures::{biome_facts::biome_facts_in, difficulty_reader},
+    structures::structures_reaching_in,
+};
 use horizon_client::vanillagen::VanillaTerrain;
 use horizon_client::{
     biome::{BiomeInfo, SpawnEntry},
@@ -11,22 +15,28 @@ use horizon_client::{
         Mob, MobWorld, Species,
         data::{self, MobData},
         seen_grid::SeenGrid,
-        spawn_rules::{Dimension, SpawnLevel},
+        spawn_rules::SpawnLevel,
         spawn_selection::{
-            self, Category, Counted, Heightmap, NaturalLevel, SpawnCost, SpawnPlayer, SpawnRequest,
-            SpawnState, Spawned, StructureAt, StructureSpawns,
+            self, Category, Counted, Heightmap, NaturalLevel, PlayerSquares, SpawnBuffers,
+            SpawnCost, SpawnPlayer, SpawnRequest, SpawnState, Spawned, StructureAt,
+            StructureSpawns,
         },
     },
 };
 use horizon_core::{
+    biome::BiomeZoom,
     geometry::{Aabb, Vec3},
-    random::{LegacyRandom, RandomSource, WorldgenRandom, XoroshiroRandom},
+    random::{LegacyRandom, LevelRandom, RandomSource, WorldgenRandom, XoroshiroRandom},
 };
 use horizon_world::{
+    dimension_type::DimensionFacts,
     nbt::{Compound, Tag},
     registry::BlockStateId,
 };
 use std::collections::HashMap;
+use std::sync::Arc;
+
+mod parallel;
 
 /// Natural spawning's candidate chunks (`ChunkMap.collectSpawningChunks`):
 /// the union of every player's 17×17 chunk square, in player then dx/dz
@@ -45,6 +55,10 @@ pub(super) struct SpawnScratch {
     /// dx/dz order, that no earlier player's square holds.
     segments: Vec<Vec<(i32, i32)>>,
     stale: Vec<bool>,
+    /// Reusable buffer for spawn players across ticks to avoid heap allocation.
+    pub(super) spawn_players: Vec<SpawnPlayer>,
+    /// The spawn state's allocations, reused across ticks.
+    pub(super) spawn_buffers: SpawnBuffers,
 }
 impl SpawnScratch {
     fn chunk(p: &LevelPlayer) -> (i32, i32) {
@@ -127,6 +141,20 @@ impl SpawnScratch {
         self.prepare(players);
         self.candidates.clear();
         let mut count = 0;
+        if players.len() == 1 {
+            let p = &players[0];
+            count = self.segments.first().map_or(0, |s| s.len());
+            if !p.spectator
+                && let Some(segment) = self.segments.first()
+            {
+                for &c in segment {
+                    if close_enough_for_spawning(p, c) && keep(c) {
+                        self.candidates.push(c);
+                    }
+                }
+            }
+            return count as i32;
+        }
         for (i, segment) in self.segments.iter().enumerate() {
             count += segment.len();
             let near = &self.neighbours[i];
@@ -145,6 +173,7 @@ impl SpawnScratch {
 }
 
 /// A player in the level in place, as spawning and despawning see it.
+#[derive(Clone)]
 pub(super) struct LevelPlayer {
     pub(super) uuid: u128,
     pub(super) position: Vec3,
@@ -294,14 +323,64 @@ impl<'p> NearestPlayers<'p> {
     }
 }
 
+/// Up to this many players, a spawn start measures to every one.
+const PLAYERS_SCANNED: usize = 8;
+/// What a level reads of the game beyond its world view, for the serial pass (`&Game`, which also
+/// answers the server mods) and for a lane of the parallel one ([`NoGame`]).
+pub(super) trait LevelHost {
+    /// The game's mobs, scanned for a box query before the grid is built.
+    fn mobs(&self) -> &[Mob];
+    fn potential_spawns(&self, category: Category, pos: [i32; 3], entries: &mut Vec<SpawnEntry>);
+}
+impl LevelHost for &Game<'_> {
+    fn mobs(&self) -> &[Mob] {
+        &self.mobs
+    }
+    fn potential_spawns(&self, category: Category, pos: [i32; 3], entries: &mut Vec<SpawnEntry>) {
+        let mut canceled = false;
+        self.native_potential_spawns(self.dim.id(), category.name(), pos, entries, &mut canceled);
+        if canceled {
+            entries.clear();
+        }
+    }
+}
+/// A lane has no `Game`: it asks no mod and finds the mobs in the shared grid.
+pub(super) struct NoGame;
+impl LevelHost for NoGame {
+    fn mobs(&self) -> &[Mob] {
+        &[]
+    }
+    fn potential_spawns(&self, _: Category, _: [i32; 3], _: &mut Vec<SpawnEntry>) {}
+}
+/// The parts of the game a level reads, as plain shared borrows (all `Sync`), so a lane's level
+/// can have them without the `Game`.
+#[derive(Clone)]
+pub(super) struct SpawnHost<'g> {
+    pub(super) biome_zoom: BiomeZoom,
+    pub(super) border: &'g horizon_core::geometry::border::BorderGeometry,
+    pub(super) mob_types: &'g HashMap<String, Arc<horizon_client::mobs::MobType>>,
+    pub(super) structure_spawns: &'static StructureSpawns,
+    /// The terrain that locates the structures (the end state's).
+    pub(super) locator: Option<Arc<VanillaTerrain>>,
+    pub(super) respawn: Option<[i32; 3]>,
+    pub(super) spawn_mobs: bool,
+}
 /// The game level as natural spawning reads it.
-pub(super) struct GameLevel<'g, 'a> {
-    pub(super) game: &'g Game<'a>,
+pub(super) type GameLevel<'g, 'a> = Level<'g, &'g Game<'a>>;
+pub(super) struct Level<'g, H> {
+    pub(super) game: H,
+    pub(super) host: SpawnHost<'g>,
+    /// The grids a pass builds once for all its lanes' levels.
+    pub(super) shared_boxes: Option<&'g MobBoxes>,
+    pub(super) shared_squares: Option<&'g PlayerSquares>,
     pub(super) w: MobWorld<'g>,
     /// Every player in the level ([`Game::level_players`]).
     pub(super) players: Vec<LevelPlayer>,
     /// Where the non-spectators among them are (`getNearestPlayer`).
     pub(super) nearest: Vec<[f64; 3]>,
+    /// `nearest` by square, built when a spawn start first asks with more
+    /// than [`PLAYERS_SCANNED`] players.
+    pub(super) player_squares: std::cell::OnceCell<PlayerSquares>,
     /// Boxes of the mobs this pass created, not yet in the game's list.
     pub(super) pending: std::cell::RefCell<Vec<Aabb>>,
     /// The types and boxes of what a spawner created this tick.
@@ -311,6 +390,8 @@ pub(super) struct GameLevel<'g, 'a> {
     /// holds the game); the first ones scan, as the build costs a few scans.
     pub(super) boxes: std::cell::OnceCell<MobBoxes>,
     pub(super) box_queries: std::cell::Cell<u32>,
+    /// The `SpawnGroupData` the pack being spawned has so far.
+    pub(super) group: std::cell::Cell<Option<horizon_client::mobs::spawning::SpawnGroup>>,
     /// The entity types some biome of the level gives a spawn cost (the
     /// nether's few): for any other the cost is none wherever it stands, and
     /// spawning asks for one for every loaded mob each tick.
@@ -355,15 +436,47 @@ impl MobBoxes {
             .chain(all.into_iter().flatten().copied())
     }
 }
-impl GameLevel<'_, '_> {
+impl<H: LevelHost> Level<'_, H> {
+    /// Creates a mob the spawner accepted, finalized the game's way (`finalizeSpawn`).
+    pub(super) fn finalized(&self, r: &SpawnRequest) -> Option<Mob> {
+        let kind = self.host.mob_types.get(r.entity)?.clone();
+        let [x, y, z] = r.position;
+        let mut mob = Mob::new(0, kind, Vec3::new(x, y, z), r.yaw);
+        let (bx, by, bz) = (x.floor() as i32, y.floor() as i32, z.floor() as i32);
+        let facts = biome_facts_in(self.w.world, self.w.biomes, self.w.data, bx, by, bz);
+        let difficulty = difficulty_reader(self.w.world)(r.position);
+        // NaturalSpawner.spawnCategoryForPosition passes each member the group
+        // data the previous one returned, starting from null.
+        let mut group = if r.group_index == 0 {
+            None
+        } else {
+            self.group.get()
+        };
+        // Natural packs still finalize on the mob's own random until #11574 ports them.
+        horizon_client::mobs::spawning::finalize_on_own_random_in(
+            &mut mob,
+            &facts,
+            &difficulty,
+            &mut group,
+        );
+        self.group.set(group);
+        horizon_client::mobs::raider::finalize(
+            &mut mob,
+            horizon_client::mobs::raider::Reason::Natural,
+        );
+        Some(mob)
+    }
     /// The mobs not removed whose boxes may meet `area` (callers test them).
     fn mobs_near(&self, area: Aabb) -> Box<dyn Iterator<Item = MobBox> + '_> {
+        if let Some(shared) = self.shared_boxes {
+            return Box::new(shared.near(area));
+        }
         let asked = self.box_queries.get() + 1;
         self.box_queries.set(asked);
         if asked <= SCANNED_QUERIES && self.boxes.get().is_none() {
             return Box::new(
                 self.game
-                    .mobs
+                    .mobs()
                     .iter()
                     .enumerate()
                     .filter(|(_, m)| !m.removed)
@@ -372,17 +485,16 @@ impl GameLevel<'_, '_> {
         }
         Box::new(
             self.boxes
-                .get_or_init(|| MobBoxes::new(&self.game.mobs))
+                .get_or_init(|| MobBoxes::new(self.game.mobs()))
                 .near(area),
         )
     }
     fn biome(&self, x: i32, y: i32, z: i32) -> Option<&BiomeInfo> {
-        let chunk = self.game.world.chunks.get(&(x >> 4, z >> 4))?;
-        Some(world_biomes!(self.game).get(chunk.biome(x, y, z)))
+        Some(self.w.biomes.get(self.w.world.noise_biome(x, y, z)?))
     }
     /// The block whose noise cell `BiomeManager.getBiome` reads.
     fn zoomed(&self, x: i32, y: i32, z: i32) -> [i32; 3] {
-        let zoom = self.game.streaming.biome_zoom;
+        let zoom = self.host.biome_zoom;
         let [qx, qy, qz] = zoom.quart_at_block(horizon_core::position::BlockPos::new(x, y, z));
         [qx << 2, qy << 2, qz << 2]
     }
@@ -391,7 +503,12 @@ impl GameLevel<'_, '_> {
         self.biome(x, y, z)
     }
 }
-impl SpawnLevel for GameLevel<'_, '_> {
+impl<H: LevelHost> SpawnLevel for Level<'_, H> {
+    fn within_world_border(&self, x: i32, z: i32) -> bool {
+        self.host
+            .border
+            .is_within_bounds(f64::from(x), f64::from(z), 0.0)
+    }
     fn state(&self, x: i32, y: i32, z: i32) -> BlockStateId {
         self.w.state(x, y, z)
     }
@@ -430,8 +547,8 @@ impl SpawnLevel for GameLevel<'_, '_> {
     fn peaceful(&self) -> bool {
         self.w.peaceful()
     }
-    fn dimension(&self) -> Dimension {
-        self.w.dimension()
+    fn dimension_type(&self) -> &DimensionFacts {
+        self.w.dimension_type
     }
     fn surface_slime_chance(&self, x: i32, y: i32, z: i32) -> f32 {
         self.w.surface_slime_chance(x, y, z)
@@ -446,7 +563,7 @@ impl SpawnLevel for GameLevel<'_, '_> {
         })
     }
 }
-impl NaturalLevel for GameLevel<'_, '_> {
+impl<H: LevelHost> NaturalLevel for Level<'_, H> {
     fn spawn_hooks(&self) -> bool {
         !horizon_client::mod_api::mods().is_empty()
     }
@@ -478,36 +595,24 @@ impl NaturalLevel for GameLevel<'_, '_> {
             .java120_spawn_generated(entity, column, chunk, yaw)
     }
     fn potential_spawns(&self, category: Category, pos: [i32; 3], entries: &mut Vec<SpawnEntry>) {
-        let mut canceled = false;
-        self.game.native_potential_spawns(
-            self.game.dim.id(),
-            category.name(),
-            pos,
-            entries,
-            &mut canceled,
-        );
-        if canceled {
-            entries.clear();
-        }
+        self.game.potential_spawns(category, pos, entries);
     }
+    // `Level.getMinY` and `getMaxY`: the level's own range (0..255 in vanilla's
+    // Nether and End), not the widened column its chunks hold.
     fn min_y(&self) -> i32 {
-        self.w.world.bottom_y()
+        self.w.world.shape.min_y
     }
     fn max_y(&self) -> i32 {
-        self.w.world.top_y() - 1
+        self.w.world.shape.max_y() - 1
     }
     fn ambient_light(&self) -> f32 {
-        match self.game.dim {
-            Dim::Nether => 0.1,
-            Dim::End => 0.25,
-            _ => 0.0,
-        }
+        self.w.dimension_type.ambient_light
     }
     fn has_ceiling(&self) -> bool {
         self.w.world.shape.has_ceiling
     }
     fn mob_type(&self, entity: &str) -> Option<(Species, f32, f32, Category)> {
-        let t = self.game.res.mob_types().get(entity)?;
+        let t = self.host.mob_types.get(entity)?;
         Some((
             t.species,
             t.width as f32,
@@ -536,41 +641,49 @@ impl NaturalLevel for GameLevel<'_, '_> {
         z: i32,
         wanted: &dyn Fn(&str) -> bool,
     ) -> Vec<StructureAt> {
-        self.game
-            .structures_reaching_where([x, y, z], wanted)
-            .into_iter()
-            .map(|(id, in_piece)| StructureAt {
-                id,
-                in_piece,
-                in_bounds: true,
-            })
-            .collect()
+        structures_reaching_in(
+            self.w.world,
+            &|| self.host.locator.clone(),
+            [x, y, z],
+            wanted,
+        )
+        .into_iter()
+        .map(|(id, in_piece)| StructureAt {
+            id,
+            in_piece,
+            in_bounds: true,
+        })
+        .collect()
     }
     fn structure_spawns(&self) -> &StructureSpawns {
-        StructureSpawns::shared(&self.game.options.resources)
+        self.host.structure_spawns
     }
     fn nearest_player_positions(&self) -> &[[f64; 3]] {
         &self.nearest
     }
-    fn respawn(&self) -> Option<[i32; 3]> {
-        // The world spawn point lives in the overworld.
-        if self.game.dim != Dim::Overworld {
-            return None;
+    fn player_positions_near(&self, x: f64, z: f64, extent: f64, out: &mut Vec<[f64; 3]>) {
+        if self.nearest.len() <= PLAYERS_SCANNED {
+            out.extend_from_slice(&self.nearest);
+            return;
         }
-        self.game.level.spawn.map(|s| {
-            [
-                s[0].floor() as i32,
-                s[1].floor() as i32,
-                s[2].floor() as i32,
-            ]
-        })
+        let squares = self.shared_squares.unwrap_or_else(|| {
+            self.player_squares
+                .get_or_init(|| PlayerSquares::new(&self.nearest))
+        });
+        squares.near(x, z, extent, out);
     }
+    fn respawn(&self) -> Option<[i32; 3]> {
+        self.host.respawn
+    }
+    /// `ServerLevel.canSpawnEntitiesInChunk`: the whole chunk is inside the border.
     fn can_spawn_in_chunk(&self, cx: i32, cz: i32) -> bool {
-        self.game.world.chunks.contains_key(&(cx, cz))
+        self.w.world.chunks.contains_key(&(cx, cz))
+            && self.within_world_border(cx << 4, cz << 4)
+            && self.within_world_border((cx << 4).wrapping_add(15), (cz << 4).wrapping_add(15))
     }
     fn no_collision(&self, bounds: Aabb) -> bool {
         let mut scene = SceneCollisions {
-            world: &self.game.world,
+            world: self.w.world,
             binding: self.w.collision,
             subject: None,
         };
@@ -598,15 +711,18 @@ impl NaturalLevel for GameLevel<'_, '_> {
                 .any(|(_, b, alive, _)| alive && b.intersects(bounds))
     }
     fn spawn_mobs(&self) -> bool {
-        self.game.ui.rules.bool("spawn_mobs")
+        self.host.spawn_mobs
     }
     /// WORLD_SURFACE (every spawn attempt's) is the chunk's kept heightmap.
     /// The others are scanned down the column: sections of air alone are
     /// skipped (air counts for no heightmap). An unloaded column reads as air.
     fn heightmap(&self, kind: Heightmap, x: i32, z: i32) -> i32 {
         let world = self.w.world;
+        // A heightmap reads at least the level's minimum Y (an empty column of a level
+        // narrower than its chunks' column would read the column's bottom).
+        let min_y = world.shape.min_y;
         if kind == Heightmap::WorldSurface {
-            return self.w.world_surface(x, z);
+            return self.w.world_surface(x, z).max(min_y);
         }
         world
             .chunks
@@ -616,7 +732,7 @@ impl NaturalLevel for GameLevel<'_, '_> {
                     spawn_selection::heightmap_blocks(self, kind, x, y, z)
                 })
             })
-            .map_or(self.w.world.bottom_y(), |y| y + 1)
+            .map_or(min_y, |y| (y + 1).max(min_y))
     }
     fn pathfindable_land(&self, x: i32, y: i32, z: i32) -> bool {
         self.w.data.state(self.state(x, y, z)).flags & data::LAND != 0
@@ -658,8 +774,10 @@ fn spawn_cost_types(biomes: &horizon_client::biome::Biomes) -> Vec<&str> {
     types
 }
 impl<'a> Game<'a> {
-    pub(super) fn natural_level(&self) -> GameLevel<'_, 'a> {
-        let players = self.level_players();
+    pub(super) fn natural_level_with_players(
+        &self,
+        players: Vec<LevelPlayer>,
+    ) -> GameLevel<'_, 'a> {
         let nearest = players
             .iter()
             .filter(|p| !p.spectator)
@@ -667,35 +785,45 @@ impl<'a> Game<'a> {
             .collect();
         GameLevel {
             game: self,
+            host: self.spawn_host(),
+            shared_boxes: None,
+            shared_squares: None,
             w: self.mob_world_base(&[]),
             players,
             nearest,
+            player_squares: Default::default(),
             pending: Default::default(),
             pending_ids: Default::default(),
             boxes: Default::default(),
             box_queries: Default::default(),
+            group: Default::default(),
             costed: spawn_cost_types(world_biomes!(self)),
         }
     }
-    /// Creates a mob the spawner accepted, finalized the game's way; the
-    /// caller adds it with [`Game::add_spawned`].
-    fn finalize_spawned(&self, r: &SpawnRequest, pending: &mut Vec<Mob>) -> Option<Spawned> {
-        let kind = self.res.mob_types().get(r.entity)?.clone();
-        let [x, y, z] = r.position;
-        let mut mob = Mob::new(0, kind, Vec3::new(x, y, z), r.yaw);
-        let facts = self.biome_facts(x.floor() as i32, y.floor() as i32, z.floor() as i32);
-        let difficulty = self.local_difficulty(r.position);
-        horizon_client::mobs::spawning::finalize(&mut mob, &facts, &difficulty);
-        horizon_client::mobs::raider::finalize(
-            &mut mob,
-            horizon_client::mobs::raider::Reason::Natural,
-        );
-        let bounds = mob.bounds();
-        pending.push(mob);
-        Some(Spawned {
-            bounds,
-            school: true,
-        })
+    pub(super) fn natural_level(&self) -> GameLevel<'_, 'a> {
+        self.natural_level_with_players(self.level_players())
+    }
+    /// What a level reads of the game besides its world view.
+    pub(super) fn spawn_host(&self) -> SpawnHost<'_> {
+        SpawnHost {
+            biome_zoom: self.streaming.biome_zoom,
+            border: self.border.geometry(),
+            mob_types: self.res.mob_types(),
+            structure_spawns: StructureSpawns::shared(&self.options.resources),
+            locator: self.end.locator(),
+            // The world spawn point lives in the overworld.
+            respawn: (self.dim.vanilla() == Dim::Overworld)
+                .then_some(self.level.spawn)
+                .flatten()
+                .map(|s| {
+                    [
+                        s[0].floor() as i32,
+                        s[1].floor() as i32,
+                        s[2].floor() as i32,
+                    ]
+                }),
+            spawn_mobs: self.ui.rules.bool("spawn_mobs"),
+        }
     }
     /// Adds the mobs a spawn pass created: ids, enchanted gear and jockeys.
     fn add_spawned(&mut self, pending: Vec<Mob>, persistent: bool) {
@@ -709,7 +837,7 @@ impl<'a> Game<'a> {
             self.enchant_spawn_equipment(id);
             self.halloween_spawn_head(id);
             if !persistent {
-                self.spawn_jockeys(id, true);
+                self.spawn_jockeys_on(id, true, true);
             }
         }
     }
@@ -719,8 +847,27 @@ impl<'a> Game<'a> {
         self.level_players_iter().collect()
     }
     /// `level_players` one at a time, without collecting them.
-    fn level_players_iter(&self) -> impl Iterator<Item = LevelPlayer> + '_ {
-        let local = self.player_view().map(|p| LevelPlayer {
+    pub(super) fn level_players_iter(&self) -> impl Iterator<Item = LevelPlayer> + '_ {
+        self.local_level_player()
+            .into_iter()
+            .chain(self.level_guests().map(|g| LevelPlayer {
+                uuid: g.uuid,
+                position: Vec3::new(g.position[0], g.position[1], g.position[2]),
+                bounds: super::lan_mobs::guest_bounds(g),
+                alive: !g.dead,
+                creative: g.creative(),
+                spectator: g.spectator(),
+            }))
+    }
+    /// The LAN guests or server players in the level in place.
+    fn level_guests(&self) -> impl Iterator<Item = &horizon_client::lan::guest::Guest> + '_ {
+        self.lan
+            .iter()
+            .flat_map(|h| h.hub.guests.iter().filter(|g| h.hub.here(g)))
+    }
+    /// The local player, first of `level_players`.
+    fn local_level_player(&self) -> Option<LevelPlayer> {
+        self.player_view().map(|p| LevelPlayer {
             uuid: self
                 .level
                 .player_uuid
@@ -730,28 +877,26 @@ impl<'a> Game<'a> {
             alive: p.alive,
             creative: p.creative,
             spectator: p.spectator,
-        });
-        let guests = self.lan.iter().flat_map(|h| {
-            h.hub
-                .guests
-                .iter()
-                .filter(|g| h.hub.here(g))
-                .map(|g| LevelPlayer {
-                    uuid: g.uuid,
-                    position: Vec3::new(g.position[0], g.position[1], g.position[2]),
-                    bounds: super::lan_mobs::guest_bounds(g),
-                    alive: !g.dead,
-                    creative: g.creative(),
-                    spectator: g.spectator(),
-                })
-        });
-        local.into_iter().chain(guests)
+        })
     }
     /// `Level.hasNearbyAlivePlayer` before a level is built for the spawn
     /// code: what a spawner asks first, every tick.
+    /// Spawners ask it every tick: the guests are tested where they stand,
+    /// without building their boxes.
     pub(super) fn alive_player_near(&self, x: f64, y: f64, z: f64, range: f64) -> bool {
-        self.level_players_iter()
-            .any(|p| p.alive_near(x, y, z, range))
+        if self
+            .local_level_player()
+            .is_some_and(|p| p.alive_near(x, y, z, range))
+        {
+            return true;
+        }
+        self.level_guests().any(|g| {
+            let [px, py, pz] = g.position;
+            !g.dead
+                && !g.spectator()
+                && (range < 0.0
+                    || (px - x).powi(2) + (py - y).powi(2) + (pz - z).powi(2) < range * range)
+        })
     }
     /// `ChunkMap.collectSpawningChunks`: the natural spawn chunk tracker's
     /// chunks (within 8 chunks of a player, `getSpawnCandidateChunks`) that
@@ -763,9 +908,31 @@ impl<'a> Game<'a> {
         scratch: &mut SpawnScratch,
     ) -> i32 {
         let levels = self.tickets.levels();
+        // Recomputed each pass: a chunk's ticket level and entity loading change without the
+        // players moving or the chunk count changing.
         scratch.collect(players, |(cx, cz)| {
             levels.loaded_ticking(cx, cz) && super::ticking_chunk(&self.world, cx, cz)
         })
+    }
+    /// The tick's spawning phases in `ServerLevel.tick`'s order: the raids
+    /// tick first (`this.raids.tick`), then the chunk source's
+    /// (`getChunkSource().tick`): natural spawning, then the custom spawners
+    /// of `ServerChunkCache.tickChunks`. A wave that lands this tick therefore
+    /// joins before that tick's spawns, with the lower entity ids.
+    pub(super) fn tick_spawners(&mut self) {
+        let from = self.lan_synced_from();
+        horizon_client::spans::time("spawn_raids", || self.tick_raids());
+        horizon_client::spans::time("spawn_natural", || self.spawn_natural());
+        // ServerChunkCache.tickChunks: the custom spawners tick only with spawn_mobs.
+        if self.ui.rules.bool("spawn_mobs") {
+            horizon_client::spans::time("spawn_custom", || {
+                self.tick_wandering_trader();
+                self.tick_patrol_spawner();
+                self.tick_cat_spawner();
+                self.tick_village_siege();
+            });
+        }
+        self.lan_synced_since(from);
     }
     /// `ServerChunkCache.tickChunks`: the spawn state over the loaded mobs,
     /// the categories under their global caps (creatures every 400 ticks),
@@ -776,80 +943,125 @@ impl<'a> Game<'a> {
         if self.world_debug {
             return;
         }
-        let players = self.level_players();
+        let mut laps = horizon_client::spans::laps();
+        let mut players = self.level_players();
+        // Fake players (mods' bots) do not anchor natural spawning.
+        if let Some(h) = self.lan.as_ref() {
+            let fake: Vec<u128> = h
+                .hub
+                .guests
+                .iter()
+                .filter(|g| g.fake)
+                .map(|g| g.uuid)
+                .collect();
+            if !fake.is_empty() {
+                players.retain(|p| !fake.contains(&p.uuid));
+            }
+        }
         if players.is_empty() {
             return;
         }
         let mut scratch = std::mem::take(&mut self.spawn_scratch);
         let spawnable = self.spawning_chunks(&players, &mut scratch);
+        laps.lap("sn_candidates");
         for &key in &scratch.candidates {
             *self.world.inhabited.entry(key).or_insert(0) += 1;
         }
+        laps.lap("sn_inhabited");
         let spawn_mobs = self.ui.rules.bool("spawn_mobs");
         let spawn_enemies = self.ui.rules.bool("spawn_monsters");
-        let mut random = std::mem::replace(&mut self.world.random, LegacyRandom::new(0));
+        let mut random = std::mem::replace(
+            &mut self.world.random,
+            LevelRandom::for_level(LegacyRandom::new(0)),
+        );
         let mut pending = Vec::new();
         let last_state;
         {
             let level = self.natural_level();
+            laps.lap("sn_level");
             // The 1.20.1 mods' mobs count toward the caps too (their runtime's, last tick).
             #[cfg(feature = "java-mods-120")]
             let theirs = super::java_mods_120::mobs::seen_in(self.dim.id());
-            #[allow(unused_mut)]
-            let mut counted: Vec<Counted> = self
-                .mobs
-                .iter()
-                .map(|m| Counted {
-                    entity: &m.kind.id,
-                    category: Category::from_name(&m.kind.category),
-                    block: [
-                        m.position.x.floor() as i32,
-                        m.position.y.floor() as i32,
-                        m.position.z.floor() as i32,
-                    ],
-                    is_mob: true,
-                    persistent: m.persistent
-                        || horizon_client::mobs::ai::requires_custom_persistence(m),
-                })
-                .collect();
+            let counted = self.mobs.iter().map(|m| Counted {
+                entity: &m.kind.id,
+                category: Category::from_name(&m.kind.category),
+                block: [
+                    m.position.x.floor() as i32,
+                    m.position.y.floor() as i32,
+                    m.position.z.floor() as i32,
+                ],
+                is_mob: true,
+                persistent: m.persistent
+                    || horizon_client::mobs::ai::requires_custom_persistence(m),
+            });
             #[cfg(feature = "java-mods-120")]
-            counted.extend(theirs.iter().map(|m| Counted {
+            let counted = counted.chain(theirs.iter().map(|m| Counted {
                 entity: &m.kind,
                 category: Category::from_name(&m.category),
                 block: m.pos.map(|c| c.floor() as i32),
                 is_mob: m.is_mob,
                 persistent: m.persistent,
             }));
-            let players = players
-                .iter()
-                .map(|p| SpawnPlayer {
+            scratch.spawn_players.clear();
+            scratch
+                .spawn_players
+                .extend(players.iter().map(|p| SpawnPlayer {
                     position: [p.position.x, p.position.y, p.position.z],
                     spectator: p.spectator,
-                })
-                .collect();
-            let mut state = SpawnState::new(&level, spawnable, players, &counted, |cx, cz| {
-                self.world.chunks.contains_key(&(cx, cz))
-            });
+                }));
+            let spawn_players = std::mem::take(&mut scratch.spawn_players);
+            laps.lap("sn_materialize");
+            let buffers = std::mem::take(&mut scratch.spawn_buffers);
+            let mut state = SpawnState::new_in(
+                &level,
+                spawnable,
+                spawn_players,
+                buffers,
+                counted,
+                |cx, cz| self.world.chunks.contains_key(&(cx, cz)),
+            );
+            laps.lap("sn_state");
             last_state = state.counts();
             let categories = if spawn_mobs {
                 state.filtered_categories(spawn_enemies, self.world.game_time % 400 == 0)
             } else {
                 Vec::new()
             };
-            // Util.shuffle.
+            laps.lap("sn_categories");
+            // Util.shuffle, every pass: it draws from the level's random even when no
+            // category may spawn.
             for i in (1..scratch.candidates.len()).rev() {
                 let j = random.next_int_bound(i as i32 + 1).unwrap_or(0) as usize;
                 scratch.candidates.swap(i, j);
             }
-            if !categories.is_empty() {
+            laps.lap("sn_shuffle");
+            spawn_selection::attempt_counters(false);
+            let lanes =
+                parallel::lanes_for(&level, scratch.candidates.len(), !categories.is_empty());
+            if let Some(lanes) = lanes {
+                let proposed =
+                    parallel::propose(&level, &state, &categories, &scratch.candidates, lanes);
+                laps.lap("sn_propose");
+                parallel::commit(&level, &mut state, proposed, &mut pending);
+                scratch.candidates.clear();
+            }
+            if lanes.is_none() && !categories.is_empty() {
                 for chunk in scratch.candidates.drain(..) {
+                    // ServerChunkCache.tickSpawningChunk gates the initial chunk too.
+                    if !level.can_spawn_in_chunk(chunk.0, chunk.1) {
+                        continue;
+                    }
                     let mut spawn = |l: &GameLevel, r: &SpawnRequest| {
-                        let spawned = l.game.finalize_spawned(r, &mut pending);
-                        if let Some(s) = &spawned {
-                            l.pending.borrow_mut().push(s.bounds);
-                        }
-                        spawned
+                        let mob = l.finalized(r)?;
+                        let bounds = mob.bounds();
+                        pending.push(mob);
+                        l.pending.borrow_mut().push(bounds);
+                        Some(Spawned {
+                            bounds,
+                            school: true,
+                        })
                     };
+                    horizon_threads::work::set_chunk(chunk.0, chunk.1);
                     spawn_selection::spawn_for_chunk(
                         &level,
                         &mut random,
@@ -861,20 +1073,27 @@ impl<'a> Game<'a> {
                     );
                 }
             }
+            (scratch.spawn_players, scratch.spawn_buffers) = state.into_parts();
         }
+        horizon_threads::work::clear_work();
+        spawn_selection::attempt_counters(true);
+        laps.lap("sn_attempts");
         self.world.random = random;
         // ServerChunkCache.lastSpawnState, for the debug overlay.
         self.spawn_counts.insert(self.dim, last_state);
         self.add_spawned(pending, false);
         self.spawn_scratch = scratch;
+        laps.lap("sn_finalize");
     }
     /// `NoiseBasedChunkGenerator.spawnOriginalMobs`: creature packs for a
     /// freshly generated chunk, from the biome at its corner column's top,
     /// with the chunk's decoration-seeded random, finalized with the
-    /// region's random as generation adds them (mobs are not generated in
-    /// the End).
+    /// region's random as generation adds them. The settings' own
+    /// `disable_mob_generation` skips the pass, which is how the End's preset
+    /// keeps its chunks empty (the dimension is also checked, as before, so a
+    /// preset that fails to load cannot start filling the End).
     pub(super) fn spawn_generation_creatures(&mut self, cx: i32, cz: i32) {
-        if !self.world.chunks.contains_key(&(cx, cz)) || self.dim == Dim::End {
+        if !self.world.chunks.contains_key(&(cx, cz)) || self.dim.vanilla() == Dim::End {
             return;
         }
         let Some(terrain) = self.end.locator() else {
@@ -882,6 +1101,11 @@ impl<'a> Game<'a> {
         };
         // `FlatLevelSource.spawnOriginalMobs` is empty: a superflat world places no packs.
         if terrain.is_flat() {
+            return;
+        }
+        // `NoiseGeneratorSettings.disableMobGeneration`: the shipped End preset
+        // asks for no packs at generation, and so would any dimension using it.
+        if terrain.disable_mob_generation() {
             return;
         }
         let mut region = terrain.region_random(cx, cz);
@@ -944,6 +1168,208 @@ impl<'a> Game<'a> {
 mod tests {
     use super::*;
 
+    /// `Level.hasNearbyAlivePlayer` as spawners ask it, against the same
+    /// test on every player's full record (`level_players`).
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn alive_player_near_tests_guests_where_they_stand() {
+        use horizon_client::lan::{Joined, NetConfig, PlayerSender, guest::Guest, hub::HubConfig};
+        use horizon_protocol::packets::configuration::ClientInformation;
+        use std::sync::{Arc, atomic::AtomicI32, mpsc};
+        let mut game = crate::game::native_machines::tests::server_game();
+        let net = NetConfig {
+            announce: false,
+            ..NetConfig::lan(0, "spawner-players-test".into(), 8)
+        };
+        game.lan_host(
+            super::super::lan::LanSettings {
+                port: 0,
+                guest_commands: true,
+                force_game_mode: false,
+            },
+            net,
+            HubConfig {
+                default_game_mode: 0,
+                guest_commands: true,
+                force_game_mode: false,
+                hardcore: false,
+                view_distance: 2,
+                simulation_distance: 2,
+                dimension: Dim::Overworld.id().into(),
+                allow_flight: false,
+                seed: 0,
+                max_players: 8,
+                integrated: false,
+                levels: Default::default(),
+            },
+        )
+        .unwrap();
+        // (x, dead, spectator): alive at 20, dead at 5, a spectator at 2.
+        for (conn, (x, dead, spectator)) in
+            [(20.5, false, false), (5.5, true, false), (2.5, false, true)]
+                .into_iter()
+                .enumerate()
+        {
+            let conn = conn as u32 + 2;
+            let (tx, _rx) = mpsc::channel();
+            let mut guest = Guest::new(
+                Joined {
+                    conn,
+                    uuid: u128::from(conn),
+                    name: format!("Near{conn}"),
+                    properties: Vec::new(),
+                    info: ClientInformation::new(2),
+                    brand: "test".into(),
+                    sender: PlayerSender::new(tx, Arc::default()),
+                    latency: Arc::new(AtomicI32::new(0)),
+                    address: "127.0.0.1:25565".parse().unwrap(),
+                    expected: false,
+                    configured: Default::default(),
+                },
+                conn as i32,
+                [x, 64.0, 0.5],
+                1,
+            );
+            guest.placed = true;
+            guest.loaded = true;
+            guest.dead = dead;
+            if spectator {
+                guest.game_mode = 3;
+            }
+            game.lan.as_mut().unwrap().hub.guests.push(guest);
+        }
+        let full = |game: &Game, x: f64, range: f64| {
+            game.level_players()
+                .iter()
+                .any(|p| p.alive_near(x, 64.0, 0.5, range))
+        };
+        for (x, range, near) in [
+            (0.5, 16.0, false),   // only the dead and the spectator in range
+            (5.5, 16.0, true),    // the live one 15 away
+            (4.4, 16.0, false),   // 16.1 away
+            (4.5, 16.0, false),   // 16 away: not below the range
+            (-500.0, -1.0, true), // any distance
+            (36.4, 16.0, true),
+        ] {
+            assert_eq!(
+                game.alive_player_near(x, 64.0, 0.5, range),
+                near,
+                "{x} {range}"
+            );
+            assert_eq!(full(&game, x, range), near, "{x} {range}");
+        }
+    }
+
+    /// An End chunk read back from a save holds the table's first biome (badlands) in the
+    /// sections its widened column adds below Y 0 and above 255. Natural spawning reads the
+    /// level's own range (`getMinY` 0, `getMaxY` 255) and biomes clamped to it
+    /// (`getNoiseBiome`): next to a floor at Y 0 every monster list is the End's, and an
+    /// empty column's surface is the floor (#15880).
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn end_spawning_reads_the_level_range_not_the_widened_column() {
+        use horizon_client::chunk::{Chunk, LevelShape};
+        use std::sync::Arc;
+        let mut game = crate::game::native_machines::tests::server_game();
+        game.dim = Dim::End;
+        game.world.shape = LevelShape::END;
+        let end = world_biomes!(game).id("minecraft:the_end");
+        // The column runs -64..320: quart rows 16..80 are the level's 0..256. The zoom
+        // reaches into the neighbours.
+        for (cx, cz) in (-1..=1).flat_map(|x| (-1..=1).map(move |z| (x, z))) {
+            let mut chunk = Chunk::with_layout(cx, cz, LevelShape::END.column());
+            for qy in 16..80 {
+                for qz in 0..4 {
+                    for qx in 0..4 {
+                        chunk.set_biome_cell(qx, qy, qz, end);
+                    }
+                }
+            }
+            game.world.chunks.insert((cx, cz), Arc::new(chunk));
+        }
+        let level = game.natural_level();
+        for x in 0..16 {
+            for z in 0..16 {
+                for y in [1, 2, 3, 254, 255] {
+                    let list = spawn_selection::mobs_at(&level, Category::Monster, x, y, z);
+                    let types: Vec<&str> = list.iter().map(|e| e.entity.as_str()).collect();
+                    assert_eq!(types, ["minecraft:enderman"], "at {x} {y} {z}");
+                }
+            }
+        }
+        assert_eq!((level.min_y(), level.max_y()), (0, 255));
+        assert_eq!(level.heightmap(Heightmap::WorldSurface, 3, 3), 0);
+        assert_eq!(level.heightmap(Heightmap::MotionBlocking, 3, 3), 0);
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn authoritative_world_border_gates_positions_and_whole_chunks() {
+        use horizon_core::position::BlockPos;
+        use horizon_world::level::LevelAccess;
+        let mut game = crate::game::native_machines::tests::server_game();
+        game.border.set_center([8.0, 8.0]);
+        game.border.set_size(16.0);
+        assert!(game.natural_level().can_spawn_in_chunk(0, 0));
+        assert!(!game.natural_level().can_spawn_in_chunk(1, 0)); // unloaded
+        game.border.set_size(15.5);
+        assert!(!game.natural_level().can_spawn_in_chunk(0, 0)); // partial
+        assert!(game.natural_level().within_world_border(1, 1));
+        assert!(!game.natural_level().within_world_border(0, 0));
+        game.with_level(|_, level, _| {
+            assert!(level.within_world_border(BlockPos::new(1, 64, 1)));
+            assert!(!level.within_world_border(BlockPos::new(0, 64, 0)));
+        });
+        game.border.set_size(16.5);
+        assert!(game.natural_level().can_spawn_in_chunk(0, 0));
+        assert!(game.mob_world_base(&[]).within_world_border(0, 0));
+        assert!(!game.mob_world_base(&[]).within_world_border(17, 0));
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn world_border_outer_chunk_gate_keeps_attempt_randomness() {
+        use horizon_client::{chunk::Chunk, motion::PlayerMotion};
+        use std::sync::Arc;
+        let mut game = crate::game::native_machines::tests::server_game();
+        // Only the center chunk can tick: its eight neighbors are loaded,
+        // but none of those has all its own neighbors. The center is partial.
+        for x in -1..=1 {
+            for z in -1..=1 {
+                let mut chunk = Chunk::empty(x, z);
+                chunk.lit = x == 0 && z == 0;
+                game.world.chunks.insert((x, z), Arc::new(chunk));
+            }
+        }
+        game.tickets.update(None);
+        game.player = Some(PlayerMotion::new(game.motion, Vec3::new(8.5, 64.0, 8.5)).unwrap());
+        game.border.set_center([8.0, 8.0]);
+        game.border.set_size(2.0);
+        let mut scratch = SpawnScratch::default();
+        game.spawning_chunks(&game.level_players(), &mut scratch);
+        assert_eq!(scratch.candidates, vec![(0, 0)]);
+        assert!(game.ui.rules.bool("spawn_mobs"));
+        // A contained chunk must actually reach the spawning pass, so an
+        // empty category list cannot satisfy the rejected-chunk assertion.
+        game.border.set_size(64.0);
+        game.world.random.set_seed(12345);
+        game.spawn_natural();
+        assert_ne!(
+            game.world.random.next_long(),
+            LegacyRandom::new(12345).next_long()
+        );
+        game.world.inhabited.clear();
+        game.border.set_size(2.0);
+        game.world.random.set_seed(12345);
+        game.spawn_natural();
+        // No shuffle draw for one candidate, and no attempt draws for a
+        // rejected chunk. Inhabited time still advances before the gate.
+        assert_eq!(game.world.inhabited.get(&(0, 0)), Some(&1));
+        assert_eq!(
+            game.world.random.next_long(),
+            LegacyRandom::new(12345).next_long()
+        );
+    }
     fn player(x: f64, y: f64, z: f64, spectator: bool) -> LevelPlayer {
         LevelPlayer {
             uuid: 0,
@@ -1122,6 +1548,31 @@ mod tests {
             NearestPlayers::new(&spectators)
                 .nearest(0.0, 0.0, 0.0)
                 .is_none()
+        );
+    }
+
+    /// `ServerLevel.tick` ticks the raids before the chunk source spawns
+    /// (`raids.tick`, then `getChunkSource().tick`): a wave that lands in a
+    /// tick joins before that tick's natural and custom spawns, with the
+    /// lower entity ids. The phases name themselves in the spans they run in.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn raids_tick_before_natural_and_custom_spawning() {
+        let mut game = crate::game::native_machines::tests::server_game();
+        horizon_client::spans::record_here(true);
+        let _ = horizon_client::spans::take_raw();
+        game.tick_spawners();
+        let raw = horizon_client::spans::take_raw();
+        horizon_client::spans::record_here(false);
+        let phases: Vec<&str> = raw
+            .iter()
+            .map(|s| s.name)
+            .filter(|name| name.starts_with("spawn_"))
+            .collect();
+        assert_eq!(
+            phases,
+            ["spawn_raids", "spawn_natural", "spawn_custom"],
+            "ServerLevel.tick ticks the raids before the chunk source's spawns"
         );
     }
 }

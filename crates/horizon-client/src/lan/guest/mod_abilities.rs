@@ -23,7 +23,9 @@ impl Guest {
     /// `Abilities.mayfly`.
     pub fn may_fly(&self) -> bool {
         self.granted()
-            .map_or(self.creative() || self.spectator(), |a| a.flags & 4 != 0)
+            .map_or(self.creative() || self.spectator() || self.allow_flight, |a| {
+                a.flags & 4 != 0
+            })
     }
     /// `Abilities.invulnerable`.
     pub fn invulnerable(&self) -> bool {

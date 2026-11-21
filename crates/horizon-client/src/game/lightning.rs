@@ -10,14 +10,17 @@ use super::{
     entity::{
         Entity as _, EntityHandle, ThunderHit, entity_lists_of, for_each_entity, with_entity,
     },
+    minecarts::CartHit,
 };
 use horizon_client::advancements::EntityView;
-use horizon_client::mobs::{Damage, DamageKind, MobEvent, SpawnSetup, Species};
+use horizon_client::mobs::{Damage, DamageKind, MobEvent, Species, conversion};
+use horizon_client::random_source;
 use horizon_core::{
     geometry::{Aabb, Vec3},
     position::BlockPos,
-    random::RandomSource,
+    random::{EntityRandom, RandomSource},
 };
+use horizon_world::level::Ticks;
 
 pub(super) struct Bolt {
     /// The entity id a server's players know it by (0 until it has one).
@@ -26,6 +29,9 @@ pub(super) struct Bolt {
     life: i32,
     flashes: i32,
     seed: i64,
+    /// The bolt's own random (`Entity.random`): its seed, flashes, flash
+    /// timing, fire spots and thunder pitch draw from it, never the level's.
+    random: EntityRandom,
     visual_only: bool,
     /// Mooshrooms and copper golems change once per bolt.
     converted: Vec<u32>,
@@ -42,16 +48,6 @@ pub(super) struct Bolt {
     /// the host, `Some(Some(conn))` for a guest.
     pub cause: Option<Option<u32>>,
 }
-/// `Pig.thunderHit`: `SpawnSetup` for mobs converted by lightning, preserving baby state.
-fn thunder_mob_spawn_setup(m: &horizon_client::mobs::Mob) -> SpawnSetup {
-    SpawnSetup {
-        baby: m.is_baby(),
-        yaw: m.yaw,
-        persistent: true,
-        ..Default::default()
-    }
-}
-
 /// The box `LightningBolt.tick` collects the `LightningStrikeTrigger` bystanders from: 15 blocks
 /// around the bolt, 15 down and `6 + 15` up.
 fn in_viewer_box(bolt: [f64; 3], p: [f64; 3]) -> bool {
@@ -59,6 +55,13 @@ fn in_viewer_box(bolt: [f64; 3], p: [f64; 3]) -> bool {
         && (p[2] - bolt[2]).abs() <= 15.0
         && p[1] >= bolt[1] - 15.0
         && p[1] <= bolt[1] + 21.0
+}
+
+/// `ServerLevel.tickThunder` -> `Level.getBlockRandomPos(minX, 0, minZ, 15)`:
+/// picks the strike column from the level's separate `randValue` LCG.
+fn thunder_strike_column(ticks: &mut Ticks, cx: i32, cz: i32) -> (i32, i32) {
+    let r = ticks.block_random_pos(cx * 16, 0, cz * 16, 15);
+    (r.x, r.z)
 }
 impl Game<'_> {
     /// `ServerChunkCache.tickSpawningChunk`: one `tickThunder` roll per
@@ -85,8 +88,7 @@ impl Game<'_> {
                 continue;
             }
             // getBlockRandomPos(minX, 0, minZ, 15)
-            let r = self.world.random.next_int();
-            let (x, z) = (cx * 16 + (r & 15), cz * 16 + (r >> 16 & 15));
+            let (x, z) = thunder_strike_column(&mut self.block_ticks, cx, cz);
             let Some(pos) = self.lightning_target(x, z) else {
                 continue;
             };
@@ -114,7 +116,7 @@ impl Game<'_> {
             if trap {
                 let at = [f64::from(pos[0]), f64::from(pos[1]), f64::from(pos[2])];
                 // ServerLevel.tickChunk: a trap horse waits for a player.
-                if let Some(id) = self.spawn_mob("minecraft:skeleton_horse", at, false)
+                if let Some(id) = self.spawn_mob_raw("minecraft:skeleton_horse", at, false)
                     && let Some(h) = self.mobs.iter_mut().find(|m| m.id == id)
                 {
                     h.extra.trap = true;
@@ -246,9 +248,10 @@ impl Game<'_> {
             let ctx = horizon_client::sculk::Context::default();
             self.post_game_event("minecraft:lightning_strike", at, ctx);
         }
-        let r = &mut self.world.random;
-        let seed = r.next_long();
-        let flashes = r.next_int_bound(3).unwrap_or(0) + 1;
+        // The LightningBolt constructor: `seed`, then `flashes`.
+        let mut random = EntityRandom::own(random_source::entity());
+        let seed = random.next_long();
+        let flashes = random.next_int_bound(3).unwrap_or(0) + 1;
         self.lightning_seen[0] += 1;
         let id = self.take_entity_id();
         self.bolts.push(Bolt {
@@ -257,6 +260,7 @@ impl Game<'_> {
             life: 2,
             flashes,
             seed,
+            random,
             visual_only,
             converted: Vec::new(),
             hit: Vec::new(),
@@ -280,9 +284,10 @@ impl Game<'_> {
     /// only flashes, sounds and draws (`LightningBolt.tick` off the server).
     pub(super) fn spawn_remote_bolt(&mut self, id: u32, at: [f64; 3]) {
         self.bolts.retain(|b| b.id != id);
-        let r = &mut self.world.random;
-        let seed = r.next_long();
-        let flashes = r.next_int_bound(3).unwrap_or(0) + 1;
+        // The client's own copy, constructed as on the server.
+        let mut random = EntityRandom::own(random_source::entity());
+        let seed = random.next_long();
+        let flashes = random.next_int_bound(3).unwrap_or(0) + 1;
         self.lightning_seen[0] += 1;
         self.bolts.push(Bolt {
             id,
@@ -290,6 +295,7 @@ impl Game<'_> {
             life: 2,
             flashes,
             seed,
+            random,
             visual_only: true,
             converted: Vec::new(),
             hit: Vec::new(),
@@ -299,20 +305,28 @@ impl Game<'_> {
             cause: None,
         });
     }
-    /// `spawnFire`: fire at the strike point and `extra` random neighbours,
-    /// wherever `BaseFireBlock.getState` fire can survive. Returns how many
-    /// blocks it set on fire.
-    fn bolt_fire(&mut self, at: [f64; 3], extra: i32) -> i32 {
+    /// `spawnFire`: fire at the strike point and `extra` random neighbours
+    /// (from the bolt's own `random`), wherever `BaseFireBlock.getState` fire
+    /// can survive, when a player is within the fire-spread radius. Returns how
+    /// many blocks it set on fire.
+    fn bolt_fire(&mut self, at: [f64; 3], extra: i32, random: &mut EntityRandom) -> i32 {
         let mut set = 0;
         let base = [
             at[0].floor() as i32,
             at[1].floor() as i32,
             at[2].floor() as i32,
         ];
+        // ServerLevel.canSpreadFireAround at the bolt: no fire at all, and no
+        // draws for the extra sources, away from every player (#11376).
+        let origin = BlockPos::new(base[0], base[1], base[2]);
+        if !self.with_level(|_, level, _| {
+            horizon_world::level::LevelAccess::can_spread_fire_around(level, origin)
+        }) {
+            return 0;
+        }
         let mut spots = vec![base];
         for _ in 0..extra {
-            let r = &mut self.world.random;
-            let mut d = || r.next_int_bound(3).unwrap_or(1) - 1;
+            let mut d = || random.next_int_bound(3).unwrap_or(1) - 1;
             spots.push([base[0] + d(), base[1] + d(), base[2] + d()]);
         }
         for p in spots {
@@ -341,14 +355,16 @@ impl Game<'_> {
         let mut bolts = std::mem::take(&mut self.bolts);
         bolts.retain_mut(|b| {
             if b.life == 2 {
-                let pitch = 0.8 + self.world.random.next_float() * 0.2;
+                // A client's bolt draws the pitches from its own random. Here one
+                // bolt stands for both copies, and both randoms are unseeded.
+                let pitch = 0.8 + b.random.next_float() * 0.2;
                 self.audio.play(
                     "minecraft:entity.lightning_bolt.thunder",
                     Some(b.at),
                     10000.0,
                     pitch,
                 );
-                let pitch = 0.5 + self.world.random.next_float() * 0.2;
+                let pitch = 0.5 + b.random.next_float() * 0.2;
                 self.audio.play(
                     "minecraft:entity.lightning_bolt.impact",
                     Some(b.at),
@@ -358,7 +374,8 @@ impl Game<'_> {
                 if !b.visual_only {
                     // Only Normal and Hard start fires with the strike itself.
                     if self.ui.difficulty >= 2 {
-                        b.fires += self.bolt_fire(b.at, 4);
+                        let set = self.bolt_fire(b.at, 4, &mut b.random);
+                        b.fires += set;
                     }
                     self.strike_rod(b.at);
                 }
@@ -376,12 +393,13 @@ impl Game<'_> {
                     self.lightning_strike_triggers(b);
                     return false;
                 }
-                if b.life < -self.world.random.next_int_bound(10).unwrap_or(0) {
+                if b.life < -b.random.next_int_bound(10).unwrap_or(0) {
                     b.flashes -= 1;
                     b.life = 1;
-                    b.seed = self.world.random.next_long();
+                    b.seed = b.random.next_long();
                     if !b.visual_only {
-                        b.fires += self.bolt_fire(b.at, 0);
+                        let set = self.bolt_fire(b.at, 0, &mut b.random);
+                        b.fires += set;
                     }
                 }
             }
@@ -424,14 +442,14 @@ impl Game<'_> {
                     // is the same block as before, so its placement does not schedule
                     // it, and without this it stayed powered for good.
                     b.schedule_tick(level, ticks, BlockPos::new(p[0], p[1], p[2]), 8);
-                    if level.redstone_experiments {
-                        b.lightning_rod_update_neighbors(
-                            level,
-                            ticks,
-                            BlockPos::new(p[0], p[1], p[2]),
-                            state,
-                        );
-                    }
+                    // `updateNeighbours`: unconditional; the experiments only decide
+                    // whether the update carries an orientation.
+                    b.lightning_rod_update_neighbors(
+                        level,
+                        ticks,
+                        BlockPos::new(p[0], p[1], p[2]),
+                        state,
+                    );
                 });
             }
             // Level event 3002 with the rod's axis: sparks along it.
@@ -581,24 +599,35 @@ impl Game<'_> {
             }
             let m = &mut self.mobs[i];
             b.hit.push(m.id);
-            let setup = thunder_mob_spawn_setup;
             let at = [m.position.x, m.position.y, m.position.z];
             match m.species() {
+                // `Pig.thunderHit`: `convertTo(ZOMBIFIED_PIGLIN,
+                // single(this, false, true), ..)`, whose step rolls the gear
+                // off the pig's own random and keeps the new mob.
                 Species::Pig if !peaceful && !keep => {
+                    let from = Box::new(m.clone());
                     m.removed = true;
-                    events.push(MobEvent::SpawnKind {
-                        kind: "minecraft:zombified_piglin".into(),
-                        at,
-                        setup: setup(m),
+                    events.push(MobEvent::Convert {
+                        from,
+                        kind: "minecraft:zombified_piglin",
+                        params: conversion::Params {
+                            keep_equipment: false,
+                            preserve_can_pick_up_loot: true,
+                        },
+                        after: conversion::After::ZombifiedPiglinGear,
                     });
                     continue;
                 }
+                // `Villager.thunderHit`: `single(this, false, false)`, then
+                // `finalizeSpawn(CONVERSION)` and persistence.
                 Species::Villager if !peaceful && !keep => {
+                    let from = Box::new(m.clone());
                     m.removed = true;
-                    events.push(MobEvent::SpawnKind {
-                        kind: "minecraft:witch".into(),
-                        at,
-                        setup: setup(m),
+                    events.push(MobEvent::Convert {
+                        from,
+                        kind: "minecraft:witch",
+                        params: conversion::Params::NONE,
+                        after: conversion::After::Witch,
                     });
                     continue;
                 }
@@ -680,7 +709,7 @@ impl Game<'_> {
                 EntityHandle::Boat(i) => {
                     self.hurt_boat(i, 5.0, false);
                 }
-                EntityHandle::Cart(i) => self.hurt_cart(i, 5.0, false, false),
+                EntityHandle::Cart(i) => self.hurt_cart(i, 5.0, false, false, CartHit::default()),
                 EntityHandle::Orb(i) if self.orbs[i].hurt(5.0) => {
                     self.orbs.remove(i);
                 }
@@ -706,8 +735,11 @@ impl Game<'_> {
         };
         strike_players(self);
         self.each_guest_hit(strike_players);
-        // Dropped items burn up (ItemEntity health 5), save fire-resistant ones.
+        // `Entity.thunderHit` hurts an item for 5 (`ItemEntity.hurtServer`): its
+        // health drops, and it is destroyed only at zero unless its
+        // `damage_resistant` covers `lightning_bolt` (`ItemStack.canBeHurtBy`).
         let mut left = self.thunder_count(strike, ThunderHit::Item);
+        let mut destroyed_contents = Vec::new();
         for h in self.entity_handles_rev() {
             if left == 0 {
                 break;
@@ -719,10 +751,25 @@ impl Game<'_> {
             left -= 1;
             let e = &self.dropped[i];
             b.hit_items.push(e.id);
-            if !(e.stack.item.contains("netherite") || (e.age < 20 && b.spared.contains(&e.id))) {
+            if (e.age < 20 && b.spared.contains(&e.id))
+                || self.item_resistant_to(i, "minecraft:lightning_bolt")
+            {
+                continue;
+            }
+            let item = &mut self.dropped[i];
+            item.health = (item.health as f32 - 5.0) as i32;
+            item.needs_sync = true;
+            // `ItemEntity.hurtServer`: ENTITY_DAMAGE before it is destroyed;
+            // `lightningBolt()` names no entity.
+            let (at, dead) = (item.position, item.health <= 0);
+            self.item_damage_event(at, None);
+            if dead {
+                let contents = self.dropped[i].hurt(0).unwrap_or_default();
                 self.dropped.remove(i);
+                destroyed_contents.extend(contents.into_iter().map(|stack| (stack, at)));
             }
         }
+        self.spawn_destroyed_contents(destroyed_contents);
         self.native_leaves_flush();
         struck
     }
@@ -752,9 +799,94 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use horizon_client::mobs::{Anim, Brain, Mob, MobType, Part, Species};
-    use horizon_core::geometry::Vec3;
-    use std::sync::Arc;
+    use horizon_core::random::LegacyRandom;
+
+    /// `LightningBolt.spawnFire` places nothing, and draws no extra sources,
+    /// unless `canSpreadFireAround` passes at the bolt (#11376).
+    #[test]
+    #[ignore = "needs prepared resources (HORIZON_TEST_RESOURCES)"]
+    fn a_bolt_away_from_players_starts_no_fire() {
+        use horizon_client::gamerules::Value;
+        let mut game = super::super::native_machines::tests::server_game();
+        let stone = game
+            .pack
+            .assets
+            .registry
+            .default_state("minecraft:stone")
+            .unwrap();
+        let air = game.res.facts().air;
+        game.world.set(8, 64, 8, stone).unwrap();
+        let bolt = [8.5, 65.0, 8.5];
+        // (radius, player's x): fires expected at the strike.
+        for (radius, player_x, fires) in [
+            (128, 12.5, true),
+            (1, 12.5, false),
+            (0, 8.5, false),
+            (-1, 1000.0, true),
+        ] {
+            game.world.set(8, 65, 8, air).unwrap();
+            game.ui
+                .rules
+                .set("fire_spread_radius_around_player", Value::Int(radius));
+            game.player = Some(
+                horizon_client::motion::PlayerMotion::new(
+                    game.motion,
+                    Vec3::new(player_x, 65.0, 8.5),
+                )
+                .unwrap(),
+            );
+            let random = game.world.random.clone();
+            let mut bolt_random = EntityRandom::own(LegacyRandom::new(0));
+            let set = game.bolt_fire(bolt, 4, &mut bolt_random);
+            let burning = game.world.block(8, 65, 8) != air;
+            assert_eq!((set > 0, burning), (fires, fires), "radius {radius}");
+            if !fires {
+                // No offset draws either: the bolt's own random is untouched,
+                // and a bolt never draws from the level's.
+                assert_eq!(bolt_random.next_long(), LegacyRandom::new(0).next_long());
+                let mut before = random;
+                assert_eq!(game.world.random.next_long(), before.next_long());
+            }
+        }
+    }
+
+    /// `LightningRodBlock.onLightningStrike` updates the neighbours of the block
+    /// in front of the rod whether or not redstone experiments are on (#14371):
+    /// a wire beside that block is strongly powered by the struck rod.
+    #[test]
+    #[ignore = "needs prepared resources (HORIZON_TEST_RESOURCES)"]
+    fn a_struck_rod_updates_the_wire_beside_the_block_behind_it() {
+        let mut game = super::super::native_machines::tests::server_game();
+        let registry = game.pack.assets.registry;
+        let stone = registry.default_state("minecraft:stone").unwrap();
+        let wire = registry.default_state("minecraft:redstone_wire").unwrap();
+        let mut rod = registry
+            .state(registry.default_state("minecraft:lightning_rod").unwrap())
+            .cloned()
+            .unwrap();
+        rod.properties.insert("facing".into(), "up".into());
+        let rod = registry.id(&rod).unwrap();
+        // The rod on stone at (8, 64, 8); wire on stone beside that block.
+        game.world.set(8, 64, 8, stone).unwrap();
+        game.world.set(9, 63, 8, stone).unwrap();
+        game.world.set(9, 64, 8, wire).unwrap();
+        game.world.set(8, 65, 8, rod).unwrap();
+        assert!(
+            !game
+                .level
+                .enabled_features
+                .iter()
+                .any(|feature| feature == "minecraft:redstone_experiments")
+        );
+        game.strike_rod([8.5, 66.0, 8.5]);
+        let power = registry
+            .state(game.world.block(9, 64, 8))
+            .unwrap()
+            .properties
+            .get("power")
+            .cloned();
+        assert_eq!(power.as_deref(), Some("15"));
+    }
 
     #[test]
     fn viewer_box_reaches_15_around_and_down_and_21_up() {
@@ -766,85 +898,23 @@ mod tests {
         assert!(!in_viewer_box(bolt, [15.5, 64.0, 0.0]));
     }
 
-    /// `Pig.thunderHit`: striking a pig with lightning converts it to a zombified
-    /// piglin while preserving age (#7510).
+    /// `ServerLevel.tickThunder` picks its strike column from `Level.randValue`
+    /// (`Ticks::block_random_pos`), using bits `2..=5` for X and `10..=13` for Z
+    /// rather than drawing from `Level.random`.
     #[test]
-    fn a_baby_pig_hit_by_lightning_becomes_a_baby_zombified_piglin() {
-        let make_pig = |baby: bool| {
-            let kind = Arc::new(MobType {
-                id: "minecraft:pig".into(),
-                species: Species::Pig,
-                width: 0.9,
-                height: 0.9,
-                eye_height: 0.85,
-                category: "creature".into(),
-                max_health: 10.0,
-                speed: 0.25,
-                flying_speed: 0.02,
-                attack_damage: 0.0,
-                attack_knockback: 0.0,
-                follow_range: 16.0,
-                step_height: 0.6,
-                armor: 0.0,
-                armor_toughness: 0.0,
-                knockback_resistance: 0.0,
-                jump_strength: 0.42,
-                attributes: Default::default(),
-                item_stack_limits: Default::default(),
-                gravity: 0.08,
-                safe_fall_distance: 3.0,
-                fall_damage_multiplier: 1.0,
-                water_efficiency: 0.0,
-                water_slowdown: 0.8,
-                air_speed: 0.02,
-                baby_scale: 0.5,
-                head_rot_speed: 10.0,
-                max_head_x_rot: 40.0,
-                max_head_y_rot: 75.0,
-                ambient_interval: 80,
-                flags: Default::default(),
-                model: Arc::new(Part {
-                    name: "root".into(),
-                    pose: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
-                    polygons: Vec::new(),
-                    children: Vec::new(),
-                }),
-                layers: Default::default(),
-                texture: String::new(),
-                brain: Brain::Passive,
-                anim: Anim::Quadruped,
-                sounds: ["", "", ""],
-                step_sound: None,
-                food: Default::default(),
-                tempt: Default::default(),
-            });
-            let mut pig = Mob::new(1, kind, Vec3::ZERO, 45.0);
-            if baby {
-                pig.extra.age = -24000;
-            }
-            pig
-        };
-
-        let adult_pig = make_pig(false);
-        assert!(!adult_pig.is_baby());
-        let adult_setup = thunder_mob_spawn_setup(&adult_pig);
-        assert!(!adult_setup.baby);
-        assert_eq!(adult_setup.yaw, 45.0);
-        assert!(adult_setup.persistent);
-
-        let baby_pig = make_pig(true);
-        assert!(baby_pig.is_baby());
-        let baby_setup = thunder_mob_spawn_setup(&baby_pig);
-        assert!(baby_setup.baby);
-        assert_eq!(baby_setup.yaw, 45.0);
-        assert!(baby_setup.persistent);
-
-        // When setup.baby is true, apply_setup sets m.extra.age = -24000,
-        // resulting in a baby mob (is_baby() == true).
-        let mut zombified = Mob::new(2, adult_pig.kind.clone(), Vec3::ZERO, 0.0);
-        if baby_setup.baby {
-            zombified.extra.age = -24000;
+    fn thunder_strike_column_uses_block_random_pos_lcg_bits() {
+        let mut ticks = Ticks::new(12345);
+        let mut expected_lcg = 12345i32;
+        for (cx, cz) in [(0, 0), (-3, 5), (12, -8)] {
+            expected_lcg = expected_lcg.wrapping_mul(3).wrapping_add(1_013_904_223);
+            let r = expected_lcg >> 2;
+            let expected = (cx * 16 + (r & 15), cz * 16 + ((r >> 8) & 15));
+            assert_eq!(thunder_strike_column(&mut ticks, cx, cz), expected);
         }
-        assert!(zombified.is_baby());
     }
 }
+
+// A conversion keeps the old mob's state; lives here for the lightning's.
+#[cfg(test)]
+#[path = "mob_conversion_state_tests.rs"]
+mod mob_conversion_state_tests;

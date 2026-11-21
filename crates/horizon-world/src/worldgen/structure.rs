@@ -13,10 +13,11 @@ pub mod mineshaft;
 pub mod monument;
 pub mod nether_fossil;
 pub mod ocean_ruin;
-mod packs;
 pub mod piece_limited;
 pub mod processor;
 pub mod ruined_portal;
+pub(crate) mod saved_legacy;
+pub(crate) mod saved_templates;
 pub mod simple;
 pub mod start;
 pub mod start_checks;
@@ -25,7 +26,7 @@ pub mod template;
 pub mod temple;
 
 use crate::{
-    nbt::{self, Limits},
+    nbt::Limits,
     registry::{BlockRegistry, BlockStateId},
 };
 use horizon_core::geometry::Direction;
@@ -34,7 +35,7 @@ use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
     io::Read,
     path::{Path, PathBuf},
-    sync::{Arc, RwLock},
+    sync::{Arc, OnceLock, RwLock},
 };
 pub use template::{BlockInfo, EntityInfo, JigsawInfo, StructureTemplate, save_nbt};
 
@@ -280,15 +281,119 @@ impl StateTransforms {
     }
 }
 
+fn qualified(id: &str) -> String {
+    if id.contains(':') {
+        id.to_owned()
+    } else {
+        format!("minecraft:{id}")
+    }
+}
+
+/// The template files and the ones loaded so far, shared by the resources and
+/// their lazy templates.
+struct TemplateStore {
+    registry: &'static BlockRegistry,
+    transforms: Arc<StateTransforms>,
+    dir: PathBuf,
+    loaded: RwLock<HashMap<String, Arc<StructureTemplate>>>,
+    /// Data packs' template files, which win over the prepared ones.
+    pack_templates: BTreeMap<String, Arc<[u8]>>,
+}
+impl TemplateStore {
+    fn get(&self, id: &str) -> Arc<StructureTemplate> {
+        if let Some(found) = self.loaded.read().unwrap().get(id) {
+            return found.clone();
+        }
+        let (namespace, path) = id.split_once(':').unwrap();
+        let file = self.dir.join(namespace).join(format!("{path}.nbt"));
+        let from_pack = self.pack_templates.contains_key(id);
+        let bytes = match self.pack_templates.get(id) {
+            Some(bytes) => Some(bytes.to_vec()),
+            None => horizon_core::prepared_files::read(&file).ok(),
+        };
+        let loaded = bytes.and_then(|bytes| {
+            let mut raw = Vec::new();
+            flate2::read::GzDecoder::new(bytes.as_slice())
+                .read_to_end(&mut raw)
+                .ok()?;
+            if from_pack {
+                // A pack's template may be an older version's (a 1.20.1 mod's): brought up to
+                // date first (`upgrade_template`), so its renamed blocks are found.
+                let mut tag = crate::nbt::read_named(&raw, Limits::templates()).ok()?.0.tag;
+                upgrade_template(&mut tag);
+                return Some(StructureTemplate::from_nbt(
+                    &tag,
+                    self.registry,
+                    &self.transforms,
+                ));
+            }
+            StructureTemplate::from_bytes(
+                &raw,
+                Limits::templates(),
+                self.registry,
+                &self.transforms,
+            )
+            .ok()
+        });
+        // StructureTemplateManager.getOrCreate: missing templates are empty.
+        let mut loaded = loaded.unwrap_or_else(StructureTemplate::empty);
+        loaded.location = id.into();
+        let loaded = Arc::new(loaded);
+        // Two threads may load the same file: every caller gets the first
+        // one kept, so templates stay comparable by pointer.
+        self.loaded
+            .write()
+            .unwrap()
+            .entry(id.to_owned())
+            .or_insert(loaded)
+            .clone()
+    }
+}
+
+/// A pool element's template, read from its file on first use.
+#[derive(Clone)]
+pub struct LazyTemplate {
+    id: String,
+    store: Option<Arc<TemplateStore>>,
+    cell: OnceLock<Arc<StructureTemplate>>,
+}
+impl LazyTemplate {
+    /// An already loaded template.
+    pub fn loaded(template: Arc<StructureTemplate>) -> Self {
+        Self {
+            id: String::new(),
+            store: None,
+            cell: OnceLock::from(template),
+        }
+    }
+    /// The template (the resources' shared one: comparable by pointer).
+    pub fn arc(&self) -> &Arc<StructureTemplate> {
+        self.cell.get_or_init(|| {
+            self.store
+                .as_ref()
+                .expect("a lazy template has its store")
+                .get(&self.id)
+        })
+    }
+}
+impl std::ops::Deref for LazyTemplate {
+    type Target = StructureTemplate;
+    fn deref(&self) -> &StructureTemplate {
+        self.arc()
+    }
+}
+impl std::fmt::Debug for LazyTemplate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(&**self.arc(), f)
+    }
+}
+
 /// Lazily loaded templates (`structure/<namespace>/<path>.nbt`, gzip NBT) and
 /// processor lists, shared by all generators of one resource bundle.
 pub struct StructureResources {
     pub registry: &'static BlockRegistry,
-    pub transforms: StateTransforms,
-    dir: PathBuf,
-    templates: RwLock<HashMap<String, Option<Arc<StructureTemplate>>>>,
-    /// The data packs' templates, read before the game's own (`with_packs`).
-    packs: super::overrides::PackTemplates,
+    pub transforms: Arc<StateTransforms>,
+    templates: Arc<TemplateStore>,
     pub processor_lists: BTreeMap<String, String>,
     jigsaw_states: BTreeMap<BlockStateId, bool>,
     pub(crate) waterlogged: HashMap<BlockStateId, BlockStateId>,
@@ -345,12 +450,17 @@ impl StructureResources {
                 }
             }
         }
+        let transforms = Arc::new(transforms);
         Self {
             registry,
-            transforms,
-            dir: dir.to_owned(),
-            templates: RwLock::new(HashMap::new()),
-            packs: Default::default(),
+            transforms: transforms.clone(),
+            templates: Arc::new(TemplateStore {
+                registry,
+                transforms,
+                dir: dir.to_owned(),
+                loaded: RwLock::new(HashMap::new()),
+                pack_templates: BTreeMap::new(),
+            }),
             processor_lists,
             jigsaw_states,
             waterlogged,
@@ -361,43 +471,31 @@ impl StructureResources {
                 .collect(),
         }
     }
+    /// These resources with data packs' template files over the prepared ones.
+    pub fn with_pack_templates(mut self, templates: BTreeMap<String, Arc<[u8]>>) -> Self {
+        // A fresh store: templates loaded before would come from the old files.
+        self.templates = Arc::new(TemplateStore {
+            registry: self.registry,
+            transforms: self.transforms.clone(),
+            dir: self.templates.dir.clone(),
+            loaded: RwLock::new(HashMap::new()),
+            pack_templates: templates,
+        });
+        self
+    }
     /// StructureTemplateManager.getOrCreate; missing templates are empty.
     pub fn template(&self, id: &str) -> Option<Arc<StructureTemplate>> {
-        let id = if id.contains(':') {
-            id.to_owned()
-        } else {
-            format!("minecraft:{id}")
-        };
-        if let Some(found) = self.templates.read().unwrap().get(&id) {
-            return found.clone();
+        Some(self.templates.get(&qualified(id)))
+    }
+    /// A template loaded on its first use, as a pool element's
+    /// (StructureTemplateManager.getOrCreate runs when vanilla first touches
+    /// the element, not when its pool is read).
+    pub fn lazy_template(&self, id: &str) -> LazyTemplate {
+        LazyTemplate {
+            id: qualified(id),
+            store: Some(self.templates.clone()),
+            cell: OnceLock::new(),
         }
-        let (namespace, path) = id.split_once(':').unwrap();
-        let file = self.dir.join(namespace).join(format!("{path}.nbt"));
-        // The packs' resource stack before the built-in pack (vanilla's
-        // ResourceManagerTemplateSource: the top pack's file wins).
-        let loaded = self
-            .packs
-            .read(&id)
-            .or_else(|| horizon_core::prepared_files::read(&file).ok())
-            .and_then(|bytes| {
-                let mut raw = Vec::new();
-                flate2::read::GzDecoder::new(bytes.as_slice())
-                    .read_to_end(&mut raw)
-                    .ok()?;
-                let mut tag = nbt::read_named(&raw, Limits::templates()).ok()?.0.tag;
-                upgrade_template(&mut tag);
-                Some(StructureTemplate::from_nbt(
-                    &tag,
-                    self.registry,
-                    &self.transforms,
-                ))
-            });
-        // StructureTemplateManager.getOrCreate: missing templates are empty.
-        let mut loaded = loaded.unwrap_or_else(StructureTemplate::empty);
-        loaded.location = id.as_str().into();
-        let loaded = Some(Arc::new(loaded));
-        self.templates.write().unwrap().insert(id, loaded.clone());
-        loaded
     }
     /// Whether the state's fluid is a source (water/lava level 0, waterlogged).
     pub fn source_fluid(&self, state: BlockStateId) -> bool {
@@ -422,28 +520,28 @@ impl StructureResources {
 /// runs it: a template saved by an older version (a mod's for 1.20.1) has its palettes' states,
 /// its blocks' block entities and its entities brought up from its `DataVersion` (500 when it
 /// has none). A block renamed since (`minecraft:grass`) is then found, not read as air.
-pub(crate) fn upgrade_template(tag: &mut nbt::Tag) {
+pub(crate) fn upgrade_template(tag: &mut crate::nbt::Tag) {
     use crate::datafix::{self, schema::Ty};
-    let nbt::Tag::Compound(root) = tag else {
+    let crate::nbt::Tag::Compound(root) = tag else {
         return;
     };
-    let from = match root.get(&nbt::JavaString::from("DataVersion")) {
-        Some(nbt::Tag::Int(v)) => *v,
+    let from = match root.get(&crate::nbt::JavaString::from("DataVersion")) {
+        Some(crate::nbt::Tag::Int(v)) => *v,
         _ => 500,
     };
     let to = horizon_core::version::DATA_VERSION;
     if from >= to {
         return;
     }
-    let fix = |ty: Ty, value: &mut nbt::Tag| datafix::update(ty, value, from, to);
-    if let Some(nbt::Tag::List(palette)) = root.get_mut(&nbt::JavaString::from("palette")) {
+    let fix = |ty: Ty, value: &mut crate::nbt::Tag| datafix::update(ty, value, from, to);
+    if let Some(crate::nbt::Tag::List(palette)) = root.get_mut(&crate::nbt::JavaString::from("palette")) {
         for state in palette.iter_mut() {
             fix(Ty::BlockState, state);
         }
     }
-    if let Some(nbt::Tag::List(palettes)) = root.get_mut(&nbt::JavaString::from("palettes")) {
+    if let Some(crate::nbt::Tag::List(palettes)) = root.get_mut(&crate::nbt::JavaString::from("palettes")) {
         for palette in palettes.iter_mut() {
-            if let nbt::Tag::List(palette) = palette {
+            if let crate::nbt::Tag::List(palette) = palette {
                 for state in palette.iter_mut() {
                     fix(Ty::BlockState, state);
                 }
@@ -454,17 +552,17 @@ pub(crate) fn upgrade_template(tag: &mut nbt::Tag) {
         ("blocks", "nbt", Ty::BlockEntity),
         ("entities", "nbt", Ty::EntityTree),
     ] {
-        if let Some(nbt::Tag::List(list)) = root.get_mut(&nbt::JavaString::from(key)) {
+        if let Some(crate::nbt::Tag::List(list)) = root.get_mut(&crate::nbt::JavaString::from(key)) {
             for entry in list.iter_mut() {
-                if let nbt::Tag::Compound(entry) = entry
-                    && let Some(value) = entry.get_mut(&nbt::JavaString::from(inner))
+                if let crate::nbt::Tag::Compound(entry) = entry
+                    && let Some(value) = entry.get_mut(&crate::nbt::JavaString::from(inner))
                 {
                     fix(ty, value);
                 }
             }
         }
     }
-    root.insert(nbt::JavaString::from("DataVersion"), nbt::Tag::Int(to));
+    root.insert(crate::nbt::JavaString::from("DataVersion"), crate::nbt::Tag::Int(to));
 }
 
 #[cfg(test)]
