@@ -255,6 +255,10 @@ pub fn start<G>(
     logging::flush();
     // With Java mods, the process ends through Java's exit (its class archive is written).
     game::java_mods::exit_through_java();
+    // `/restart`: the world is saved; the supervisor reads this code as "start the game again".
+    if game::exit_code::restart_requested() {
+        std::process::exit(game::exit_code::RESTART);
+    }
 }
 
 pub(crate) fn install_client_hooks() {
