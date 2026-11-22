@@ -25,8 +25,9 @@ use std::path::{Path, PathBuf};
 /// 10: their spawn eggs drawn as in 1.20.1 ([`spawn_eggs`]). 11: the files their runtime resource
 /// packs hold, and their items drawn by code as models ([`code`]). 12: the worldgen pack carries
 /// the mods' block tags, and 26.3's shapes of trees, states and noise providers, so Horizon's
-/// generator places the mods' data features itself rather than the runtime.
-const FORMAT: u32 = 12;
+/// generator places the mods' data features itself rather than the runtime. 13: a mod's own
+/// files for 26.3 (its pack's overlays for 26.3's format: Geophilic's biomes) go in as they are.
+const FORMAT: u32 = 13;
 
 /// The file under the cache holding the pools the mods add to loot tables ([`loot_added`]).
 pub const LOOT_ADDED: &str = "loot_added.json";
@@ -724,6 +725,72 @@ fn loot_added(json: &str) -> std::collections::BTreeMap<String, Vec<serde_json::
         .collect()
 }
 
+/// A multi-version data pack's files for 26.3 (Geophilic's `biomes_26_3`, `f26-3`): the overlay
+/// folders its `pack.mcmeta` lists for a pack format range holding 26.3's, in their order, each
+/// over the ones before. They are under `data/` as a pack's own, world generation and block tags
+/// only.
+fn native_overlays(
+    zip: &mut zip::ZipArchive<std::fs::File>,
+) -> std::collections::BTreeMap<String, Vec<u8>> {
+    use std::io::Read;
+    let mut out = std::collections::BTreeMap::new();
+    let mut meta = String::new();
+    if !zip
+        .by_name("pack.mcmeta")
+        .is_ok_and(|mut e| e.read_to_string(&mut meta).is_ok())
+    {
+        return out;
+    }
+    let Ok(meta) = serde_json::from_str::<serde_json::Value>(&meta) else {
+        return out;
+    };
+    let format = horizon_port_pack::upgrade::PACK_FORMAT;
+    let major = |v: &serde_json::Value| {
+        v.as_u64()
+            .or_else(|| v.as_array().and_then(|a| a.first()).and_then(|x| x.as_u64()))
+    };
+    let dirs: Vec<String> = meta["overlays"]["entries"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|e| {
+            let (min, max) = match (e.get("min_format"), e.get("max_format")) {
+                (Some(a), Some(b)) => (major(a), major(b)),
+                _ => match e.get("formats") {
+                    Some(serde_json::Value::Array(a)) if a.len() == 2 => (major(&a[0]), major(&a[1])),
+                    Some(f) if f.is_u64() => (f.as_u64(), f.as_u64()),
+                    Some(f) => (
+                        f.get("min_inclusive").and_then(|x| x.as_u64()),
+                        f.get("max_inclusive").and_then(|x| x.as_u64()),
+                    ),
+                    None => (None, None),
+                },
+            };
+            min.zip(max).is_some_and(|(a, b)| a <= format && format <= b)
+        })
+        .filter_map(|e| e["directory"].as_str().map(str::to_owned))
+        .collect();
+    for dir in dirs {
+        let prefix = format!("{dir}/");
+        let names: Vec<String> = zip
+            .file_names()
+            .filter_map(|n| n.strip_prefix(&prefix))
+            .filter(|n| is_worldgen(n))
+            .map(str::to_owned)
+            .collect();
+        for name in names {
+            let mut bytes = Vec::new();
+            if zip
+                .by_name(&format!("{prefix}{name}"))
+                .is_ok_and(|mut e| e.read_to_end(&mut bytes).is_ok())
+            {
+                out.insert(name, bytes);
+            }
+        }
+    }
+    out
+}
+
 /// Whether a jar entry is a block tag, in 1.20.1's folder or 26.3's.
 fn is_block_tag(name: &str) -> bool {
     name.strip_prefix("data/")
@@ -825,6 +892,8 @@ fn worldgen_pack(
         .collect();
     jars.sort();
     let mut files: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+    // The files a mod has for 26.3 itself (`native_overlays`), which go into the pack as they are.
+    let mut native: BTreeMap<String, Vec<u8>> = BTreeMap::new();
     for jar in jars {
         let Ok(file) = std::fs::File::open(&jar) else {
             continue;
@@ -837,10 +906,14 @@ fn worldgen_pack(
             .filter(|n| is_worldgen(n))
             .map(str::to_owned)
             .collect();
+        let own = native_overlays(&mut zip);
         // Any mod's block tags may be named by another's features (`#c:ores`): those come
         // along from every jar, the rest only from the jars that need the pack.
-        if !needs_pack(&names) {
+        let own_names: Vec<String> = own.keys().cloned().collect();
+        if !needs_pack(&names) && !needs_pack(&own_names) {
             names.retain(|n| is_block_tag(n));
+        } else {
+            native.extend(own);
         }
         for name in names {
             let mut bytes = Vec::new();
@@ -876,7 +949,7 @@ fn worldgen_pack(
             files.insert(name, bytes);
         }
     }
-    if files.keys().all(|n| is_block_tag(n)) {
+    if files.keys().chain(native.keys()).all(|n| is_block_tag(n)) {
         return Ok(0);
     }
     let own_carvers = drop_own_carvers(&mut files);
@@ -889,6 +962,7 @@ fn worldgen_pack(
     // The biomes that exist: vanilla's (26.3's, prepared) and the pack's.
     let biomes: std::collections::HashSet<String> = files
         .keys()
+        .chain(native.keys())
         .filter_map(|n| {
             let (ns, rest) = n.strip_prefix("data/")?.split_once('/')?;
             let path = rest
@@ -927,13 +1001,15 @@ fn worldgen_pack(
         "description": "The 1.20.1 mods' world generation",
     }});
     files.insert("pack.mcmeta".into(), meta.to_string().into_bytes());
-    let (upgraded, report) = horizon_port_pack::upgrade::upgrade_pack(&files);
+    let (mut upgraded, report) = horizon_port_pack::upgrade::upgrade_pack(&files);
     if !report.lossy.is_empty() || !report.unknown.is_empty() {
         log(format!(
             "1.20.1 mods' content: their world generation upgraded with losses {:?}, unknown {:?}",
             report.lossy, report.unknown
         ));
     }
+    // A mod's own 26.3 files over what was upgraded from its 1.20.1 ones.
+    upgraded.extend(native);
     let mut written = 0;
     for (path, bytes) in upgraded {
         if path.split('/').any(|p| p == ".." || p.is_empty()) || path.contains(['\\', ':']) {
