@@ -77,8 +77,11 @@ Mods' packets go between the halves through Forge's own hand-off (NetworkHooks.o
 with every channel taken as present on the client (NetworkInstanceMixin): the client is this same
 game. The window is hidden from creation and the client parks once the mods' models are baked.
 
-Still to do: a vanilla block's break heard by both runtimes' mods (it goes to the first), models
-drawn by code, biome modifiers on the mirror's registries, mod key mappings by registration rather
+Models drawn by code: a mod's state whose baked model is a class of its own (not vanilla's or
+Forge's) is drawn where it stands, from its quads with Forge's model data (as for Fabric, only
+those with a block entity are drawn again as they change).
+
+Still to do: a vanilla block's break heard by both runtimes' mods (it goes to the first), biome modifiers on the mirror's registries, mod key mappings by registration rather
 than by category.
 
 ## License

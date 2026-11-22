@@ -52,6 +52,15 @@ fn main() {
                     runtime.call_with("codeItems", &[dir]).map(|r| r.len())
                 );
             }
+            // The mods' block states drawn by code too (`FORGE120_DRAWN=1`).
+            if std::env::var_os("FORGE120_DRAWN").is_some() {
+                println!(
+                    "drawnByCode: {:?}",
+                    runtime
+                        .drawn_by_code()
+                        .map(|r| (r.len(), r.into_iter().take(5).collect::<Vec<_>>()))
+                );
+            }
             runtime.stop();
         }
         Err(e) => {

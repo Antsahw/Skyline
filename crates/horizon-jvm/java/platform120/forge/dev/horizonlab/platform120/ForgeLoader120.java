@@ -269,10 +269,99 @@ final class ForgeLoader120 implements Loader120 {
         return out;
     }
 
-    /** Models drawn by code: none told apart yet under Forge (phase 3). */
-    @Override public String[] drawnByCode() { return new String[0]; }
+    /**
+     * The mods' states whose model is a mod's own code (a baked model class of its own, as
+     * Forge's geometry loaders make them: connected textures, models of a block entity's data):
+     * what they draw is asked for where they stand. Vanilla's and Forge's own model classes
+     * (simple, multipart, weighted, composite, OBJ) draw the same everywhere, from their files.
+     */
+    @Override
+    public String[] drawnByCode() {
+        List<String> out = new ArrayList<>();
+        for (var entry : baked().entrySet()) {
+            BlockState state = entry.getKey();
+            if ("minecraft".equals(net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(state.getBlock()).getNamespace())) continue;
+            String model = entry.getValue().getClass().getName();
+            if (model.startsWith("net.minecraft.") || model.startsWith("net.minecraftforge.")) continue;
+            out.add(net.minecraft.commands.arguments.blocks.BlockStateParser.serialize(state));
+        }
+        return out.toArray(new String[0]);
+    }
 
-    @Override public Object[] render(Level level, BlockPos pos) { return new Object[0]; }
+    /**
+     * The quads of the block at `pos`, as its model gives them there (Forge's model data, every
+     * render type, every side): {sprites, corners (x y z u v, u v in the sprite), colours}, as
+     * Models120.render answers.
+     */
+    @Override
+    public Object[] render(Level level, BlockPos pos) {
+        BlockState state = level.getBlockState(pos);
+        var model = Minecraft.getInstance().getModelManager().getBlockModelShaper().getBlockModel(state);
+        var view = new Models120.View(level);
+        List<String> sprites = new ArrayList<>();
+        List<Double> corners = new ArrayList<>();
+        List<Integer> colors = new ArrayList<>();
+        try {
+            var entity = level.getBlockEntity(pos);
+            var data = model.getModelData(view, pos, state,
+                    entity == null ? net.minecraftforge.client.model.data.ModelData.EMPTY : entity.getModelData());
+            var random = net.minecraft.util.RandomSource.create();
+            long seed = state.getSeed(pos);
+            for (var type : model.getRenderTypes(state, net.minecraft.util.RandomSource.create(seed), data)) {
+                for (int side = -1; side < 6; side++) {
+                    random.setSeed(seed);
+                    var direction = side < 0 ? null : net.minecraft.core.Direction.from3DDataValue(side);
+                    for (var quad : model.getQuads(state, direction, random, data, type)) {
+                        quad(quad, state, view, pos, sprites, corners, colors);
+                    }
+                }
+            }
+        } catch (RuntimeException | LinkageError e) {
+            Throwable cause = e;
+            while (cause.getCause() != null && cause.getCause() != cause) cause = cause.getCause();
+            var at = cause.getStackTrace().length > 0 ? " at " + cause.getStackTrace()[0] : "";
+            Mirror120.log("the block at " + pos.toShortString() + " (" + state + ") didn't draw: " + cause + at);
+        }
+        double[] flat = new double[corners.size()];
+        for (int i = 0; i < flat.length; i++) flat[i] = corners.get(i);
+        int[] argb = new int[colors.size()];
+        for (int i = 0; i < argb.length; i++) argb[i] = colors.get(i);
+        return new Object[] {sprites.toArray(new String[0]), flat, argb};
+    }
+
+    /** One baked quad: vanilla's block vertex format, eight ints a corner. */
+    private static void quad(net.minecraft.client.renderer.block.model.BakedQuad quad, BlockState state,
+            Models120.View view, BlockPos pos, List<String> sprites, List<Double> corners, List<Integer> colors) {
+        int[] vertices = quad.getVertices();
+        if (vertices.length < 32) return;
+        var sprite = quad.getSprite();
+        float u0 = sprite.getU0(), du = sprite.getU1() - u0, v0 = sprite.getV0(), dv = sprite.getV1() - v0;
+        int tint = -1;
+        if (quad.isTinted()) {
+            tint = 0xFF000000 | Minecraft.getInstance().getBlockColors().getColor(state, view, pos, quad.getTintIndex());
+        }
+        sprites.add(sprite.contents().name().toString());
+        int stride = vertices.length / 4;
+        for (int c = 0; c < 4; c++) {
+            int at = c * stride;
+            corners.add((double) Float.intBitsToFloat(vertices[at]));
+            corners.add((double) Float.intBitsToFloat(vertices[at + 1]));
+            corners.add((double) Float.intBitsToFloat(vertices[at + 2]));
+            corners.add(du == 0 ? 0 : (double) ((Float.intBitsToFloat(vertices[at + 4]) - u0) / du));
+            corners.add(dv == 0 ? 0 : (double) ((Float.intBitsToFloat(vertices[at + 5]) - v0) / dv));
+            int abgr = vertices[at + 3];
+            int argb = abgr & 0xFF00FF00 | (abgr & 0xFF) << 16 | abgr >> 16 & 0xFF;
+            colors.add(tint == -1 ? argb : multiply(argb, tint));
+        }
+    }
+
+    private static int multiply(int a, int b) {
+        int out = 0;
+        for (int shift = 0; shift < 32; shift += 8) {
+            out |= ((a >>> shift & 0xFF) * (b >>> shift & 0xFF) / 255) << shift;
+        }
+        return out;
+    }
 
     /** Each mod's own pack, as Forge makes one per mod file. */
     @Override

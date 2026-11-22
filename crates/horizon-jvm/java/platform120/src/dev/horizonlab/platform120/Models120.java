@@ -211,7 +211,7 @@ final class Models120 {
     }
 
     /** The world a block draws in: the mirror level's blocks, full light, no shading of its own. */
-    private record View(Level level) implements BlockAndTintGetter {
+    record View(Level level) implements BlockAndTintGetter {
         @Override public float getShade(Direction side, boolean shade) { return 1.0f; }
         @Override public LevelLightEngine getLightEngine() { return null; }
         @Override public int getBrightness(LightLayer layer, BlockPos pos) { return 15; }
