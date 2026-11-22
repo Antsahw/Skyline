@@ -50,6 +50,41 @@ final class Tints120 {
         return out.toString();
     }
 
+    /**
+     * The mods' item tints (their ItemColors: a leaves item's foliage green): {item id: [a tint
+     * index's ARGB, -1 for none]}, those with any. Spawn eggs are left to Mirror120.spawnEggs.
+     */
+    static String items() {
+        Loader120.get().baked();
+        var client = net.minecraft.client.Minecraft.getInstance();
+        var colors = ((dev.horizonlab.platform120.mixin.MinecraftAccess) client).horizon$itemColors();
+        if (colors == null && client.getBlockColors() != null) {
+            colors = net.minecraft.client.color.item.ItemColors.createDefault(client.getBlockColors());
+        }
+        JsonObject out = new JsonObject();
+        if (colors == null) return out.toString();
+        for (var item : BuiltInRegistries.ITEM) {
+            var id = BuiltInRegistries.ITEM.getKey(item);
+            if ("minecraft".equals(id.getNamespace()) || item instanceof net.minecraft.world.item.SpawnEggItem) continue;
+            var stack = new net.minecraft.world.item.ItemStack(item);
+            int[] tints = new int[2];
+            int last = -1;
+            for (int index = 0; index < tints.length; index++) {
+                try {
+                    tints[index] = colors.getColor(stack, index);
+                } catch (RuntimeException | LinkageError e) {
+                    tints[index] = -1;
+                }
+                if (tints[index] != -1) last = index;
+            }
+            if (last < 0) continue;
+            JsonArray layers = new JsonArray();
+            for (int index = 0; index <= last; index++) layers.add(tints[index]);
+            out.add(id.toString(), layers);
+        }
+        return out.toString();
+    }
+
     private static String kind(net.minecraft.client.color.block.BlockColors colors, BlockState state, int index) {
         int color;
         try {

@@ -21,6 +21,9 @@ final class ForgeRuntime120 implements RemoteRuntime {
             case "start":
             case "report":
                 return new Object[] {report()};
+            case "side":
+                // Which side Forge takes this thread for (EffectiveSide: by its thread group).
+                return new Object[] {String.valueOf(net.minecraftforge.fml.util.thread.EffectiveSide.get())};
             case "facts":
                 return new Object[] {Content120.exportFacts((String) args[0])};
             default:

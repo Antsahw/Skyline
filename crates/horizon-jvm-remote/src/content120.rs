@@ -28,8 +28,8 @@ use std::path::{Path, PathBuf};
 /// generator places the mods' data features itself rather than the runtime. 13: a mod's own
 /// files for 26.3 (its pack's overlays for 26.3's format: Geophilic's biomes) go in as they are.
 /// 14: a creative tab whose icon only code draws takes its first item's. 15: the mods' block
-/// tints ([`BLOCK_TINTS`]).
-const FORMAT: u32 = 15;
+/// tints ([`BLOCK_TINTS`]). 16: their items' tints ([`item_tints`]).
+const FORMAT: u32 = 16;
 
 /// The file under the cache holding the pools the mods add to loot tables ([`loot_added`]).
 pub const LOOT_ADDED: &str = "loot_added.json";
@@ -625,6 +625,19 @@ pub fn build(
             "1.20.1 mods' content: {eggs} spawn egg(s) drawn as 1.20.1 draws them"
         ));
     }
+    match runtime.call_with("itemTints", &[]) {
+        Ok(tints) => {
+            let tinted = item_tints(&tints, &carried(&work));
+            if tinted > 0 {
+                log(format!(
+                    "1.20.1 mods' content: {tinted} item(s) tinted as their code tints them"
+                ));
+            }
+        }
+        Err(e) => log(format!(
+            "1.20.1 mods' content: their item tints were not read: {e}"
+        )),
+    }
     let drawn = cache.join("code_items");
     let items = runtime.call_with(
         "codeItems",
@@ -730,6 +743,56 @@ fn spawn_eggs(eggs: &str, textures: &Path, carried: &[PathBuf]) -> usize {
                 .parent()
                 .is_some_and(|d| std::fs::create_dir_all(d).is_ok())
             && std::fs::write(&definition_file, definition.to_string()).is_ok();
+        written += usize::from(ok);
+    }
+    written
+}
+
+/// The mods' items tinted in code (the runtime's `itemTints`: `{item: [ARGB a tint index, -1
+/// none]}`, their ItemColors: a leaves item's foliage green). 26.3 tints in the item's
+/// definition, so each such item's gets the colours as constants on its model (a definition
+/// made for it when the carry-over gave none). How many items.
+fn item_tints(tints: &str, carried: &[PathBuf]) -> usize {
+    let Ok(serde_json::Value::Object(tints)) = serde_json::from_str(tints) else {
+        return 0;
+    };
+    let mut written = 0;
+    for (id, layers) in tints {
+        let (Some((ns, path)), Some(layers)) = (id.split_once(':'), layers.as_array()) else {
+            continue;
+        };
+        let Some(carry) = carrying(carried, ns) else {
+            continue;
+        };
+        let file = carry
+            .join("assets")
+            .join(ns)
+            .join("items")
+            .join(format!("{path}.json"));
+        let mut definition = std::fs::read(&file)
+            .ok()
+            .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
+            .unwrap_or_else(|| {
+                serde_json::json!({"model": {"type": "minecraft:model",
+                "model": format!("{ns}:item/{path}")}})
+            });
+        let model = &mut definition["model"];
+        // Only a plain model takes tints (one chosen by a condition or a select keeps its own).
+        if model["type"].as_str() != Some("minecraft:model") || model.get("tints").is_some() {
+            continue;
+        }
+        let constants: Vec<serde_json::Value> = layers
+            .iter()
+            .map(|c| {
+                serde_json::json!({"type": "minecraft:constant",
+                "value": c.as_i64().unwrap_or(-1) as i32})
+            })
+            .collect();
+        model["tints"] = serde_json::Value::Array(constants);
+        let ok = file
+            .parent()
+            .is_some_and(|d| std::fs::create_dir_all(d).is_ok())
+            && std::fs::write(&file, definition.to_string()).is_ok();
         written += usize::from(ok);
     }
     written
@@ -1234,6 +1297,30 @@ mod tests {
                 "predicate": {"items": "farmersdelight:flint_knife"}}),
             "1.20.1's item list is a holder set, its condition list 26.3's one condition"
         );
+    }
+
+    #[test]
+    fn a_tinted_items_definition_takes_its_colours_and_one_is_made_for_an_item_without() {
+        let carry = std::env::temp_dir().join(format!("horizon-item-tints-{}", std::process::id()));
+        let items = carry.join("assets/simplefarming/items");
+        std::fs::create_dir_all(&items).unwrap();
+        std::fs::write(
+            items.join("apple_leaves.json"),
+            r#"{"model":{"type":"minecraft:model","model":"simplefarming:block/apple_leaves"}}"#,
+        )
+        .unwrap();
+        let tints = r#"{"simplefarming:apple_leaves":[-12012264],"simplefarming:plum_leaves":[-12012264,-1]}"#;
+        assert_eq!(item_tints(tints, std::slice::from_ref(&carry)), 2);
+        let read = |name: &str| -> serde_json::Value {
+            serde_json::from_slice(&std::fs::read(items.join(name)).unwrap()).unwrap()
+        };
+        let apple = read("apple_leaves.json");
+        assert_eq!(apple["model"]["model"], "simplefarming:block/apple_leaves");
+        assert_eq!(apple["model"]["tints"][0]["value"], -12012264);
+        let plum = read("plum_leaves.json");
+        assert_eq!(plum["model"]["model"], "simplefarming:item/plum_leaves");
+        assert_eq!(plum["model"]["tints"][1]["value"], -1);
+        let _ = std::fs::remove_dir_all(&carry);
     }
 
     #[test]

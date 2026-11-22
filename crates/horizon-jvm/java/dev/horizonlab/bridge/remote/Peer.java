@@ -123,6 +123,36 @@ public final class Peer {
         }
     }
 
+    /**
+     * Runs {@code work} on a new thread of {@code group} (a loader that tells sides apart by
+     * thread group: Forge's server work), which is the conversation's while it runs: its calls
+     * into Horizon go as this thread's would, this thread waiting for it. From another thread
+     * than the conversation's, the work runs there all the same, without the conversation.
+     */
+    public void lend(ThreadGroup group, String name, Runnable work) {
+        Thread caller = Thread.currentThread();
+        boolean ours = caller == conversation;
+        Throwable[] failed = new Throwable[1];
+        Thread worker = new Thread(group, () -> {
+            try {
+                work.run();
+            } catch (Throwable t) {
+                failed[0] = t;
+            }
+        }, name);
+        if (ours) conversation = worker;
+        try {
+            worker.start();
+            worker.join();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } finally {
+            if (ours) conversation = caller;
+        }
+        if (failed[0] instanceof RuntimeException r) throw r;
+        if (failed[0] instanceof Error e) throw e;
+    }
+
     /** Handles Horizon's calls and events on this thread until it says goodbye. */
     public void serve(Handler handler) throws IOException {
         this.handler = handler;

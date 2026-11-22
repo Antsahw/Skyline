@@ -51,6 +51,8 @@ import net.minecraftforge.items.IItemHandler;
 final class ForgeLoader120 implements Loader120 {
     private static final Set<String> FAILED = new HashSet<>();
     private boolean started;
+    /** Forge's start of the mirror server has run (it can run once: it modifies the biomes). */
+    private boolean aboutToStart;
     private final Set<Long> chunksLoaded = new HashSet<>();
 
     /** Posts `event` on Forge's bus; a listener that throws is said once and the call goes on. */
@@ -70,8 +72,11 @@ final class ForgeLoader120 implements Loader120 {
         // Through Forge's lifecycle hooks, as a server's start goes: they make the mirror the
         // current server (PacketDistributor's, ServerLifecycleHooks.getCurrentServer) and load
         // the mods' server configs, posting the events. Each falls back to its event alone.
-        hook("server about to start", () -> net.minecraftforge.server.ServerLifecycleHooks.handleServerAboutToStart(server),
-                () -> post(new ServerAboutToStartEvent(server), "server about to start"));
+        if (!aboutToStart) {
+            aboutToStart = true;
+            hook("server about to start", () -> net.minecraftforge.server.ServerLifecycleHooks.handleServerAboutToStart(server),
+                    () -> post(new ServerAboutToStartEvent(server), "server about to start"));
+        }
         hook("server starting", () -> net.minecraftforge.server.ServerLifecycleHooks.handleServerStarting(server),
                 () -> post(new ServerStartingEvent(server), "server starting"));
         for (ServerLevel level : levels) post(new LevelEvent.Load(level), "level load");
@@ -248,7 +253,12 @@ final class ForgeLoader120 implements Loader120 {
         if (!(packet instanceof net.minecraft.network.protocol.game.ServerboundCustomPayloadPacket payload)) return;
         ServerPlayer player = Screens120.standingIn();
         if (player == null) return;
-        deliver("to the server on " + payload.getIdentifier(), payload, player.connection.connection);
+        // Forge takes a thread for the server's by its thread group (EffectiveSide), and hands a
+        // payload to the server's handlers only there: delivered from a thread of the server's
+        // group, which is the conversation's meanwhile.
+        dev.horizonlab.bridge.remote.Host.lend(net.minecraftforge.fml.util.thread.SidedThreadGroups.SERVER,
+                "Horizon server work",
+                () -> deliver("to the server on " + payload.getIdentifier(), payload, player.connection.connection));
     }
 
     private static final java.util.Set<String> PACKETS_FAILED = java.util.concurrent.ConcurrentHashMap.newKeySet();
@@ -407,6 +417,15 @@ final class ForgeLoader120 implements Loader120 {
      */
     @Override
     public void finalizeBiomes(net.minecraft.core.RegistryAccess registries) {
+        // Through Forge's own start of a server first (ServerLifecycleHooks.handleServerAboutToStart):
+        // it makes the mirror the current server, which modifiers read (Farmer's Delight's
+        // filters ask the server's registries), loads the mods' server configs and applies the
+        // modifiers itself. The biomes it left unmodified are done below.
+        if (!aboutToStart) {
+            aboutToStart = true;
+            hook("server about to start", () -> net.minecraftforge.server.ServerLifecycleHooks.handleServerAboutToStart(Mirror120.server()),
+                    () -> post(new ServerAboutToStartEvent(Mirror120.server()), "server about to start"));
+        }
         var found = registries.registry(net.minecraftforge.registries.ForgeRegistries.Keys.BIOME_MODIFIERS);
         if (found.isEmpty()) {
             Mirror120.log("the mirror's registries have no biome modifiers");
@@ -425,7 +444,8 @@ final class ForgeLoader120 implements Loader120 {
                 Mirror120.log("biome " + holder.key().location() + " can't be modified: " + e);
             }
         }
-        Mirror120.log(modifiers.size() + " biome modifier(s) applied to " + done + " biome(s)");
+        Mirror120.log(modifiers.size() + " biome modifier(s): " + (done == 0 ? "Forge's server start applied them"
+                : "applied to " + done + " biome(s) Forge's server start left"));
     }
 
     @Override public int firstEntityId() { return Entities120.FORGE_FIRST_ID; }

@@ -39,6 +39,7 @@ fn main() {
         Ok((mut runtime, report)) => {
             println!("{report}");
             println!("ping: {:?}", runtime.call("ping"));
+            println!("side: {:?}", runtime.call("side"));
             // The content facts too, to a file, when asked (`FORGE120_FACTS=PATH`).
             if let Ok(path) = std::env::var("FORGE120_FACTS") {
                 let path = horizon_jvm_remote::wire::Value::Str(path);
@@ -71,7 +72,13 @@ fn main() {
             // The vanilla methods the mods' mixins inject into, and the settings screens
             // (`FORGE120_MIXINS=1`).
             if std::env::var_os("FORGE120_MIXINS").is_some() {
-                for call in ["mixinTargets", "configMods", "fluidLooks", "blockTints"] {
+                for call in [
+                    "mixinTargets",
+                    "configMods",
+                    "fluidLooks",
+                    "blockTints",
+                    "itemTints",
+                ] {
                     println!("{call}: {:?}", runtime.call_answers(call, &[]));
                 }
             }

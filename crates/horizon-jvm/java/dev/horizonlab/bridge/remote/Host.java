@@ -38,4 +38,29 @@ public final class Host {
         if (p == null) throw new IllegalStateException("not running under Horizon");
         return p.call(method, args);
     }
+
+    /** Runs {@code work} on a thread of {@code group} as the conversation's (see {@link Peer#lend}). */
+    public static void lend(ThreadGroup group, String name, Runnable work) {
+        Peer p = peer;
+        if (p != null) {
+            p.lend(group, name, work);
+            return;
+        }
+        Throwable[] failed = new Throwable[1];
+        Thread worker = new Thread(group, () -> {
+            try {
+                work.run();
+            } catch (Throwable t) {
+                failed[0] = t;
+            }
+        }, name);
+        worker.start();
+        try {
+            worker.join();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        if (failed[0] instanceof RuntimeException r) throw r;
+        if (failed[0] instanceof Error e) throw e;
+    }
 }
