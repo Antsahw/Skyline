@@ -118,6 +118,12 @@ public interface Loader120 {
     /** The mods' biome modifications applied to `registries` (features, spawns, effects). */
     void finalizeBiomes(net.minecraft.core.RegistryAccess registries);
 
+    /**
+     * Whether the client runs its own loop: Forge's client is a real one (a hidden window, its
+     * render thread); the Fabric runtime's is headless, called and never ticked.
+     */
+    boolean clientRunsItsLoop();
+
     // The bridge's own checks of the loader.
 
     /** A payload down to the client half and one back up: what each side got, and canSend. */

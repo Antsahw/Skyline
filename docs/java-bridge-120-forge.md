@@ -1,6 +1,6 @@
 # Unmodified Forge 1.20.1 mods on Horizon 26.3 (plan, 2026-11-22)
 
-Status: phases 1 and 2 done.
+Status: phases 1 and 2 done; phase 3's platform loads in Forge's client.
 
 **Phase 1 (2026-11-22):** `tools/java_bridge/fetch120forge.py --boot` fetched Forge 47.4.28 (its
 recommended 1.20.1 build), installed the client over fetch120.py's Mojang files (81 class path
@@ -18,6 +18,30 @@ name and falls back without it (entity death and damage events, tooltips, fluid 
 dynamic registries, Config120's settings screens, Mixins120's index of the mods' mixins). Three
 mixins target Fabric API's own classes (`ClientPlayNetworkingMixin`, `ServerPlayNetworkingMixin`,
 `PlayerLookupMixin`): the Forge build leaves them out of its mixin config (phase 3).
+
+**Phase 3 (2026-11-22, started):** `tools/java_bridge/build120forge.sh` builds the same sources plus
+`platform120/forge` (`ForgeLoader120`, the `@Mod` class `ForgeMod120`, `META-INF/mods.toml`)
+into `platform120-forge.jar`: compiled against Forge's patched client, the rest of the client
+and Forge itself, remapped from srg to Mojang's names; then remapped to srg, Forge's runtime
+names (Mojang's class names, SRG member names), from a fourth namespace `Remap120 srg` adds to
+build120.sh's mappings out of the installer's mcp_config. Forge's client (`forgeclient`, as the
+installer's launch arguments start it) loads it beside its own mod: "Horizon platform loaded
+under Forge (ForgeLoader120)", the platform's mixins applied, and the client runs on to its
+title screen (checked under Xvfb).
+
+Unlike the Fabric runtime's headless client, Forge's client is a real one: it makes its window
+(to be hidden) and runs its own loop, and its start needs GL. So the Forge jar leaves out the
+mixins that stop GL calls and stand in for the window (`GlStateManagerMixin`,
+`RenderSystemMixin`, `RawGlMixin`, `MinecraftMixin`, `InputConstantsMixin`), and
+`BlockableEventLoopMixin` runs work at once only for the mirror's server
+(`Loader120.clientRunsItsLoop`).
+
+`ForgeLoader120` so far: server, level, player, chunk and tick events posted on Forge's bus;
+`BreakEvent` and `EntityInteract(Specific)` for breaking and entity use; the item handler
+capability for hoppers; the client's own resources and baked models; each mod file's pack.
+Still to do: the bridge's connection to Horizon from the Forge JVM (phase 4), packets to the
+client half, models drawn by code, biome modifiers on the mirror's registries, mod key mappings
+by registration rather than by category, hiding the window.
 
 ## License
 

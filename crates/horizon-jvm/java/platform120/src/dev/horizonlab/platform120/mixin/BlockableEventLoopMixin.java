@@ -28,8 +28,9 @@ public abstract class BlockableEventLoopMixin {
     @Inject(method = "execute(Ljava/lang/Runnable;)V", at = @At("HEAD"), cancellable = true)
     private void horizon$now(Runnable task, CallbackInfo ci) {
         Object self = this;
-        if (self != net.minecraft.client.Minecraft.getInstance()
-                && self != dev.horizonlab.platform120.Mirror120.server()) {
+        boolean client = self == net.minecraft.client.Minecraft.getInstance()
+                && !dev.horizonlab.platform120.Loader120.get().clientRunsItsLoop();
+        if (!client && self != dev.horizonlab.platform120.Mirror120.server()) {
             return;
         }
         ci.cancel();
