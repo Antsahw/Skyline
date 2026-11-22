@@ -46,9 +46,12 @@ final class Names {
 
     private static Map<String, String> methods;
 
-    /** Mojang's name of an intermediary method name ({@code method_5773}); others as they are. */
+    /**
+     * Mojang's name of an intermediary method name ({@code method_5773}) under Fabric, or of an
+     * srg one ({@code m_6469_}) under Forge (build120forge.sh's table); others as they are.
+     */
     static String mojangMethod(String name) {
-        if (!name.startsWith("method_")) return name;
+        if (!name.startsWith("method_") && !(name.startsWith("m_") && name.endsWith("_"))) return name;
         return loadMethods().getOrDefault(name, name);
     }
 

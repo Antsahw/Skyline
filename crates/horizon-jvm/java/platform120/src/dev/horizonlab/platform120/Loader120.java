@@ -140,6 +140,24 @@ public interface Loader120 {
     /** A mod's name, its id when unknown. */
     String modName(String id);
 
+    /** A mod's mixin configs (their paths in its jar), and how to read a file of its jar. */
+    record ModMixins(List<String> configs, java.util.function.Function<String, java.util.Optional<byte[]>> read) {}
+
+    /** Every mod's mixin configs (Mixins120's index). */
+    List<ModMixins> modMixins();
+
+    /**
+     * How a mod's fluid is drawn by the loader's own fluid API: {still texture, flowing
+     * texture, tint (ARGB, as a number)}, or null to look elsewhere.
+     */
+    String[] fluidLook(net.minecraft.world.level.material.Fluid fluid);
+
+    /**
+     * The hook mods register their layers on living entities' renderers with, fired once as the
+     * client fires it while it makes its renderers (mods load their item models there).
+     */
+    void featureRenderers(net.minecraft.client.renderer.entity.EntityRendererProvider.Context context);
+
     /** The data packs' registries a world loads: vanilla's and those the loader's mods add. */
     java.util.List<net.minecraft.resources.RegistryDataLoader.RegistryData<?>> worldgenRegistries();
 

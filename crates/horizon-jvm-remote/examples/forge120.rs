@@ -68,6 +68,13 @@ fn main() {
                     Err(e) => println!("biomeChanges: {e}"),
                 }
             }
+            // The vanilla methods the mods' mixins inject into, and the settings screens
+            // (`FORGE120_MIXINS=1`).
+            if std::env::var_os("FORGE120_MIXINS").is_some() {
+                for call in ["mixinTargets", "configMods", "fluidLooks"] {
+                    println!("{call}: {:?}", runtime.call_answers(call, &[]));
+                }
+            }
             runtime.stop();
         }
         Err(e) => {

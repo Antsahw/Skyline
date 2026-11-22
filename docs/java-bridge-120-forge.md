@@ -93,7 +93,15 @@ go through the loader seam like the rest.
 A block that is neither runtime's (vanilla's, 26.3's) breaking is heard by both runtimes' mods,
 and either can stop it; a runtime's own block goes to that runtime only.
 
-Still to do: testing with more Forge mods (Create, JEI, Waystones).
+The mods' mixins on vanilla behaviour Horizon runs itself are indexed from each mod file's
+`MixinConfigs` (its manifest), srg method names read as Mojang's from a table build120forge.sh
+makes into the jar (Farmer's Delight's `Rabbit.isFood`, `CampfireBlock.isSmokeSource`). Mod
+fluids' looks come from Forge's client fluid type extensions. Tooltip images need nothing: Forge's
+`ClientTooltipComponent.create` asks its own registry. Layers on renderers (AddLayers) were posted
+by Forge's own client as it loaded.
+
+Still to do: testing with more Forge mods (Create, JEI, Waystones); hoppers reach only Forge's item
+handlers (not its fluid or energy ones).
 
 ## License
 

@@ -483,4 +483,61 @@ final class ForgeLoader120 implements Loader120 {
         return net.minecraftforge.fml.ModList.get().getModContainerById(id)
                 .map(c -> c.getModInfo().getDisplayName()).orElse(id);
     }
+
+    /**
+     * Each mod file's mixin configs, as its manifest names them for Mixin (`MixinConfigs`), its
+     * files read from the mod file.
+     */
+    @Override
+    public List<ModMixins> modMixins() {
+        List<ModMixins> out = new ArrayList<>();
+        for (var info : net.minecraftforge.fml.ModList.get().getModFiles()) {
+            var file = info.getFile();
+            java.util.function.Function<String, java.util.Optional<byte[]>> read = path -> {
+                try {
+                    var found = file.findResource(path.split("/"));
+                    if (!java.nio.file.Files.isRegularFile(found)) return java.util.Optional.empty();
+                    return java.util.Optional.of(java.nio.file.Files.readAllBytes(found));
+                } catch (java.io.IOException | RuntimeException e) {
+                    return java.util.Optional.empty();
+                }
+            };
+            var manifest = read.apply("META-INF/MANIFEST.MF");
+            if (manifest.isEmpty()) continue;
+            List<String> configs = new ArrayList<>();
+            try {
+                var parsed = new java.util.jar.Manifest(new java.io.ByteArrayInputStream(manifest.get()));
+                String names = parsed.getMainAttributes().getValue("MixinConfigs");
+                if (names == null) continue;
+                for (String name : names.split(",")) {
+                    if (!name.isBlank()) configs.add(name.trim());
+                }
+            } catch (java.io.IOException e) {
+                continue;
+            }
+            out.add(new ModMixins(configs, read));
+        }
+        return out;
+    }
+
+    /** Forge's client fluid type extensions: the textures and tint a mod's fluid type gives. */
+    @Override
+    public String[] fluidLook(net.minecraft.world.level.material.Fluid fluid) {
+        try {
+            var look = net.minecraftforge.client.extensions.common.IClientFluidTypeExtensions.of(fluid);
+            var still = look.getStillTexture();
+            var flow = look.getFlowingTexture();
+            if (still == null || flow == null) return null;
+            return new String[] {still.toString(), flow.toString(), Integer.toString(look.getTintColor())};
+        } catch (RuntimeException | LinkageError e) {
+            return null;
+        }
+    }
+
+    /**
+     * Forge's client made its renderers itself as it loaded, posting EntityRenderersEvent.AddLayers
+     * then: what mods do there is done.
+     */
+    @Override
+    public void featureRenderers(net.minecraft.client.renderer.entity.EntityRendererProvider.Context context) {}
 }

@@ -77,6 +77,22 @@ for side in ("mixins", "client", "server"):
 config["mixins"] = config.get("mixins", []) + ["NetworkInstanceMixin"]
 json.dump(config, open(sys.argv[2], "w"), indent=2)
 PY
+# Mojang's names of srg method names (m_..._), for the mods' mixins on vanilla's methods
+# (Mixins120, Names): from Mojang's mappings, so into the jar in the cache, never the repo.
+mkdir -p "$TMP/classes/horizon"
+python3 -I - "$SRG" "$TMP/classes/horizon/methods-1.20.1.tsv" <<'PY'
+import sys
+with open(sys.argv[1]) as f, open(sys.argv[2], "w") as methods:
+    names = f.readline().rstrip("\n").split("\t")[3:]
+    s, n = names.index("srg"), names.index("named")
+    seen = set()
+    for line in f:
+        if line.startswith("\tm\t"):
+            parts = line.rstrip("\n").split("\t")[3:]
+            if parts[s].startswith("m_") and parts[s] not in seen:
+                seen.add(parts[s])
+                methods.write(parts[s] + "\t" + parts[n] + "\n")
+PY
 mkdir -p "$TMP/classes/META-INF"
 cp "$SRC/forge/META-INF/mods.toml" "$TMP/classes/META-INF/"
 printf 'Manifest-Version: 1.0\nMixinConfigs: horizon-platform120.forge.mixins.json\n' > "$TMP/manifest"

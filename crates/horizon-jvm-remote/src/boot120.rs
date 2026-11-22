@@ -320,11 +320,7 @@ impl Runtime120 {
     }
 
     /// A call that asks Horizon nothing back, its answers as they come.
-    pub(crate) fn call_answers(
-        &mut self,
-        command: &str,
-        args: &[Value],
-    ) -> Result<Vec<Value>, String> {
+    pub fn call_answers(&mut self, command: &str, args: &[Value]) -> Result<Vec<Value>, String> {
         let mut handler = Phase1 {
             log: self.log.clone(),
         };

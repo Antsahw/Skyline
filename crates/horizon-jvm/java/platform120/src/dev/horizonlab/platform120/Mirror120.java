@@ -1541,6 +1541,11 @@ public final class Mirror120 {
         return net.minecraft.client.gui.screens.inventory.tooltip.ClientTooltipComponent.create(data);
     }
 
+    /** The vanilla methods mods inject into (Mojang's `owner.method`), for a look at the index. */
+    public static Object[] mixinTargets() {
+        return new Object[] {Mixins120.index().keySet().stream().sorted().toArray(String[]::new)};
+    }
+
     /** Whether a fluid is a mod's (its own code runs it: phase 6e). */
     static boolean ourFluid(net.minecraft.world.level.material.Fluid fluid) {
         ResourceLocation id = BuiltInRegistries.FLUID.getKey(fluid);
@@ -1591,13 +1596,19 @@ public final class Mirror120 {
             if (block.isAir()) continue;
             String still = null, flow = null;
             int tint = -1;
+            String[] own = Loader120.get().fluidLook(fluid);
+            if (own != null && own[0] != null && own[1] != null) {
+                still = own[0];
+                flow = own[1];
+                tint = Integer.parseInt(own[2]);
+            }
             Object handler = null;
             try {
                 if (registry != null) handler = get.invoke(registry, fluid);
             } catch (Throwable t) {
                 handler = null;
             }
-            if (handler != null) {
+            if (handler != null && still == null) {
                 still = idField(handler, "stillTexture");
                 flow = idField(handler, "flowingTexture");
                 try {

@@ -82,7 +82,7 @@ final class Render120 {
             }
         }
         Mirror120.log(renderers.size() + " mod entity renderer(s) made");
-        featureRenderers(context);
+        Loader120.get().featureRenderers(context);
 
         // Block entity renderers (phase 7b): a cutting board's item, a skillet's food. They draw
         // items through an ItemRenderer over the client's baked item models (Models120).
@@ -124,45 +124,6 @@ final class Render120 {
             }
         }
         Mirror120.log(blockRenderers.size() + " mod block entity renderer(s) made");
-    }
-
-    /**
-     * Fabric's `LivingEntityFeatureRendererRegistrationCallback`, as the client fires it while it
-     * makes its entity renderers: mods load their item models there (Epic Knights' shields, whose
-     * item renderer draws nothing until then). Fired once, for a pig's renderer, with a helper
-     * that keeps the layers nowhere (the mods' layers on vanilla's mobs are Horizon's to draw).
-     */
-    private static void featureRenderers(EntityRendererProvider.Context context) {
-        try {
-            // By reflection: Fabric's rendering API is the mods', not on the bridge's classpath.
-            var pig = new net.minecraft.client.renderer.entity.PigRenderer(context);
-            Class<?> callback = Class.forName(
-                    "net.fabricmc.fabric.api.client.rendering.v1.LivingEntityFeatureRendererRegistrationCallback");
-            Class<?> helperType = Class.forName(callback.getName() + "$RegistrationHelper");
-            Object helper = java.lang.reflect.Proxy.newProxyInstance(helperType.getClassLoader(),
-                    new Class<?>[] {helperType}, (proxy, method, args) -> {
-                        if (method.getDeclaringClass() == Object.class) {
-                            return switch (method.getName()) {
-                                case "hashCode" -> System.identityHashCode(proxy);
-                                case "equals" -> proxy == args[0];
-                                default -> "RegistrationHelper";
-                            };
-                        }
-                        return null;
-                    });
-            Object event = callback.getField("EVENT").get(null);
-            Object invoker = event.getClass().getMethod("invoker").invoke(event);
-            for (var method : callback.getMethods()) {
-                if (method.getName().equals("registerRenderers") && method.getParameterCount() == 4) {
-                    method.invoke(invoker, EntityType.PIG, pig, helper, context);
-                }
-            }
-        } catch (ReflectiveOperationException e) {
-            Mirror120.log("the mods' feature renderer hooks failed: " + (e.getCause() != null ? e.getCause() : e));
-        } catch (RuntimeException | LinkageError e) {
-            Mirror120.log("the mods' feature renderer hooks failed: " + e);
-            for (StackTraceElement at : e.getStackTrace()) Mirror120.log("    at " + at);
-        }
     }
 
     /**

@@ -288,4 +288,90 @@ final class FabricLoader120 implements Loader120 {
     public String modName(String id) {
         return Config120.modMenuName(id);
     }
+
+    /** Each mod's mixin configs, as its fabric.mod.json lists them, read through Fabric Loader. */
+    @Override
+    public List<ModMixins> modMixins() {
+        List<ModMixins> out = new java.util.ArrayList<>();
+        try {
+            Object loader = Class.forName("net.fabricmc.loader.api.FabricLoader").getMethod("getInstance").invoke(null);
+            for (Object mod : (Iterable<?>) loader.getClass().getMethod("getAllMods").invoke(loader)) {
+                var find = mod.getClass().getMethod("findPath", String.class);
+                java.util.function.Function<String, java.util.Optional<byte[]>> read = path -> {
+                    try {
+                        var found = (java.util.Optional<?>) find.invoke(mod, path);
+                        if (found.isEmpty()) return java.util.Optional.empty();
+                        return java.util.Optional.of(java.nio.file.Files.readAllBytes((java.nio.file.Path) found.get()));
+                    } catch (ReflectiveOperationException | java.io.IOException e) {
+                        return java.util.Optional.empty();
+                    }
+                };
+                var meta = read.apply("fabric.mod.json");
+                if (meta.isEmpty()) continue;
+                List<String> configs = new java.util.ArrayList<>();
+                try {
+                    var json = com.google.gson.JsonParser.parseString(new String(meta.get(), java.nio.charset.StandardCharsets.UTF_8));
+                    if (!json.isJsonObject() || !json.getAsJsonObject().has("mixins")) continue;
+                    for (var entry : json.getAsJsonObject().getAsJsonArray("mixins")) {
+                        if (entry.isJsonPrimitive()) configs.add(entry.getAsString());
+                        else if (entry.isJsonObject() && entry.getAsJsonObject().has("config")) {
+                            configs.add(entry.getAsJsonObject().get("config").getAsString());
+                        }
+                    }
+                } catch (RuntimeException e) {
+                    continue;
+                }
+                out.add(new ModMixins(configs, read));
+            }
+        } catch (ReflectiveOperationException e) {
+            Mirror120.log("the mods' mixins can't be listed: " + e);
+        }
+        return out;
+    }
+
+    /** Fabric's own fluid API is read where Mirror120.fluidLooks reads it. */
+    @Override
+    public String[] fluidLook(net.minecraft.world.level.material.Fluid fluid) {
+        return null;
+    }
+
+    /**
+     * Fabric's `LivingEntityFeatureRendererRegistrationCallback`, as the client fires it while it
+     * makes its entity renderers: mods load their item models there (Epic Knights' shields, whose
+     * item renderer draws nothing until then). Fired once, for a pig's renderer, with a helper
+     * that keeps the layers nowhere (the mods' layers on vanilla's mobs are Horizon's to draw).
+     */
+    @Override
+    public void featureRenderers(net.minecraft.client.renderer.entity.EntityRendererProvider.Context context) {
+        try {
+            // By reflection: Fabric's rendering API is the mods', not on the bridge's classpath.
+            var pig = new net.minecraft.client.renderer.entity.PigRenderer(context);
+            Class<?> callback = Class.forName(
+                    "net.fabricmc.fabric.api.client.rendering.v1.LivingEntityFeatureRendererRegistrationCallback");
+            Class<?> helperType = Class.forName(callback.getName() + "$RegistrationHelper");
+            Object helper = java.lang.reflect.Proxy.newProxyInstance(helperType.getClassLoader(),
+                    new Class<?>[] {helperType}, (proxy, method, args) -> {
+                        if (method.getDeclaringClass() == Object.class) {
+                            return switch (method.getName()) {
+                                case "hashCode" -> System.identityHashCode(proxy);
+                                case "equals" -> proxy == args[0];
+                                default -> "RegistrationHelper";
+                            };
+                        }
+                        return null;
+                    });
+            Object event = callback.getField("EVENT").get(null);
+            Object invoker = event.getClass().getMethod("invoker").invoke(event);
+            for (var method : callback.getMethods()) {
+                if (method.getName().equals("registerRenderers") && method.getParameterCount() == 4) {
+                    method.invoke(invoker, net.minecraft.world.entity.EntityType.PIG, pig, helper, context);
+                }
+            }
+        } catch (ReflectiveOperationException e) {
+            Mirror120.log("the mods' feature renderer hooks failed: " + (e.getCause() != null ? e.getCause() : e));
+        } catch (RuntimeException | LinkageError e) {
+            Mirror120.log("the mods' feature renderer hooks failed: " + e);
+            for (StackTraceElement at : e.getStackTrace()) Mirror120.log("    at " + at);
+        }
+    }
 }
