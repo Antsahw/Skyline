@@ -94,6 +94,8 @@ impl super::super::Game<'_> {
 
     /// Player `uuid` left the game: the 1.20.1 mods hear it, their screen there closes.
     pub(in crate::game) fn java120_player_left(&mut self, conn: u32, uuid: u128) {
+        // Who joins next is sent the mods' blocks' kept shapes again (`tick_java120_block_entities`).
+        super::forget_sent_shapes();
         super::screens::forget(conn);
         if self.remote.is_some() {
             return;

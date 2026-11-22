@@ -30,6 +30,12 @@ static NAMESPACES: Mutex<Option<HashSet<String>>> = Mutex::new(None);
 /// How many ticks each of the mods' blocks with no shape kept has been asked for one since the
 /// game started, by dimension: up to [`SHAPE_TRIES`].
 static SHAPE_ASKED: Mutex<Option<HashMap<(String, [i32; 3]), u8>>> = Mutex::new(None);
+/// The mods' blocks whose kept shape has gone to the clients since the game started.
+static SHAPE_SENT: Mutex<Option<HashSet<(String, [i32; 3])>>> = Mutex::new(None);
+/// Sends the kept shapes again from the next tick (a player left: the next to join has none).
+pub(in crate::game) fn forget_sent_shapes() {
+    *SHAPE_SENT.lock().unwrap_or_else(|e| e.into_inner()) = None;
+}
 /// A second of ticks: a block entity the runtime hasn't read by then has no shape of its own.
 const SHAPE_TRIES: u8 = 20;
 
@@ -854,6 +860,30 @@ impl super::Game<'_> {
             return;
         }
         let dimension = self.dim.id().to_owned();
+        // What a loaded world's block entities kept (their attachments, saved with the chunk),
+        // for the game's own window and for walking, before the mods are asked again.
+        for p in positions.chunks_exact(3) {
+            let pos = [p[0], p[1], p[2]];
+            let state = self.world.block(pos[0], pos[1], pos[2]);
+            let Some(attachments) = self
+                .world
+                .block_entities
+                .attachments((pos[0], pos[1], pos[2]))
+            else {
+                continue;
+            };
+            if horizon_client::collisions::mod_outline(pos, state).is_none()
+                && let Some(boxes) = super::mod_block_shape::of(attachments)
+                && !boxes.is_empty()
+            {
+                horizon_client::collisions::set_mod_outline(pos, Some((state, &boxes)));
+            }
+            if !horizon_client::collisions::has_mod_collision(pos, state)
+                && let Ok(Some(solid)) = attachments.peek(&super::mod_block_shape::BLOCK_COLLISION)
+            {
+                horizon_client::collisions::set_mod_collision(pos, Some((state, &solid)));
+            }
+        }
         // A mod's block with no shape kept (a world saved before shapes were, or one whose
         // runtime hadn't read the block entity when asked): asked again, for a second.
         let unasked: Vec<[i32; 3]> = {
@@ -872,12 +902,47 @@ impl super::Game<'_> {
                 .filter(|p| {
                     let tries = once.entry((dimension.clone(), *p)).or_insert(0);
                     *tries += 1;
+                    if *tries == SHAPE_TRIES {
+                        log::info!(
+                            "1.20.1 mods: their block at {p:?} gave no shape in {SHAPE_TRIES} ticks; it keeps the registry's"
+                        );
+                    }
                     *tries <= SHAPE_TRIES
                 })
                 .collect()
         };
         if !unasked.is_empty() {
             self.refresh_java120_shapes(&dimension, &unasked);
+        }
+        // A shape kept from before (the world loaded with it) goes to the clients once, as a
+        // new one does: the client of this window's own server thread draws the outline from
+        // what it was sent, and a value read back from the save had not been.
+        let kept: Vec<[i32; 3]> = {
+            let mut once = SHAPE_SENT.lock().unwrap_or_else(|e| e.into_inner());
+            let once = once.get_or_insert_with(HashSet::new);
+            positions
+                .chunks_exact(3)
+                .map(|p| [p[0], p[1], p[2]])
+                .filter(|&[x, y, z]| {
+                    self.world
+                        .block_entities
+                        .attachments((x, y, z))
+                        .and_then(super::mod_block_shape::of)
+                        .is_some_and(|b| !b.is_empty())
+                })
+                .filter(|p| once.insert((dimension.clone(), *p)))
+                .collect()
+        };
+        for [x, y, z] in kept {
+            if let Some(attachments) = self.world.block_entities.attachments_mut((x, y, z))
+                && attachments
+                    .mark_sync(&super::mod_block_shape::BLOCK_SHAPE)
+                    .is_ok()
+            {
+                self.world
+                    .attachment_syncs
+                    .insert(horizon_world::attachments::Holder::BlockEntity([x, y, z]));
+            }
         }
         let ticked = {
             let Ok(mut guard) = RUNTIME.try_lock() else {
@@ -1011,6 +1076,7 @@ impl super::Game<'_> {
             .collect();
         for pos in gone {
             horizon_client::collisions::set_mod_collision(pos, None);
+            horizon_client::collisions::set_mod_outline(pos, None);
             if redstone::keep(pos, None) {
                 self.java120_signal_changed(pos);
             }
@@ -1092,9 +1158,6 @@ impl super::Game<'_> {
         }
         for ([x, y, z], boxes) in asked.iter().copied().zip(shapes) {
             trace120!("{x} {y} {z}: the mods say its shape is {boxes:?}");
-            let Some(attachments) = self.world.block_entities.attachments_mut((x, y, z)) else {
-                continue;
-            };
             // Nothing, with the mod's block entity still there: the runtime hasn't read the
             // block entity yet (a world just loaded, its LibMultiPart container still without
             // its parts), not the block gone -- a container left with no parts takes its block
@@ -1103,6 +1166,11 @@ impl super::Game<'_> {
             if boxes.is_empty() {
                 continue;
             }
+            let state = self.world.block(x, y, z);
+            horizon_client::collisions::set_mod_outline([x, y, z], Some((state, &boxes)));
+            let Some(attachments) = self.world.block_entities.attachments_mut((x, y, z)) else {
+                continue;
+            };
             if let Err(e) = attachments.set(&super::mod_block_shape::BLOCK_SHAPE, boxes) {
                 log::warn!("1.20.1 mods: keeping a block's shape at {x} {y} {z}: {e:?}");
                 continue;
