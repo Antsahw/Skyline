@@ -466,8 +466,11 @@ public final class Mirror120 {
             // Whose connection it is: a packet sent through it goes to this player's client
             // half (ServerGamePacketListenerMixin, Packets120).
             player.connection.player = player;
+            var connection = Allocate.make(net.minecraft.network.Connection.class);
+            ((dev.horizonlab.platform120.mixin.ConnectionAccess) connection)
+                    .horizon$setChannel(new io.netty.channel.embedded.EmbeddedChannel());
             ((dev.horizonlab.platform120.mixin.ServerGamePacketListenerAccess) player.connection)
-                    .horizon$setConnection(Allocate.make(net.minecraft.network.Connection.class));
+                    .horizon$setConnection(connection);
             PLAYERS.put(id, player);
             // On the server's player list, as a player who joined is: a mod's tick looking for
             // the players (getPlayers, getPlayer by UUID) finds Horizon's.
