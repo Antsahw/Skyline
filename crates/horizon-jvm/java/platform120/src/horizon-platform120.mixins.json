@@ -32,7 +32,8 @@
     "ServerPlayerMixin",
     "ServerPlayerMenuMixin",
     "ServerGamePacketListenerMixin",
-    "ConnectionAccess"
+    "ConnectionAccess",
+    "ConnectionMixin"
   ],
   "client": [
     "AbstractClientPlayerAccess",

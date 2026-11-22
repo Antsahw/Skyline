@@ -67,10 +67,31 @@ final class ForgeLoader120 implements Loader120 {
     public void serverStart(MinecraftServer server, Iterable<ServerLevel> levels) {
         if (started) return;
         started = true;
-        post(new ServerAboutToStartEvent(server), "server about to start");
-        post(new ServerStartingEvent(server), "server starting");
+        // Through Forge's lifecycle hooks, as a server's start goes: they make the mirror the
+        // current server (PacketDistributor's, ServerLifecycleHooks.getCurrentServer) and load
+        // the mods' server configs, posting the events. Each falls back to its event alone.
+        hook("server about to start", () -> net.minecraftforge.server.ServerLifecycleHooks.handleServerAboutToStart(server),
+                () -> post(new ServerAboutToStartEvent(server), "server about to start"));
+        hook("server starting", () -> net.minecraftforge.server.ServerLifecycleHooks.handleServerStarting(server),
+                () -> post(new ServerStartingEvent(server), "server starting"));
         for (ServerLevel level : levels) post(new LevelEvent.Load(level), "level load");
-        post(new ServerStartedEvent(server), "server started");
+        hook("server started", () -> net.minecraftforge.server.ServerLifecycleHooks.handleServerStarted(server),
+                () -> post(new ServerStartedEvent(server), "server started"));
+        if (net.minecraftforge.server.ServerLifecycleHooks.getCurrentServer() != server) {
+            Mirror120.log("Forge's current server isn't the mirror's: the mods' packets to all players fail");
+        }
+    }
+
+    private static void hook(String what, Runnable hook, Runnable fallback) {
+        try {
+            hook.run();
+        } catch (RuntimeException | LinkageError e) {
+            Mirror120.log(what + " through Forge's hooks failed (" + e + "): its event alone");
+            for (StackTraceElement at : e.getStackTrace()) {
+                if (at.getClassName().startsWith("net.minecraftforge")) Mirror120.log("    at " + at);
+            }
+            fallback.run();
+        }
     }
 
     @Override public boolean serverStarted() { return started; }
@@ -219,8 +240,7 @@ final class ForgeLoader120 implements Loader120 {
         if (!(packet instanceof net.minecraft.network.protocol.game.ClientboundCustomPayloadPacket payload)
                 || player == null) return;
         Screens120.clientPlayer(player);
-        var listener = Minecraft.getInstance().getConnection();
-        deliver("to the client on " + payload.getIdentifier(), payload, clientConnection(listener));
+        deliver("to the client on " + payload.getIdentifier(), payload, Screens120.clientConnection());
     }
 
     @Override
@@ -229,20 +249,6 @@ final class ForgeLoader120 implements Loader120 {
         ServerPlayer player = Screens120.standingIn();
         if (player == null) return;
         deliver("to the server on " + payload.getIdentifier(), payload, player.connection.connection);
-    }
-
-    private static net.minecraft.network.Connection clientConnection;
-
-    /** The client listener's connection, for Forge's NetworkEvent.Context: no channel behind it. */
-    private static net.minecraft.network.Connection clientConnection(net.minecraft.network.PacketListener listener) {
-        if (clientConnection == null) {
-            var connection = Allocate.make(net.minecraft.network.Connection.class);
-            ((dev.horizonlab.platform120.mixin.ConnectionAccess) connection)
-                    .horizon$setChannel(new io.netty.channel.embedded.EmbeddedChannel());
-            clientConnection = connection;
-        }
-        ((dev.horizonlab.platform120.mixin.ConnectionAccess) clientConnection).horizon$setListener(listener);
-        return clientConnection;
     }
 
     private static final java.util.Set<String> PACKETS_FAILED = java.util.concurrent.ConcurrentHashMap.newKeySet();
