@@ -1378,7 +1378,6 @@ impl Title {
                     && cursor.1 < b.y + 20.0
             }) {
                 let step = if delta > 0.0 { -1 } else { 1 };
-                options.load_mod_presets(b.id, &self.resources);
                 options.cycle(b.id, creative, step);
                 return true;
             }
@@ -2904,7 +2903,6 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
                 },
                 Some(id),
             ) if !matches!(id, 21 | 22 | 30 | 31) => {
-                options.load_mod_presets(id, &self.resources);
                 options.press(id, creative);
                 Action::None
             }

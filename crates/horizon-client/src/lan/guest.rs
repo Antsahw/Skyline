@@ -264,7 +264,7 @@ pub struct Guest {
     pub mod_abilities: Option<ModAbilities>,
     /// The name a server mod shows for the player in the tab list (a text component), None for
     /// the player's own name (`ServerPlayer.getTabListDisplayName`).
-    pub tab_name: Option<horizon_world::nbt::Tag>,
+    pub tab_name: Option<horizon_core::nbt::Tag>,
     pub sleeping: bool,
     /// `LivingEntity.DATA_LIVING_ENTITY_FLAGS`: 1 while using an item, 2 if
     /// it is in the off hand.

@@ -391,7 +391,7 @@ impl Hub {
         items: Vec<Option<ItemStack>>,
         extra: Option<Vec<u8>>,
     ) {
-        self.open_menu_window(conn, menu_kind, title, Some(pos), slots, items, extra);
+        self.open_menu_window(conn, menu_kind, title, pos, slots, items, extra);
     }
 
     /// Open menu type `menu_kind` for a guest, of a block at `pos` or of none:

@@ -84,6 +84,7 @@ impl TryIntoEngine<()> for mod_api::Block {
     type Error = String;
     fn try_into_engine(&self, _: &()) -> Result<Self::Engine, Self::Error> {
         Ok(engine::Block {
+            states: Vec::new(),
             state_light: self.state_light.as_ref().map(|light| engine::StateValues {
                 property: String::new(),
                 properties: light.properties.clone(),

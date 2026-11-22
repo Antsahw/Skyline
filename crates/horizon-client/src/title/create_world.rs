@@ -6,7 +6,6 @@ use crate::{
     text::Text,
     ui,
 };
-mod mod_presets;
 
 /// MenuTabBar.HEIGHT: the header above the tab area.
 const TAB_BAR: f32 = 24.0;
@@ -48,9 +47,6 @@ pub struct WorldOptions {
     pub flat_settings: Option<super::flat::FlatSettings>,
     /// A mod's world preset (`oneblock:oneblock`) instead of `world_type`.
     pub mod_preset: Option<String>,
-    /// The mods' world presets the World Type button cycles through after vanilla's
-    /// ([`mod_presets`]).
-    pub presets: Vec<String>,
     pub structures: bool,
     pub bonus_chest: bool,
     /// `getGameRules`: the Game Rules screen's values, saved with the world.
@@ -117,7 +113,6 @@ impl Default for WorldOptions {
             single_biome: "minecraft:plains".into(),
             flat_settings: None,
             mod_preset: None,
-            presets: Vec::new(),
             structures: true,
             bonus_chest: false,
             rules: crate::gamerules::GameRules::default(),

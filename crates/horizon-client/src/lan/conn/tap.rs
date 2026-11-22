@@ -36,14 +36,3 @@ pub(super) fn send_tapped(
     }
     c.send(body)
 }
-
-/// The window's own player over an in-memory pipe: no 21-bit frame (a big pack's join).
-pub(super) fn wide_frame(
-    writer: &mut ConnWriter,
-    body: &[u8],
-    out: &mut Vec<u8>,
-) -> horizon_protocol::Result<()> {
-    let contents = horizon_protocol::frame::unbounded_contents(body, writer.threshold)?;
-    writer.frame_into(&contents, out);
-    Ok(())
-}

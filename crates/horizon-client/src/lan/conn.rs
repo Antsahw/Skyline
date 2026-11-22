@@ -430,6 +430,7 @@ impl PlayerSender {
             pending: Arc::default(),
             held: Arc::default(),
             framing: horizon_protocol::connection::Framing::Network(None),
+            tapped: false,
             to: To::Disabled,
             wire: None,
             payload_transport: Transport::empty(),
@@ -2775,9 +2776,6 @@ fn frame_one(
     body: &[u8],
     out: &mut Vec<u8>,
 ) -> horizon_protocol::Result<()> {
-    if writer.wide {
-        return tap::wide_frame(writer, body, out);
-    }
     match writer.framing() {
         horizon_protocol::connection::Framing::Network(Some(t))
             if body.len() >= t.max(SHARED_FRAME_MIN) =>

@@ -13,30 +13,17 @@ pub struct ModAbilities {
 }
 
 impl Guest {
-    /// The mod-given abilities, while the player is still in the game mode they were given in
-    /// (`GameType.updatePlayerAbilities` resets them on a change; the mod sends them again).
-    fn granted(&self) -> Option<&ModAbilities> {
-        self.mod_abilities
-            .as_ref()
-            .filter(|a| a.game_mode == self.game_mode)
-    }
-    /// `Abilities.mayfly`.
+    /// `Abilities.mayfly`: the game mode's, or what a server mod gave.
     pub fn may_fly(&self) -> bool {
-        self.granted()
-            .map_or(self.creative() || self.spectator() || self.allow_flight, |a| {
-                a.flags & 4 != 0
-            })
+        self.abilities.may_fly
     }
     /// `Abilities.invulnerable`.
     pub fn invulnerable(&self) -> bool {
-        self.granted()
-            .map_or(self.creative() || self.spectator(), |a| a.flags & 1 != 0)
+        self.abilities.invulnerable
     }
     /// `Abilities.flyingSpeed` and `walkingSpeed`.
     pub fn speeds(&self) -> (f32, f32) {
-        self.granted().map_or((self.flying_speed, 0.1), |a| {
-            (a.flying_speed, a.walking_speed)
-        })
+        (self.abilities.flying_speed, self.abilities.walking_speed)
     }
 }
 

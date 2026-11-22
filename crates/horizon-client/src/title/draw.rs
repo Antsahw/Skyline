@@ -68,6 +68,7 @@ impl Title {
         cursor: (f32, f32),
         hide_splash: bool,
         hide_server_address: bool,
+        phases: &mut dyn FnMut(crate::screen_draw::RenderPhase, &mut HudBatch),
     ) {
         self.draw_own(
             atlas,
@@ -76,6 +77,7 @@ impl Title {
             cursor,
             hide_splash,
             hide_server_address,
+            phases,
         );
         if !matches!(self.mode, Mode::Main) || self.rules.borrow().is_some() {
             return;
