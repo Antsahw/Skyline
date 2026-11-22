@@ -1,6 +1,18 @@
 # Unmodified Forge 1.20.1 mods on Horizon 26.3 (plan, 2026-11-22)
 
-Status: plan. Nothing here is built yet.
+Status: phase 1 done, phase 2 started.
+
+**Phase 1 (2026-11-22):** `tools/java_bridge/fetch120forge.py --boot` fetched Forge 47.4.28 (its
+recommended 1.20.1 build), installed the client over fetch120.py's Mojang files (81 class path
+entries, none missing; `cpw.mods.bootstraplauncher.BootstrapLauncher`, launch target
+`forgeclient`), and booted a dedicated server with no mods to "Done" in 2 s, on Java 21.
+
+**Phase 2:** `Loader120` is the seam, found once by which loader's classes exist;
+`fabric/FabricLoader120` is today's Fabric API calls behind it. In so far: using an entity
+(`UseEntityCallback`) and breaking blocks (`PlayerBlockBreakEvents`). Still direct: Events120,
+Packets120, Hoppers120, Keys120, Models120, Hud120 and the three mixins on Fabric API's classes;
+the reflective calls (entity events, tooltips, fluid renderers, dynamic registries) already
+fall back when Fabric isn't there.
 
 The 1.20.1 Fabric bridge ([java-bridge-120.md](java-bridge-120.md)) runs Fabric mods in a JVM
 of its own, with a mirror of Horizon's world. Forge 1.20.1 mods get **a JVM of their own too**,

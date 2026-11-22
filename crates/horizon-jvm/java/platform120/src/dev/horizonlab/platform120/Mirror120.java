@@ -2008,9 +2008,8 @@ public final class Mirror120 {
                 code = 1;
             } else {
                 Vec3 at = new Vec3(lx, ly, lz);
-                InteractionResult result = net.fabricmc.fabric.api.event.player.UseEntityCallback.EVENT.invoker()
-                        .interact(player, level, which, target,
-                                new net.minecraft.world.phys.EntityHitResult(target, at.add(target.position())));
+                InteractionResult result = Loader120.get().useEntity(player, level, which, target,
+                        new net.minecraft.world.phys.EntityHitResult(target, at.add(target.position())));
                 if (result == InteractionResult.PASS) {
                     result = target.interactAt(player, at, which);
                     if (!result.consumesAction()) result = player.interactOn(target, which);
@@ -2648,16 +2647,11 @@ public final class Mirror120 {
                 case BREAK_BEFORE -> {
                     BlockState was = level.getBlockState(pos);
                     var entity = level.getBlockEntity(pos);
-                    goes = net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents.BEFORE.invoker()
-                            .beforeBlockBreak(level, player, pos, was, entity);
-                    if (!goes) {
-                        net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents.CANCELED.invoker()
-                                .onBlockBreakCanceled(level, player, pos, was, entity);
-                    }
+                    goes = Loader120.get().beforeBreak(level, player, pos, was, entity);
+                    if (!goes) Loader120.get().canceledBreak(level, player, pos, was, entity);
                 }
                 default -> {
-                    net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents.AFTER.invoker()
-                            .afterBlockBreak(level, player, pos, state(state), null);
+                    Loader120.get().afterBreak(level, player, pos, state(state), null);
                     goes = true;
                 }
             }
