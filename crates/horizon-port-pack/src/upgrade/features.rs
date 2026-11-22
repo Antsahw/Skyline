@@ -252,7 +252,11 @@ pub(super) fn placed(v: &Value, report: &mut Report) -> Value {
     {
         v["feature"] = feature(&f, report);
     }
-    if let Some(patch) = v.get("feature").and_then(Value::as_str).and_then(removed_patch) {
+    if let Some(patch) = v
+        .get("feature")
+        .and_then(Value::as_str)
+        .and_then(removed_patch)
+    {
         v["feature"] = patch;
     }
     if let Some(Value::Array(ms)) = v.get_mut("placement") {
@@ -288,11 +292,12 @@ fn removed_patch(id: &str) -> Option<Value> {
             "blocks": "minecraft:grass_block"}]});
     }
     let spread = |s: i64| json!({"type": "minecraft:trapezoid", "min": -s, "max": s, "plateau": 0});
-    Some(json!({"type": "minecraft:random_selector", "features": [], "default": {
+    Some(
+        json!({"type": "minecraft:random_selector", "features": [], "default": {
         "feature": format!("minecraft:{block}"),
         "placement": [
             {"type": "minecraft:count", "count": tries},
             {"type": "minecraft:offset", "x": spread(xz), "y": spread(y), "z": spread(xz)},
-            {"type": "minecraft:block_predicate_filter", "predicate": filter}]}}))
+            {"type": "minecraft:block_predicate_filter", "predicate": filter}]}}),
+    )
 }
-

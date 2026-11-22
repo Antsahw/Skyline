@@ -243,3 +243,51 @@ mod tests {
         );
     }
 }
+
+impl super::super::Game<'_> {
+    /// Horizon's explosion of `radius` takes the block at `pos`: a 1.20.1 mod's block is
+    /// blown up by its own code (`Runtime120::explode_block`: a Wired Redstone cable drops its
+    /// cables, a skillet itself), its drops landing as items; true when it was one. Any other
+    /// block, or a runtime that isn't up, is Horizon's to blow up (false).
+    pub(in crate::game) fn java120_exploded(
+        &mut self,
+        pos: [i32; 3],
+        radius: f32,
+        decay: bool,
+    ) -> bool {
+        if self.remote.is_some() {
+            return false;
+        }
+        let registry = self.pack.assets.registry;
+        let name = state_name(registry, self.world.block(pos[0], pos[1], pos[2]));
+        if !super::is_mods_id(&name) {
+            return false;
+        }
+        let dimension = self.dim.id().to_owned();
+        let blown = {
+            let Some(mut guard) = wait_for_runtime() else {
+                return false;
+            };
+            let Some(runtime) = guard.as_mut() else {
+                return false;
+            };
+            runtime.explode_block(&Level(self), &dimension, pos, radius, decay)
+        };
+        match blown {
+            Ok(blown) => {
+                trace120!("{pos:?}: blown up by the mods' code: {blown:?}");
+                self.apply_java120(
+                    &dimension,
+                    &blown.set,
+                    &blown.block_entities,
+                    &blown.spawned,
+                );
+                true
+            }
+            Err(e) => {
+                log::warn!("1.20.1 mods: blowing up {name} failed: {e}");
+                false
+            }
+        }
+    }
+}

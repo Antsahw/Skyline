@@ -2158,6 +2158,45 @@ impl Runtime120 {
         })
     }
 
+    /// Horizon's explosion of `radius` takes the mods' block at `pos` (`Mirror120.explodeBlock`):
+    /// its own code drops what it drops (a LibMultiPart container its parts) and removes it.
+    /// `decay`: the blast decays its loot (`DESTROY_WITH_DECAY`). What it set, changed and
+    /// dropped, as a tick's.
+    pub fn explode_block(
+        &mut self,
+        world: &dyn World120,
+        dimension: &str,
+        pos: [i32; 3],
+        radius: f32,
+        decay: bool,
+    ) -> Result<Ticked, String> {
+        let args = [
+            Value::Str(dimension.to_owned()),
+            Value::I32(pos[0]),
+            Value::I32(pos[1]),
+            Value::I32(pos[2]),
+            Value::F64(f64::from(radius)),
+            Value::Bool(decay),
+        ];
+        let mut handler = InWorld {
+            world,
+            set: Vec::new(),
+            block_entities: Vec::new(),
+            spawned: Vec::new(),
+            log: self.log.clone(),
+        };
+        let values = self.call_values("explodeBlock", &args, &mut handler)?;
+        Ok(Ticked {
+            ticked: match values.first() {
+                Some(Value::I32(n)) => *n,
+                _ => 0,
+            },
+            set: handler.set,
+            block_entities: handler.block_entities,
+            spawned: handler.spawned,
+        })
+    }
+
     /// A Horizon hopper (or dropper) pushes one item into the mods' block at `pos` through
     /// `face` (`Direction.get3DDataValue`: the side of the block the hopper touches), by the
     /// block's item storage (Fabric Transfer API's `ItemStorage.SIDED`, as its patch of

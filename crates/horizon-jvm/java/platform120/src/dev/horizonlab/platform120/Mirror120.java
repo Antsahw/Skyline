@@ -2648,6 +2648,55 @@ public final class Mirror120 {
         }
     }
 
+    /**
+     * The mods' block at x, y, z of `dimension` blown up by Horizon's explosion of `radius`
+     * (vanilla 1.20.1's {@code Explosion.finalizeExplosion} for one block): its drops by its own
+     * code ({@code getDrops} with the block entity, so a LibMultiPart container drops the parts
+     * in it), then the block gone and its {@code wasExploded}. The drops land as spawned items,
+     * the removal as a set block. `decay`: {@code DESTROY_WITH_DECAY}, the loot's explosion
+     * decay drawn from the radius. 1 when there was a block.
+     */
+    public static Object[] explodeBlock(String dimension, int x, int y, int z, double radius, boolean decay) {
+        begin();
+        try {
+            ServerLevel level = level(dimension);
+            BlockPos pos = new BlockPos(x, y, z);
+            Events120.around(level, pos);
+            BlockState state = level.getBlockState(pos);
+            if (state.isAir()) return new Object[] {0};
+            var interaction = decay
+                    ? net.minecraft.world.level.Explosion.BlockInteraction.DESTROY_WITH_DECAY
+                    : net.minecraft.world.level.Explosion.BlockInteraction.DESTROY;
+            var explosion = new net.minecraft.world.level.Explosion(level, null,
+                    x + 0.5, y + 0.5, z + 0.5, (float) radius, false, interaction);
+            if (state.getBlock().dropFromExplosion(explosion)) {
+                var entity = state.hasBlockEntity() ? level.getBlockEntity(pos) : null;
+                var params = new net.minecraft.world.level.storage.loot.LootParams.Builder(level)
+                        .withParameter(net.minecraft.world.level.storage.loot.parameters.LootContextParams.ORIGIN,
+                                Vec3.atCenterOf(pos))
+                        .withParameter(net.minecraft.world.level.storage.loot.parameters.LootContextParams.TOOL,
+                                ItemStack.EMPTY)
+                        .withOptionalParameter(
+                                net.minecraft.world.level.storage.loot.parameters.LootContextParams.BLOCK_ENTITY,
+                                entity);
+                if (decay) {
+                    params.withParameter(
+                            net.minecraft.world.level.storage.loot.parameters.LootContextParams.EXPLOSION_RADIUS,
+                            (float) radius);
+                }
+                state.spawnAfterBreak(level, pos, ItemStack.EMPTY, false);
+                for (ItemStack drop : state.getDrops(params)) {
+                    net.minecraft.world.level.block.Block.popResource(level, pos, drop);
+                }
+            }
+            level.setBlock(pos, Blocks.AIR.defaultBlockState(), 3);
+            state.getBlock().wasExploded(level, pos, explosion);
+            return new Object[] {1};
+        } finally {
+            finish();
+        }
+    }
+
     /** A held item from 1.20.1 item NBT; empty for "" or one that doesn't read. */
     private static ItemStack heldStack(String snbt) {
         if (snbt == null || snbt.isEmpty()) return ItemStack.EMPTY;

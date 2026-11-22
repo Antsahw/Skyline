@@ -746,8 +746,11 @@ fn native_overlays(
     };
     let format = horizon_port_pack::upgrade::PACK_FORMAT;
     let major = |v: &serde_json::Value| {
-        v.as_u64()
-            .or_else(|| v.as_array().and_then(|a| a.first()).and_then(|x| x.as_u64()))
+        v.as_u64().or_else(|| {
+            v.as_array()
+                .and_then(|a| a.first())
+                .and_then(|x| x.as_u64())
+        })
     };
     let dirs: Vec<String> = meta["overlays"]["entries"]
         .as_array()
@@ -757,7 +760,9 @@ fn native_overlays(
             let (min, max) = match (e.get("min_format"), e.get("max_format")) {
                 (Some(a), Some(b)) => (major(a), major(b)),
                 _ => match e.get("formats") {
-                    Some(serde_json::Value::Array(a)) if a.len() == 2 => (major(&a[0]), major(&a[1])),
+                    Some(serde_json::Value::Array(a)) if a.len() == 2 => {
+                        (major(&a[0]), major(&a[1]))
+                    }
                     Some(f) if f.is_u64() => (f.as_u64(), f.as_u64()),
                     Some(f) => (
                         f.get("min_inclusive").and_then(|x| x.as_u64()),
@@ -766,7 +771,8 @@ fn native_overlays(
                     None => (None, None),
                 },
             };
-            min.zip(max).is_some_and(|(a, b)| a <= format && format <= b)
+            min.zip(max)
+                .is_some_and(|(a, b)| a <= format && format <= b)
         })
         .filter_map(|e| e["directory"].as_str().map(str::to_owned))
         .collect();

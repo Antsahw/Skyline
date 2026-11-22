@@ -676,7 +676,8 @@ mod tests {
     /// (dirt over what a trunk can replace), or the provider itself with `force_dirt`.
     #[test]
     fn a_trees_dirt_provider_is_its_below_trunk_provider() {
-        let dirt = json!({"type": "minecraft:simple_state_provider", "state": {"Name": "minecraft:dirt"}});
+        let dirt =
+            json!({"type": "minecraft:simple_state_provider", "state": {"Name": "minecraft:dirt"}});
         let (v, _) = up(
             "data/x/worldgen/configured_feature/t.json",
             json!({"type": "minecraft:tree", "config": {"dirt_provider": dirt, "force_dirt": false}}),
@@ -705,7 +706,10 @@ mod tests {
             json!({"feature": "minecraft:patch_grass", "placement": []}),
         );
         assert_eq!(v["feature"]["default"]["feature"], json!("minecraft:grass"));
-        assert_eq!(v["feature"]["default"]["placement"][0], json!({"type": "minecraft:count", "count": 32}));
+        assert_eq!(
+            v["feature"]["default"]["placement"][0],
+            json!({"type": "minecraft:count", "count": 32})
+        );
         let (v, _) = up(
             "data/x/worldgen/placed_feature/p.json",
             json!({"feature": "minecraft:patch_fire", "placement": []}),
