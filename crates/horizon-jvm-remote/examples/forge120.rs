@@ -71,7 +71,7 @@ fn main() {
             // The vanilla methods the mods' mixins inject into, and the settings screens
             // (`FORGE120_MIXINS=1`).
             if std::env::var_os("FORGE120_MIXINS").is_some() {
-                for call in ["mixinTargets", "configMods", "fluidLooks"] {
+                for call in ["mixinTargets", "configMods", "fluidLooks", "blockTints"] {
                     println!("{call}: {:?}", runtime.call_answers(call, &[]));
                 }
             }

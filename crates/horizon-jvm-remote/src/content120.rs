@@ -27,11 +27,16 @@ use std::path::{Path, PathBuf};
 /// the mods' block tags, and 26.3's shapes of trees, states and noise providers, so Horizon's
 /// generator places the mods' data features itself rather than the runtime. 13: a mod's own
 /// files for 26.3 (its pack's overlays for 26.3's format: Geophilic's biomes) go in as they are.
-/// 14: a creative tab whose icon only code draws takes its first item's.
-const FORMAT: u32 = 14;
+/// 14: a creative tab whose icon only code draws takes its first item's. 15: the mods' block
+/// tints ([`BLOCK_TINTS`]).
+const FORMAT: u32 = 15;
 
 /// The file under the cache holding the pools the mods add to loot tables ([`loot_added`]).
 pub const LOOT_ADDED: &str = "loot_added.json";
+
+/// The file under the cache holding the mods' block tints (the runtime's `blockTints`:
+/// `{"mod:block": ["foliage", ...]}`, as the mesher's `set_mod_tints` reads them).
+pub const BLOCK_TINTS: &str = "block_tints.json";
 
 /// The folder under the cache holding the mods' world generation as a 26.3 data pack.
 pub const WORLDGEN_PACK: &str = "worldgen";
@@ -572,6 +577,13 @@ pub fn build(
         serde_json::to_vec(&added).unwrap_or_default(),
     )
     .map_err(|e| format!("{LOOT_ADDED}: {e}"))?;
+    match runtime.call_with("blockTints", &[]) {
+        Ok(tints) => std::fs::write(cache.join(BLOCK_TINTS), tints)
+            .map_err(|e| format!("{BLOCK_TINTS}: {e}"))?,
+        Err(e) => log(format!(
+            "1.20.1 mods' content: their block tints were not read: {e}"
+        )),
+    }
     let changes = runtime.call_with("biomeChanges", &[])?;
     let modifiers = biome_modifiers(&changes, &carried(&work));
     if modifiers > 0 {

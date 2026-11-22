@@ -2124,6 +2124,12 @@ public final class Mirror120 {
         return new Object[] {out.toString()};
     }
 
+    /** The mods' block tints (Tints120.export): {json}. */
+    public static Object[] blockTints() {
+        setUp();
+        return new Object[] {Tints120.export()};
+    }
+
     /** The pools the mods add to loot tables in code (Loot120.added): {json}. */
     public static Object[] lootAdded() {
         setUp();

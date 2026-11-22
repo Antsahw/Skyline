@@ -207,6 +207,7 @@ fn content_of(loader: Loader, dir: PathBuf, base: &Path) -> Vec<PathBuf> {
     let cache = home.join("content");
     if let Some(folders) = horizon_jvm_remote::content120::cached(&stamped(loader, &jars), &cache) {
         remember_loot(&cache);
+        remember_tints(&cache);
         remember_blocks(loader, &cache);
         levels::register(&cache.join(horizon_jvm_remote::content120::WORLDGEN_PACK));
         log::info!(
@@ -235,6 +236,7 @@ fn content_of(loader: Loader, dir: PathBuf, base: &Path) -> Vec<PathBuf> {
     match make(loader, &dir, &jars, base, &home, &cache) {
         Ok(folders) => {
             remember_loot(&cache);
+            remember_tints(&cache);
             remember_blocks(loader, &cache);
             levels::register(&cache.join(horizon_jvm_remote::content120::WORLDGEN_PACK));
             folders
@@ -264,6 +266,19 @@ fn foreign_pending(starting: bool) {
         STARTING.fetch_sub(1, SeqCst).saturating_sub(1)
     };
     horizon_world::worldgen::foreign::set_foreign_pending(left > 0);
+}
+
+/// Hands the mods' block tints in the content cache to the mesher (Simple Farming's fruit
+/// leaves take the foliage colour).
+fn remember_tints(cache: &Path) {
+    let Ok(json) = std::fs::read_to_string(cache.join(horizon_jvm_remote::content120::BLOCK_TINTS))
+    else {
+        return;
+    };
+    match horizon_client::mesher::set_mod_tints(&json) {
+        Ok(n) => log::info!("1.20.1 mods: tints of {n} block(s)"),
+        Err(e) => log::warn!("1.20.1 mods: their block tints were not read: {e}"),
+    }
 }
 
 /// Reads the pools the mods add to loot tables from the content cache.
