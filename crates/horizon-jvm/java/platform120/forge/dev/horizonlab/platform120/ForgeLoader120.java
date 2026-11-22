@@ -122,18 +122,30 @@ final class ForgeLoader120 implements Loader120 {
         post(new TickEvent.ClientTickEvent(TickEvent.Phase.END), "client tick end");
     }
 
-    /** Vanilla's key categories: a mapping in another is a mod's. */
-    private static final Set<String> VANILLA_CATEGORIES = Set.of("key.categories.movement", "key.categories.misc",
-            "key.categories.multiplayer", "key.categories.gameplay", "key.categories.ui", "key.categories.inventory",
-            "key.categories.creative");
-
+    /**
+     * The mods' key mappings: the game's (Forge adds those registered with RegisterKeyMappingsEvent
+     * to them) but vanilla's own, which are the options' fields (keyUp..., the hotbar's slots).
+     */
     @Override
     public List<KeyMapping> modKeyMappings() {
         List<KeyMapping> mods = new ArrayList<>();
         var options = Minecraft.getInstance().options;
         if (options == null) return mods;
+        Set<KeyMapping> vanilla = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+        for (var field : net.minecraft.client.Options.class.getFields()) {
+            if (java.lang.reflect.Modifier.isStatic(field.getModifiers())) continue;
+            try {
+                if (field.getType() == KeyMapping.class) {
+                    vanilla.add((KeyMapping) field.get(options));
+                } else if (field.getType() == KeyMapping[].class && field.get(options) != options.keyMappings) {
+                    vanilla.addAll(List.of((KeyMapping[]) field.get(options)));
+                }
+            } catch (IllegalAccessException e) {
+                Mirror120.log("vanilla's key mappings could not be read: " + e);
+            }
+        }
         for (KeyMapping mapping : options.keyMappings) {
-            if (!VANILLA_CATEGORIES.contains(mapping.getCategory())) mods.add(mapping);
+            if (!vanilla.contains(mapping)) mods.add(mapping);
         }
         return mods;
     }
