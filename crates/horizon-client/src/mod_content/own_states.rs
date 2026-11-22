@@ -159,6 +159,21 @@ impl NewBlock<'_> {
                         row.set(field, v.clone());
                     }
                 }
+                // Its own occlusion, not its stand-in's: a Java mod's seat stood in by a full
+                // cube was a solid render, and the ground's face under it was culled (the sky
+                // showed through).
+                if let Some(occlusion) = &state.occlusion {
+                    let full = !occlusion.is_empty()
+                        && !occlusion
+                            .join_is_not_empty(&VoxelShape::block(), ShapeOp::XOR)
+                            .unwrap_or(true);
+                    row.set("can_occlude", J::Bool(!occlusion.is_empty()));
+                    if !full && matches!(row.get("solid_render"), Some(J::Bool(true))) {
+                        let down = matches!(row.get("skylight_down"), Some(J::Bool(true)));
+                        row.set("dampening", J::Num(i64::from(!down).into()));
+                        row.set("solid_render", J::Bool(false));
+                    }
+                }
             }
             Rows::Behaviour => {}
             Rows::Shape => *row = shape.clone(),
