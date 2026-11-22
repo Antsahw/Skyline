@@ -73,7 +73,11 @@ public final class Hud120 {
                 part("renderPlayerHealth", () -> access.horizon$renderPlayerHealth(graphics));
             }
             part("renderExperienceBar", () -> access.horizon$renderExperienceBar(graphics, width / 2 - 91));
-            part("renderEffects", () -> access.horizon$renderEffects(graphics));
+            // The effect icons come from the texture manager a headless client never made: the
+            // part is left out until it has one (Horizon draws the effects meanwhile).
+            if (minecraft.getMobEffectTextures() != null) {
+                part("renderEffects", () -> access.horizon$renderEffects(graphics));
+            }
             renderHandlers(gui, graphics);
             part("field of view", () -> {
                 double factor = fovFactor(minecraft);

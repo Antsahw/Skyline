@@ -52,6 +52,14 @@ pub fn stamp(jars: &[PathBuf]) -> String {
     sorted.sort();
     for jar in &sorted {
         jar.file_name().hash(&mut hasher);
+        // The bridge's own jar is written again by every build120.sh run: by what is in it
+        // (each entry's name and CRC), so a rebuild that changed nothing keeps the content.
+        if is_platform(jar)
+            && let Some(entries) = entries_crc(jar)
+        {
+            entries.hash(&mut hasher);
+            continue;
+        }
         if let Ok(meta) = std::fs::metadata(jar) {
             meta.len().hash(&mut hasher);
             if let Ok(t) = meta.modified() {
@@ -60,6 +68,26 @@ pub fn stamp(jars: &[PathBuf]) -> String {
         }
     }
     format!("{:016x}", hasher.finish())
+}
+
+/// Whether `jar` is one of the bridge's platform jars (`platform120.jar`, `platform120-forge.jar`).
+fn is_platform(jar: &Path) -> bool {
+    jar.file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(|n| n.starts_with("platform120") && n.ends_with(".jar"))
+}
+
+/// The names and CRCs of `jar`'s entries, sorted: what is in it, whatever its time.
+fn entries_crc(jar: &Path) -> Option<Vec<(String, u32)>> {
+    let file = std::fs::File::open(jar).ok()?;
+    let mut zip = zip::ZipArchive::new(std::io::BufReader::new(file)).ok()?;
+    let mut out = Vec::with_capacity(zip.len());
+    for i in 0..zip.len() {
+        let entry = zip.by_index_raw(i).ok()?;
+        out.push((entry.name().to_string(), entry.crc32()));
+    }
+    out.sort();
+    Some(out)
 }
 
 /// The content mod folders built for `jars` under `cache` before, when their stamp matches.
@@ -1663,6 +1691,21 @@ mod tests {
     }
 
     /// A jar with the given entries.
+    #[test]
+    fn a_platform_jar_written_again_the_same_keeps_the_stamp() {
+        let dir = std::env::temp_dir().join(format!("h120-stamp-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let platform = dir.join("platform120.jar");
+        std::fs::write(&platform, jar(&[("a.class", b"one")])).unwrap();
+        let first = stamp(std::slice::from_ref(&platform));
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        std::fs::write(&platform, jar(&[("a.class", b"one")])).unwrap();
+        assert_eq!(stamp(std::slice::from_ref(&platform)), first);
+        std::fs::write(&platform, jar(&[("a.class", b"two")])).unwrap();
+        assert_ne!(stamp(std::slice::from_ref(&platform)), first);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     fn jar(entries: &[(&str, &[u8])]) -> Vec<u8> {
         use std::io::Write;
         let mut out = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));

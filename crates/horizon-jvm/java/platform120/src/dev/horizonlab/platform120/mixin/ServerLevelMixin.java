@@ -96,6 +96,17 @@ public abstract class ServerLevelMixin {
         if (server != null && server.getScoreboard() != null) cir.setReturnValue(server.getScoreboard());
     }
 
+    /**
+     * A mirror level's points of interest: a manager of its own (Mirror120.poi), where the
+     * chunk map a mirror level never made has none. A mob looking for its feeder or its hive
+     * (Alex's Mobs' hummingbird) asks, and its every tick threw on the null.
+     */
+    @Inject(method = "getPoiManager", at = @At("HEAD"), cancellable = true)
+    private void horizon$poi(CallbackInfoReturnable<net.minecraft.world.entity.ai.village.poi.PoiManager> cir) {
+        var poi = dev.horizonlab.platform120.Mirror120.poi((ServerLevel) (Object) this);
+        if (poi != null) cir.setReturnValue(poi);
+    }
+
     /** A mirror level's players are Horizon's in it this tick (Mirror120.tickEntities). */
     @Inject(method = "players", at = @At("HEAD"), cancellable = true)
     private void horizon$players(CallbackInfoReturnable<java.util.List<net.minecraft.server.level.ServerPlayer>> cir) {

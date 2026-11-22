@@ -2239,6 +2239,33 @@ public final class Mirror120 {
         return answer.length > 0 && answer[0] instanceof Integer h ? h : level.getMinBuildHeight();
     }
 
+    private static final Map<Level, net.minecraft.world.entity.ai.village.poi.PoiManager> POI =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    private static volatile boolean poiFailed;
+
+    /**
+     * A mirror level's points of interest: an empty manager of its own, kept in a folder of the
+     * runtime's temporary directory that nothing is saved to (it is never ticked). The mods
+     * looking for one find none rather than throw; null if it can't be made.
+     */
+    public static net.minecraft.world.entity.ai.village.poi.PoiManager poi(net.minecraft.server.level.ServerLevel level) {
+        if (poiFailed) return null;
+        try {
+            return POI.computeIfAbsent(level, l -> {
+                String name = l.dimension().location().toString().replace(':', '_');
+                var dir = java.nio.file.Path.of(System.getProperty("java.io.tmpdir"),
+                        "horizon-poi-" + ProcessHandle.current().pid(), name);
+                return new net.minecraft.world.entity.ai.village.poi.PoiManager(dir,
+                        net.minecraft.util.datafix.DataFixers.getDataFixer(), false, l.registryAccess(), l);
+            });
+        } catch (RuntimeException | LinkageError e) {
+            poiFailed = true;
+            log("points of interest: no manager for the mirror levels: " + e);
+            return null;
+        }
+    }
+
     private static final Map<Level, Biomes120> BIOME_MANAGERS = new HashMap<>();
 
     /** A mirror level's biome manager, which asks Horizon (Biomes120). */

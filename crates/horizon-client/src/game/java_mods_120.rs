@@ -191,9 +191,43 @@ fn install() -> PathBuf {
 pub(in crate::game) fn content(base: &Path) -> Vec<PathBuf> {
     let chosen = chosen();
     *LOADERS.lock().unwrap_or_else(|e| e.into_inner()) = chosen.iter().map(|(l, _)| *l).collect();
+    // Each loader's content is made in its own runtime, so the two are made side by side (a
+    // Fabric and a Forge set of mods took 21 s + 31 s one after the other). What the game reads
+    // from them is taken in the loaders' order after, so it doesn't depend on which was first.
+    let made: Vec<(Loader, Vec<PathBuf>)> = std::thread::scope(|scope| {
+        let handles: Vec<_> = chosen
+            .into_iter()
+            .map(|(loader, dir)| {
+                let handle = std::thread::Builder::new()
+                    .name(format!("1.20.1 content {loader:?}"))
+                    .spawn_scoped(scope, move || content_of(loader, dir, base));
+                (loader, handle)
+            })
+            .collect();
+        handles
+            .into_iter()
+            .map(|(loader, handle)| {
+                let folders = match handle.map_err(|e| e.to_string()).and_then(|h| {
+                    h.join()
+                        .map_err(|_| "its content thread panicked".to_string())
+                }) {
+                    Ok(folders) => folders,
+                    Err(e) => {
+                        log::warn!("1.20.1 mods ({loader:?}): their content was not made: {e}");
+                        Vec::new()
+                    }
+                };
+                (loader, folders)
+            })
+            .collect()
+    });
     let mut all = Vec::new();
-    for (loader, dir) in chosen {
-        let folders = content_of(loader, dir, base);
+    for (loader, folders) in made {
+        if !folders.is_empty() {
+            let cache = runtime_home(loader).join("content");
+            remember_loot(&cache);
+            levels::register(&cache.join(horizon_jvm_remote::content120::WORLDGEN_PACK));
+        }
         remember_namespaces(loader, &folders);
         all.extend(folders);
     }
@@ -206,10 +240,8 @@ fn content_of(loader: Loader, dir: PathBuf, base: &Path) -> Vec<PathBuf> {
     let home = runtime_home(loader);
     let cache = home.join("content");
     if let Some(folders) = horizon_jvm_remote::content120::cached(&stamped(loader, &jars), &cache) {
-        remember_loot(&cache);
         remember_tints(&cache);
         remember_blocks(loader, &cache);
-        levels::register(&cache.join(horizon_jvm_remote::content120::WORLDGEN_PACK));
         log::info!(
             "1.20.1 mods: {} content mod(s) from the cache",
             folders.len()
@@ -235,10 +267,8 @@ fn content_of(loader: Loader, dir: PathBuf, base: &Path) -> Vec<PathBuf> {
     }
     match make(loader, &dir, &jars, base, &home, &cache) {
         Ok(folders) => {
-            remember_loot(&cache);
             remember_tints(&cache);
             remember_blocks(loader, &cache);
-            levels::register(&cache.join(horizon_jvm_remote::content120::WORLDGEN_PACK));
             folders
         }
         Err(e) => {
