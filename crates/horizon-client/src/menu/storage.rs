@@ -132,6 +132,10 @@ pub struct State {
     /// stack taken and the grid row by row before the take used it, for the
     /// caller (`native_item_crafted`).
     pub item_crafted: Vec<(String, ItemStack, Vec<Option<ItemStack>>)>,
+    /// Crafting results taken from a crafting grid (`ResultSlot.onTake`), with the recipe, the
+    /// taken stack, the grid's width and its cells before the take: for the caller's Java mods
+    /// (their crafted hooks).
+    pub crafted_takes: Vec<CraftedTake>,
     /// `ItemStack.onCraftedBy` counts from merchant result callbacks, without a recipe id.
     pub crafted_counts: Vec<(Arc<str>, i32)>,
     /// `MerchantResultSlot.removeCount`, reset by checkTakeAchievements.

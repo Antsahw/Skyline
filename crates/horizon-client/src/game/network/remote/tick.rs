@@ -60,11 +60,27 @@ impl Game<'_> {
 
     /// One client tick while connected (Minecraft.tick with a ClientLevel).
     pub(super) fn tick_remote_body(&mut self) -> Result<()> {
+        // The Java mods' fluids' looks, once their models load (this process's server).
+        self.java_mod_fluids();
+        self.java_mod_item_models();
+        // The 1.20.1 mods' blocks their code drew (this process's server).
+        #[cfg(feature = "java-mods-120")]
+        self.java120_drawn_models();
+        // Their entity types, for the commands typed here.
+        #[cfg(feature = "java-mods-120")]
+        self.java120_command_types();
+        // The tooltips asked of the 1.20.1 mods, to the server.
+        #[cfg(feature = "java-mods-120")]
+        self.ask_java120_tooltips();
+        // Their fluids' looks (this process's server).
+        #[cfg(feature = "java-mods-120")]
+        self.java120_fluid_looks();
         self.tick_remote_level()?;
         // Its rockets tick after the player (even waiting for chunks), then ParticleEngine.tick.
         self.tick_own_rockets();
         self.tick_remote_particle_engine();
         self.tick_book_snapshot_retry();
+        self.tick_device_client();
         // Far tiles the samplers asked for (`lod_net`).
         if let Some(r) = &self.remote {
             r.session.send_far_terrain();

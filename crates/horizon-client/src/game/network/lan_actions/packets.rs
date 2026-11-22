@@ -209,7 +209,8 @@ impl Game<'_> {
                     // block back on the client).
                     let canceled = self.as_guest(conn, |g| {
                         let state = g.world.block(a.pos[0], a.pos[1], a.pos[2]);
-                        let mut canceled = false;
+                        // Java mods first (Fabric's AttackBlockCallback, java_server.rs).
+                        let mut canceled = g.java_attack_block(a.pos, i32::from(a.direction));
                         g.native_left_click_block(a.pos, face, state, &mut canceled);
                         canceled
                     });
@@ -435,6 +436,9 @@ impl Game<'_> {
             },
             // handleSetCarriedItem: a new slot stops a main-hand use.
             S::SetCarriedItem(p) => {
+                if self.java_guest_slot_refused(host, conn, gi, p.slot) {
+                    return;
+                }
                 if !(0..9).contains(&p.slot) {
                     let Some(host) = self.lan.as_ref() else {
                         return;
@@ -475,6 +479,7 @@ impl Game<'_> {
                         return;
                     }
                 }
+                let (yaw, pitch) = (p.yaw, p.pitch);
                 self.as_guest(conn, |g| {
                     if changed
                         && g.using
@@ -535,9 +540,16 @@ impl Game<'_> {
                 let hand = if p.hand == 1 { Hand::Off } else { Hand::Main };
                 let _ = self.guest_use_item(conn, gi, hand, Some((p.yaw, p.pitch)));
             }
+            // The 1.20.1 mods' own entities (game/java_mods_120/mobs.rs).
+            #[cfg(feature = "java-mods-120")]
+            S::Attack(p) if self.java120_entity_action(conn, p.id, None) => {}
+            #[cfg(feature = "java-mods-120")]
+            S::Interact(p) if self.java120_entity_action(conn, p.id, Some(&p)) => {}
+            S::Attack(p) if self.java_entity_attack(conn, p.id) => {}
             S::Attack(p) => {
                 let _ = self.guest_attack(conn, gi, p.id);
             }
+            S::Interact(p) if self.java_entity_interact(conn, &p) => {}
             S::Interact(p) => {
                 let hand = if p.hand == 1 { Hand::Off } else { Hand::Main };
                 let _ = self.guest_interact(conn, gi, p.id, hand, p.location);
@@ -630,6 +642,7 @@ impl Game<'_> {
                     });
                 }
             }
+            S::ContainerClick(p) if self.java_menu_click(host, conn, &p) => {}
             // AbstractContainerMenu.quickMoveStack of a mod container: the mods first.
             S::ContainerClick(p) if self.lan_mod_quick_move(conn, &p) => {}
             S::ContainerClick(p) if self.lan_merchant_click(conn, &p) => {}
@@ -702,6 +715,7 @@ impl Game<'_> {
             }
             S::SetBeacon(p) => self.lan_station_beacon(conn, p.primary, p.secondary),
             S::SelectTrade(p) => self.lan_select_trade(conn, p.item),
+            S::ContainerClose(p) if self.java_menu_closed(conn, p.container) => {}
             S::ContainerClose(p) if self.lan_merchant_closed(conn, Some(p.container)) => {
                 self.guest_carried_back(gi);
             }
@@ -801,6 +815,17 @@ impl Game<'_> {
                 }
             }
             S::ChatCommand(c) => self.guest_chat_command(conn, &c.command),
+            S::CustomPayload(p) if p.channel == super::java_screen::INPUT => {
+                // A 1.20.1 mod's screen takes its own input; any other is the 26.3 bridge's.
+                #[cfg(feature = "java-mods-120")]
+                if self.java120_screen_input(conn, &p.data) {
+                    return;
+                }
+                self.java_screen_input(conn, &p.data)
+            }
+            S::CustomPayload(p) if p.channel == super::java_screen::OWN_SKIN => {
+                self.java_own_skin(conn, &p.data)
+            }
             S::CustomPayload(p) if p.channel == horizon_protocol::quiet::CHANNEL => {
                 self.guest_quiet_commands(conn, &p.data)
             }
@@ -821,6 +846,7 @@ impl Game<'_> {
             S::CustomPayload(p) if p.channel == horizon_client::lod_net::CHANNEL => {
                 self.guest_far_terrain(conn, &p.data)
             }
+            S::CustomPayload(p) => self.java_device_payload(conn, &p.channel, &p.data),
             S::ChatCommandSigned(p) => self.guest_signed_command(conn, p),
             // ServerCommonPacketListenerImpl.handleCustomClickAction: the server only logs
             // the click, so a mod's cancel leaves nothing else to skip.

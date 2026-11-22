@@ -68,6 +68,52 @@ impl Title {
         cursor: (f32, f32),
         hide_splash: bool,
         hide_server_address: bool,
+    ) {
+        self.draw_own(
+            atlas,
+            items,
+            batch,
+            cursor,
+            hide_splash,
+            hide_server_address,
+        );
+        if !matches!(self.mode, Mode::Main) || self.rules.borrow().is_some() {
+            return;
+        }
+        let (w, h) = (batch.width.ceil(), batch.height.ceil());
+        if let Some(b) = self
+            .buttons(w, h)
+            .into_iter()
+            .find(|b| b.id == mod_menu::BUTTON_ID)
+        {
+            let hover =
+                cursor.0 >= b.x && cursor.0 < b.x + b.w && cursor.1 >= b.y && cursor.1 < b.y + 20.0;
+            let bar = if hover {
+                rgba(255, 255, 255, 255)
+            } else {
+                rgba(224, 224, 224, 255)
+            };
+            for (x, y, bw, bh) in mod_menu::BARS {
+                batch.fill(atlas, b.x + x, b.y + y, bw, bh, bar);
+            }
+            if hover {
+                let lines = atlas
+                    .font
+                    .split(&Text::translate("horizon.mod_menu.button", &[]), 170.0);
+                crate::ui::tooltip(batch, atlas, &lines, cursor);
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn draw_own(
+        &self,
+        atlas: &HudAtlas,
+        items: Option<&crate::item_render::ItemRenderer>,
+        batch: &mut HudBatch,
+        cursor: (f32, f32),
+        hide_splash: bool,
+        hide_server_address: bool,
         phases: &mut dyn FnMut(crate::screen_draw::RenderPhase, &mut HudBatch),
     ) {
         let (w, h) = (batch.width.ceil(), batch.height.ceil());

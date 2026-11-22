@@ -125,6 +125,8 @@ impl Game<'_> {
             && self.before_block(hit.distance)
         {
             self.remote_attack_entity(hit.id, hit.distance);
+        } else if self.remote_attack_java_entity() {
+            // A Java mod's entity: the server's mods attack it (remote/java.rs).
         } else if let Some((i, distance, _)) = self.mob_hit()
             && self.before_block(distance)
         {

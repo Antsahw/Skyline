@@ -252,18 +252,12 @@ pub struct Guest {
     pub vehicle_good: Option<[f64; 3]>,
     pub sprinting: bool,
     pub fall_flying: bool,
-<<<<<<< ours
-    pub flying: bool,
     /// What a server mod (a Java mod's `Abilities`) gave the player on top of its game mode:
     /// flight, invulnerability, speeds. Holds only for the game mode it was given in.
     pub mod_abilities: Option<ModAbilities>,
     /// The name a server mod shows for the player in the tab list (a text component), None for
     /// the player's own name (`ServerPlayer.getTabListDisplayName`).
     pub tab_name: Option<horizon_world::nbt::Tag>,
-||||||| base
-    pub flying: bool,
-=======
->>>>>>> theirs
     pub sleeping: bool,
     /// `LivingEntity.DATA_LIVING_ENTITY_FLAGS`: 1 while using an item, 2 if
     /// it is in the off hand.
@@ -561,14 +555,10 @@ pub struct Guest {
     /// The open block container, if any.
     pub menu: Option<super::menu::Menu>,
     pub next_window: i32,
-<<<<<<< ours
     /// The state id of the window of a Java mod's menu (Hub::send_window_content).
     pub java_window_state: i32,
-||||||| base
-=======
     /// Identity of the current menu, distinct even when a window id is reused.
     pub menu_generation: u64,
->>>>>>> theirs
     /// An unfinished drag in the inventory menu.
     pub drag: Option<(u8, Vec<usize>)>,
     /// The compound this player was loaded from, for fields Horizon does not model.
@@ -782,14 +772,8 @@ impl Guest {
             vehicle_good: None,
             sprinting: false,
             fall_flying: false,
-<<<<<<< ours
-            flying: false,
             mod_abilities: None,
             tab_name: None,
-||||||| base
-            flying: false,
-=======
->>>>>>> theirs
             sleeping: false,
             living_flags: 0,
             stuck: (0, 0),
@@ -918,12 +902,8 @@ impl Guest {
             dimension: "minecraft:overworld".into(),
             menu: None,
             next_window: 0,
-<<<<<<< ours
             java_window_state: 0,
-||||||| base
-=======
             menu_generation: menu_generation(),
->>>>>>> theirs
             drag: None,
             saved: None,
             attachments: Default::default(),
@@ -940,29 +920,9 @@ impl Guest {
             recipes_unlocked: Vec::new(),
         }
     }
-<<<<<<< ours
-    /// `ServerPlayer.onUpdateAbilities`: the guest's abilities, flying speed included (a
-    /// server mod's, while it gives the player abilities: [`Self::speeds`]).
-    pub fn abilities(&self) -> play::Clientbound {
-        let (flying_speed, walking_speed) = self.speeds();
-        play::Clientbound::PlayerAbilities(play::PlayerAbilities {
-            flags: self.ability_flags(),
-            flying_speed,
-            walking_speed,
-        })
-||||||| base
-    /// `ServerPlayer.onUpdateAbilities`: the guest's abilities, flying speed included.
-    pub fn abilities(&self) -> play::Clientbound {
-        play::Clientbound::PlayerAbilities(play::PlayerAbilities {
-            flags: self.ability_flags(),
-            flying_speed: self.flying_speed,
-            walking_speed: 0.1,
-        })
-=======
     /// `ServerPlayer.onUpdateAbilities`: the guest's abilities, speeds included.
     pub fn abilities_packet(&self) -> play::Clientbound {
         play::Clientbound::PlayerAbilities(self.abilities.packet())
->>>>>>> theirs
     }
     pub fn send(&self, packet: &play::Clientbound) {
         if !self.participates_online() {
@@ -1133,49 +1093,6 @@ impl Guest {
     pub fn spectator(&self) -> bool {
         self.game_mode == SPECTATOR
     }
-<<<<<<< ours
-    /// `Abilities.mayBuild`: survival or creative.
-    pub fn may_build(&self) -> bool {
-        matches!(self.game_mode, SURVIVAL | CREATIVE)
-    }
-    /// PlayerAbilities flags (invulnerable, flying, may fly, instabuild).
-    pub fn ability_flags(&self) -> i8 {
-        let mut f = 0;
-        if self.invulnerable() {
-            f |= 1;
-        }
-        if (self.flying && self.may_fly()) || self.spectator() {
-            f |= 2;
-        }
-        if self.may_fly() {
-            f |= 4;
-        }
-        if self.creative() {
-            f |= 8;
-        }
-        f
-||||||| base
-    /// `Abilities.mayBuild`: survival or creative.
-    pub fn may_build(&self) -> bool {
-        matches!(self.game_mode, SURVIVAL | CREATIVE)
-    }
-    /// PlayerAbilities flags (invulnerable, flying, may fly, instabuild).
-    pub fn ability_flags(&self) -> i8 {
-        let mut f = 0;
-        if self.creative() || self.spectator() {
-            f |= 1;
-        }
-        if self.flying || self.spectator() {
-            f |= 2;
-        }
-        if self.creative() || self.spectator() || self.allow_flight {
-            f |= 4;
-        }
-        if self.creative() {
-            f |= 8;
-        }
-        f
-=======
     /// Whether handlePlayerPositionChange's moved-wrongly check applies (the
     /// spectators and sleepers aside): not in creative, and not in the
     /// server body's `LivingEntity.isInPostImpulseGraceTime` (the 40 ticks
@@ -1192,7 +1109,6 @@ impl Guest {
     /// extensions, such as a native mod's particle (`Particle::horizon_only`).
     pub fn is_horizon(&self) -> bool {
         self.brand == "horizon"
->>>>>>> theirs
     }
     /// `updateFallFlying` ends the glide (`glide_end_unsent`: its end reaches the client a tick later).
     pub fn end_glide(&mut self) {

@@ -154,7 +154,9 @@ impl LaunchArguments {
                 | "--server-thread"
                 | "--in-frame"
                 | "--no-server-thread"
-                | "--pregen" => {
+                | "--pregen"
+                // Skyline: Fabric mods on for this run (game/java_mods.rs, `opted_in`).
+                | "--java-mods" => {
                     rest.push(Argument::Switch(arg));
                 }
                 _ => {

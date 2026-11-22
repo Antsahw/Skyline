@@ -13,7 +13,7 @@ pub struct CraftedTake {
     pub grid: Vec<Option<ItemStack>>,
 }
 impl CraftedTake {
-    /// Recipe `id` (`minecraft:` added) taken as `taken` from a `width`-wide grid of `grid`.
+    /// Recipe `id` (`minecraft:` added when it has no namespace) taken as `taken` from a `width`-wide grid of `grid`.
     pub(super) fn of(
         id: &str,
         taken: &ItemStack,
@@ -21,7 +21,11 @@ impl CraftedTake {
         grid: &[Option<ItemStack>],
     ) -> Self {
         Self {
-            recipe: format!("minecraft:{id}"),
+            recipe: if id.contains(':') {
+                id.to_owned()
+            } else {
+                format!("minecraft:{id}")
+            },
             taken: taken.clone(),
             width,
             grid: grid.to_vec(),

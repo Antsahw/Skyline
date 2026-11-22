@@ -342,7 +342,6 @@ pub(super) trait LevelHost: Sized {
     /// The game's mobs, scanned for a box query before the grid is built.
     fn mobs(&self) -> &[Mob];
     fn potential_spawns(&self, category: Category, pos: [i32; 3], entries: &mut Vec<SpawnEntry>);
-<<<<<<< ours
     /// The 1.20.1 mods' natural spawn of one of their types (`NaturalLevel::foreign_spawn`).
     #[cfg(feature = "java-mods-120")]
     fn java120_spawn_natural(
@@ -365,8 +364,6 @@ pub(super) trait LevelHost: Sized {
     ) -> bool {
         false
     }
-||||||| base
-=======
     /// `mob_spawn_placement_check` for the level's spawn at `at`; `vanilla` where nothing listens.
     fn placement_check(
         _: &Level<'_, Self>,
@@ -387,7 +384,6 @@ pub(super) trait LevelHost: Sized {
     ) -> SpawnCheck {
         SpawnCheck::Default
     }
->>>>>>> theirs
 }
 impl LevelHost for &Game<'_> {
     #[cfg(feature = "java-mods-120")]
@@ -1223,55 +1219,6 @@ impl<'a> Game<'a> {
             checked: Default::default(),
         }
     }
-<<<<<<< ours
-    pub(super) fn natural_level(&self) -> GameLevel<'_, 'a> {
-        self.natural_level_with_players(self.level_players())
-    }
-    /// What a level reads of the game besides its world view.
-    pub(super) fn spawn_host(&self) -> SpawnHost<'_> {
-        SpawnHost {
-            biome_zoom: self.streaming.biome_zoom,
-            border: self.border.geometry(),
-            mob_types: self.res.mob_types(),
-            structure_spawns: StructureSpawns::shared(&self.options.resources),
-            locator: self.end.locator(),
-            // The world spawn point lives in the overworld.
-            respawn: (self.dim.vanilla() == Dim::Overworld)
-                .then_some(self.level.spawn)
-                .flatten()
-                .map(|s| {
-                    [
-                        s[0].floor() as i32,
-                        s[1].floor() as i32,
-                        s[2].floor() as i32,
-                    ]
-                }),
-            spawn_mobs: self.ui.rules.bool("spawn_mobs"),
-||||||| base
-    pub(super) fn natural_level(&self) -> GameLevel<'_, 'a> {
-        self.natural_level_with_players(self.level_players())
-    }
-    /// What a level reads of the game besides its world view.
-    pub(super) fn spawn_host(&self) -> SpawnHost<'_> {
-        SpawnHost {
-            biome_zoom: self.streaming.biome_zoom,
-            border: self.border.geometry(),
-            mob_types: self.res.mob_types(),
-            structure_spawns: StructureSpawns::shared(&self.options.resources),
-            locator: self.end.locator(),
-            // The world spawn point lives in the overworld.
-            respawn: (self.dim == Dim::Overworld)
-                .then_some(self.level.spawn)
-                .flatten()
-                .map(|s| {
-                    [
-                        s[0].floor() as i32,
-                        s[1].floor() as i32,
-                        s[2].floor() as i32,
-                    ]
-                }),
-            spawn_mobs: self.ui.rules.bool("spawn_mobs"),
-=======
     /// Gives a spawn pass's provisional mobs (the `u32::MAX - n` ids
     /// [`GameLevel`] hands out) their real ids in order, rewrites the mount
     /// and rider links that reference them, and seats chicken jockeys on the
@@ -1310,7 +1257,6 @@ impl<'a> Game<'a> {
                 c.extra.jockey = true;
                 c.extra.rider = Some(rider);
             }
->>>>>>> theirs
         }
         links
     }
@@ -1534,53 +1480,7 @@ impl<'a> Game<'a> {
         let extras = {
             let level = self.natural_level();
             laps.lap("sn_level");
-<<<<<<< ours
-            // The 1.20.1 mods' mobs count toward the caps too (their runtime's, last tick).
-            #[cfg(feature = "java-mods-120")]
-            let theirs = super::java_mods_120::mobs::seen_in(self.dim.id());
-            let counted = self.mobs.iter().map(|m| Counted {
-                entity: &m.kind.id,
-                category: Category::from_name(&m.kind.category),
-                block: [
-                    m.position.x.floor() as i32,
-                    m.position.y.floor() as i32,
-                    m.position.z.floor() as i32,
-                ],
-                is_mob: true,
-                persistent: m.persistent
-                    || horizon_client::mobs::ai::requires_custom_persistence(m),
-            });
-            #[cfg(feature = "java-mods-120")]
-            let counted = counted.chain(theirs.iter().map(|m| Counted {
-                entity: &m.kind,
-                category: Category::from_name(&m.category),
-                block: m.pos.map(|c| c.floor() as i32),
-                is_mob: m.is_mob,
-                persistent: m.persistent,
-            }));
-            scratch.spawn_players.clear();
-            scratch
-                .spawn_players
-                .extend(players.iter().map(|p| SpawnPlayer {
-||||||| base
-            let counted = self.mobs.iter().map(|m| Counted {
-                entity: &m.kind.id,
-                category: Category::from_name(&m.kind.category),
-                block: [
-                    m.position.x.floor() as i32,
-                    m.position.y.floor() as i32,
-                    m.position.z.floor() as i32,
-                ],
-                is_mob: true,
-                persistent: m.persistent
-                    || horizon_client::mobs::ai::requires_custom_persistence(m),
-            });
-            scratch.spawn_players.clear();
-            scratch
-                .spawn_players
-                .extend(players.iter().map(|p| SpawnPlayer {
-=======
-            let counted: Vec<Counted> = self
+            let mut counted: Vec<Counted> = self
                 .mobs
                 .iter()
                 .map(|m| Counted {
@@ -1596,10 +1496,20 @@ impl<'a> Game<'a> {
                         || horizon_client::mobs::ai::requires_custom_persistence(m),
                 })
                 .collect();
+            // The 1.20.1 mods' mobs count toward the caps too (their runtime's, last tick).
+            #[cfg(feature = "java-mods-120")]
+            let theirs = super::java_mods_120::mobs::seen_in(self.dim.id());
+            #[cfg(feature = "java-mods-120")]
+            counted.extend(theirs.iter().map(|m| Counted {
+                entity: &m.kind,
+                category: Category::from_name(&m.category),
+                block: m.pos.map(|c| c.floor() as i32),
+                is_mob: m.is_mob,
+                persistent: m.persistent,
+            }));
             let players = players
                 .iter()
                 .map(|p| SpawnPlayer {
->>>>>>> theirs
                     position: [p.position.x, p.position.y, p.position.z],
                     spectator: p.spectator,
                 })

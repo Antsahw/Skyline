@@ -1226,8 +1226,9 @@ pub fn folder_id(mod_id: &str) -> Option<String> {
     let ok = (1..=64).contains(&mod_id.len())
         && mod_id
             .bytes()
-            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"_-".contains(&b));
-    ok.then(|| mod_id.replace('-', "_"))
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"_-.".contains(&b));
+    // Skyline: a 1.20.1 mod's id may hold dots too (`fabric-api.base`).
+    ok.then(|| mod_id.replace(['-', '.'], "_"))
 }
 
 /// Carries `jar` over into `out/carry/`. With the oracle's `facts`, blocks
@@ -1268,43 +1269,15 @@ pub fn carry(
 ) -> Result<Report, String> {
     let loaded = pack.loaded;
     let id = &info.mod_id;
-<<<<<<< ours
-    if id.is_empty()
-        || id.len() > 64
-        || !id
-            .bytes()
-            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"_-.".contains(&b))
-    {
-||||||| base
-    if id.is_empty()
-        || id.len() > 64
-        || !id
-            .bytes()
-            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
-    {
-=======
     let Some(folder) = folder_id(id) else {
->>>>>>> theirs
         return Err(format!(
-<<<<<<< ours
             "mod id {id:?} is not [a-z0-9_-.]{{1,64}}: rename it before carrying over"
-||||||| base
-            "mod id {id:?} is not [a-z0-9_]{{1,64}}: rename it before carrying over"
-=======
-            "mod id {id:?} is not [a-z0-9_-]{{1,64}}: rename it before carrying over"
->>>>>>> theirs
         ));
-<<<<<<< ours
-    }
+    };
     // Fabric's ids may hold `-` and `.` (`cloth-config`, `fabric-api`); a content mod's id may
     // not. Its manifest takes the id with `_` for them and owns the original as a namespace
     // (its files keep their names).
-    let content_id = id.replace(['-', '.'], "_");
-||||||| base
-    }
-=======
-    };
->>>>>>> theirs
+    let content_id = folder.clone();
     let file = fs::File::open(jar).map_err(|e| format!("{}: {e}", jar.display()))?;
     let mut zip = crate::zip_intake::open(file).map_err(|e| format!("{}: {e}", jar.display()))?;
     // The previous harness verdict describes the content we are about to replace.
@@ -1848,16 +1821,8 @@ pub fn carry(
         "client"
     };
     let mut manifest = format!(
-<<<<<<< ours
-        "# Carried over from {jar} by horizon-port-pack, for local use only.\n# Licence: {license}\nid = {}\nname = {}\nversion = {}\napi = \"0.2\"\nside = \"{side}\"\ncapabilities = [\"registries\"]\n",
-        q(&content_id),
-||||||| base
-        "# Carried over from {jar} by horizon-port-pack, for local use only.\n# Licence: {license}\nid = {}\nname = {}\nversion = {}\napi = \"0.2\"\nside = \"both\"\ncapabilities = [\"registries\"]\n",
-        q(id),
-=======
         "# Carried over from {jar} by horizon-port-pack, for local use only.\n# Licence: {license}\nid = {}\nname = {}\nversion = {}\napi = \"0.2\"\nside = \"both\"\ncapabilities = [\"registries\"]\n",
         q(&folder),
->>>>>>> theirs
         q(name),
         q(&info.version),
         // In a `#` comment: a line break from the jar would end it and write keys of its own.
@@ -3528,15 +3493,9 @@ mod tests {
         let carried = out.join("carry");
         let package = horizon_mod_package::Package::read(&carried).unwrap();
         assert_eq!(package.manifest.namespaces, ["kaisyn", "towers_wg"]);
-<<<<<<< ours
         // Its structures change the world: every player joining needs it.
         assert_eq!(package.manifest.side, horizon_mods::Side::Both);
-        let content = horizon_mods::Content::read(&carried, &package.manifest).unwrap();
-||||||| base
-        let content = horizon_mods::Content::read(&carried, &package.manifest).unwrap();
-=======
         let content = horizon_mod_package::Content::read(&carried, &package.manifest).unwrap();
->>>>>>> theirs
         assert!(
             content
                 .files
@@ -3552,7 +3511,6 @@ mod tests {
         fs::remove_dir_all(&dir).unwrap();
     }
 
-<<<<<<< ours
     /// A mod with no block, item or data (a minimap: textures and translations) is carried as a
     /// client-side mod, which any server accepts the player with.
     #[test]
@@ -3593,8 +3551,6 @@ mod tests {
         fs::remove_dir_all(&dir).unwrap();
     }
 
-||||||| base
-=======
     /// A biome modifier that names its biomes by the loader's convention tags
     /// (`#c:is_overworld`) brings those tags along, as a structure does: the
     /// game has no loader to supply them and skips a modifier whose tag it
@@ -3656,7 +3612,6 @@ mod tests {
         fs::remove_dir_all(&dir).unwrap();
     }
 
->>>>>>> theirs
     /// Overrides make looks of the mod's own models only, and never of an item it registers.
     #[test]
     fn override_targets_lose_their_definition_only_when_they_are_looks() {

@@ -404,6 +404,10 @@ impl Game<'_> {
     }
     /// A mouse button while playing (window or control socket).
     pub(super) fn play_mouse(&mut self, button: MouseButton, pressed: bool) -> Result<()> {
+        // A Java mod's key binding on a mouse button (game/java/java_screen.rs).
+        if self.remote.is_some() {
+            self.java_bind_mouse(button, pressed);
+        }
         if pressed {
             self.pvp_click(button);
         }

@@ -1146,29 +1146,10 @@ impl Game<'_> {
             let Some(gs) = host.menus.get(&conn).and_then(|p| p.station.as_ref()) else {
                 continue;
             };
-<<<<<<< ours
             // A server mod's station menu has no block behind it.
             if host.play.get(&conn).and_then(|p| p.mod_window) == Some(gs.window) {
                 continue;
             }
-            if !self.lan_station_valid(g, gs) {
-                let window = gs.window;
-                self.lan_station_closed(host, conn, Some(window));
-                host.hub.send_to(
-                    conn,
-                    &C::ContainerClose(play::ContainerClose { container: window }),
-                );
-            } else if gs.kind == StationKind::Beacon {
-||||||| base
-            if !self.lan_station_valid(g, gs) {
-                let window = gs.window;
-                self.lan_station_closed(host, conn, Some(window));
-                host.hub.send_to(
-                    conn,
-                    &C::ContainerClose(play::ContainerClose { container: window }),
-                );
-            } else if gs.kind == StationKind::Beacon {
-=======
             let (window, beacon, pos) = (gs.window, gs.kind == StationKind::Beacon, gs.pos);
             let invalid = !self
                 .portable_station_valid(g, window)
@@ -1182,7 +1163,6 @@ impl Game<'_> {
                     );
                 }
             } else if beacon {
->>>>>>> theirs
                 // The beacon's data slots follow its block entity.
                 let data = self.beacon_data(pos);
                 if let Some(gs) = self

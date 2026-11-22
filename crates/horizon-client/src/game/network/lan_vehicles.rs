@@ -224,19 +224,13 @@ impl Game<'_> {
         let Some(vehicle) = g.vehicle else {
             return;
         };
-<<<<<<< ours
-        let (mut keys, dead) = (input_keys(g.input), g.dead || g.health <= 0.0);
-||||||| base
-        let (keys, dead) = (input_keys(g.input), g.dead || g.health <= 0.0);
-=======
         if self.persist.removed_vehicles.contains_key(&vehicle) {
             // A canceled destruction dismount still owns the removed object.
             // Retry in the player's tick, not by silently dropping the edge.
             self.as_guest(conn, |game| game.stop_riding());
             return;
         }
-        let (keys, dead) = (input_keys(g.input), g.dead || g.health <= 0.0);
->>>>>>> theirs
+        let (mut keys, dead) = (input_keys(g.input), g.dead || g.health <= 0.0);
         let boat = self.boats.iter().position(|b| b.id == vehicle);
         let cart = self.carts.iter().any(|c| c.id == vehicle);
         let mount = self.mobs.iter().any(|m| m.id == vehicle);
@@ -324,21 +318,10 @@ impl Game<'_> {
             let p = game.player.as_ref()?.position;
             Some([p.x, p.y, p.z])
         });
-<<<<<<< ours
         // Off it now (the seat is gone): the ends of stopRiding/removeVehicle for the mods.
         if keys.shift && matches!(seat, Some(None)) {
             self.as_guest(host, conn, |game| game.java_dismount(vehicle, true));
         }
-        if let Some(Some(at)) = seat {
-            let g = &mut host.hub.guests[gi];
-            g.previous_position = g.position;
-            g.position = at;
-||||||| base
-        if let Some(Some(at)) = seat {
-            let g = &mut host.hub.guests[gi];
-            g.previous_position = g.position;
-            g.position = at;
-=======
         if let Some(Some(at)) = seat
             && let Some(host) = self.lan.as_mut()
         {
@@ -346,7 +329,6 @@ impl Game<'_> {
                 g.previous_position = g.position;
                 g.position = at;
             });
->>>>>>> theirs
         }
     }
 

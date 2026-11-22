@@ -11,7 +11,7 @@ use serde_json::Value;
 
 /// The players the Java mods saw last tick (joins and leaves), and what players did this tick:
 /// `ModsState::java`.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(in crate::game) struct JavaServerState {
     pub(super) players: Vec<JavaPlayer>,
     pub(super) events: Vec<ModEvent>,

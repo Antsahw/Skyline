@@ -1462,23 +1462,10 @@ impl Game<'_> {
             );
             return self.eject_into(pos, hopper, &target, face);
         }
-<<<<<<< ours
         // A Java mod's block (its block entity lives in Java): through its item storage.
         if let Some(moved) = self.java_eject(hopper, front, face) {
             return moved;
         }
-        let Some(id) = self.entity_container_at([
-            f64::from(front.0) + 0.5,
-            f64::from(front.1) + 0.5,
-            f64::from(front.2) + 0.5,
-        ]) else {
-||||||| base
-        let Some(id) = self.entity_container_at([
-            f64::from(front.0) + 0.5,
-            f64::from(front.1) + 0.5,
-            f64::from(front.2) + 0.5,
-        ]) else {
-=======
         let Some(found) = self.automation_entity_at(
             [
                 f64::from(front.0) + 0.5,
@@ -1487,7 +1474,6 @@ impl Game<'_> {
             ],
             face,
         ) else {
->>>>>>> theirs
             return false;
         };
         match found {
@@ -1626,36 +1612,9 @@ impl Game<'_> {
         }
         let c = self.containers();
         let Some(source) = c.hopper_insertion_view(above) else {
-<<<<<<< ours
             if let Some(took) = self.java_suck(above, hopper) {
                 return Some(took);
             }
-            let id = self.entity_container_at(at)?;
-            self.native_hopper_inventory_search(
-                [
-                    hopper.parts[0].0.0,
-                    hopper.parts[0].0.1,
-                    hopper.parts[0].0.2,
-                ],
-                None,
-                Some(id),
-            );
-            return self
-                .with_entity_container(id, |g, source| g.suck_from_slots(None, source, hopper));
-||||||| base
-            let id = self.entity_container_at(at)?;
-            self.native_hopper_inventory_search(
-                [
-                    hopper.parts[0].0.0,
-                    hopper.parts[0].0.1,
-                    hopper.parts[0].0.2,
-                ],
-                None,
-                Some(id),
-            );
-            return self
-                .with_entity_container(id, |g, source| g.suck_from_slots(None, source, hopper));
-=======
             let found = self.automation_entity_at(at, Direction::Down)?;
             return match found {
                 AutomationEntity::Container(id) => {
@@ -1669,7 +1628,6 @@ impl Game<'_> {
                     Some(self.suck_from_part(&part, [above.0, above.1, above.2], hopper))
                 }
             };
->>>>>>> theirs
         };
         self.native_hopper_inventory_search([x, y, z], Some([above.0, above.1, above.2]), None);
         if let Kind::Composter(level) = source.kind {
@@ -2075,53 +2033,12 @@ impl Game<'_> {
         };
         let target = offset(key, facing);
         let remaining = if dropper {
-<<<<<<< ours
             // A Java mod's block in front (machines/java.rs).
             if self.containers().view(target, false).is_none()
                 && self.java_item_storage([target.0, target.1, target.2], facing.opposite())
             {
                 return self.java_drop(key, &view, target, facing.opposite());
             }
-            // `HopperBlockEntity.getContainerAt`: the block's container, else a
-            // container entity (chest boat, chest or hopper minecart) there.
-            let one = ItemStack {
-                count: 1,
-                ..stack.clone()
-            };
-            let face = Some(facing.opposite());
-            let inserted = match self.containers().view(target, false) {
-                Some(into) => Some(self.dropper_insert(&into, one, face)),
-                None => self
-                    .entity_container_at([
-                        f64::from(target.0) + 0.5,
-                        f64::from(target.1) + 0.5,
-                        f64::from(target.2) + 0.5,
-                    ])
-                    .and_then(|id| {
-                        self.with_entity_container(id, |g, into| g.dropper_insert(into, one, face))
-                    }),
-            };
-||||||| base
-            // `HopperBlockEntity.getContainerAt`: the block's container, else a
-            // container entity (chest boat, chest or hopper minecart) there.
-            let one = ItemStack {
-                count: 1,
-                ..stack.clone()
-            };
-            let face = Some(facing.opposite());
-            let inserted = match self.containers().view(target, false) {
-                Some(into) => Some(self.dropper_insert(&into, one, face)),
-                None => self
-                    .entity_container_at([
-                        f64::from(target.0) + 0.5,
-                        f64::from(target.1) + 0.5,
-                        f64::from(target.2) + 0.5,
-                    ])
-                    .and_then(|id| {
-                        self.with_entity_container(id, |g, into| g.dropper_insert(into, one, face))
-                    }),
-            };
-=======
             let side = facing.opposite();
             let inserted = self.with_container_at(target, side, |game, into| match into {
                 ContainerTarget::View(into) => {
@@ -2141,7 +2058,6 @@ impl Game<'_> {
                     ControlFlow::Break(())
                 }
             });
->>>>>>> theirs
             match inserted {
                 Some(ControlFlow::Break(())) => {
                     self.container_changed(key);

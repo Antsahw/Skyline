@@ -21,14 +21,6 @@ mod projectile_targets;
 mod projectile_world;
 pub(super) use projectile_world::ProjWorld;
 mod pufferfish_player;
-<<<<<<< ours
-mod spawn_eggs;
-
-mod java;
-||||||| base
-mod spawn_eggs;
-
-=======
 mod residency;
 #[cfg(test)]
 mod retained_limits_tests;
@@ -43,7 +35,7 @@ mod world_view;
 use super::api_values::TryIntoApi;
 use super::level_sounds::LevelSound;
 use super::piston_push::Lid;
->>>>>>> theirs
+mod java;
 use super::{
     Dim, Game, InteractTarget, entity_culling::EntityCullDecision, native_mob_draw::PlayerRender,
     native_projectiles::Impact, view_vector,
@@ -1050,128 +1042,6 @@ impl Game<'_> {
         }
         self.world.bottom_y()
     }
-<<<<<<< ours
-    pub(super) fn mob_world_base<'s>(&'s self, others: &'s [Seen]) -> MobWorld<'s> {
-        let (rain, thunder) = self.weather_levels(1.0);
-        let weather = self.can_have_weather();
-        let player = self.player_view();
-        MobWorld {
-            world: &self.world,
-            registry: self.pack.assets.registry,
-            facts: self.res.facts(),
-            fluid_tables: &self.motion.fluids,
-            movement: &self.motion.blocks,
-            collision: self.collision,
-            suffocation: self.mob_suffocation(),
-            data: self.res.mob_data(),
-            controlling_player_movement: None,
-            nearest_player: player.as_ref().filter(|p| !p.spectator).map(|p| p.position),
-            player,
-            others,
-            dragon: self.dragon_target(),
-            leash_boats: &self.leash_boats,
-            others_grid: None,
-            others_index: None,
-            others_villagers: None,
-            others_solid: None,
-            daylight: self.dim.vanilla() != Dim::Nether && self.sky_darken() < 4,
-            // day.json: false from tick 12542, true from 23460 (a step track).
-            monsters_burn: self.dimension_type().has_timeline("minecraft:day")
-                && !(12542..23460).contains(&self.world.day_time.rem_euclid(24000)),
-            game_time: self.world.game_time,
-            day_time: self.world.day_time,
-            raining: weather && rain > 0.2,
-            thundering: weather && thunder > 0.9,
-            level: self.level_key(),
-            block_tags: &self.items().block_tags,
-            landing: &self.motion.landing,
-            biomes: world_biomes!(self),
-            mob_griefing: self.ui.rules.bool("mob_griefing"),
-            universal_anger: self.ui.rules.bool("universal_anger"),
-            mob_drops: self.ui.rules.bool("mob_drops"),
-            max_entity_cramming: self.ui.rules.int("max_entity_cramming"),
-            dimension_type: self.dimension_type(),
-            world_seed: self.level.seed,
-            sea_level: horizon_world::level::sea_level_of(self.level_key()),
-            teams: std::sync::Arc::new(self.mob_teams()),
-            items: Some(self.items()),
-            lid_openers: &self.lid_openers,
-            mod_effects: self.remote.is_none().then_some(self as _),
-            // A warden's away suspects are UUIDs: on the server side, where the
-            // entity UUIDs live, they resolve back to the mobs that are here.
-            who_lookup: self.remote.is_none().then_some(self as _),
-            foreign: None,
-            border: Some(self.border.geometry()),
-            // The first player in the level: a server has no player of its own.
-            difficulty: self.local_difficulty(
-                self.level_players_iter()
-                    .next()
-                    .map_or([0.0; 3], |p| [p.position.x, p.position.y, p.position.z]),
-            ),
-        }
-    }
-||||||| base
-    pub(super) fn mob_world_base<'s>(&'s self, others: &'s [Seen]) -> MobWorld<'s> {
-        let (rain, thunder) = self.weather_levels(1.0);
-        let weather = self.can_have_weather();
-        let player = self.player_view();
-        MobWorld {
-            world: &self.world,
-            registry: self.pack.assets.registry,
-            facts: self.res.facts(),
-            fluid_tables: &self.motion.fluids,
-            movement: &self.motion.blocks,
-            collision: self.collision,
-            suffocation: self.mob_suffocation(),
-            data: self.res.mob_data(),
-            controlling_player_movement: None,
-            nearest_player: player.as_ref().filter(|p| !p.spectator).map(|p| p.position),
-            player,
-            others,
-            dragon: self.dragon_target(),
-            leash_boats: &self.leash_boats,
-            others_grid: None,
-            others_index: None,
-            others_villagers: None,
-            others_solid: None,
-            daylight: self.dim != Dim::Nether && self.sky_darken() < 4,
-            // day.json: false from tick 12542, true from 23460 (a step track).
-            monsters_burn: self.dimension_type().has_timeline("minecraft:day")
-                && !(12542..23460).contains(&self.world.day_time.rem_euclid(24000)),
-            game_time: self.world.game_time,
-            day_time: self.world.day_time,
-            raining: weather && rain > 0.2,
-            thundering: weather && thunder > 0.9,
-            level: self.level_key(),
-            block_tags: &self.items().block_tags,
-            landing: &self.motion.landing,
-            biomes: world_biomes!(self),
-            mob_griefing: self.ui.rules.bool("mob_griefing"),
-            universal_anger: self.ui.rules.bool("universal_anger"),
-            mob_drops: self.ui.rules.bool("mob_drops"),
-            max_entity_cramming: self.ui.rules.int("max_entity_cramming"),
-            dimension_type: self.dimension_type(),
-            world_seed: self.level.seed,
-            sea_level: horizon_world::level::sea_level_of(self.level_key()),
-            teams: std::sync::Arc::new(self.mob_teams()),
-            items: Some(self.items()),
-            lid_openers: &self.lid_openers,
-            mod_effects: self.remote.is_none().then_some(self as _),
-            // A warden's away suspects are UUIDs: on the server side, where the
-            // entity UUIDs live, they resolve back to the mobs that are here.
-            who_lookup: self.remote.is_none().then_some(self as _),
-            foreign: None,
-            border: Some(self.border.geometry()),
-            // The first player in the level: a server has no player of its own.
-            difficulty: self.local_difficulty(
-                self.level_players_iter()
-                    .next()
-                    .map_or([0.0; 3], |p| [p.position.x, p.position.y, p.position.z]),
-            ),
-        }
-    }
-=======
->>>>>>> theirs
     /// What the generator finalizes this level's structure mobs with.
     pub(super) fn share_spawn_conditions(&self) {
         if let Some(terrain) = self.end.locator() {
@@ -1438,15 +1308,9 @@ impl Game<'_> {
             m.on_climbable = climbing;
         }
         let mut snapshot = std::mem::take(&mut self.creatures.seen_buf);
-<<<<<<< ours
-        self.prepare_mobs(uuid, &mut snapshot);
+        snapshot.extend(self.mobs.iter().map(|m| seen(m, uuid, self.items())));
         // The Java mods' living entities, as the vanilla types they are taken for.
         snapshot.extend(self.java_neighbours_seen());
-||||||| base
-        self.prepare_mobs(uuid, &mut snapshot);
-=======
-        snapshot.extend(self.mobs.iter().map(|m| seen(m, uuid, self.items())));
->>>>>>> theirs
         let mut events = std::mem::take(&mut self.creatures.event_buf);
         events.clear();
         let passenger_objects = self.retained_passenger_snapshot(uuid);
@@ -1724,8 +1588,7 @@ impl Game<'_> {
             // The body may be gone already.
             self.set_bed_occupied(bed, false);
         }
-<<<<<<< ours
-        let killer = self.last_hurt_by_player.remove(&m.id);
+        self.last_hurt_by_player.remove(&m.id);
         // The 1.20.1 mods' death events (java_mods_120/items.rs): their drops land with the mob's.
         #[cfg(feature = "java-mods-120")]
         {
@@ -1736,11 +1599,6 @@ impl Game<'_> {
             let at = [m.position.x, m.position.y, m.position.z];
             self.java120_mob_died(&kind, at, damage_type, killer.flatten());
         }
-||||||| base
-        let killer = self.last_hurt_by_player.remove(&m.id);
-=======
-        self.last_hurt_by_player.remove(&m.id);
->>>>>>> theirs
         // TamableAnimal.die, before the rest of LivingEntity.die.
         self.tell_owner_pet_died(m, killer);
         self.love_cause.remove(&m.id);
@@ -4586,20 +4444,9 @@ impl Game<'_> {
         let hear = self.native_hears_impacts();
         let mut impacts: Vec<Impact> = Vec::new();
         let mut vehicle_winds = self.vehicle_winds();
-<<<<<<< ours
-        {
-            let mut targets = self.projectile_targets();
-            // The mods' living entities: Horizon's arrows and snowballs meet them too.
-            targets.extend(self.java_projectile_targets());
-            let breezes: Vec<u32> = self
-                .mobs
-||||||| base
-        {
-            let targets = self.projectile_targets();
-            let breezes: Vec<u32> = self
-                .mobs
-=======
-        let targets = self.projectile_targets();
+        let mut targets = self.projectile_targets();
+        // The mods' living entities: Horizon's arrows and snowballs meet them too.
+        targets.extend(self.java_projectile_targets());
         let breezes: Vec<u32> = self
             .mobs
             .iter()
@@ -4630,7 +4477,6 @@ impl Game<'_> {
         let dead_guests: Vec<u32> = self.lan.as_ref().map_or_else(Vec::new, |h| {
             h.hub
                 .guests
->>>>>>> theirs
                 .iter()
                 .filter(|g| g.dead)
                 .map(|g| g.conn)

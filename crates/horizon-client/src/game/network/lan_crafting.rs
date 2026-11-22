@@ -4,15 +4,9 @@
 //! guest's inventory, with vanilla's packets: OpenScreen, container clicks
 //! and their corrections, and the grid back into the inventory when the menu
 //! closes (`AbstractContainerMenu.clearContainer`).
-<<<<<<< ours
 mod java;
-use super::{Game, lan::LanHost};
-||||||| base
-use super::{Game, lan::LanHost};
-=======
 use super::{Game, transactions::decision::MenuOwner};
 use horizon_client::lan::recipes;
->>>>>>> theirs
 use horizon_client::{
     containers::{BlockEntity, ModMenuType},
     furnace::FurnaceCooking,
@@ -259,20 +253,14 @@ impl Game<'_> {
         let item_crafted = std::mem::take(&mut menu.item_crafted);
         let crafted_counts = std::mem::take(&mut menu.crafted_counts);
         menu.drops.clear();
-<<<<<<< ours
         let takes = std::mem::take(&mut menu.crafted_takes);
-        store_player(menu, &mut host.hub.guests[gi]);
-        self.lan_java_crafted(host, gi, &takes);
-||||||| base
-        store_player(menu, &mut host.hub.guests[gi]);
-=======
         let host = self.lan.as_mut()?;
         host.hub
             .guests
             .update(gi, |guest| store_player(menu, guest));
         let guest = &host.hub.guests[gi];
         let (conn, uuid, entity_id) = (guest.conn, guest.uuid, guest.entity_id);
->>>>>>> theirs
+        self.lan_java_crafted(host, gi, &takes);
         // `ItemStack.onCraftedBy`'s `Stats.ITEM_CRAFTED` count, before the
         // recipe the take used.
         if !crafted_counts.is_empty() {
@@ -1161,15 +1149,10 @@ impl Game<'_> {
         };
         if let Some(gi) = gi
             && !host.hub.guests[gi].spectator()
-<<<<<<< ours
-            && (modded || self.lan_table_valid(&host.hub.guests[gi], pos))
-||||||| base
-            && self.lan_table_valid(&host.hub.guests[gi], pos)
-=======
-            && self
-                .portable_station_valid(&host.hub.guests[gi], window)
-                .unwrap_or_else(|| self.lan_table_valid(&host.hub.guests[gi], pos))
->>>>>>> theirs
+            && (modded
+                || self
+                    .portable_station_valid(&host.hub.guests[gi], window)
+                    .unwrap_or_else(|| self.lan_table_valid(&host.hub.guests[gi], pos)))
         {
             let Some(mut changed) = self.guest_menu_op(gi, &mut menu, |menu, env| {
                 let before: Vec<_> = (0..menu.slot_count())
@@ -1514,23 +1497,8 @@ impl Game<'_> {
             .menus
             .iter()
             .filter_map(|(c, p)| p.crafting.table.as_ref().map(|t| (*c, t.0, t.3)))
-<<<<<<< ours
             // A server mod's crafting menu has no table behind it.
             .filter(|&(c, window, _)| host.play.get(&c).and_then(|p| p.mod_window) != Some(window))
-            .filter(|&(c, _, pos)| {
-                host.hub
-                    .guests
-                    .iter()
-                    .find(|g| g.conn == c)
-                    .is_some_and(|g| host.hub.here(g) && !self.lan_table_valid(g, pos))
-||||||| base
-            .filter(|&(c, _, pos)| {
-                host.hub
-                    .guests
-                    .iter()
-                    .find(|g| g.conn == c)
-                    .is_some_and(|g| host.hub.here(g) && !self.lan_table_valid(g, pos))
-=======
             .filter(|&(c, window, pos)| {
                 host.hub.guests.iter().find(|g| g.conn == c).is_some_and(|g| {
                     host.hub.here(g)
@@ -1538,7 +1506,6 @@ impl Game<'_> {
                             .portable_station_valid(g, window)
                             .unwrap_or_else(|| self.lan_table_valid(g, pos))
                 })
->>>>>>> theirs
             })
             .map(|(c, window, _)| (c, window))
             .collect();

@@ -364,7 +364,6 @@ impl Hub {
         items: Vec<Option<ItemStack>>,
         extra: Option<Vec<u8>>,
     ) {
-<<<<<<< ours
         self.open_container_at(conn, menu_kind, title, Some(pos), slots, items, extra);
     }
 
@@ -392,10 +391,6 @@ impl Hub {
         items: Vec<Option<ItemStack>>,
         extra: Option<Vec<u8>>,
     ) {
-        let Some(kind) = self
-||||||| base
-        let Some(kind) = self
-=======
         self.open_menu_window(conn, menu_kind, title, Some(pos), slots, items, extra);
     }
 
@@ -414,40 +409,12 @@ impl Hub {
         extra: Option<Vec<u8>>,
     ) -> Option<i32> {
         let kind = self
->>>>>>> theirs
             .sync
             .builtin
             .get("minecraft:menu")
             .and_then(|m| m.id(menu_kind))?;
         let i = self.guests.iter().position(|g| g.conn == conn)?;
         self.close_container_at(i);
-<<<<<<< ours
-        let g = &mut self.guests[i];
-        g.next_window = g.next_window % 100 + 1;
-        let window = g.next_window;
-        if let (Some(data), Some(pos)) = (extra, pos) {
-            let message = horizon_protocol::menu_extra::Message {
-                window,
-                pos: [pos.0, pos.1, pos.2],
-                data,
-            };
-            match horizon_protocol::menu_extra::encode(&message) {
-                Ok(data) => g.send(&C::CustomPayload(CustomPayload {
-                    channel: horizon_protocol::menu_extra::CHANNEL.into(),
-||||||| base
-        let g = &mut self.guests[i];
-        g.next_window = g.next_window % 100 + 1;
-        let window = g.next_window;
-        if let Some(data) = extra {
-            let message = horizon_protocol::menu_extra::Message {
-                window,
-                pos: [pos.0, pos.1, pos.2],
-                data,
-            };
-            match horizon_protocol::menu_extra::encode(&message) {
-                Ok(data) => g.send(&C::CustomPayload(CustomPayload {
-                    channel: horizon_protocol::menu_extra::CHANNEL.into(),
-=======
         let window = self.guests.update(i, |g| {
             let window = g.next_menu_window();
             if slots == Slots::Native {
@@ -457,7 +424,6 @@ impl Hub {
                 let message = horizon_protocol::menu_extra::Message {
                     window,
                     pos: pos.map(|p| [p.0, p.1, p.2]),
->>>>>>> theirs
                     data,
                 };
                 // A client that answered no revision query (an older Horizon build)
@@ -475,51 +441,6 @@ impl Hub {
                     Err(e) => log::warn!("Horizon: {menu_kind}'s extra data not sent: {e}"),
                 }
             }
-<<<<<<< ours
-        }
-        g.send(&C::OpenScreen(play::OpenScreen {
-            container: window,
-            menu: kind,
-            title,
-        }));
-        let mod_type = crate::containers::mod_menu_type(menu_kind);
-        g.menu = Some(Menu {
-            window,
-            kind,
-            pos,
-            slots,
-            size: items.len(),
-            state: 0,
-            sent: Vec::new(),
-            drag: None,
-            sent_data: Vec::new(),
-            hidden: Vec::new(),
-            mod_type,
-            craft: None,
-            links: Vec::new(),
-||||||| base
-        }
-        g.send(&C::OpenScreen(play::OpenScreen {
-            container: window,
-            menu: kind,
-            title,
-        }));
-        let mod_type = crate::containers::mod_menu_type(menu_kind);
-        g.menu = Some(Menu {
-            window,
-            kind,
-            pos: Some(pos),
-            slots,
-            size: items.len(),
-            state: 0,
-            sent: Vec::new(),
-            drag: None,
-            sent_data: Vec::new(),
-            hidden: Vec::new(),
-            mod_type,
-            craft: None,
-            links: Vec::new(),
-=======
             g.send(&C::OpenScreen(play::OpenScreen {
                 container: window,
                 menu: kind,
@@ -544,7 +465,6 @@ impl Hub {
                 asks_still_valid: super::menu::asks_still_valid(mod_type, menu_kind),
             });
             window
->>>>>>> theirs
         });
         self.send_menu_content(i, items);
         Some(window)

@@ -1224,13 +1224,10 @@ impl Game<'_> {
             .as_ref()
             .is_some_and(|p| p.health.absorption() <= 0.0);
         let mut effects = std::mem::take(&mut self.potions.effects);
-<<<<<<< ours
         // The 1.20.1 mods' effects due this tick: their own code runs them, once the
         // effects have ticked (java_mods_120/effects.rs).
         #[cfg(feature = "java-mods-120")]
         let mut due_120: Vec<(&'static str, i32, i32)> = Vec::new();
-||||||| base
-=======
         // `MobEffectEvent.Expired`: ask before the pass, for the effects at
         // zero ticks and the ones reaching it in this pass (the last tick of
         // their countdown); a canceled expiry keeps the effect at no ticks,
@@ -1262,18 +1259,7 @@ impl Game<'_> {
         } else {
             Vec::new()
         };
->>>>>>> theirs
         let (actions, raid_omen_added) = effects.tick_with(
-<<<<<<< ours
-            &mut |e, t| {
-                #[cfg(feature = "java-mods-120")]
-                if super::java_mods_120::is_effect(e.id) {
-                    due_120.push((e.id, t, e.amplifier));
-                    return OmenTick::Continue;
-                }
-||||||| base
-            &mut |e, t| {
-=======
             &mut |e, t, actions, dispatch| {
                 for action in actions.drain(..) {
                     self.apply_effect_action(action);
@@ -1281,7 +1267,11 @@ impl Game<'_> {
                 if !dispatch {
                     return OmenTick::Continue;
                 }
->>>>>>> theirs
+                #[cfg(feature = "java-mods-120")]
+                if super::java_mods_120::is_effect(e.id) {
+                    due_120.push((e.id, t, e.amplifier));
+                    return OmenTick::Continue;
+                }
                 if !brewing::is_mod_effect(e.id) {
                     self.omen_tick(e)
                 } else {
@@ -1422,13 +1412,10 @@ impl Game<'_> {
         }
     }
     pub(super) fn add_player_effect(&mut self, effect: EffectInstance) -> bool {
-<<<<<<< ours
         // Java mods' heads of LivingEntity.addEffect may refuse it.
         if self.java_add_effect(&effect) {
             return false;
         }
-||||||| base
-=======
         // `LivingEntity.addEffect` refuses what cannot affect the entity;
         // players pass the tag check, but the `mob_effect_applicable` hook
         // is asked for every add.
@@ -1438,7 +1425,6 @@ impl Game<'_> {
         if !self.can_be_affected_resolved(None, "minecraft:player", effect.id, key) {
             return false;
         }
->>>>>>> theirs
         let id = effect.id;
         let amp = effect.amplifier;
         let new = self.potions.effects.get(id).is_none();

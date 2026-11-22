@@ -710,26 +710,14 @@ impl Game<'_> {
         let (end_portal, gateway) = self.inside_end_portals(at, WIDTH, HEIGHT);
         if end_portal && !riding {
             // EndPortalBlock.entityInside: the first exit from the End shows the credits.
-<<<<<<< ours
-            if self.dim.vanilla() == Dim::End && !host.hub.guest(conn).is_some_and(|g| g.seen_credits) {
-                if let Some(g) = host.hub.guests.iter_mut().find(|g| g.conn == conn) {
-                    g.seen_credits = true;
-                }
-||||||| base
-            if self.dim == Dim::End && !host.hub.guest(conn).is_some_and(|g| g.seen_credits) {
-                if let Some(g) = host.hub.guests.iter_mut().find(|g| g.conn == conn) {
-                    g.seen_credits = true;
-                }
-=======
             let Some(host) = self.lan.as_mut() else {
                 return;
             };
-            if self.dim == Dim::End && !host.hub.guest(conn).is_some_and(|g| g.seen_credits) {
+            if self.dim.vanilla() == Dim::End && !host.hub.guest(conn).is_some_and(|g| g.seen_credits) {
                 let _ = host
                     .hub
                     .guests
                     .update_connection(conn, |g| g.seen_credits = true);
->>>>>>> theirs
                 host.play.entry(conn).or_default().won_game = true;
                 // ClientboundGameEventPacket.WIN_GAME.
                 host.hub.send_to(
@@ -746,16 +734,8 @@ impl Game<'_> {
                 // anywhere else, out of it to the player's own point, in the
                 // level the config names (`findRespawnPositionAndUseSpawnBlock`,
                 // not used up).
-<<<<<<< ours
                 let (target, respawn) = if self.dim.vanilla() == Dim::End {
-                    self.end_departure(host, conn)
-||||||| base
-                let (target, respawn) = if self.dim == Dim::End {
-                    self.end_departure(host, conn)
-=======
-                let (target, respawn) = if self.dim == Dim::End {
                     self.end_departure(conn)
->>>>>>> theirs
                 } else {
                     (Dim::End, None)
                 };

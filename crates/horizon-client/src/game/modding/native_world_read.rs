@@ -358,23 +358,10 @@ impl Game<'_> {
         if !self.native_lifecycle.permits_read(context) {
             return Err(NativeBlockReadError::InactiveContext);
         }
-<<<<<<< ours
-        let Some(dim) = Dim::known(dimension) else {
-            return Err(NativeBlockReadError::UnavailableDimension);
-        };
-||||||| base
-        let dim = match dimension {
-            "minecraft:overworld" => Dim::Overworld,
-            "minecraft:the_nether" => Dim::Nether,
-            "minecraft:the_end" => Dim::End,
-            _ => return Err(NativeBlockReadError::UnavailableDimension),
-        };
-=======
         if !Dim::exists(dimension) {
             return Err(NativeBlockReadError::UnavailableDimension);
         }
         let dim = Dim::from_id(dimension);
->>>>>>> theirs
         let world = if dim == self.dim {
             Some(&self.world)
         } else {

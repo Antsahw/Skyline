@@ -92,25 +92,13 @@ pub(super) struct ModsState {
     pub(super) content_base: Arc<std::sync::OnceLock<PathBuf>>,
     /// `--dev-mod PATH`: content mods always on.
     pub(super) dev: Vec<PathBuf>,
-<<<<<<< ours
-    /// The WebAssembly mods found that no longer run, for the one-time notice.
-    stopped: Vec<String>,
-    /// The Java mods' server side (`java_server.rs`).
-    pub(super) java: super::java_server::JavaServerState,
-    /// Browse mods' worker (`mod_browser`).
-    pub(super) jobs: super::mod_browser::Jobs,
-||||||| base
-    /// The WebAssembly mods found that no longer run, for the one-time notice.
-    stopped: Vec<String>,
-    /// Browse mods' worker (`mod_browser`).
-    pub(super) jobs: super::mod_browser::Jobs,
-=======
     pub(super) native: std::sync::Arc<horizon_mod_package::runtime::Runtime>,
     pub(super) installation_side: horizon_mod_package::manifest::Side,
     pub(super) overrides_dir: PathBuf,
     pub(super) load_notices: Arc<Mutex<Vec<horizon_mod_package::dependencies::Notice>>>,
     pub(super) selected: std::sync::Arc<[horizon_mod_package::selection::SelectedPackage]>,
->>>>>>> theirs
+    /// The Java mods' server side (`java_server.rs`).
+    pub(super) java: super::java_server::JavaServerState,
     /// The content mods the loaded resources were built with: a switch the
     /// game can apply live moves it to the player's choice (`switch_mods`).
     pub(super) applied: Option<std::collections::BTreeSet<String>>,
@@ -684,37 +672,6 @@ pub(super) fn register_particles(role: ExecutionRole) {
 /// (docs/modpacks.md): their blocks, items, data and assets. Read once at
 /// start, before the resources load; a mod whose content is refused is left
 /// out here and its row on the Mods page says why.
-<<<<<<< ours
-pub(super) fn content_root(
-    root: &std::path::Path,
-    enabled: &std::collections::BTreeSet<String>,
-    disabled: &std::collections::BTreeSet<String>,
-    dev: &[std::path::PathBuf],
-) -> std::path::PathBuf {
-    let here = std::env::current_dir().unwrap_or_default();
-    // The Java mods' content mods are always on, as dev mods are (the jars in mods-java/ are
-    // what turns them on and off).
-    let dev = &[dev, super::java_mods::java_content(root).as_slice()].concat();
-    // So are the 1.20.1 mods' (mods-java-1.20.1/, docs/java-bridge-120.md).
-    #[cfg(feature = "java-mods-120")]
-    let dev = &[dev, super::java_mods_120::content(root).as_slice()].concat();
-    let version = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|p| p.to_owned()));
-    content_root_at(root, enabled, disabled, dev, &here, version.as_deref())
-||||||| base
-pub(super) fn content_root(
-    root: &std::path::Path,
-    enabled: &std::collections::BTreeSet<String>,
-    disabled: &std::collections::BTreeSet<String>,
-    dev: &[std::path::PathBuf],
-) -> std::path::PathBuf {
-    let here = std::env::current_dir().unwrap_or_default();
-    let version = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|p| p.to_owned()));
-    content_root_at(root, enabled, disabled, dev, &here, version.as_deref())
-=======
 /// The merged content root and the accepted content mods behind it, before
 /// any process-wide registration. A caller that only reads the overlay (the
 /// reload tests) must not freeze the mod registries for the rest of the
@@ -730,7 +687,6 @@ pub(super) struct ContentOverlay {
     pub(super) announce: bool,
     /// The accepted content-only mods, each with its version, for the worlds saved to record.
     pub(super) content_mods: Vec<horizon_client::save::level_mods::ModRecord>,
->>>>>>> theirs
 }
 
 /// Builds the content overlay: every enabled or dev content mod's files
@@ -899,53 +855,6 @@ pub(super) fn content_overlay(
             .into());
         }
     }
-<<<<<<< ours
-    let overlay = {
-        let _step = horizon_client::spans::startup::step("mods.overlay");
-        mod_content::resource_root(root, &mods, &horizon_cache())
-    };
-    super::java_mods::start_early();
-    match overlay {
-        Ok(out) => {
-            if out != root {
-                super::java_mods::java_creative(&out);
-            }
-            if announce {
-                horizon_protocol::mod_list::set_local(announced);
-            }
-            if out != root {
-                log::info!(
-                    "Horizon: content from {} mod(s) in {}",
-                    mods.len(),
-                    out.display()
-                );
-            }
-            register_mob_effects(&mods);
-            register_entity_types(&mods);
-            register_menu_types(&mods);
-            out
-||||||| base
-    let overlay = {
-        let _step = horizon_client::spans::startup::step("mods.overlay");
-        mod_content::resource_root(root, &mods, &here.join(".horizon-cache"))
-    };
-    match overlay {
-        Ok(out) => {
-            if announce {
-                horizon_protocol::mod_list::set_local(announced);
-            }
-            if out != root {
-                log::info!(
-                    "Horizon: content from {} mod(s) in {}",
-                    mods.len(),
-                    out.display()
-                );
-            }
-            register_mob_effects(&mods);
-            register_entity_types(&mods);
-            register_menu_types(&mods);
-            out
-=======
     if !blocks.is_empty() || !items.is_empty() || !types.is_empty() {
         let known = match &mut known {
             Some(types) => types,
@@ -954,7 +863,6 @@ pub(super) fn content_overlay(
         let errors = mod_content::accept_declared(&mut mods, blocks, items, types, known);
         if !errors.is_empty() {
             return Err(errors.join("\n").into());
->>>>>>> theirs
         }
         mod_content::accept_world_fluids(&mut mods, fluids);
         // A file item's remainder named a code-declared item that was refused: that mod
@@ -982,7 +890,7 @@ pub(super) fn content_overlay(
         &overrides,
     )
     .map_err(|error| error.to_string())?;
-    let cache = here.join(".horizon-cache");
+    let cache = horizon_cache();
     // Content admission and the live code-dispatch boundary jointly determine
     // what loaded. Namespaces and raw startup metadata cannot answer this.
     let inventory = sources.enabled_inventory(|id| mods.iter().any(|loaded| loaded.id == id));
@@ -1083,6 +991,51 @@ mod particle_registry_reload_tests {
     }
 }
 
+/// `sources` with the Java mods' content mods (made once per run: their runtimes start with
+/// them) selected as dev mods are; None when there are none.
+fn with_java_content(root: &std::path::Path, sources: &ModsState) -> Option<ModsState> {
+    static JAVA_CONTENT: std::sync::OnceLock<Vec<PathBuf>> = std::sync::OnceLock::new();
+    let paths = JAVA_CONTENT.get_or_init(|| {
+        #[allow(unused_mut)]
+        let mut paths = super::java_mods::java_content(root);
+        // So are the 1.20.1 mods' (mods-java-1.20.1/, docs/java-bridge-120.md).
+        #[cfg(feature = "java-mods-120")]
+        paths.extend(super::java_mods_120::content(root));
+        paths
+    });
+    if paths.is_empty() {
+        return None;
+    }
+    let mut with = sources.clone();
+    // The ones already chosen, read again (a package isn't Clone).
+    let mut selected: Vec<_> = with
+        .selected
+        .iter()
+        .filter(|s| !paths.contains(&s.path))
+        .filter_map(|s| {
+            let package = horizon_mod_package::Package::read(&s.path).ok()?;
+            Some(horizon_mod_package::selection::SelectedPackage {
+                path: s.path.clone(),
+                package,
+            })
+        })
+        .collect();
+    for path in paths {
+        match horizon_mod_package::Package::read(path) {
+            Ok(package) => selected.push(horizon_mod_package::selection::SelectedPackage {
+                path: path.clone(),
+                package,
+            }),
+            Err(e) => log::warn!("Java mods: their content {} is left out: {e}", path.display()),
+        }
+        if !with.dev.contains(path) {
+            with.dev.push(path.clone());
+        }
+    }
+    with.selected = selected.into();
+    Some(with)
+}
+
 /// The content root with everything the mods declare registered against the
 /// process: block entities, mob effects, entity and menu types, fluid looks,
 /// and the protocol's local mod list, each set once.
@@ -1092,10 +1045,18 @@ pub(super) fn content_root(
 ) -> horizon_client::Result<horizon_assets::resource_source::ResourceRoot> {
     let _step = horizon_client::spans::startup::step("mods.content_root");
     let jar_store = horizon_client::logging::game_home().join("jars");
+    // The Java mods' content mods are always on, as dev mods are (the jars in mods-java/ and
+    // mods-java-1.20.1/ are what turns them on and off).
+    let with_java = with_java_content(root, sources);
+    let sources = with_java.as_ref().unwrap_or(sources);
     let overlay = {
         let _step = horizon_client::spans::startup::step("mods.overlay");
         content_overlay(root, sources, &jar_store)?
     };
+    super::java_mods::start_early();
+    if overlay.root.prepared() != root {
+        super::java_mods::java_creative(overlay.root.prepared());
+    }
     let world_fluids = horizon_client::mod_content::register_world_fluids(&overlay.mods)?;
     register_block_entity_types(overlay.root.prepared(), &overlay.mods)?;
     if overlay.announce {
@@ -1832,45 +1793,11 @@ impl Game<'_> {
         let native_dir = Self::game_dir().join(mod_list::NATIVE_DIR);
         let unbuilt = not_built(&native_dir, built, &self.settings.mods.installed);
         self.settings.mods.installed.extend(unbuilt);
-<<<<<<< ours
         self.settings.mods.runtimes = runtime_sections();
-        let installed = &self.settings.mods.installed;
-        self.mods.stopped = installed
-            .iter()
-            .filter(|row| row.problem.as_deref() == Some(STOPPED))
-            .map(|row| row.title.clone())
-            .collect();
-    }
-    /// The content mods the Mods page lets the player switch with a world
-    /// open: in single player and on an open LAN world, those with only
-    /// assets and data; none on another server, which owns its data.
-    pub(super) fn mods_live_now(&self) -> std::collections::BTreeSet<String> {
-        match self.integrated.is_some() || self.remote.is_none() {
-            true => self.mods.live_ids.clone(),
-            false => Default::default(),
-        }
-||||||| base
-        let installed = &self.settings.mods.installed;
-        self.mods.stopped = installed
-            .iter()
-            .filter(|row| row.problem.as_deref() == Some(STOPPED))
-            .map(|row| row.title.clone())
-            .collect();
-    }
-    /// The content mods the Mods page lets the player switch with a world
-    /// open: in single player and on an open LAN world, those with only
-    /// assets and data; none on another server, which owns its data.
-    pub(super) fn mods_live_now(&self) -> std::collections::BTreeSet<String> {
-        match self.integrated.is_some() || self.remote.is_none() {
-            true => self.mods.live_ids.clone(),
-            false => Default::default(),
-        }
-=======
         self.mods.report_refusals(&mut self.settings.mods.installed);
         self.settings
             .mods
             .apply_dependency_notices(&self.mods.load_notices.lock().unwrap());
->>>>>>> theirs
     }
     /// The content mods the resources load with: the ones applied, which a
     /// switch that needs a restart doesn't change.

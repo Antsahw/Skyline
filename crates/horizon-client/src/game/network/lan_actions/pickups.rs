@@ -76,8 +76,13 @@ impl Game<'_> {
             let before = stack.count;
             let kind = stack.item.clone();
             let thrower = self.dropped[i].thrower;
-            let Some(rest) = self.as_guest(conn, |g| g.native_pickup_insert(&stack)) else {
-                continue;
+            // A Java mod may take the pickup (lan_actions/java.rs).
+            let rest = match self.java_guest_item_touch(conn, i) {
+                Some(rest) => rest,
+                None => match self.as_guest(conn, |g| g.native_pickup_insert(&stack)) {
+                    Some(rest) => rest,
+                    None => continue,
+                },
             };
             // Where the entity is and what it holds once the pickup is told: `None` when a mod
             // removed it.
@@ -303,6 +308,10 @@ impl Game<'_> {
             .random
             .next_int_bound(touching.len() as i32)
             .unwrap_or(0) as usize;
+        // A Java mod may take the pickup (lan_actions/java.rs).
+        if self.java_guest_orb_touch(host, conn, touching[pick], id, at) {
+            return;
+        }
         // A merged orb gives its value once per count and goes at zero.
         let index = touching[pick];
         let mut orb = self.orbs[index].clone();

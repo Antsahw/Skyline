@@ -44,12 +44,7 @@ pub mod advancements;
 mod block_changes;
 pub mod chat;
 pub mod chat_filter;
-<<<<<<< ours
 mod mod_guests;
-mod chunk_batch;
-||||||| base
-mod chunk_batch;
-=======
 mod fake_kicks;
 mod item_particles;
 mod joined;
@@ -59,7 +54,6 @@ pub mod passage_cross;
 mod pending_move;
 mod raw_inbox;
 mod selector_sync;
->>>>>>> theirs
 mod spawn_info;
 pub(super) mod terrain;
 use advancements::AdvancementOwners;
@@ -818,19 +812,10 @@ impl Hub {
             .id("minecraft:chat_type", "minecraft:chat")
             .unwrap_or(0);
         let dimension_type = sync
-<<<<<<< ours
-            .id(
-                "minecraft:dimension_type",
-                super::data::dimension_type_of(&config.dimension),
-            )
-||||||| base
-            .id("minecraft:dimension_type", &config.dimension)
-=======
             .id(
                 "minecraft:dimension_type",
                 config.levels.dimension_type(&config.dimension),
             )
->>>>>>> theirs
             .unwrap_or(0);
         let clock_ids = (0..sync.dynamic.len("minecraft:world_clock") as i32).collect();
         let mut encoder = encoder;
@@ -1512,18 +1497,12 @@ impl Hub {
             game_mode: Some(mode),
             listed: Some(true),
             latency: Some(latency),
-<<<<<<< ours
             // A Java mod's tab-list name first, else the player's list name.
             display_name: Some(
                 guest
                     .and_then(|g| g.tab_name.clone())
-                    .or_else(|| self.list_name(uuid)),
+                    .or_else(|| self.tab_list_name(uuid, name)),
             ),
-||||||| base
-            display_name: Some(self.list_name(uuid)),
-=======
-            display_name: Some(self.tab_list_name(uuid, name)),
->>>>>>> theirs
             list_order: Some(0),
             show_hat: Some(guest.is_none_or(|g| g.info.model_customisation & 0x40 != 0)),
         }
@@ -4317,24 +4296,6 @@ impl Hub {
                 }
                 // handlePlayerAbilities: the client flies only if it may.
                 S::PlayerAbilities(p) => {
-<<<<<<< ours
-                    let g = &mut self.guests[i];
-                    let flying = p.flags & 2 != 0 && g.may_fly();
-                    // The change is the game's to announce (the mods may refuse it).
-                    if flying != g.flying {
-                        g.flying = flying;
-                        events.push(HostEvent::Flight { conn, flying });
-                    }
-||||||| base
-                    let g = &mut self.guests[i];
-                    let flying =
-                        p.flags & 2 != 0 && (g.creative() || g.spectator() || g.allow_flight);
-                    // The change is the game's to announce (the mods may refuse it).
-                    if flying != g.flying {
-                        g.flying = flying;
-                        events.push(HostEvent::Flight { conn, flying });
-                    }
-=======
                     self.guests.update(i, |g| {
                         let flying = p.flags & 2 != 0 && g.abilities.may_fly;
                         // The change is the game's to announce (the mods may refuse it).
@@ -4343,7 +4304,6 @@ impl Hub {
                             events.push(HostEvent::Flight { conn, flying });
                         }
                     });
->>>>>>> theirs
                 }
                 S::MovePlayerPos(p) => {
                     self.move_player(i, Some([p.x, p.y, p.z]), None, p.flags, ctx, events);
@@ -5268,19 +5228,10 @@ impl Hub {
         self.config.dimension = dimension.to_owned();
         self.dimension_type = self
             .sync
-<<<<<<< ours
-            .id(
-                "minecraft:dimension_type",
-                super::data::dimension_type_of(dimension),
-            )
-||||||| base
-            .id("minecraft:dimension_type", dimension)
-=======
             .id(
                 "minecraft:dimension_type",
                 self.config.levels.dimension_type(dimension),
             )
->>>>>>> theirs
             .unwrap_or(0);
         self.encoder
             .set_dimension(self.config.levels.get(dimension));

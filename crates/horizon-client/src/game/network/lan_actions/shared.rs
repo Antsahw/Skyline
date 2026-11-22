@@ -10,6 +10,9 @@ pub(super) enum MenuOpen {
 /// Per-guest state of the gameplay code that lives outside `Guest`.
 #[derive(Default)]
 pub(super) struct GuestPlay {
+    /// The window of a menu a server mod opened (a Java mod's `/workbench`): no block
+    /// behind it, so it stays valid wherever the guest goes (the mod's `stillValid`).
+    pub(super) mod_window: Option<i32>,
     mining: Option<Mining>,
     destroy_delay: u32,
     using: Option<(usize, u32)>,
@@ -216,6 +219,8 @@ pub(super) struct GuestSwap {
     building_boxes: BuildingPlayers,
     /// That turn's `known_movement`.
     known_movement: Vec3,
+    /// The player Java mods' hooks were about before this turn (`set_java_actor`).
+    java_actor: Option<String>,
     /// The packets queued for that guest.
     packets: Vec<play::Clientbound>,
     /// The entity events queued for that guest.

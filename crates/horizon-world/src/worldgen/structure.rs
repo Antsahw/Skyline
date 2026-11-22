@@ -276,15 +276,7 @@ impl TemplateStore {
         if let Some(found) = self.loaded.read().unwrap().get(id) {
             return found.clone();
         }
-<<<<<<< ours
-        let (namespace, path) = id.split_once(':').unwrap();
-        let file = self.dir.join(namespace).join(format!("{path}.nbt"));
         let from_pack = self.pack_templates.contains_key(id);
-||||||| base
-        let (namespace, path) = id.split_once(':').unwrap();
-        let file = self.dir.join(namespace).join(format!("{path}.nbt"));
-=======
->>>>>>> theirs
         let bytes = match self.pack_templates.get(id) {
             Some(resource) => resource.read().ok(),
             None => template_path(&self.dir, id)
@@ -510,7 +502,6 @@ impl StructureResources {
         self.jigsaw_states.contains_key(&state)
     }
 }
-<<<<<<< ours
 
 /// `DataFixTypes.STRUCTURE.updateToCurrentVersion`, as `StructureTemplateManager.readStructure`
 /// runs it: a template saved by an older version (a mod's for 1.20.1) has its palettes' states,
@@ -602,8 +593,6 @@ mod upgrade_tests {
         );
     }
 }
-||||||| base
-=======
 
 #[cfg(test)]
 mod tests {
@@ -637,4 +626,3 @@ mod tests {
         }
     }
 }
->>>>>>> theirs

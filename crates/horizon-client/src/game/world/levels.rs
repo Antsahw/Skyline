@@ -1263,20 +1263,10 @@ impl Game<'_> {
                 running,
                 packets_drained: false,
             };
-<<<<<<< ours
-            if observe_level {
+            if observe_level && let Some(level) = self.level(dim.id()) {
                 #[cfg(feature = "java-mods-120")]
                 super::java_mods_120::items::set_ticking_dimension(dim.id());
-                let _span = horizon_client::spans::guard("mods_level_tick_pre");
-                self.native_level_tick_pre(dim.id());
-||||||| base
-            if observe_level {
-                let _span = horizon_client::spans::guard("mods_level_tick_pre");
-                self.native_level_tick_pre(dim.id());
-=======
-            if observe_level && let Some(level) = self.level(dim.id()) {
                 self.native_level_tick_pre(level);
->>>>>>> theirs
             }
             horizon_client::spans::time("dedicated_streaming", || {
                 self.update_dedicated_streaming();
@@ -1539,16 +1529,8 @@ impl Game<'_> {
         let mut dims: Vec<Dim> = Dim::all()
             .into_iter()
             .filter(|d| {
-<<<<<<< ours
-                // `/forceload`ed chunks, or a native or Java mod's tickets.
-                let held = |s: &Streaming| !s.forced.is_empty() || !s.mod_forced.is_empty();
-||||||| base
-                // `/forceload`ed chunks, or a native mod's tickets.
-                let held = |s: &Streaming| !s.forced.is_empty() || !s.mod_forced.is_empty();
-=======
                 // `/forceload`ed chunks, or a native mod's tickets.
                 let held = |s: &Streaming| !s.forced.is_empty();
->>>>>>> theirs
                 let forced = if *d == self.dim {
                     held(&self.streaming)
                 } else {

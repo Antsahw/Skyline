@@ -111,6 +111,10 @@ impl Game<'_> {
             }
             return true;
         }
+        // A Java mod's entity (remote/java.rs).
+        if let Some(used) = self.remote_use_java_entity(hand, sneaking) {
+            return used;
+        }
         if let Some((i, distance, location)) = self.mob_hit()
             && self.before_block(distance)
         {

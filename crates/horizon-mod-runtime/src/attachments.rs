@@ -971,7 +971,6 @@ impl Attachments {
         self.entries
             .contains_key(&(namespace, name) as &dyn AttachmentKeyView)
     }
-<<<<<<< ours
     /// [`Attachments::get_existing`] for a reader that only has `&self`: the value is decoded
     /// and not kept, so a caller that asks often is better off with `get_existing`. (The
     /// client's aiming reads a block's shape this way, in the frame, through `&Game`.)
@@ -1005,28 +1004,11 @@ impl Attachments {
             None => Ok(None),
         }
     }
-    /// Get an existing value or insert its default; saved values decode lazily.
-    pub fn get<T: Clone + Send + Sync + 'static>(
-        &mut self,
-        ty: &AttachmentType<T>,
-    ) -> Result<T, AttachmentError> {
-        if let Some(value) = self.get_existing(ty)? {
-            return Ok(value);
-||||||| base
-    /// Get an existing value or insert its default; saved values decode lazily.
-    pub fn get<T: Clone + Send + Sync + 'static>(
-        &mut self,
-        ty: &AttachmentType<T>,
-    ) -> Result<T, AttachmentError> {
-        if let Some(value) = self.get_existing(ty)? {
-            return Ok(value);
-=======
     /// Refuse a namespace whose saved form isn't a compound: nothing under it can be read or
     /// written without losing it.
     fn check_namespace(&self, namespace: &str) -> Result<(), AttachmentError> {
         thread_local! {
             static NAMESPACE: std::cell::RefCell<JavaString> = Default::default();
->>>>>>> theirs
         }
         let invalid = self.raw.as_ref().is_some_and(|raw| {
             NAMESPACE.with_borrow_mut(|key| {

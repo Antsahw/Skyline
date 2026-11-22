@@ -178,6 +178,9 @@ impl Menu {
         {
             let id = crate::crafting::qualified(id);
             let made = (id.clone(), taken.clone(), grid.clone());
+            self.state
+                .crafted_takes
+                .push(super::crafted_takes::CraftedTake::of(&id, taken, n, &grid));
             self.state.crafted.push((id, grid.clone()));
             self.state.item_crafted.push(made);
         }

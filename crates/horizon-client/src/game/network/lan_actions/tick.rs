@@ -320,7 +320,14 @@ impl Game<'_> {
                 .and_then(|host| host.hub.guest(conn))
                 .map(|g| (g.uuid, g.name.clone()))
         };
+        // Java mods may cancel the jump (`LivingEntity.jumpFromGround`'s heads): there is none on
+        // the server, and the guest goes back to where it took off.
+        let mut refused = false;
         self.as_guest(conn, |game| {
+            if game.java_jump_refused() {
+                refused = true;
+                return;
+            }
             let Some(player) = game.player.as_mut() else {
                 return;
             };
@@ -345,10 +352,18 @@ impl Game<'_> {
             let _ = w.jump_from_ground();
             (w.player.position, w.player.yaw, w.player.ground.on_ground) =
                 (position, yaw_after, ground);
+            // Java mods hear the jump (java_server.rs).
+            game.java_jumped();
             if let Some((uuid, name)) = identity {
                 game.native_player_jump(uuid, &name);
             }
         });
+        if refused
+            && let Some(host) = self.lan.as_mut()
+            && let Some(i) = host.hub.guests.iter().position(|g| g.conn == conn)
+        {
+            host.hub.teleport(i, Some(from));
+        }
     }
 }
 

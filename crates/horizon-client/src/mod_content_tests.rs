@@ -3346,8 +3346,7 @@ fn debug_density_line_lists_the_noise_settings_functions() {
 }
 
 #[test]
-<<<<<<< ours
-#[ignore = "full content root: needs prepared vanilla data"]
+#[ignore = "daily"]
 fn own_states_boxes_drive_outline_collision_and_occlusion() {
     use horizon_core::geometry::Direction;
     use horizon_world::{collision::CachedCollisionRegistry, registry::BlockStateId};
@@ -3434,11 +3433,6 @@ fn own_states_boxes_drive_outline_collision_and_occlusion() {
 
 #[test]
 #[ignore = "full content root: needs prepared vanilla data"]
-||||||| base
-#[ignore = "full content root: needs prepared vanilla data"]
-=======
-#[ignore = "daily"]
->>>>>>> theirs
 fn content_shapes_drive_outline_and_collision() {
     use horizon_core::{
         geometry::{Aabb, Axis, Vec3},
@@ -4414,16 +4408,7 @@ fn declared_partial_shapes_observe_waterlogging_and_template_light_overrides() {
     let Some(J::Arr(rows)) = gameplay.get("states") else {
         panic!("states")
     };
-<<<<<<< ours
     let rows: Vec<J> = rows.iter().map(|r| r.clone().parsed()).collect();
-    assert_eq!(rows[0].get("outline"), rows[2].get("outline"));
-    assert_eq!(rows[1].get("outline"), rows[3].get("outline"));
-    assert_eq!(rows[2].get("full_collision"), Some(&J::Bool(false)));
-||||||| base
-    assert_eq!(rows[0].get("outline"), rows[2].get("outline"));
-    assert_eq!(rows[1].get("outline"), rows[3].get("outline"));
-    assert_eq!(rows[2].get("full_collision"), Some(&J::Bool(false)));
-=======
     assert_eq!(rows[2].get("skylight_down"), Some(&J::Bool(true)));
     assert_eq!(rows[2].get("dampening"), Some(&J::Num(0.into())));
     assert_eq!(rows[3].get("skylight_down"), Some(&J::Bool(false)));
@@ -4724,7 +4709,6 @@ fn collision_only_preserves_outline_and_shape_typos_are_errors() {
     assert_eq!(rows[0].get("outline"), rows[2].get("outline"));
     assert_eq!(rows[1].get("outline"), rows[3].get("outline"));
     assert_eq!(rows[2].get("full_collision"), Some(&J::Bool(false)));
->>>>>>> theirs
     fs::remove_dir_all(base.parent().unwrap()).unwrap();
     for (index, table) in [
         r#"{"properties":["axis","typo"],"default":[]}"#,

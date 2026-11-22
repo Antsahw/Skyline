@@ -324,6 +324,27 @@ impl Game<'_> {
             let heard = self.audio.capture.as_ref().map_or(0, Vec::len);
             let used = self
                 .as_guest_at(gi, conn, |g| {
+                    // ServerPlayerGameMode.useItemOn's head: a Java mod may take the click.
+                    let face_index = match hit.face {
+                        [0, -1, 0] => 0,
+                        [0, 1, 0] => 1,
+                        [0, 0, -1] => 2,
+                        [0, 0, 1] => 3,
+                        [-1, 0, 0] => 4,
+                        _ => 5,
+                    };
+                    if let Some(swing) =
+                        g.java_use_block(hit.pos, face_index, hit.point, hand == Hand::Off)
+                    {
+                        return (swing, true, false);
+                    }
+                    // The same for the 1.20.1 mods' code (their own JVM).
+                    #[cfg(feature = "java-mods-120")]
+                    if let Some(swing) =
+                        g.java120_use_block(hit.pos, face_index, hit.point, hand == Hand::Off)
+                    {
+                        return (swing, true, false);
+                    }
                     let attempt = g.was_block_placement_attempt(hand);
                     let saved = (g.forced_hit, g.guest_use);
                     g.forced_hit = Some(hit);
@@ -426,6 +447,15 @@ impl Game<'_> {
         let heard = self.audio.capture.as_ref().map_or(0, Vec::len);
         let used = self
             .as_guest_at(gi, conn, |g| {
+                    // ServerPlayerGameMode.useItem's head: a Java mod may take the click.
+                    if let Some(swing) = g.java_use_item(hand == Hand::Off, yaw, pitch) {
+                        return (swing, None);
+                    }
+                    // The same for a 1.20.1 mod's item.
+                    #[cfg(feature = "java-mods-120")]
+                    if let Some(swing) = g.java120_use_item(hand == Hand::Off) {
+                        return (swing, None);
+                    }
                 // A horn's sound, inline instruments included.
                 let horn = g.with_hand(hand, |g| {
                     let held = g.held()?;
@@ -507,6 +537,9 @@ impl Game<'_> {
             })
             .ok();
         self.lan_swing_back(conn, used.map(|u| u.0));
+        if self.java_guest_ride_refused(conn, gi, before) {
+            return Ok(used.is_some_and(|u| u.1));
+        }
         self.guest_boarded(conn, before);
         Ok(used.is_some_and(|u| u.1))
     }

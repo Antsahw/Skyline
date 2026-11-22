@@ -42,397 +42,9 @@ use horizon_protocol::{
     packets::play::{self, Clientbound as C},
 };
 use horizon_world::block_collision::BlockCollisionRegistry;
-<<<<<<< ours
-use level_event_targets::level_event_except;
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
-    time::Instant,
-};
+use std::{collections::HashMap, sync::Arc, time::Instant};
 
 mod java;
-
-/// What `sync_data` loaded: whether it was with data packs over the game's
-/// data, and the registries and tags.
-type Synced = (bool, std::result::Result<Arc<SyncData>, String>);
-
-/// Only damage is bound eagerly for gameplay. Full wire data remains lazy
-/// except when the entering world actually defines damage types.
-#[derive(Default)]
-struct SyncCache {
-    data: Option<Synced>,
-    damage: Option<FrozenDamage>,
-    world_packs: bool,
-}
-
-static SYNC: Mutex<SyncCache> = Mutex::new(SyncCache {
-    data: None,
-    damage: None,
-    world_packs: false,
-});
-
-/// Load wire data once, retaining this session's frozen damage definitions.
-pub(super) fn sync_data(
-    root: &std::path::Path,
-    overlay: &horizon_world::loot::PackOverlay,
-) -> std::result::Result<Arc<SyncData>, String> {
-    let mut sync = SYNC.lock().unwrap_or_else(|e| e.into_inner());
-    cached_sync_data(&mut sync, root, overlay)
-}
-
-fn cached_sync_data(
-    sync: &mut SyncCache,
-    root: &std::path::Path,
-    overlay: &horizon_world::loot::PackOverlay,
-) -> std::result::Result<Arc<SyncData>, String> {
-    let packs = !overlay.files.is_empty();
-    let load = || {
-        match &sync.damage {
-            Some(damage) => SyncData::load_with_frozen_damage(root, overlay, damage),
-            None => SyncData::load(root, overlay),
-        }
-        .map(Arc::new)
-    };
-    // A helper started before world entry must not fill a pack world's
-    // still-lazy cache with its vanilla overlay.
-    if sync.data.is_none() && sync.world_packs && !packs {
-        return load();
-    }
-    sync.data.get_or_insert_with(|| (packs, load())).1.clone()
-}
-
-/// Reuse a no-pack preload; unrelated packs only invalidate it, as on main.
-/// Packs defining damage types seed the wire snapshot under the same lock
-/// that helpers use, before reloads or guests can observe a partial state.
-pub(super) fn open_world_sync_data(
-    root: &std::path::Path,
-    overlay: &horizon_world::loot::PackOverlay,
-    damage: &horizon_world::damage_source::Catalog,
-) -> std::result::Result<(), String> {
-    let mut sync = SYNC.lock().unwrap_or_else(|e| e.into_inner());
-    initialize_world_sync_data(&mut sync, root, overlay, damage)
-}
-
-fn initialize_world_sync_data(
-    sync: &mut SyncCache,
-    root: &std::path::Path,
-    overlay: &horizon_world::loot::PackOverlay,
-    damage: &horizon_world::damage_source::Catalog,
-) -> std::result::Result<(), String> {
-    sync.world_packs = !overlay.files.is_empty();
-    if sync.world_packs {
-        sync.data = None;
-    }
-    sync.damage = Some(FrozenDamage::new(damage, overlay));
-    if overlay.kind("damage_type").next().is_some() {
-        cached_sync_data(sync, root, overlay)?;
-    }
-    Ok(())
-}
-
-/// Let go of what `sync_data` loaded: a preload no world used
-/// (game/world_loading.rs), or the previous session when another world opens.
-pub(super) fn forget_sync_data() {
-    *SYNC.lock().unwrap_or_else(|e| e.into_inner()) = SyncCache::default();
-}
-
-/// Without a hub yet, retain this world's frozen registries through `/reload`
-/// too. World entry discards this snapshot before loading another world's.
-pub(super) fn reload_cached_sync_data(
-    root: &std::path::Path,
-    overlay: &horizon_world::loot::PackOverlay,
-) -> std::result::Result<(), String> {
-    let kept = prepare_sync_reload(&mut SYNC.lock().unwrap_or_else(|e| e.into_inner()), overlay);
-    if let Some(kept) = kept {
-        reload_sync_data(root, overlay, &kept)?;
-    }
-    Ok(())
-}
-
-/// Keep lazy-cache admission aligned with the current packs even when no
-/// complete wire snapshot has been loaded yet. Damage definitions stay frozen.
-fn prepare_sync_reload(
-    sync: &mut SyncCache,
-    overlay: &horizon_world::loot::PackOverlay,
-) -> Option<Arc<SyncData>> {
-    sync.world_packs = !overlay.files.is_empty();
-    sync.data
-        .as_ref()
-        .and_then(|(_, result)| result.as_ref().ok())
-        .cloned()
-}
-
-/// `/reload` (MinecraftServer.reloadResources) under a running hub: the
-/// tags, recipes and advancements read again with the world's packs, the
-/// synchronized registries `kept` (the hub's) as they were, and that becomes
-/// what `sync_data` gives.
-pub(super) fn reload_sync_data(
-    root: &std::path::Path,
-    overlay: &horizon_world::loot::PackOverlay,
-    kept: &SyncData,
-) -> std::result::Result<Arc<SyncData>, String> {
-    // Kept pack dialogs count as packs: a world opened without packs after
-    // a `/reload` that dropped them must read its own registries again.
-    let packs = !overlay.files.is_empty() || kept.has_pack_entries();
-    let sync = SyncData::reload(root, overlay, kept).map(|mut sync| {
-        sync.features.clone_from(&kept.features);
-        Arc::new(sync)
-    });
-    SYNC.lock().unwrap_or_else(|e| e.into_inner()).data = Some((packs, sync.clone()));
-    sync
-}
-
-impl Game<'_> {
-    /// The commands' `minecraft:dialog` ids as the clients get them in the
-    /// configuration phase (`sync`, the world's packs' dialogs among them):
-    /// `/dialog show` parses an id against these and sends its index.
-    pub(super) fn sync_dialog_ids(&mut self, sync: &SyncData) {
-        let Some(names) = sync.dynamic.registries.get("minecraft:dialog") else {
-            return;
-        };
-        let ids = names.iter().map(|(name, _)| name.clone()).collect();
-        self.ui
-            .registries
-            .by_registry
-            .entry("minecraft:dialog".to_owned())
-            .or_default()
-            .ids = ids;
-    }
-}
-
-/// The registries and tags a server sends without data packs over them, read
-/// on a helper thread while a server's world prepares: most worlds have no
-/// packs, so it is what `sync_data` would load once the world is open.
-pub(super) struct SyncPreload(std::thread::JoinHandle<std::result::Result<SyncData, String>>);
-
-/// Start reading the server's data beside the world's preparation; `None`
-/// when it is read already, or being read (`preload_world_data`).
-pub(super) fn preload_sync_data(root: &std::path::Path) -> Option<SyncPreload> {
-    if !SYNC
-        .try_lock()
-        .is_ok_and(|sync| sync.data.is_none() && sync.damage.is_none())
-    {
-        return None;
-    }
-    let root = root.to_owned();
-    std::thread::Builder::new()
-        .name("Server data preload".into())
-        .spawn(move || SyncData::load(&root, &horizon_world::loot::PackOverlay::NONE))
-        .map(SyncPreload)
-        .ok()
-}
-
-impl SyncPreload {
-    /// The world is open: without packs of its own (`overlay`), what was read
-    /// becomes `sync_data`'s; with them, `sync_data` loads them as before.
-    pub(super) fn adopt(self, overlay: &horizon_world::loot::PackOverlay) {
-        if !overlay.files.is_empty() {
-            return;
-        }
-        if let Ok(read) = self.0.join() {
-            let mut sync = SYNC.lock().unwrap_or_else(|e| e.into_inner());
-            if !sync.world_packs && sync.data.is_none() {
-                sync.data = Some((false, read.map(Arc::new)));
-            }
-        }
-    }
-}
-||||||| base
-use level_event_targets::level_event_except;
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
-    time::Instant,
-};
-
-/// What `sync_data` loaded: whether it was with data packs over the game's
-/// data, and the registries and tags.
-type Synced = (bool, std::result::Result<Arc<SyncData>, String>);
-
-/// Only damage is bound eagerly for gameplay. Full wire data remains lazy
-/// except when the entering world actually defines damage types.
-#[derive(Default)]
-struct SyncCache {
-    data: Option<Synced>,
-    damage: Option<FrozenDamage>,
-    world_packs: bool,
-}
-
-static SYNC: Mutex<SyncCache> = Mutex::new(SyncCache {
-    data: None,
-    damage: None,
-    world_packs: false,
-});
-
-/// Load wire data once, retaining this session's frozen damage definitions.
-pub(super) fn sync_data(
-    root: &std::path::Path,
-    overlay: &horizon_world::loot::PackOverlay,
-) -> std::result::Result<Arc<SyncData>, String> {
-    let mut sync = SYNC.lock().unwrap_or_else(|e| e.into_inner());
-    cached_sync_data(&mut sync, root, overlay)
-}
-
-fn cached_sync_data(
-    sync: &mut SyncCache,
-    root: &std::path::Path,
-    overlay: &horizon_world::loot::PackOverlay,
-) -> std::result::Result<Arc<SyncData>, String> {
-    let packs = !overlay.files.is_empty();
-    let load = || {
-        match &sync.damage {
-            Some(damage) => SyncData::load_with_frozen_damage(root, overlay, damage),
-            None => SyncData::load(root, overlay),
-        }
-        .map(Arc::new)
-    };
-    // A helper started before world entry must not fill a pack world's
-    // still-lazy cache with its vanilla overlay.
-    if sync.data.is_none() && sync.world_packs && !packs {
-        return load();
-    }
-    sync.data.get_or_insert_with(|| (packs, load())).1.clone()
-}
-
-/// Reuse a no-pack preload; unrelated packs only invalidate it, as on main.
-/// Packs defining damage types seed the wire snapshot under the same lock
-/// that helpers use, before reloads or guests can observe a partial state.
-pub(super) fn open_world_sync_data(
-    root: &std::path::Path,
-    overlay: &horizon_world::loot::PackOverlay,
-    damage: &horizon_world::damage_source::Catalog,
-) -> std::result::Result<(), String> {
-    let mut sync = SYNC.lock().unwrap_or_else(|e| e.into_inner());
-    initialize_world_sync_data(&mut sync, root, overlay, damage)
-}
-
-fn initialize_world_sync_data(
-    sync: &mut SyncCache,
-    root: &std::path::Path,
-    overlay: &horizon_world::loot::PackOverlay,
-    damage: &horizon_world::damage_source::Catalog,
-) -> std::result::Result<(), String> {
-    sync.world_packs = !overlay.files.is_empty();
-    if sync.world_packs {
-        sync.data = None;
-    }
-    sync.damage = Some(FrozenDamage::new(damage, overlay));
-    if overlay.kind("damage_type").next().is_some() {
-        cached_sync_data(sync, root, overlay)?;
-    }
-    Ok(())
-}
-
-/// Let go of what `sync_data` loaded: a preload no world used
-/// (game/world_loading.rs), or the previous session when another world opens.
-pub(super) fn forget_sync_data() {
-    *SYNC.lock().unwrap_or_else(|e| e.into_inner()) = SyncCache::default();
-}
-
-/// Without a hub yet, retain this world's frozen registries through `/reload`
-/// too. World entry discards this snapshot before loading another world's.
-pub(super) fn reload_cached_sync_data(
-    root: &std::path::Path,
-    overlay: &horizon_world::loot::PackOverlay,
-) -> std::result::Result<(), String> {
-    let kept = prepare_sync_reload(&mut SYNC.lock().unwrap_or_else(|e| e.into_inner()), overlay);
-    if let Some(kept) = kept {
-        reload_sync_data(root, overlay, &kept)?;
-    }
-    Ok(())
-}
-
-/// Keep lazy-cache admission aligned with the current packs even when no
-/// complete wire snapshot has been loaded yet. Damage definitions stay frozen.
-fn prepare_sync_reload(
-    sync: &mut SyncCache,
-    overlay: &horizon_world::loot::PackOverlay,
-) -> Option<Arc<SyncData>> {
-    sync.world_packs = !overlay.files.is_empty();
-    sync.data
-        .as_ref()
-        .and_then(|(_, result)| result.as_ref().ok())
-        .cloned()
-}
-
-/// `/reload` (MinecraftServer.reloadResources) under a running hub: the
-/// tags, recipes and advancements read again with the world's packs, the
-/// synchronized registries `kept` (the hub's) as they were, and that becomes
-/// what `sync_data` gives.
-pub(super) fn reload_sync_data(
-    root: &std::path::Path,
-    overlay: &horizon_world::loot::PackOverlay,
-    kept: &SyncData,
-) -> std::result::Result<Arc<SyncData>, String> {
-    // Kept pack dialogs count as packs: a world opened without packs after
-    // a `/reload` that dropped them must read its own registries again.
-    let packs = !overlay.files.is_empty() || kept.has_pack_entries();
-    let sync = SyncData::reload(root, overlay, kept).map(|mut sync| {
-        sync.features.clone_from(&kept.features);
-        Arc::new(sync)
-    });
-    SYNC.lock().unwrap_or_else(|e| e.into_inner()).data = Some((packs, sync.clone()));
-    sync
-}
-
-impl Game<'_> {
-    /// The commands' `minecraft:dialog` ids as the clients get them in the
-    /// configuration phase (`sync`, the world's packs' dialogs among them):
-    /// `/dialog show` parses an id against these and sends its index.
-    pub(super) fn sync_dialog_ids(&mut self, sync: &SyncData) {
-        let Some(names) = sync.dynamic.registries.get("minecraft:dialog") else {
-            return;
-        };
-        let ids = names.iter().map(|(name, _)| name.clone()).collect();
-        self.ui
-            .registries
-            .by_registry
-            .entry("minecraft:dialog".to_owned())
-            .or_default()
-            .ids = ids;
-    }
-}
-
-/// The registries and tags a server sends without data packs over them, read
-/// on a helper thread while a server's world prepares: most worlds have no
-/// packs, so it is what `sync_data` would load once the world is open.
-pub(super) struct SyncPreload(std::thread::JoinHandle<std::result::Result<SyncData, String>>);
-
-/// Start reading the server's data beside the world's preparation; `None`
-/// when it is read already, or being read (`preload_world_data`).
-pub(super) fn preload_sync_data(root: &std::path::Path) -> Option<SyncPreload> {
-    if !SYNC
-        .try_lock()
-        .is_ok_and(|sync| sync.data.is_none() && sync.damage.is_none())
-    {
-        return None;
-    }
-    let root = root.to_owned();
-    std::thread::Builder::new()
-        .name("Server data preload".into())
-        .spawn(move || SyncData::load(&root, &horizon_world::loot::PackOverlay::NONE))
-        .map(SyncPreload)
-        .ok()
-}
-
-impl SyncPreload {
-    /// The world is open: without packs of its own (`overlay`), what was read
-    /// becomes `sync_data`'s; with them, `sync_data` loads them as before.
-    pub(super) fn adopt(self, overlay: &horizon_world::loot::PackOverlay) {
-        if !overlay.files.is_empty() {
-            return;
-        }
-        if let Ok(read) = self.0.join() {
-            let mut sync = SYNC.lock().unwrap_or_else(|e| e.into_inner());
-            if !sync.world_packs && sync.data.is_none() {
-                sync.data = Some((false, read.map(Arc::new)));
-            }
-        }
-    }
-}
-=======
-use std::{collections::HashMap, sync::Arc, time::Instant};
->>>>>>> theirs
 
 /// The settings of the open world (WorldOptionsScreen's multiplayer section).
 #[derive(Clone, Copy, Debug)]
@@ -2480,13 +2092,9 @@ impl Game<'_> {
                 previous = Some((Instant::now(), event_kind(&event), detail));
             }
             match event {
-<<<<<<< ours
                 HostEvent::Joined(conn) if self.hold_join(conn) => {}
-||||||| base
-=======
                 HostEvent::InputCredits(credits) => drop(credits),
                 HostEvent::RawPayload(delivery) => self.receive_raw_delivery(delivery),
->>>>>>> theirs
                 event @ (HostEvent::Chat { .. } | HostEvent::Warn(_) | HostEvent::Error(_)) => {
                     self.lan_log_event(event);
                 }
@@ -2500,24 +2108,7 @@ impl Game<'_> {
                     action,
                 } => self.chat_filtered(sender, &name, place, &text, count, action),
                 HostEvent::PlayerChat { sender, text } => {
-<<<<<<< ours
                     self.java_player_chat(super::java_server::Who::Uuid(sender), &text);
-                    if let Some(g) = host.hub.guests.iter().find(|g| g.uuid == sender) {
-                        if self.options.dedicated.is_some() {
-                            super::dedicated::events::record(
-                                "chat",
-                                &g.name,
-                                sender,
-                                serde_json::json!({ "message": text }),
-||||||| base
-                    if let Some(g) = host.hub.guests.iter().find(|g| g.uuid == sender) {
-                        if self.options.dedicated.is_some() {
-                            super::dedicated::events::record(
-                                "chat",
-                                &g.name,
-                                sender,
-                                serde_json::json!({ "message": text }),
-=======
                     self.lan_player_chatted(sender, &text);
                 }
                 HostEvent::ChatSubmitted {
@@ -2587,7 +2178,6 @@ impl Game<'_> {
                                     ),
                                     overlay: false,
                                 }),
->>>>>>> theirs
                             );
                         }
                     }
@@ -2761,120 +2351,12 @@ impl Game<'_> {
                     self.save_guest(&mut guest);
                     let host = self.lan.as_mut()?;
                     host.play.remove(&guest.conn);
-<<<<<<< ours
-                    self.guest_combat.remove(&guest.conn);
                     // The 1.20.1 mods hear the player leave (Fabric's DISCONNECT).
                     #[cfg(feature = "java-mods-120")]
                     self.java120_player_left(guest.conn, guest.uuid);
-                    // A held player was recorded as joined at its login: it leaves too.
-                    if self.options.dedicated.is_some() && (guest.placed || guest.held) {
-                        super::dedicated::events::record(
-                            "leave",
-                            &guest.name,
-                            guest.uuid,
-                            serde_json::json!({ "reason": guest.left_reason }),
-                        );
-                        if guest.held && !guest.placed {
-                            // Never announced, so no "left the game" either.
-                            super::dedicated::log(
-                                "INFO",
-                                &horizon_client::lan::arrivals::dropped_line(
-                                    &guest.name,
-                                    &guest.left_reason,
-                                ),
-                            );
-                        } else {
-                            super::dedicated::log(
-                                "INFO",
-                                &format!("{} lost connection: {}", guest.name, guest.left_reason),
-                            );
-                        }
-                        // A player moved to another server without `announce` was not
-                        // announced as leaving, so the line is not logged either; a held
-                        // player was never announced at all.
-                        if guest.placed && !guest.quiet_leave {
-                            super::dedicated::log(
-                                "INFO",
-                                &format!("System chat: {} left the game", guest.name),
-                            );
-                        }
-                    } else if self.player.is_some() && guest.placed && !guest.quiet_leave {
-                        // ServerGamePacketListenerImpl.removePlayerFromWorld.
-                        let who = self.player_text(&guest.name, guest.uuid);
-                        let mut line = Some(
-                            Text::translate("multiplayer.player.left", &[who])
-                                .with_color(horizon_client::text::YELLOW),
-                        );
-                        self.lan = Some(host);
-                        self.native_player_leave_message(guest.uuid, &guest.name, &mut line);
-                        host = self.lan.take()?;
-                        if let Some(line) = line {
-                            self.system_message(line);
-                        }
-                    }
-                    if guest.placed && !host.players_told_left {
-                        self.lan = Some(host);
-                        self.native_player_logged_out(guest.uuid, &guest.name);
-                        host = self.lan.take()?;
-                    }
-||||||| base
-                    self.guest_combat.remove(&guest.conn);
-                    // A held player was recorded as joined at its login: it leaves too.
-                    if self.options.dedicated.is_some() && (guest.placed || guest.held) {
-                        super::dedicated::events::record(
-                            "leave",
-                            &guest.name,
-                            guest.uuid,
-                            serde_json::json!({ "reason": guest.left_reason }),
-                        );
-                        if guest.held && !guest.placed {
-                            // Never announced, so no "left the game" either.
-                            super::dedicated::log(
-                                "INFO",
-                                &horizon_client::lan::arrivals::dropped_line(
-                                    &guest.name,
-                                    &guest.left_reason,
-                                ),
-                            );
-                        } else {
-                            super::dedicated::log(
-                                "INFO",
-                                &format!("{} lost connection: {}", guest.name, guest.left_reason),
-                            );
-                        }
-                        // A player moved to another server without `announce` was not
-                        // announced as leaving, so the line is not logged either; a held
-                        // player was never announced at all.
-                        if guest.placed && !guest.quiet_leave {
-                            super::dedicated::log(
-                                "INFO",
-                                &format!("System chat: {} left the game", guest.name),
-                            );
-                        }
-                    } else if self.player.is_some() && guest.placed && !guest.quiet_leave {
-                        // ServerGamePacketListenerImpl.removePlayerFromWorld.
-                        let who = self.player_text(&guest.name, guest.uuid);
-                        let mut line = Some(
-                            Text::translate("multiplayer.player.left", &[who])
-                                .with_color(horizon_client::text::YELLOW),
-                        );
-                        self.lan = Some(host);
-                        self.native_player_leave_message(guest.uuid, &guest.name, &mut line);
-                        host = self.lan.take()?;
-                        if let Some(line) = line {
-                            self.system_message(line);
-                        }
-                    }
-                    if guest.placed && !host.players_told_left {
-                        self.lan = Some(host);
-                        self.native_player_logged_out(guest.uuid, &guest.name);
-                        host = self.lan.take()?;
-                    }
-=======
                     host.forget_menus(guest.conn);
                     self.clear_guest_book_connection(guest.conn);
                     self.native_guest_left(&guest);
->>>>>>> theirs
                 }
                 HostEvent::Flight { conn, flying } => {
                     self.lan_flight_toggled(conn, flying);
@@ -3411,18 +2893,12 @@ impl Game<'_> {
                 }
                 events
             };
-<<<<<<< ours
-            self.wake_woken_guests(&mut host);
-            // Players held until the Java mods' load functions ran join now (lan/java.rs).
-            let (events, spawn) = self.release_held_joins_into(events, spawn);
-||||||| base
-            self.wake_woken_guests(&mut host);
-=======
             self.wake_woken_guests();
             let Some(host) = self.lan.take() else {
                 return;
             };
->>>>>>> theirs
+            // Players held until the Java mods' load functions ran join now (lan/java.rs).
+            let (events, spawn) = self.release_held_joins_into(events, spawn);
             let processed = horizon_client::spans::time("lan_process_events", || {
                 self.lan_process_events(host, events, entities, spawn)
             });
@@ -3661,50 +3137,6 @@ impl Game<'_> {
         }
         for e in events {
             match e {
-<<<<<<< ours
-                horizon_world::level::LevelEvent::LevelEvent { id, pos, data } => {
-                    let own = *id == 2001 && own_break;
-                    if own && self.lan_break_pos == Some([pos.x, pos.y, pos.z]) {
-                        own_break = false;
-                    }
-                    // The acting guest does not predict these, and the vanilla
-                    // call names no excluded player (`levelEvent(id, pos, data)`
-                    // passes null): the composter fill (1500), the egg's
-                    // teleport, bone meal's growth, anvil result sounds, a
-                    // finished brushing or an eye inserted in a portal frame,
-                    // a zombie's infection and a finished cure (1026, 1027),
-                    // and the digger's own crack and hit sound (2019, 2020).
-                    // A Java mod's event with a player as its source: not to that player.
-                    let except = self.java_event_except().or_else(|| {
-                        level_event_except(
-                            *id,
-                            self.lan_acting,
-                            *id == 2001 && self.lan_break_pos.is_some() && !own,
-                        )
-                    });
-                    self.lan_events
-                        .push((*id, [pos.x, pos.y, pos.z], *data, except));
-||||||| base
-                horizon_world::level::LevelEvent::LevelEvent { id, pos, data } => {
-                    let own = *id == 2001 && own_break;
-                    if own && self.lan_break_pos == Some([pos.x, pos.y, pos.z]) {
-                        own_break = false;
-                    }
-                    // The acting guest does not predict these, and the vanilla
-                    // call names no excluded player (`levelEvent(id, pos, data)`
-                    // passes null): the composter fill (1500), the egg's
-                    // teleport, bone meal's growth, anvil result sounds, a
-                    // finished brushing or an eye inserted in a portal frame,
-                    // a zombie's infection and a finished cure (1026, 1027),
-                    // and the digger's own crack and hit sound (2019, 2020).
-                    let except = level_event_except(
-                        *id,
-                        self.lan_acting,
-                        *id == 2001 && self.lan_break_pos.is_some() && !own,
-                    );
-                    self.lan_events
-                        .push((*id, [pos.x, pos.y, pos.z], *data, except));
-=======
                 horizon_world::level::LevelEvent::LevelEvent {
                     id,
                     pos,
@@ -3717,7 +3149,6 @@ impl Game<'_> {
                         data: *data,
                         source: *source,
                     });
->>>>>>> theirs
                 }
                 // `ServerLevel.runBlockEvents` broadcasts a handled block
                 // event (`ClientboundBlockEventPacket`): the guest re-runs
@@ -4052,13 +3483,9 @@ impl Game<'_> {
                     .map(|chunk| (chunk, 1)),
             )
             .chain(self.portal_ticket_areas())
-<<<<<<< ours
             // Players held until the Java mods' load functions ran (lan/java.rs).
             .chain(self.held_joins_spawn_area())
-||||||| base
-=======
             .chain(self.viewed_extra())
->>>>>>> theirs
             .collect();
     }
 

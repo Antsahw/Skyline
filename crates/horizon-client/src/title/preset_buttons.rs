@@ -1,6 +1,30 @@
 use super::*;
 impl Title {
     pub(super) fn buttons(&self, w: f32, h: f32) -> Vec<Button> {
+        let mut buttons = self.own_buttons(w, h);
+        if matches!(self.mode, Mode::Main) {
+            for b in buttons.iter_mut().filter(|b| matches!(b.id, 5..=7)) {
+                b.x -= mod_menu::ROW_SHIFT;
+            }
+            if let Some((x, y)) = buttons.iter().find(|b| b.id == 7).map(|b| (b.x, b.y)) {
+                // No label: `draw_with_items` draws the icon over it.
+                buttons.push(Button {
+                    x: x + 24.0,
+                    y,
+                    w: 20.0,
+                    label: String::new(),
+                    enabled: true,
+                    id: mod_menu::BUTTON_ID,
+                    icon: None,
+                    trailing: None,
+                    action: None,
+                });
+            }
+        }
+        buttons
+    }
+
+    fn own_buttons(&self, w: f32, h: f32) -> Vec<Button> {
         // The game rules draw and press their own.
         if self.rules.borrow().is_some() {
             return Vec::new();

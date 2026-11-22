@@ -382,6 +382,7 @@ impl Game<'_> {
             self.lan_acting_entity.replace(g.entity_id as u32),
             std::mem::replace(&mut self.lan_acting_spawn_protection, spawn_protection),
         );
+        let java_actor = java::set_actor(g.uuid);
         let acting_fake = std::mem::replace(&mut self.lan_acting_fake, !g.participates_online());
         g.residency.put_back();
         self.hook.finish_loan();
@@ -480,6 +481,7 @@ impl Game<'_> {
             marks,
             death_cause,
             acting,
+            java_actor,
             acting_fake,
             known_movement,
             packets,
@@ -622,6 +624,7 @@ impl Game<'_> {
             combat,
             building_boxes,
             acting,
+            java_actor,
             acting_fake,
             known_movement,
             packets,
@@ -751,6 +754,7 @@ impl Game<'_> {
         ) = acting;
         self.lan_acting_fake = acting_fake;
         self.known_movement = known_movement;
+        Game::set_java_actor(java_actor);
         self.lan_building_boxes = building_boxes;
         play.death_cause = std::mem::replace(&mut self.ui.death_cause, death_cause);
         // An ender chest the guest opened: the menu shows their inventory
@@ -821,6 +825,7 @@ impl Game<'_> {
         let released_vehicle = host.hub.guests[i]
             .vehicle
             .filter(|id| Some(*id) != guest_vehicle);
+        let mut java_teleport = None;
         let (stat_events, name, teleport) = host.hub.guests.update(i, |g| {
             let mut teleport = None;
             g.attachments = std::mem::replace(&mut self.player_state.attachments, attachments);
@@ -887,6 +892,7 @@ impl Game<'_> {
             // (ServerPlayer.forceSetRotation) sends the rotation alone, rider or not.
             let forced = std::mem::take(&mut self.rotation_forced);
             let turned = !forced && [self.yaw, self.pitch] != [g.yaw, g.pitch];
+            let old_look = [g.yaw, g.pitch];
             [g.yaw, g.pitch] = [self.yaw, self.pitch];
             if forced {
                 g.send(&C::PlayerRotation(play::PlayerRotation {
@@ -926,10 +932,17 @@ impl Game<'_> {
                         yaw,
                     }));
                 }
-                let teleported = std::mem::take(&mut m.teleported);
+                let mut teleported = std::mem::take(&mut m.teleported);
                 let teleported_delta = m.teleported_delta;
                 m.teleported_delta = [false; 3];
-                let moved: f64 = (0..3).map(|k| (at[k] - g.position[k]).powi(2)).sum();
+                let mut moved: f64 = (0..3).map(|k| (at[k] - g.position[k]).powi(2)).sum();
+                let mut turned = turned;
+                // ServerPlayer.teleport's head: a Java mod may cancel it (lan_actions/java.rs).
+                let moves = moved > 0.0001 || teleported;
+                if self.java_guest_teleport_refused(g, &mut m, at, old_look, moves) {
+                    (teleported, moved, turned) = (false, 0.0, false);
+                }
+                let at = if moved > 0.0 { at } else { g.position };
                 g.motion = Some(Box::new(m));
                 // The pearl and the bed took the rider out of its vehicle at their
                 // source (`stop_riding`), so `left_vehicle` already says so.
@@ -942,6 +955,8 @@ impl Game<'_> {
                         passengers: Vec::new(),
                     }));
                 }
+                java_teleport = (g.vehicle.is_none() && (moved > 0.0001 || teleported))
+                    .then_some((g.uuid, at, [g.yaw, g.pitch]));
                 if g.vehicle.is_none() && (moved > 0.0001 || turned || teleported) {
                     // A command's teleport carries its relative axes as the
                     // packet's DELTA flags; any other move is absolute.
@@ -964,6 +979,7 @@ impl Game<'_> {
             Some(TurnTeleport::Rider(at)) => host.hub.teleport_rider(i, at),
             None => {}
         }
+        self.java_guest_teleported(java_teleport);
         let g = &host.hub.guests[i];
         if new_mode != g.game_mode {
             let conn = g.conn;

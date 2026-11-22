@@ -566,6 +566,7 @@ impl Game<'_> {
             let _finished = Finished(server_flags.clone());
             // MinecraftServer.spin's Thread.setPriority(8).
             horizon_threads::favour_current();
+            let _ends = thread_end::Ends;
             let result = serve(
                 &res,
                 pack,
@@ -575,6 +576,10 @@ impl Game<'_> {
                 server_flags.clone(),
                 server_tasks,
                 &ready_tx,
+            );
+            log::info!(
+                "Horizon: the server thread's loop returned (stop asked: {})",
+                server_flags.stop.load(Ordering::Relaxed)
             );
             if let Err(e) = result {
                 log::error!("Horizon: integrated server: {e}");
@@ -587,60 +592,9 @@ impl Game<'_> {
         #[cfg(test)]
         let run_server = mod_api::testing::inherit_mods(run_server);
         let thread = std::thread::Builder::new()
-<<<<<<< ours
-            .name("Server thread".into())
-            .spawn(move || {
-                let _finished = Finished(server_flags.clone());
-                // MinecraftServer.spin's Thread.setPriority(8).
-                horizon_threads::favour_current();
-                let _ends = thread_end::Ends;
-                let result = serve(
-                    &res,
-                    pack,
-                    options,
-                    settings,
-                    launch,
-                    server_flags.clone(),
-                    server_tasks,
-                    &ready_tx,
-                );
-                log::info!(
-                    "Horizon: the server thread's loop returned (stop asked: {})",
-                    server_flags.stop.load(Ordering::Relaxed)
-                );
-                if let Err(e) = result {
-                    log::error!("Horizon: integrated server: {e}");
-                    *server_flags.failure.lock().unwrap() = Some(e.to_string());
-                    let _ = ready_tx.send(Err(e.to_string()));
-                }
-            })?;
-||||||| base
-            .name("Server thread".into())
-            .spawn(move || {
-                let _finished = Finished(server_flags.clone());
-                // MinecraftServer.spin's Thread.setPriority(8).
-                horizon_threads::favour_current();
-                let result = serve(
-                    &res,
-                    pack,
-                    options,
-                    settings,
-                    launch,
-                    server_flags.clone(),
-                    server_tasks,
-                    &ready_tx,
-                );
-                if let Err(e) = result {
-                    log::error!("Horizon: integrated server: {e}");
-                    *server_flags.failure.lock().unwrap() = Some(e.to_string());
-                    let _ = ready_tx.send(Err(e.to_string()));
-                }
-            })?;
-=======
             .name(horizon_client::crash::INTEGRATED_SERVER_THREAD.into())
             .stack_size(server_thread_stack())
             .spawn(move || run_server(&()))?;
->>>>>>> theirs
         let emergency_flags = flags.clone();
         let server_id = thread.thread().id();
         let emergency_save = horizon_client::crash::on_emergency_save(move || {
@@ -1139,31 +1093,9 @@ impl Game<'_> {
                 std::thread::sleep(Duration::from_millis(50));
             }
         }
-<<<<<<< ours
         // The Java mods' client connection ends as the server stops.
         self.java_world_closing();
-        // ServerPlayer.disconnect: nobody is left in a bed.
-        self.free_player_beds()?;
-        self.save_game()?;
-        self.lan_close(false);
-        self.save.flush()?;
-        // `WorldCloseFinal` follows a successful final save.
-        self.native_lifecycle_world_closed();
-        self.session_lock = None;
-        Ok(())
-||||||| base
-        // ServerPlayer.disconnect: nobody is left in a bed.
-        self.free_player_beds()?;
-        self.save_game()?;
-        self.lan_close(false);
-        self.save.flush()?;
-        // `WorldCloseFinal` follows a successful final save.
-        self.native_lifecycle_world_closed();
-        self.session_lock = None;
-        Ok(())
-=======
         self.finish_server_save(crashed)
->>>>>>> theirs
     }
 }
 
@@ -1257,30 +1189,10 @@ impl Game<'_> {
                 return vec![String::from("(run by a server mod)")];
             }
             // Commands.performCommand runs in the player's level.
-<<<<<<< ours
-            let (back, theirs) = (self.dim, super::Dim::from_id(&dimension));
-            let entered = theirs == back || self.enter_level(Some(&mut host), theirs).is_ok();
-            if entered && let Some(swap) = self.enter_guest(&mut host, conn, back) {
-                let command = command.trim_start_matches('/').to_owned();
-                // The hub is back in place while the command runs, as for a
-                // guest's own (`run_guest_commands`): selectors see every
-                // player (`team join … @a`), and `defaultgamemode` reaches it.
-                self.lan = Some(host);
-||||||| base
-            let (back, theirs) = (self.dim, super::Dim::from_id(&g.dimension));
-            let entered = theirs == back || self.enter_level(Some(&mut host), theirs).is_ok();
-            if entered && let Some(swap) = self.enter_guest(&mut host, conn, back) {
-                let command = command.trim_start_matches('/').to_owned();
-                // The hub is back in place while the command runs, as for a
-                // guest's own (`run_guest_commands`): selectors see every
-                // player (`team join … @a`), and `defaultgamemode` reaches it.
-                self.lan = Some(host);
-=======
             let (back, theirs) = (self.dim, super::Dim::from_id(&g.dimension));
             let entered = theirs == back || self.enter_level(theirs).is_ok();
             if entered && let Some(swap) = self.enter_guest_in_dimension(conn, back) {
                 let command = command.strip_prefix('/').unwrap_or(command).to_owned();
->>>>>>> theirs
                 let lines = self.as_console(|g| {
                     g.chat_capture = Some(Vec::new());
                     // A command a native mod registered goes to the mods

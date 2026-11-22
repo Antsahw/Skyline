@@ -1541,6 +1541,7 @@ impl Game<'_> {
                 }
             }
             C::OpenScreen(p) => self.remote_open_screen(p),
+            C::CustomPayload(p) if self.remote_java_payload(&p.channel, &p.data) => {}
             C::MountScreenOpen(p) => self.remote_open_mount(p),
             C::UpdateRecipes(p) => self.remote_recipe_properties(p),
 

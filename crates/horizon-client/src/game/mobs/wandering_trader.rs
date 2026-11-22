@@ -40,18 +40,12 @@ impl Game<'_> {
     /// `WanderingTraderSpawner.tick`: the data is loaded here, the rest runs in
     /// `horizon_gameplay::wandering_trader`.
     pub(super) fn tick_wandering_trader(&mut self) {
-<<<<<<< ours
-        if self.dim.vanilla() != Dim::Overworld || !self.ui.rules.bool("spawn_wandering_traders") {
-||||||| base
-        if self.dim != Dim::Overworld || !self.ui.rules.bool("spawn_wandering_traders") {
-=======
-        if self.dim != Dim::Overworld
+        if self.dim.vanilla() != Dim::Overworld
             || !self
                 .ui
                 .rules
                 .bool_at(horizon_client::gamerules::vanilla::SPAWN_WANDERING_TRADERS)
         {
->>>>>>> theirs
             return;
         }
         self.load_trader_data();

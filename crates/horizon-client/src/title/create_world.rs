@@ -324,20 +324,8 @@ impl WorldOptions {
             }
             24 => self.commands = Some(!self.commands(*creative)),
             25 => {
-<<<<<<< ours
-                self.world_type = if self.cycle_mod_preset(step) {
-                    self.world_type
-                } else {
-                    self.world_type.step(step, self.alt_down)
-                };
-                if self.mod_preset.is_none() && self.world_type == crate::save::WorldPreset::Flat {
-||||||| base
-                self.world_type = self.world_type.step(step, self.alt_down);
-                if self.world_type == crate::save::WorldPreset::Flat {
-=======
                 self.cycle_preset(step);
                 if self.world_type == crate::save::WorldPreset::Flat {
->>>>>>> theirs
                     // setWorldType starts the generator from the flat preset.
                     self.flat_settings = Some(super::flat::FlatSettings::default());
                 }
@@ -537,13 +525,7 @@ pub(super) fn buttons(
                 gx,
                 gy,
                 150.0,
-<<<<<<< ours
-                labelled("selectWorld.mapType", o.world_type_label()),
-||||||| base
-                labelled("selectWorld.mapType", tr(o.world_type.label())),
-=======
                 labelled("selectWorld.mapType", o.preset_label()),
->>>>>>> theirs
                 true,
                 25,
             ),

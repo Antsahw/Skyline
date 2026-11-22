@@ -531,14 +531,8 @@ impl PlayerSender {
         self.send_body(body.into());
     }
     fn send_body(&self, body: Body) {
-<<<<<<< ours
         self.tap(&body);
-        if self.fake.load(Ordering::Relaxed) && !fake_wants(&body) {
-||||||| base
-        if self.fake.load(Ordering::Relaxed) && !fake_wants(&body) {
-=======
         if matches!(self.to, To::Disabled) {
->>>>>>> theirs
             return;
         }
         if !self.reserve_body(io_pool::charge(body.retained())) {
@@ -586,18 +580,12 @@ impl PlayerSender {
         let mut held = self.held();
         for body in bodies {
             let body = body.into();
-<<<<<<< ours
             self.tap(&body);
-            self.pending.fetch_add(body.len(), Ordering::Relaxed);
-||||||| base
-            self.pending.fetch_add(body.len(), Ordering::Relaxed);
-=======
             if !self.reserve_body(io_pool::charge(body.retained())) {
                 self.close();
                 return;
             }
             self.packet_counts.add_body(&body);
->>>>>>> theirs
             held.push(body);
         }
     }
@@ -1486,6 +1474,7 @@ fn login_and_configure(
         _ => return Err("unexpected packet during login".into()),
     }
     c.reader.set_read_timeout(Some(READ_TIMEOUT)).map_err(e)?;
+    let memory = c.is_memory();
     // Configuration.
     let payload_transport = Transport::new(shared.payload_local.clone(), Side::Server);
     let mut config_io =
@@ -1493,22 +1482,21 @@ fn login_and_configure(
     let c = &mut config_io;
     let sync_data = shared.sync();
     let sync: &SyncData = &sync_data;
-<<<<<<< ours
-    let memory = c.is_memory();
-    let send = |c: &mut Connection, p: cfg::Clientbound| {
-        tap::send_tapped(c, memory, &p.encode()).map_err(e)
-    };
-||||||| base
-    let send = |c: &mut Connection, p: cfg::Clientbound| c.send(&p.encode()).map_err(e);
-=======
     let send = |c: &mut ConfigIo<'_>, p: cfg::Clientbound| {
         if let cfg::Clientbound::Disconnect(packet) = p {
             c.disconnect(packet.reason);
             return Ok(());
         }
-        p.try_encode().and_then(|body| c.send(&body)).map_err(e)
+        // Kept for the Java mods' client too, if this is the window's own player (conn/tap.rs).
+        p.try_encode()
+            .and_then(|body| {
+                if memory {
+                    super::packet_tap::keep(&body);
+                }
+                c.send(&body)
+            })
+            .map_err(e)
     };
->>>>>>> theirs
     send(
         c,
         cfg::Clientbound::CustomPayload(cfg::CustomPayload {
@@ -2724,21 +2712,13 @@ pub(super) fn frame_body(
         return Ok(());
     };
     let body = &body[..];
-<<<<<<< ours
     if writer.wide {
         return tap::wide_frame(writer, body, out);
     }
-    match writer.threshold {
-        Some(t) if body.len() >= t.max(SHARED_FRAME_MIN) => {
-||||||| base
-    match writer.threshold {
-        Some(t) if body.len() >= t.max(SHARED_FRAME_MIN) => {
-=======
     match writer.framing() {
         horizon_protocol::connection::Framing::Network(Some(t))
             if body.len() >= t.max(SHARED_FRAME_MIN) =>
         {
->>>>>>> theirs
             writer.frame_into(&SharedFrames::get().contents(body, t)?, out);
         }
         _ => writer.frame_into(&writer.contents(body)?, out),
