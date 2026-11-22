@@ -32,8 +32,15 @@ public final class Entities120 implements LevelEntityGetter<Entity> {
     /** Where the mods' entities' ids start: Horizon's own are below. */
     public static final int FIRST_ID = 0x7ffe_0000;
 
+    /**
+     * Where the Forge runtime's start: the range's upper half, so Horizon tells the two
+     * runtimes' mobs apart by id and sends a call about one to its own runtime (Horizon's
+     * `java_mods_120::FORGE_IDS` is the same number).
+     */
+    public static final int FORGE_FIRST_ID = FIRST_ID + 0x8000;
+
     private static final Map<Level, Entities120> LEVELS = new HashMap<>();
-    private static int nextId = FIRST_ID;
+    private static int nextId = Loader120.get().firstEntityId();
 
     private final List<Entity> entities = new ArrayList<>();
 

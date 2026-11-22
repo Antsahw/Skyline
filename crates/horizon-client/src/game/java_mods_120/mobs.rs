@@ -6,9 +6,10 @@
 
 use super::super::{Game, lan::LanHost};
 use super::breaking::stack_to_120;
-use super::{Level, RUNTIME, runtime_within, tick_failed_once, wait_for_runtime};
+use super::{Level, runtime, runtime_within, tick_failed_once, wait_for_runtime};
 use horizon_client::mesher::Vertex;
 use horizon_core::geometry::{Aabb, Vec3};
+use horizon_jvm_remote::boot120::Loader;
 use horizon_jvm_remote::mirror120::EntityAction;
 use horizon_protocol::packets::configuration::CustomPayload;
 use horizon_protocol::packets::play::Interact;
@@ -26,16 +27,24 @@ pub(in crate::game) const CHANNEL: &str = "horizon:java120_entities";
 /// meanwhile shows up within a second.
 const IDLE_EVERY: u64 = 20;
 
-/// The server half: how many mobs the last tick had.
-static LAST_COUNT: Mutex<usize> = Mutex::new(0);
+/// The server half: how many mobs the last tick had, by runtime (`Loader::index`).
+static LAST_COUNTS: [Mutex<usize>; 2] = [Mutex::new(0), Mutex::new(0)];
+
+/// Each runtime's mobs as last sent to the players' games.
+static LAST_ENTRIES: [Mutex<Vec<Value>>; 2] = [Mutex::new(Vec::new()), Mutex::new(Vec::new())];
+
+/// The calls' runtime's count in [`LAST_COUNTS`].
+fn last_count() -> &'static Mutex<usize> {
+    &LAST_COUNTS[super::current().index()]
+}
 
 /// The mods' entities' ids (`Entities120.FIRST_ID` and up): Horizon's own are below, the 26.3
 /// bridge's (`java_entities::FIRST_ID`) above.
 pub(in crate::game) const IDS: std::ops::Range<i32> = 0x7ffe_0000..0x7fff_0000;
 
 /// The server half: each dimension's mobs after its last tick (a click's range check, the
-/// mob caps' count).
-static SEEN: Mutex<Option<HashMap<String, Vec<Seen>>>> = Mutex::new(None);
+/// mob caps' count), by runtime.
+static SEEN: Mutex<Option<HashMap<(Loader, String), Vec<Seen>>>> = Mutex::new(None);
 
 /// One of the mods' mobs as the server half last saw it.
 #[derive(Clone)]
@@ -50,11 +59,16 @@ pub(in crate::game) struct Seen {
 
 /// The mods' mobs of a dimension after its last tick, for the mob caps (`natural_spawning`).
 pub(in crate::game) fn seen_in(dimension: &str) -> Vec<Seen> {
-    SEEN.lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .as_ref()
-        .and_then(|all| all.get(dimension).cloned())
-        .unwrap_or_default()
+    let all = SEEN.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(all) = all.as_ref() else {
+        return Vec::new();
+    };
+    Loader::ALL
+        .iter()
+        .filter_map(|l| all.get(&(*l, dimension.to_owned())))
+        .flatten()
+        .cloned()
+        .collect()
 }
 
 /// Whether a type is one of the mods' (their runtime makes it).
@@ -66,13 +80,16 @@ pub(in crate::game) fn theirs(kind: &str) -> bool {
         .any(|t| t == kind)
 }
 
-/// The mods' entity types, from when their runtime started: what `/summon` makes there.
+/// The mods' entity types, from when their runtimes started: what `/summon` makes there.
 static TYPES: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
-/// The runtime is up: its mods' entity types, for Horizon's commands.
+/// A runtime is up: its mods' entity types, for Horizon's commands, beside the other's.
 pub(super) fn know_types(runtime: &mut horizon_jvm_remote::boot120::Runtime120) {
     match runtime.mod_entity_types() {
-        Ok(types) => *TYPES.lock().unwrap_or_else(|e| e.into_inner()) = types,
+        Ok(types) => TYPES
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .extend(types),
         Err(e) => log::warn!("1.20.1 mods: their entity types can't be listed: {e}"),
     }
 }
@@ -80,11 +97,21 @@ pub(super) fn know_types(runtime: &mut horizon_jvm_remote::boot120::Runtime120) 
 /// The server half: which world's mobs the runtime holds (its folder), and the dimensions of it
 /// whose saved mobs are in already. A dimension's save is written only once it is in, so a
 /// save before that never writes over the mobs it would have loaded.
-static HELD: Mutex<Option<(PathBuf, HashSet<String>)>> = Mutex::new(None);
+static HELDS: [Mutex<Option<(PathBuf, HashSet<String>)>>; 2] = [Mutex::new(None), Mutex::new(None)];
 
-/// Where a dimension's mobs are kept, beside its other data (`raids.dat`).
+/// The calls' runtime's [`HELDS`].
+fn held() -> &'static Mutex<Option<(PathBuf, HashSet<String>)>> {
+    &HELDS[super::current().index()]
+}
+
+/// Where a dimension's mobs are kept, beside its other data (`raids.dat`): the Fabric runtime's
+/// and the Forge one's each in a file of its own.
 fn kept_at(root: &Path, dimension: &str) -> PathBuf {
-    horizon_client::save::dimension_dir(root, dimension).join("data/skyline/entities120.json")
+    let file = match super::current() {
+        Loader::Fabric => "data/skyline/entities120.json",
+        Loader::Forge => "data/skyline/entities120-forge.json",
+    };
+    horizon_client::save::dimension_dir(root, dimension).join(file)
 }
 
 /// 1.20.1's `ServerGamePacketListenerImpl.MAX_INTERACTION_DISTANCE`: a player further than six
@@ -251,82 +278,28 @@ impl Game<'_> {
         if self.remote.is_some() {
             return;
         }
-        let dimension = self.dim.id().to_owned();
-        let answer = {
-            // A chunk worker placing a feature holds the runtime for a moment: wait for it
-            // rather than freeze the mobs for a tick.
-            let Some(mut guard) = runtime_within(std::time::Duration::from_millis(25)) else {
-                return;
-            };
-            let Some(runtime) = guard.as_mut() else {
-                return;
-            };
-            let level = Level(self);
-            self.java120_bring_mobs(runtime, &level, &dimension);
-            let idle = *LAST_COUNT.lock().unwrap_or_else(|e| e.into_inner()) == 0;
-            if idle && !self.ticks.is_multiple_of(IDLE_EVERY) {
-                return;
+        // Each runtime ticks its own mobs; the players' games get them all in one message.
+        let mut entries: Vec<Value> = Vec::new();
+        let mut any = false;
+        for loader in super::loaders() {
+            let _route = super::route(loader);
+            let mut last = LAST_ENTRIES[loader.index()]
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            match self.tick_java120_mobs_of() {
+                Some((theirs, had)) => {
+                    any |= had;
+                    *last = theirs;
+                }
+                // Skipped (busy, idle): its mobs as last sent, so they don't vanish for a tick
+                // from a message the other runtime's mobs make.
+                None => any |= !last.is_empty(),
             }
-            runtime
-                .tick_entities(&level, &dimension, &self.java120_players_here())
-                .and_then(|ticked| {
-                    let looks = if ticked.entities.is_empty() {
-                        String::from("{}")
-                    } else {
-                        runtime.render_entities(&level, &dimension)?
-                    };
-                    Ok((ticked, looks))
-                })
-        };
-        let (ticked, looks) = match answer {
-            Ok(answer) => answer,
-            Err(e) => {
-                tick_failed_once(&e);
-                return;
-            }
-        };
-        let was = std::mem::replace(
-            &mut *LAST_COUNT.lock().unwrap_or_else(|e| e.into_inner()),
-            ticked.entities.len(),
-        );
-        self.apply_java120(
-            &dimension,
-            &ticked.set,
-            &ticked.block_entities,
-            &ticked.spawned,
-        );
-        SEEN.lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .get_or_insert_with(HashMap::new)
-            .insert(
-                dimension.clone(),
-                ticked
-                    .entities
-                    .iter()
-                    .map(|e| Seen {
-                        id: e.id,
-                        kind: e.kind.clone(),
-                        category: e.category.clone(),
-                        pos: e.pos,
-                        is_mob: e.is_mob,
-                        persistent: e.persistent,
-                    })
-                    .collect(),
-            );
-        if ticked.entities.is_empty() && was == 0 {
+            entries.extend(last.iter().cloned());
+        }
+        if !any {
             return;
         }
-        let looks: Value = serde_json::from_str(&looks).unwrap_or(Value::Null);
-        let entries: Vec<Value> = ticked
-            .entities
-            .iter()
-            .map(|e| {
-                serde_json::json!({
-                    "id": e.id, "kind": e.kind, "p": e.pos, "r": e.rot, "s": e.size,
-                    "h": e.health, "m": looks.get(e.id.to_string()).cloned().unwrap_or(Value::Null),
-                })
-            })
-            .collect();
         let data = serde_json::to_vec(&serde_json::json!({ "e": entries })).unwrap_or_default();
         let Some(host) = self.lan.as_mut() else {
             return;
@@ -350,6 +323,84 @@ impl Game<'_> {
         }
     }
 
+    /// The calls' runtime's mobs ticked: their entries for the players' games, and whether
+    /// there are or were any (else nothing need be sent). None when the tick was skipped.
+    fn tick_java120_mobs_of(&mut self) -> Option<(Vec<Value>, bool)> {
+        let dimension = self.dim.id().to_owned();
+        let answer = {
+            // A chunk worker placing a feature holds the runtime for a moment: wait for it
+            // rather than freeze the mobs for a tick.
+            let mut guard = runtime_within(std::time::Duration::from_millis(25))?;
+            let runtime = guard.as_mut()?;
+            let level = Level(self);
+            self.java120_bring_mobs(runtime, &level, &dimension);
+            let idle = *last_count().lock().unwrap_or_else(|e| e.into_inner()) == 0;
+            if idle && !self.ticks.is_multiple_of(IDLE_EVERY) {
+                return None;
+            }
+            runtime
+                .tick_entities(&level, &dimension, &self.java120_players_here())
+                .and_then(|ticked| {
+                    let looks = if ticked.entities.is_empty() {
+                        String::from("{}")
+                    } else {
+                        runtime.render_entities(&level, &dimension)?
+                    };
+                    Ok((ticked, looks))
+                })
+        };
+        let (ticked, looks) = match answer {
+            Ok(answer) => answer,
+            Err(e) => {
+                tick_failed_once(&e);
+                return None;
+            }
+        };
+        let was = std::mem::replace(
+            &mut *last_count().lock().unwrap_or_else(|e| e.into_inner()),
+            ticked.entities.len(),
+        );
+        self.apply_java120(
+            &dimension,
+            &ticked.set,
+            &ticked.block_entities,
+            &ticked.spawned,
+        );
+        SEEN.lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get_or_insert_with(HashMap::new)
+            .insert(
+                (super::current(), dimension.clone()),
+                ticked
+                    .entities
+                    .iter()
+                    .map(|e| Seen {
+                        id: e.id,
+                        kind: e.kind.clone(),
+                        category: e.category.clone(),
+                        pos: e.pos,
+                        is_mob: e.is_mob,
+                        persistent: e.persistent,
+                    })
+                    .collect(),
+            );
+        if ticked.entities.is_empty() && was == 0 {
+            return Some((Vec::new(), false));
+        }
+        let looks: Value = serde_json::from_str(&looks).unwrap_or(Value::Null);
+        let entries: Vec<Value> = ticked
+            .entities
+            .iter()
+            .map(|e| {
+                serde_json::json!({
+                    "id": e.id, "kind": e.kind, "p": e.pos, "r": e.rot, "s": e.size,
+                    "h": e.health, "m": looks.get(e.id.to_string()).cloned().unwrap_or(Value::Null),
+                })
+            })
+            .collect();
+        Some((entries, true))
+    }
+
     /// The server half, before a dimension's first tick: the mobs its save kept go back into
     /// the runtime (and those of another world, opened before in this game, go).
     fn java120_bring_mobs(
@@ -358,7 +409,7 @@ impl Game<'_> {
         level: &Level<'_, '_>,
         dimension: &str,
     ) {
-        let mut held = HELD.lock().unwrap_or_else(|e| e.into_inner());
+        let mut held = held().lock().unwrap_or_else(|e| e.into_inner());
         if held
             .as_ref()
             .is_some_and(|(root, _)| root != &self.world_root)
@@ -366,7 +417,7 @@ impl Game<'_> {
             if let Err(e) = runtime.clear_entities(level) {
                 log::warn!("1.20.1 mods: the last world's mobs didn't go: {e}");
             }
-            *LAST_COUNT.lock().unwrap_or_else(|e| e.into_inner()) = 0;
+            *last_count().lock().unwrap_or_else(|e| e.into_inner()) = 0;
             *held = None;
         }
         let (_, loaded) = held.get_or_insert_with(|| (self.world_root.clone(), HashSet::new()));
@@ -396,8 +447,16 @@ impl Game<'_> {
         if self.remote.is_some() {
             return;
         }
+        for loader in super::loaders() {
+            let _route = super::route(loader);
+            self.save_java120_mobs_of();
+        }
+    }
+
+    /// [`Self::save_java120_mobs`] for the calls' runtime.
+    fn save_java120_mobs_of(&mut self) {
         let dimension = self.dim.id().to_owned();
-        let in_already = HELD
+        let in_already = held()
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .as_ref()
@@ -406,7 +465,7 @@ impl Game<'_> {
             return;
         }
         let saved = {
-            let mut guard = RUNTIME.lock().unwrap_or_else(|e| e.into_inner());
+            let mut guard = runtime().lock().unwrap_or_else(|e| e.into_inner());
             let Some(runtime) = guard.as_mut() else {
                 return;
             };
@@ -511,8 +570,9 @@ impl Game<'_> {
         distance: f64,
     ) -> Option<(Aabb, u32)> {
         let dimension = self.dim.id().to_owned();
+        let _route = super::route_id(kind);
         let made = {
-            let Ok(mut guard) = RUNTIME.try_lock() else {
+            let Ok(mut guard) = runtime().try_lock() else {
                 return None;
             };
             let runtime = guard.as_mut()?;
@@ -525,7 +585,7 @@ impl Game<'_> {
                 return None;
             }
         };
-        *LAST_COUNT.lock().unwrap_or_else(|e| e.into_inner()) += 1;
+        *last_count().lock().unwrap_or_else(|e| e.into_inner()) += 1;
         let half = f64::from(made.size[0]) / 2.0;
         Some((
             Aabb::new(
@@ -553,8 +613,9 @@ impl Game<'_> {
         if super::tracing() {
             log::info!("1.20.1 mods (trace): a chunk-generation spawn of {kind} at {column:?}");
         }
+        let _route = super::route_id(kind);
         let made = {
-            let Ok(mut guard) = RUNTIME.try_lock() else {
+            let Ok(mut guard) = runtime().try_lock() else {
                 if super::tracing() {
                     log::info!("1.20.1 mods (trace): the runtime was busy");
                 }
@@ -568,7 +629,7 @@ impl Game<'_> {
         match made {
             Ok(made) => {
                 if made {
-                    *LAST_COUNT.lock().unwrap_or_else(|e| e.into_inner()) += 1;
+                    *last_count().lock().unwrap_or_else(|e| e.into_inner()) += 1;
                 }
                 made
             }
@@ -592,6 +653,7 @@ impl Game<'_> {
             return None;
         }
         let dimension = self.dim.id().to_owned();
+        let _route = super::route_id(kind);
         let made = {
             let mut guard = wait_for_runtime()?;
             let runtime = guard.as_mut()?;
@@ -600,7 +662,7 @@ impl Game<'_> {
         match made {
             Ok(made) => {
                 // The next tick asks for them, rather than wait out the idle pause.
-                *LAST_COUNT.lock().unwrap_or_else(|e| e.into_inner()) += 1;
+                *last_count().lock().unwrap_or_else(|e| e.into_inner()) += 1;
                 Some(made.is_some())
             }
             Err(e) => {
@@ -793,6 +855,7 @@ impl Game<'_> {
             location: used.map_or([0.0; 3], |p| p.location),
             stance: self.java120_stance(),
         };
+        let _route = super::route(super::loader_of_entity(id));
         let done = {
             let mut guard = wait_for_runtime()?;
             let runtime = guard.as_mut()?;

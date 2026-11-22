@@ -252,6 +252,8 @@ final class ForgeLoader120 implements Loader120 {
 
     @Override public boolean clientRunsItsLoop() { return true; }
 
+    @Override public int firstEntityId() { return Entities120.FORGE_FIRST_ID; }
+
     @Override public Object[] packetProbe(ServerPlayer player) { return new Object[] {-1, -1, false, false}; }
 
     @Override public Object[] keyProbe() { return new Object[] {0}; }

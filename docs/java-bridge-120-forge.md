@@ -49,15 +49,29 @@ and every Mirror120 call by name. Checked end to end with `examples/forge120.rs`
 a ping, and the content facts of Forge's registries (16 MB); with Farmer's Delight for Forge
 (1.20.1-1.3.4, from Modrinth) Forge loads it and the facts hold its 132 blocks and 185 items.
 
-**In the game:** Forge's 1.20.1 mods go in `mods-java-forge-1.20.1/` beside `options.txt`, and run
-when `mods-java-1.20.1/` has none: one 1.20.1 runtime at a time for now, as the game's calls go
-to one runtime (`java_mods_120`'s `RUNTIME`). Its cache is `java-120-forge/` (the content, Forge's
-game folder with the mods copied in); the content is made by the same carry-over, told the
-instance is Forge's (`Runtime120::loader`), Forge's Jar-in-Jar (`META-INF/jarjar/`) read too.
-The Mods screen lists them under "Forge 1.20.1".
+**In the game:** Forge's 1.20.1 mods go in `mods-java-forge-1.20.1/` beside `options.txt`, Fabric's
+stay in `mods-java-1.20.1/`; each folder with jars gets its runtime, both at once. Each has its
+cache (`java-120/`, `java-120-forge/`: the content, its game folder), its content made by the
+same carry-over (told the instance is Forge's: `Runtime120::loader`; Forge's Jar-in-Jar,
+`META-INF/jarjar/`, read too), and the Mods screen lists them under "Fabric 1.20.1" and
+"Forge 1.20.1".
 
-Still to do: both runtimes at once (the game's calls routed by the mod that owns the block,
-item or entity), packets to the
+The game's calls go to the runtime whose mods they're about (`java_mods_120::route`, a
+thread's choice of `RUNTIMES`): a block's by its namespace (using, breaking, exploding,
+hoppers, shapes and signals, neighbours, block entities ticked and drawn, blocks drawn by
+code, fluids), an item's by its id (using it, its tooltip, its effects), a mob's by its id (the
+Forge runtime's from `Entities120.FORGE_FIRST_ID`, the upper half of the mods' range), a
+command, a settings screen or a screen by the runtime it came from, a feature, structure or
+set by its namespace (a structure start's handle marked as the Forge runtime's). What every
+mod hears goes to both: ticks, players joining, leaving, dying and being hurt, vanilla mobs
+dying and being hurt, keys. What both give is put together: the HUD's operations, the mobs
+sent to the players' games (a runtime that skipped a tick sends its last), commands, key
+bindings, settings screens, fluids' looks, recipes, block entity types, loot added, worldgen
+packs. Each runtime knows only its own mods' blocks: the other runtime's are strangers to it,
+stood in for by their shape as 26.3's own new blocks are.
+
+Still to do: a vanilla block's break heard by both runtimes' mods (it goes to the first),
+packets to the
 client half, models drawn by code, biome modifiers on the mirror's registries, mod key mappings
 by registration rather than by category, hiding the window.
 

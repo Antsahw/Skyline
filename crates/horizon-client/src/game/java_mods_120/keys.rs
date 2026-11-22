@@ -50,20 +50,24 @@ impl super::super::Game<'_> {
             return;
         }
         if told.keys.is_none() {
-            let Ok(mut guard) = super::RUNTIME.try_lock() else {
-                return;
-            };
-            let Some(runtime) = guard.as_mut() else {
-                return;
-            };
-            let keys = match runtime.mod_keys(&Level(self)) {
-                Ok(keys) => keys,
-                Err(e) => {
-                    log::warn!("1.20.1 mods: their key bindings can't be read: {e}");
-                    Vec::new()
+            // Every runtime's mods' keys, read once each is up.
+            let mut all = Vec::new();
+            for loader in super::loaders() {
+                let _route = super::route(loader);
+                let Ok(mut guard) = super::runtime().try_lock() else {
+                    return;
+                };
+                let Some(runtime) = guard.as_mut() else {
+                    return;
+                };
+                match runtime.mod_keys(&Level(self)) {
+                    Ok(keys) => all.extend(keys),
+                    Err(e) => log::warn!("1.20.1 mods: their key bindings can't be read: {e}"),
                 }
-            };
-            told.keys = Some(keys.into_iter().filter_map(scancode).collect());
+            }
+            all.sort_unstable();
+            all.dedup();
+            told.keys = Some(all.into_iter().filter_map(scancode).collect());
         }
         let keys = told.keys.clone().unwrap_or_default();
         let Some(host) = self.lan.as_mut() else {
@@ -103,17 +107,21 @@ impl super::super::Game<'_> {
             return;
         };
         let (uuid, name) = (uuid_string(guest.uuid), guest.name.clone());
-        self.as_guest(host, conn, |g| {
-            let pressed = {
-                let mut guard = wait_for_runtime()?;
-                let runtime = guard.as_mut()?;
-                runtime.key_press(&Level(g), &uuid, &name, glfw, down)
-            };
-            if let Err(e) = pressed {
-                log::warn!("1.20.1 mods: a key for {uuid}: {e}");
-            }
-            Some(())
-        });
+        // To every runtime: a key no mod of its binds does nothing there.
+        for loader in super::loaders() {
+            let _route = super::route(loader);
+            self.as_guest(host, conn, |g| {
+                let pressed = {
+                    let mut guard = wait_for_runtime()?;
+                    let runtime = guard.as_mut()?;
+                    runtime.key_press(&Level(g), &uuid, &name, glfw, down)
+                };
+                if let Err(e) = pressed {
+                    log::warn!("1.20.1 mods: a key for {uuid}: {e}");
+                }
+                Some(())
+            });
+        }
     }
 }
 

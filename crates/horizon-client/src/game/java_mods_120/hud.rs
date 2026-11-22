@@ -10,7 +10,7 @@
 
 use super::super::java_screen::{HUD_WINDOW, HudPart, forget_hud, send_hud_part};
 use super::super::lan::LanHost;
-use super::{Level, RUNTIME, uuid_string};
+use super::{Level, runtime, uuid_string};
 use horizon_client::command::args::GameMode;
 use horizon_protocol::packets::configuration::CustomPayload;
 use horizon_protocol::packets::play::Clientbound as C;
@@ -170,12 +170,25 @@ impl super::super::Game<'_> {
                 }
             }
             let state = state.to_string();
-            // Busy (a click is being run): this tick's frame is skipped, the next one comes.
-            let Ok(mut guard) = RUNTIME.try_lock() else {
-                return None;
-            };
-            let runtime = guard.as_mut()?;
-            Some(runtime.hud_frame(&Level(g), uuid, name, &state, size.0, size.1))
+            // Every runtime's mods draw on the HUD: their frames' operations, one after the
+            // other. Busy (a click is being run): this tick's frame is skipped, the next comes.
+            let mut ops: Vec<Value> = Vec::new();
+            for loader in super::loaders() {
+                let _route = super::route(loader);
+                let Ok(mut guard) = runtime().try_lock() else {
+                    return None;
+                };
+                let runtime = guard.as_mut()?;
+                match runtime.hud_frame(&Level(g), uuid, name, &state, size.0, size.1) {
+                    Ok(frame) => {
+                        if let Ok(Value::Array(theirs)) = serde_json::from_str(&frame) {
+                            ops.extend(theirs);
+                        }
+                    }
+                    Err(e) => return Some(Err(e)),
+                }
+            }
+            Some(Ok(Value::Array(ops).to_string()))
         });
         let frame = match drawn.flatten() {
             Some(Ok(frame)) => frame,

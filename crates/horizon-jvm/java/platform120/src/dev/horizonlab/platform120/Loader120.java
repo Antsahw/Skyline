@@ -124,6 +124,9 @@ public interface Loader120 {
      */
     boolean clientRunsItsLoop();
 
+    /** Where this runtime's mods' entities' ids start (Entities120's FIRST_ID, FORGE_FIRST_ID). */
+    int firstEntityId();
+
     // The bridge's own checks of the loader.
 
     /** A payload down to the client half and one back up: what each side got, and canSend. */

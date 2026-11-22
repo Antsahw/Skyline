@@ -5,7 +5,7 @@
 //! Fabric's `PlayerBlockBreakEvents.BEFORE` (which may stop it) and `AFTER` around it, so a
 //! 1.20.1 mod listening for breaks hears vanilla blocks too.
 
-use super::{Level, NAMESPACES, RUNTIME, stack_from_120, state_name, tracing, wait_for_runtime};
+use super::{Level, NAMESPACES, runtime, stack_from_120, state_name, tracing, wait_for_runtime};
 use horizon_client::items::ItemStack;
 use horizon_jvm_remote::mirror120::{BreakBlock, BreakHow, Broke};
 use horizon_world::registry::BlockStateId;
@@ -138,13 +138,16 @@ impl super::super::Game<'_> {
             BreakHow::Before
         };
         let request = self.java120_break_request(pos, state, how);
+        // Their block to the runtime whose mods it is; another's break, for the mods' events,
+        // to the first runtime's.
+        let _route = super::route_id(&request.state);
         let broke = {
             // Their own block: the player waits on it, and nobody else can break it right, so
             // a busy runtime is waited for. Anyone else's: the events only, never worth a stall.
             let guard = if theirs {
                 wait_for_runtime()
             } else {
-                RUNTIME.try_lock().ok()
+                runtime().try_lock().ok()
             };
             let Some(mut guard) = guard else {
                 return Break120::Horizon { after: false };
@@ -215,8 +218,9 @@ impl super::super::Game<'_> {
             return;
         }
         let request = self.java120_break_request(pos, state, BreakHow::After);
+        let _route = super::route_id(&request.state);
         let broke = {
-            let Ok(mut guard) = RUNTIME.try_lock() else {
+            let Ok(mut guard) = runtime().try_lock() else {
                 return;
             };
             let Some(runtime) = guard.as_mut() else {
@@ -291,6 +295,7 @@ impl super::super::Game<'_> {
             return false;
         }
         let dimension = self.dim.id().to_owned();
+        let _route = super::route_id(&name);
         let blown = {
             let Some(mut guard) = wait_for_runtime() else {
                 return false;

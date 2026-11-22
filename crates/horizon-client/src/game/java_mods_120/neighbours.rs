@@ -5,7 +5,7 @@
 //! then `neighborChanged`, as vanilla's neighbour updater tells them: a Wired Redstone wire
 //! takes the power of a lever flipped beside it), and what they set and changed lands here.
 
-use super::{Level, NAMESPACES, RUNTIME, tick_failed_once};
+use super::{Level, NAMESPACES, runtime, tick_failed_once};
 use horizon_core::position::BlockPos;
 use horizon_world::registry::BlockStateId;
 use std::sync::{Mutex, OnceLock};
@@ -82,10 +82,18 @@ impl super::super::Game<'_> {
             positions.dedup();
             positions
         };
+        for (loader, group) in self.java120_by_owner(&positions) {
+            let _route = super::route(loader);
+            self.java120_neighbours_of(group);
+        }
+    }
+
+    /// The neighbours' changes at `positions`, told to the runtime calls go to now.
+    fn java120_neighbours_of(&mut self, positions: Vec<[i32; 3]>) {
         let dimension = self.dim.id().to_owned();
         let flat: Vec<i32> = positions.iter().flatten().copied().collect();
         let heard = {
-            let Ok(mut guard) = RUNTIME.try_lock() else {
+            let Ok(mut guard) = runtime().try_lock() else {
                 UPDATED
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())

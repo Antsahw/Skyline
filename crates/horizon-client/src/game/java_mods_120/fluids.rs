@@ -8,8 +8,9 @@
 //! set land in Horizon's world, which tells this module again, and so it flows. As the 26.3
 //! bridge does its mods' fluids (`java_server/blocks.rs`, `JAVA_FLUID_STATES`).
 
-use super::{Level, RUNTIME};
+use super::{Level, runtime};
 use horizon_core::position::BlockPos;
+use horizon_jvm_remote::boot120::Loader;
 use horizon_world::registry::BlockStateId;
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -21,7 +22,7 @@ static FLUID_STATES: OnceLock<Vec<bool>> = OnceLock::new();
 static CHANGED: Mutex<Vec<[i32; 3]>> = Mutex::new(Vec::new());
 
 /// By dimension: how many of the mods' fluid ticks the runtime has pending.
-static PENDING: Mutex<Option<HashMap<String, i32>>> = Mutex::new(None);
+static PENDING: Mutex<Option<HashMap<(Loader, String), i32>>> = Mutex::new(None);
 
 /// `LevelAccess::foreign_fluid`, for the 1.20.1 mods: whether `state` is one of their fluids.
 pub(in crate::game) fn is_fluid(state: BlockStateId) -> bool {
@@ -46,19 +47,21 @@ impl super::super::Game<'_> {
         if FLUID_STATES.get().is_some() {
             return true;
         }
-        let Ok(mut guard) = RUNTIME.try_lock() else {
-            return false;
-        };
-        let Some(runtime) = guard.as_mut() else {
-            return false;
-        };
-        let ids: std::collections::HashSet<String> = match runtime.mod_fluid_blocks() {
-            Ok(ids) => ids.into_iter().collect(),
-            Err(e) => {
-                log::warn!("1.20.1 mods: their fluids can't be listed: {e}");
-                Default::default()
+        // Every runtime's.
+        let mut ids: std::collections::HashSet<String> = Default::default();
+        for loader in super::loaders() {
+            let _route = super::route(loader);
+            let Ok(mut guard) = runtime().try_lock() else {
+                return false;
+            };
+            let Some(runtime) = guard.as_mut() else {
+                return false;
+            };
+            match runtime.mod_fluid_blocks() {
+                Ok(theirs) => ids.extend(theirs),
+                Err(e) => log::warn!("1.20.1 mods: their fluids can't be listed: {e}"),
             }
-        };
+        }
         let registry = self.pack.assets.registry;
         let states: Vec<bool> = (0..registry.len() as u32)
             .map(|id| {
@@ -86,29 +89,46 @@ impl super::super::Game<'_> {
             return;
         }
         let dimension = self.dim.id().to_owned();
+        let changed = std::mem::take(&mut *CHANGED.lock().unwrap_or_else(|e| e.into_inner()));
+        // Each runtime's fluids by their own code: the changes where its fluids are, its ticks.
+        for loader in super::loaders() {
+            let mine: Vec<[i32; 3]> = changed
+                .iter()
+                .copied()
+                .filter(|p| self.java120_owner_at(*p) == Some(loader))
+                .collect();
+            let _route = super::route(loader);
+            self.tick_java120_fluids_of(&dimension, mine);
+        }
+    }
+
+    /// [`Self::tick_java120_fluids`] in the calls' runtime, with its fluids' changes.
+    fn tick_java120_fluids_of(&mut self, dimension: &str, changed: Vec<[i32; 3]>) {
+        let loader = super::current();
+        let dimension = dimension.to_owned();
         let now = self.world.game_time;
         let pending = PENDING
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .as_ref()
-            .and_then(|p| p.get(&dimension).copied())
+            .and_then(|p| p.get(&(loader, dimension.clone())).copied())
             .unwrap_or(0);
-        let changed_empty = CHANGED.lock().unwrap_or_else(|e| e.into_inner()).is_empty();
-        if pending == 0 && changed_empty {
+        if pending == 0 && changed.is_empty() {
             return;
         }
         let ran = {
-            let Ok(mut guard) = RUNTIME.try_lock() else {
+            let Ok(mut guard) = runtime().try_lock() else {
+                // Busy: its changes wait for the next tick.
+                CHANGED
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .extend(changed);
                 return;
             };
             let Some(runtime) = guard.as_mut() else {
                 return;
             };
-            let positions: Vec<i32> =
-                std::mem::take(&mut *CHANGED.lock().unwrap_or_else(|e| e.into_inner()))
-                    .into_iter()
-                    .flatten()
-                    .collect();
+            let positions: Vec<i32> = changed.into_iter().flatten().collect();
             if !positions.is_empty()
                 && let Err(e) = runtime.fluid_changed(&Level(self), &dimension, &positions, now)
             {
@@ -122,7 +142,7 @@ impl super::super::Game<'_> {
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
                     .get_or_insert_with(HashMap::new)
-                    .insert(dimension.clone(), ticked.ticked);
+                    .insert((loader, dimension.clone()), ticked.ticked);
                 self.apply_java120(
                     &dimension,
                     &ticked.set,
@@ -142,22 +162,26 @@ impl super::super::Game<'_> {
         if DONE.load(std::sync::atomic::Ordering::Relaxed) {
             return;
         }
-        let looks = {
-            let Ok(mut guard) = RUNTIME.try_lock() else {
-                return;
+        // Every runtime's, once all are up.
+        let mut looks: HashMap<String, serde_json::Value> = HashMap::new();
+        for loader in super::loaders() {
+            let _route = super::route(loader);
+            let theirs = {
+                let Ok(mut guard) = runtime().try_lock() else {
+                    return;
+                };
+                let Some(runtime) = guard.as_mut() else {
+                    return;
+                };
+                runtime.fluid_looks()
             };
-            let Some(runtime) = guard.as_mut() else {
-                return;
-            };
-            DONE.store(true, std::sync::atomic::Ordering::Relaxed);
-            runtime.fluid_looks()
-        };
-        let looks: HashMap<String, serde_json::Value> =
-            match looks.map(|l| serde_json::from_str(&l)) {
-                Ok(Ok(looks)) => looks,
-                Ok(Err(e)) => return log::warn!("1.20.1 mods: their fluids' looks: {e}"),
-                Err(e) => return log::warn!("1.20.1 mods: their fluids' looks: {e}"),
-            };
+            match theirs.map(|l| serde_json::from_str::<HashMap<String, serde_json::Value>>(&l)) {
+                Ok(Ok(theirs)) => looks.extend(theirs),
+                Ok(Err(e)) => log::warn!("1.20.1 mods: their fluids' looks: {e}"),
+                Err(e) => log::warn!("1.20.1 mods: their fluids' looks: {e}"),
+            }
+        }
+        DONE.store(true, std::sync::atomic::Ordering::Relaxed);
         if looks.is_empty() {
             return;
         }

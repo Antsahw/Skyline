@@ -6,7 +6,7 @@
 //! Asked only where a 1.20.1 mod's block is; a block that turns out to hold no items on that
 //! face is not asked again for two seconds (a hopper under a stove tries every 8 ticks).
 
-use super::{Level, NAMESPACES, RUNTIME, stack_from_120};
+use super::{Level, NAMESPACES, runtime, stack_from_120};
 use horizon_client::items::ItemStack;
 use horizon_core::geometry::Direction;
 use horizon_jvm_remote::mirror120::{Hopper, Moved};
@@ -105,8 +105,9 @@ impl super::super::Game<'_> {
         }
         let slots: Vec<Option<(&str, i32, i32)>> = stacks.iter().map(|s| s.map(one)).collect();
         let dimension = self.dim.id().to_owned();
+        let _route = self.java120_owner_at(pos).map(super::route);
         let moved = {
-            let Ok(mut guard) = RUNTIME.try_lock() else {
+            let Ok(mut guard) = runtime().try_lock() else {
                 return None;
             };
             let runtime = guard.as_mut()?;
@@ -138,8 +139,9 @@ impl super::super::Game<'_> {
         }
         let partial: Vec<(&str, i32, i32)> = partial.iter().map(|s| one(s)).collect();
         let dimension = self.dim.id().to_owned();
+        let _route = self.java120_owner_at(pos).map(super::route);
         let moved = {
-            let Ok(mut guard) = RUNTIME.try_lock() else {
+            let Ok(mut guard) = runtime().try_lock() else {
                 return None;
             };
             let runtime = guard.as_mut()?;

@@ -224,13 +224,21 @@ pub struct Runtime120 {
 }
 
 /// A 1.20.1 runtime's mod loader: each runs in a JVM of its own.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Loader {
     Fabric,
     Forge,
 }
 
 impl Loader {
+    /// Both, Fabric's first.
+    pub const ALL: [Loader; 2] = [Loader::Fabric, Loader::Forge];
+
+    /// Its index in [`Loader::ALL`].
+    pub fn index(self) -> usize {
+        self as usize
+    }
+
     /// As horizon-port-pack's instance names it (`mmc-pack.json`'s component), with the version.
     pub fn component(self) -> (&'static str, &'static str) {
         match self {
