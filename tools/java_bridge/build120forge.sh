@@ -56,11 +56,12 @@ COMPILE="$FDEV/$(basename "$PATCHED" .jar)-named.jar:$FDEV/$(basename "$CLIENT_S
 # Forge's and Mojang's libraries (not the game jars, not the installer's tools).
 LIBS=$(find "$LIB" -name '*.jar' | grep -v -e '/net/minecraft/client/' -e '/forge-1.20.1-' -e installertools -e ForgeAutoRenamingTool -e jarsplitter -e binarypatcher | tr '\n' ':')
 MOJANG=$(python3 -I -c "import json,sys;print(':'.join(p for p in json.load(open(sys.argv[1]))['class_path'] if '/libraries/' in p))" "$LAUNCH")
-# 3. The shared sources need Fabric API's to compile (FabricLoader120 and its modules ride along
+# 3. With the bridge's conversation classes (bridge/remote: JDK types only), which the Fabric
+# runtime has on its class path and a Forge game has only from its mods. The shared sources need Fabric API's to compile (FabricLoader120 and its modules ride along
 # unused in the Forge jar, never loaded: Loader120 picks the Forge side).
 API=$(for m in "$DEV"/fabric-api-named/*.jar; do printf '%s:' "$m"; done)
 FABRIC=$(python3 -I -c "import json,sys;print(':'.join(p for p in json.load(open(sys.argv[1]))['class_path'] if '/fabric/' in p))" "$LAUNCH")
-"${JAVAC[@]}" -cp "$COMPILE:$LIBS$MOJANG:$API$FABRIC" -d "$TMP/classes" $(find "$SRC/src" "$SRC/forge" -name '*.java')
+"${JAVAC[@]}" -cp "$COMPILE:$LIBS$MOJANG:$API$FABRIC" -d "$TMP/classes" $(find "$SRC/src" "$SRC/forge" "$ROOT/crates/horizon-jvm/java/dev/horizonlab/bridge/remote" -name '*.java')
 # 4. The mixin config without the mixins on Fabric API's classes or for a client with no GL, named in the manifest as Forge
 # reads it; mods.toml.
 python3 -I - "$SRC/src/horizon-platform120.mixins.json" "$TMP/classes/horizon-platform120.forge.mixins.json" <<'PY'

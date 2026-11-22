@@ -41,6 +41,10 @@ pub struct Config {
     pub class_path: Vec<PathBuf>,
     /// The class the child runs once connected (`dev.horizonlab.bridge.r120.Boot120`).
     pub runtime: String,
+    /// A game's own main class and its arguments, in place of [`CHILD_MAIN`]: the game starts
+    /// as its loader starts it (Forge's), and a mod in it connects back (`Child.serveInGame`),
+    /// told where and as what by `HORIZON_REMOTE_CONNECT` and `HORIZON_REMOTE_RUNTIME`.
+    pub main: Option<(String, Vec<String>)>,
     /// Its arguments.
     pub runtime_args: Vec<String>,
     /// The child's working folder, and where the socket file goes (`<dir>/remote/`).
@@ -182,15 +186,25 @@ pub fn spawn(config: &Config) -> Result<Child, String> {
     let class_path =
         std::env::join_paths(&config.class_path).map_err(|e| format!("class path: {e}"))?;
     let mut command = Command::new(&config.java);
+    command.args(&config.jvm_args).arg("-cp").arg(&class_path);
+    match &config.main {
+        None => {
+            command
+                .arg(CHILD_MAIN)
+                .arg("--connect")
+                .arg(listener.address())
+                .arg("--runtime")
+                .arg(&config.runtime);
+        }
+        Some((main, args)) => {
+            command
+                .arg(main)
+                .args(args)
+                .env("HORIZON_REMOTE_CONNECT", listener.address())
+                .env("HORIZON_REMOTE_RUNTIME", &config.runtime);
+        }
+    }
     command
-        .args(&config.jvm_args)
-        .arg("-cp")
-        .arg(&class_path)
-        .arg(CHILD_MAIN)
-        .arg("--connect")
-        .arg(listener.address())
-        .arg("--runtime")
-        .arg(&config.runtime)
         .current_dir(&config.dir)
         .env("HORIZON_REMOTE_TOKEN", &token)
         .stdin(Stdio::null())

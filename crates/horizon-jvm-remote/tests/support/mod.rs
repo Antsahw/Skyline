@@ -73,6 +73,7 @@ pub fn config(name: &str, args: &[&str]) -> Option<(Config, Lines)> {
             jvm_args: vec!["-Xshare:auto".into(), "-XX:TieredStopAtLevel=1".into()],
             class_path: vec![classes],
             runtime: "dev.horizonlab.remotetest.TestRuntime".into(),
+            main: None,
             runtime_args: args.iter().map(|s| s.to_string()).collect(),
             dir,
             tcp: false,

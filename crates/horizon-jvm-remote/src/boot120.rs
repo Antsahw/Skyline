@@ -255,6 +255,7 @@ pub fn start(config: &Fabric120) -> Result<(Runtime120, String), String> {
         jvm_args,
         class_path,
         runtime: RUNTIME.into(),
+        main: None,
         runtime_args: runtime_args(config, &launch),
         dir: config.game_dir.clone(),
         tcp: false,

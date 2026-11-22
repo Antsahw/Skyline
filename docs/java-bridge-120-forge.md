@@ -1,6 +1,6 @@
 # Unmodified Forge 1.20.1 mods on Horizon 26.3 (plan, 2026-11-22)
 
-Status: phases 1 and 2 done; phase 3's platform loads in Forge's client.
+Status: phases 1 and 2 done; Forge's client runs the platform and talks to Horizon (phases 3 and 4, first half).
 
 **Phase 1 (2026-11-22):** `tools/java_bridge/fetch120forge.py --boot` fetched Forge 47.4.28 (its
 recommended 1.20.1 build), installed the client over fetch120.py's Mojang files (81 class path
@@ -39,7 +39,15 @@ mixins that stop GL calls and stand in for the window (`GlStateManagerMixin`,
 `ForgeLoader120` so far: server, level, player, chunk and tick events posted on Forge's bus;
 `BreakEvent` and `EntityInteract(Specific)` for breaking and entity use; the item handler
 capability for hoppers; the client's own resources and baked models; each mod file's pack.
-Still to do: the bridge's connection to Horizon from the Forge JVM (phase 4), packets to the
+**Phase 4 (2026-11-22, first half):** `horizon-jvm-remote`'s `forge120::start` starts Forge's client as
+its installer's arguments do (`child::Config::main`: the game's own main class in place of
+`remote.Child`), with the platform in `<game>/mods`, an empty asset index and Forge's early
+window off. Once every mod has loaded (`FMLLoadCompleteEvent`), `ForgeMod120` hides the window
+and connects back (`Child.serveInGame`, told where by `HORIZON_REMOTE_CONNECT`);
+`ForgeRuntime120` answers as Boot120 does: `start` (the mods Forge loaded), `facts` (Content120),
+and every Mirror120 call by name. Checked end to end with `examples/forge120.rs`: the report,
+a ping, and the content facts of Forge's registries (16 MB). Still to do: the game starting the
+Forge JVM beside the Fabric one when there are Forge mods, packets to the
 client half, models drawn by code, biome modifiers on the mirror's registries, mod key mappings
 by registration rather than by category, hiding the window.
 
