@@ -17,17 +17,20 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 public abstract class RawGlMixin {
     @Inject(method = "glIsEnabled(I)Z", at = @At("HEAD"), cancellable = true, require = 0)
     private static void horizon$isEnabled(int cap, CallbackInfoReturnable<Boolean> cir) {
+        if (!dev.horizonlab.platform120.Loader120.headless()) return;
         cir.setReturnValue(false);
     }
 
     @Inject(method = "glGetTexLevelParameteri(III)I", at = @At("HEAD"), cancellable = true, require = 0)
     private static void horizon$texLevel(int target, int level, int name, CallbackInfoReturnable<Integer> cir) {
+        if (!dev.horizonlab.platform120.Loader120.headless()) return;
         cir.setReturnValue(0);
     }
 
     @Inject(method = {"glPixelStorei(II)V", "glEnable(I)V", "glDisable(I)V"},
             at = @At("HEAD"), cancellable = true, require = 0)
     private static void horizon$noGl(CallbackInfo ci) {
+        if (!dev.horizonlab.platform120.Loader120.headless()) return;
         ci.cancel();
     }
 }

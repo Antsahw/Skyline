@@ -29,7 +29,7 @@ public abstract class BlockableEventLoopMixin {
     private void horizon$now(Runnable task, CallbackInfo ci) {
         Object self = this;
         boolean client = self == net.minecraft.client.Minecraft.getInstance()
-                && !dev.horizonlab.platform120.Loader120.get().clientRunsItsLoop();
+                && dev.horizonlab.platform120.Loader120.headless();
         if (!client && self != dev.horizonlab.platform120.Mirror120.server()) {
             return;
         }

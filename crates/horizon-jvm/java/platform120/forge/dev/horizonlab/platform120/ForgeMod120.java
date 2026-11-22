@@ -15,10 +15,15 @@ public final class ForgeMod120 {
     }
 
     private static void loaded() {
-        if (dev.horizonlab.bridge.remote.Child.serveInGame(new ForgeRuntime120())) {
+        if (System.getenv("HORIZON_REMOTE_CONNECT") == null) return;
+        // On the render thread, once the client is up: the window hidden and the client parked
+        // headless (Loader120.goHeadless: no more frames, ticks or GL), then Horizon's calls.
+        var minecraft = net.minecraft.client.Minecraft.getInstance();
+        minecraft.execute(() -> {
+            org.lwjgl.glfw.GLFW.glfwHideWindow(minecraft.getWindow().getWindow());
+            Loader120.goHeadless();
             Mirror120.log("connecting to Horizon");
-            var minecraft = net.minecraft.client.Minecraft.getInstance();
-            minecraft.execute(() -> org.lwjgl.glfw.GLFW.glfwHideWindow(minecraft.getWindow().getWindow()));
-        }
+            dev.horizonlab.bridge.remote.Child.serveInGame(new ForgeRuntime120());
+        });
     }
 }

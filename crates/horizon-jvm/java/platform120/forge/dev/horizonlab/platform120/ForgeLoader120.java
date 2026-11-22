@@ -250,8 +250,6 @@ final class ForgeLoader120 implements Loader120 {
     /** Forge applies biome modifiers as its server starts; the mirror's levels are told later (phase 3). */
     @Override public void finalizeBiomes(net.minecraft.core.RegistryAccess registries) {}
 
-    @Override public boolean clientRunsItsLoop() { return true; }
-
     @Override public int firstEntityId() { return Entities120.FORGE_FIRST_ID; }
 
     @Override public Object[] packetProbe(ServerPlayer player) { return new Object[] {-1, -1, false, false}; }

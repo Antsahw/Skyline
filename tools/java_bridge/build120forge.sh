@@ -62,20 +62,17 @@ MOJANG=$(python3 -I -c "import json,sys;print(':'.join(p for p in json.load(open
 API=$(for m in "$DEV"/fabric-api-named/*.jar; do printf '%s:' "$m"; done)
 FABRIC=$(python3 -I -c "import json,sys;print(':'.join(p for p in json.load(open(sys.argv[1]))['class_path'] if '/fabric/' in p))" "$LAUNCH")
 "${JAVAC[@]}" -cp "$COMPILE:$LIBS$MOJANG:$API$FABRIC" -d "$TMP/classes" $(find "$SRC/src" "$SRC/forge" "$ROOT/crates/horizon-jvm/java/dev/horizonlab/bridge/remote" -name '*.java')
-# 4. The mixin config without the mixins on Fabric API's classes or for a client with no GL, named in the manifest as Forge
+# 4. The mixin config without the mixins on Fabric API's classes, named in the manifest as Forge
 # reads it; mods.toml.
 python3 -I - "$SRC/src/horizon-platform120.mixins.json" "$TMP/classes/horizon-platform120.forge.mixins.json" <<'PY'
 import json, sys
 # On Fabric API's own classes:
 fabric_only = {"ClientPlayNetworkingMixin", "ServerPlayNetworkingMixin", "PlayerLookupMixin"}
-# The Fabric runtime's client has no GL context and these stop every GL call; Forge's client
-# makes its own window (hidden), and its start needs GL.
-headless_only = {"GlStateManagerMixin", "RenderSystemMixin", "RawGlMixin", "MinecraftMixin", "InputConstantsMixin"}
 config = json.load(open(sys.argv[1]))
 config.setdefault("minVersion", "0.8")
 for side in ("mixins", "client", "server"):
     if side in config:
-        config[side] = [m for m in config[side] if m not in fabric_only | headless_only]
+        config[side] = [m for m in config[side] if m not in fabric_only]
 json.dump(config, open(sys.argv[2], "w"), indent=2)
 PY
 mkdir -p "$TMP/classes/META-INF"

@@ -113,8 +113,6 @@ final class FabricLoader120 implements Loader120 {
         net.fabricmc.fabric.impl.biome.modification.BiomeModificationImpl.INSTANCE.finalizeWorldGen(registries);
     }
 
-    @Override public boolean clientRunsItsLoop() { return false; }
-
     @Override public int firstEntityId() { return Entities120.FIRST_ID; }
 
     // Probes of the loader's networking and key bindings (the bridge's own checks).

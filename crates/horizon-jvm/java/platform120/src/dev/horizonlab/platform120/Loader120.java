@@ -118,12 +118,6 @@ public interface Loader120 {
     /** The mods' biome modifications applied to `registries` (features, spawns, effects). */
     void finalizeBiomes(net.minecraft.core.RegistryAccess registries);
 
-    /**
-     * Whether the client runs its own loop: Forge's client is a real one (a hidden window, its
-     * render thread); the Fabric runtime's is headless, called and never ticked.
-     */
-    boolean clientRunsItsLoop();
-
     /** Where this runtime's mods' entities' ids start (Entities120's FIRST_ID, FORGE_FIRST_ID). */
     int firstEntityId();
 
@@ -140,8 +134,26 @@ public interface Loader120 {
         return Holder.LOADER;
     }
 
+    /**
+     * Whether the client is headless now: no GL, no window, no ticks of its own; the platform's
+     * mixins for that (GL calls stopped, the window stood in for, keys from Horizon) are on.
+     * Always under Fabric, whose runtime starts a client with none. Forge's client is a real
+     * one until every mod has loaded; then {@link #goHeadless} parks it.
+     */
+    static boolean headless() {
+        return Holder.headless;
+    }
+
+    /** From now on the client is headless ({@link #headless}): its render thread parks. */
+    static void goHeadless() {
+        Holder.headless = true;
+    }
+
     final class Holder {
         private Holder() {}
+
+        /** Read by the GL mixins from the first GL call: not through LOADER, which is made later. */
+        static volatile boolean headless = exists("net.fabricmc.loader.api.FabricLoader");
 
         static final Loader120 LOADER = find();
 

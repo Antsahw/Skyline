@@ -29,12 +29,15 @@ installer's launch arguments start it) loads it beside its own mod: "Horizon pla
 under Forge (ForgeLoader120)", the platform's mixins applied, and the client runs on to its
 title screen (checked under Xvfb).
 
-Unlike the Fabric runtime's headless client, Forge's client is a real one: it makes its window
-(to be hidden) and runs its own loop, and its start needs GL. So the Forge jar leaves out the
-mixins that stop GL calls and stand in for the window (`GlStateManagerMixin`,
-`RenderSystemMixin`, `RawGlMixin`, `MinecraftMixin`, `InputConstantsMixin`), and
-`BlockableEventLoopMixin` runs work at once only for the mirror's server
-(`Loader120.clientRunsItsLoop`).
+Unlike the Fabric runtime's headless client, Forge's client is a real one while it starts: it
+makes its window and runs its own loop, and its start needs GL. So the mixins that stop GL
+calls and stand in for the window (`GlStateManagerMixin`, `RenderSystemMixin`, `RawGlMixin`,
+`MinecraftMixin`, `InputConstantsMixin`, and `BlockableEventLoopMixin`'s client half) act only
+while `Loader120.headless()`: always under Fabric; under Forge once every mod has loaded, when
+`ForgeMod120` hides the window and parks the client (`Loader120.goHeadless`,
+`MinecraftParkMixin`: no more frames or ticks) before answering Horizon. Its first test in the
+game showed why: the HUD drawn from the conversation thread hit Forge's render-thread checks,
+and the client ticking the platform's level crashed it.
 
 `ForgeLoader120` so far: server, level, player, chunk and tick events posted on Forge's bus;
 `BreakEvent` and `EntityInteract(Specific)` for breaking and entity use; the item handler
