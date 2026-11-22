@@ -337,11 +337,18 @@ impl Runtime120 {
         args: &[Value],
         handler: &mut dyn Handler,
     ) -> Result<Vec<Value>, String> {
-        let started = timing::on().then(std::time::Instant::now);
-        let answer = self.child.call(command, args, handler);
-        if let Some(started) = started {
+        let answer = if timing::on() {
+            let started = std::time::Instant::now();
+            let mut counting = timing::Counting {
+                inner: handler,
+                command,
+            };
+            let answer = self.child.call(command, args, &mut counting);
             timing::record(self.loader, command, started.elapsed());
-        }
+            answer
+        } else {
+            self.child.call(command, args, handler)
+        };
         answer.map_err(|e| {
             let lines = self.child.last_lines();
             format!(
@@ -368,6 +375,55 @@ pub mod timing {
     struct Table {
         since: Instant,
         calls: HashMap<(Loader, String), (u32, Duration, Duration)>,
+        /// The runtime's calls back into Horizon during each call: (call, method).
+        back: HashMap<(String, String), (u32, Duration)>,
+    }
+
+    /// A call's handler, its calls back counted ([`TABLE`]'s `back`).
+    pub(crate) struct Counting<'a, 'b> {
+        pub(crate) inner: &'a mut dyn crate::peer::Handler,
+        pub(crate) command: &'b str,
+    }
+
+    impl crate::peer::Handler for Counting<'_, '_> {
+        fn call(
+            &mut self,
+            peer: &mut crate::peer::Peer,
+            method: &str,
+            args: Vec<crate::wire::Value>,
+        ) -> Result<Vec<crate::wire::Value>, String> {
+            let started = Instant::now();
+            let answer = self.inner.call(peer, method, args);
+            let took = started.elapsed();
+            let mut guard = TABLE.lock().unwrap_or_else(|e| e.into_inner());
+            let table = guard.get_or_insert_with(Table::new);
+            let entry = table
+                .back
+                .entry((self.command.to_owned(), method.to_owned()))
+                .or_insert((0, Duration::ZERO));
+            entry.0 += 1;
+            entry.1 += took;
+            answer
+        }
+
+        fn event(
+            &mut self,
+            peer: &mut crate::peer::Peer,
+            method: &str,
+            args: Vec<crate::wire::Value>,
+        ) {
+            self.inner.event(peer, method, args);
+        }
+    }
+
+    impl Table {
+        fn new() -> Self {
+            Table {
+                since: Instant::now(),
+                calls: HashMap::new(),
+                back: HashMap::new(),
+            }
+        }
     }
 
     static TABLE: Mutex<Option<Table>> = Mutex::new(None);
@@ -379,10 +435,7 @@ pub mod timing {
 
     pub(crate) fn record(loader: Loader, command: &str, took: Duration) {
         let mut guard = TABLE.lock().unwrap_or_else(|e| e.into_inner());
-        let table = guard.get_or_insert_with(|| Table {
-            since: Instant::now(),
-            calls: HashMap::new(),
-        });
+        let table = guard.get_or_insert_with(Table::new);
         let entry = table.calls.entry((loader, command.to_owned())).or_insert((
             0,
             Duration::ZERO,
@@ -409,6 +462,14 @@ pub mod timing {
                 "\n  {loader:?} {command}: {count}x, {:.1} ms total, {:.2} ms max",
                 sum.as_secs_f64() * 1000.0,
                 max.as_secs_f64() * 1000.0
+            ));
+        }
+        let mut back: Vec<_> = table.back.drain().collect();
+        back.sort_by_key(|row| std::cmp::Reverse(row.1.0));
+        for ((command, method), (count, sum)) in back.iter().take(6) {
+            out.push_str(&format!(
+                "\n  back into Horizon: {command} -> {method}: {count}x, {:.1} ms in Horizon",
+                sum.as_secs_f64() * 1000.0
             ));
         }
         eprintln!("{out}");
