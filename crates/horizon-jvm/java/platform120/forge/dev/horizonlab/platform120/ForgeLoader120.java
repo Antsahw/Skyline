@@ -432,4 +432,55 @@ final class ForgeLoader120 implements Loader120 {
     @Override public Object[] packetProbe(ServerPlayer player) { return new Object[] {-1, -1, false, false}; }
 
     @Override public Object[] keyProbe() { return new Object[] {0}; }
+
+    /** Forge's ItemTooltipEvent, with the client's player (none before one stands in the world). */
+    @Override
+    public void tooltip(ItemStack stack, net.minecraft.world.item.TooltipFlag flag, List<net.minecraft.network.chat.Component> all) {
+        post(new net.minecraftforge.event.entity.player.ItemTooltipEvent(stack, Minecraft.getInstance().player, all, flag),
+                "item tooltip");
+    }
+
+    /** Forge's LivingDeathEvent (its listeners can't be counted: one, when posted). */
+    @Override
+    public int afterDeath(net.minecraft.world.entity.LivingEntity mob, net.minecraft.world.damagesource.DamageSource source) {
+        post(new net.minecraftforge.event.entity.living.LivingDeathEvent(mob, source), "mob death");
+        return 1;
+    }
+
+    /** Forge's bus doesn't say who listens: asked always. */
+    @Override
+    public boolean listensToDamage() {
+        return true;
+    }
+
+    /** Forge's LivingAttackEvent then LivingHurtEvent, as a mob's hurt posts them: cancelled, not hurt. */
+    @Override
+    public boolean allowDamage(net.minecraft.world.entity.LivingEntity mob, net.minecraft.world.damagesource.DamageSource source, float amount) {
+        if (post(new net.minecraftforge.event.entity.living.LivingAttackEvent(mob, source, amount), "mob attacked").isCanceled()) {
+            return false;
+        }
+        var hurt = post(new net.minecraftforge.event.entity.living.LivingHurtEvent(mob, source, amount), "mob hurt");
+        return !hurt.isCanceled() && hurt.getAmount() > 0;
+    }
+
+    /** Each mod's config screen factory (its ConfigScreenFactory extension point). */
+    @Override
+    public Map<String, java.util.function.Function<net.minecraft.client.gui.screens.Screen, net.minecraft.client.gui.screens.Screen>> settingsScreens() {
+        Map<String, java.util.function.Function<net.minecraft.client.gui.screens.Screen, net.minecraft.client.gui.screens.Screen>> out = new java.util.TreeMap<>();
+        for (var info : net.minecraftforge.fml.ModList.get().getMods()) {
+            try {
+                net.minecraftforge.client.ConfigScreenHandler.getScreenFactoryFor(info).ifPresent(factory ->
+                        out.put(info.getModId(), parent -> factory.apply(Minecraft.getInstance(), parent)));
+            } catch (RuntimeException | LinkageError e) {
+                Mirror120.log("the settings screen of " + info.getModId() + " can't be found: " + e);
+            }
+        }
+        return out;
+    }
+
+    @Override
+    public String modName(String id) {
+        return net.minecraftforge.fml.ModList.get().getModContainerById(id)
+                .map(c -> c.getModInfo().getDisplayName()).orElse(id);
+    }
 }

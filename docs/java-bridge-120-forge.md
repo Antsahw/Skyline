@@ -85,8 +85,12 @@ Biome modifiers: the mirror's registries are loaded with Forge's data pack regis
 mods' biome modifiers applied to each biome's modifiable info as a server's start applies them
 (Farmer's Delight: 9 modifiers, its wild crops in 64 biomes).
 
-Still to do: a vanilla block's break heard by both runtimes' mods (it goes to the first), mod key
-mappings by registration rather than by category.
+Mod key mappings are the game's but vanilla's own (the options' fields). Tooltips
+(ItemTooltipEvent), Horizon's mobs dying (LivingDeathEvent) and being hurt (LivingAttackEvent,
+LivingHurtEvent: cancelled, not hurt) and the mods' settings screens (their ConfigScreenFactory)
+go through the loader seam like the rest.
+
+Still to do: a vanilla block's break heard by both runtimes' mods (it goes to the first).
 
 ## License
 

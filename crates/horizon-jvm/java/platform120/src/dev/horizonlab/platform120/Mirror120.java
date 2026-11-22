@@ -1426,17 +1426,9 @@ public final class Mirror120 {
             all.addAll(hover);
             int before = all.size();
             try {
-                Class<?> callback = Class.forName("net.fabricmc.fabric.api.client.item.v1.ItemTooltipCallback");
-                Object eventObject = callback.getField("EVENT").get(null);
-                Object invoker = eventObject.getClass().getMethod("invoker").invoke(eventObject);
-                var getTooltip = callback.getMethod("getTooltip", ItemStack.class,
-                        net.minecraft.world.item.TooltipFlag.class, java.util.List.class);
-                getTooltip.invoke(invoker, stack, flag, all);
-            } catch (ClassNotFoundException e) {
-                // No Fabric client item API: no tooltip mods.
-            } catch (Throwable t) {
-                Throwable cause = t instanceof java.lang.reflect.InvocationTargetException i && i.getCause() != null ? i.getCause() : t;
-                log("a tooltip mod failed on " + id + ": " + cause);
+                Loader120.get().tooltip(stack, flag, all);
+            } catch (RuntimeException | LinkageError t) {
+                log("a tooltip mod failed on " + id + ": " + t);
             }
             var hoverJson = new com.google.gson.JsonArray();
             for (var line : hover) hoverJson.add(net.minecraft.network.chat.Component.Serializer.toJsonTree(line));
@@ -2316,22 +2308,10 @@ public final class Mirror120 {
                 source = damageSource(level, damageType);
             }
             int ran = 0;
-            // Fabric API's entity events, by reflection: the platform jar is built without them.
             try {
-                Object event = Class.forName("net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents")
-                        .getField("AFTER_DEATH").get(null);
-                Object invoker = event.getClass().getMethod("invoker").invoke(event);
-                for (var m : invoker.getClass().getMethods()) {
-                    if (m.getName().equals("afterDeath") && m.getParameterCount() == 2) {
-                        m.setAccessible(true);
-                        m.invoke(invoker, mob, source);
-                        ran++;
-                        break;
-                    }
-                }
-            } catch (ReflectiveOperationException | RuntimeException | LinkageError e) {
-                Throwable cause = e.getCause() != null ? e.getCause() : e;
-                log("a mod's death listener failed for " + type + ": " + cause);
+                ran += Loader120.get().afterDeath(mob, source);
+            } catch (RuntimeException | LinkageError e) {
+                log("a mod's death listener failed for " + type + ": " + e);
             }
             ran += Mixins120.fire("net.minecraft.world.entity.LivingEntity.die", mob, new Object[] {source}, false).ran();
             return new Object[] {ran};
@@ -2351,11 +2331,11 @@ public final class Mirror120 {
             String damageType, double amount, int byPlayer) {
         begin();
         try {
-            Object allow = allowDamageInvoker();
+            boolean allow = Loader120.get().listensToDamage();
             boolean hooked = Mixins120.index().keySet().stream().anyMatch(t -> t.endsWith(".hurt")
                     && !t.startsWith("net.minecraft.server.level.ServerPlayer.")
                     && !t.startsWith("net.minecraft.world.entity.player."));
-            if (allow == null && !hooked) return new Object[] {false, false};
+            if (!allow && !hooked) return new Object[] {false, false};
             ServerLevel level = level(dimension);
             var kind = net.minecraft.world.entity.EntityType.byString(type).orElse(null);
             if (kind == null) return new Object[] {false, true};
@@ -2364,20 +2344,11 @@ public final class Mirror120 {
             mob.moveTo(x, y, z, 0f, 0f);
             var source = damageSource(level, byPlayer != 0 && (damageType == null || damageType.isEmpty())
                     ? "minecraft:player_attack" : damageType);
-            if (allow != null) {
+            if (allow) {
                 try {
-                    for (var m : allow.getClass().getMethods()) {
-                        if (m.getName().equals("allowDamage") && m.getParameterCount() == 3) {
-                            m.setAccessible(true);
-                            if (Boolean.FALSE.equals(m.invoke(allow, mob, source, (float) amount))) {
-                                return new Object[] {true, true};
-                            }
-                            break;
-                        }
-                    }
-                } catch (ReflectiveOperationException | RuntimeException | LinkageError e) {
-                    Throwable cause = e.getCause() != null ? e.getCause() : e;
-                    log("a mod's damage listener failed for " + type + ": " + cause);
+                    if (!Loader120.get().allowDamage(mob, source, (float) amount)) return new Object[] {true, true};
+                } catch (RuntimeException | LinkageError e) {
+                    log("a mod's damage listener failed for " + type + ": " + e);
                 }
             }
             Object[] args = {source, (float) amount};
@@ -2389,30 +2360,6 @@ public final class Mirror120 {
             return new Object[] {false, true};
         } finally {
             finish();
-        }
-    }
-
-    /**
-     * Fabric's ALLOW_DAMAGE invoker, or null without Fabric's entity events or a mod listening
-     * (its ArrayBackedEvent's `handlers` empty).
-     */
-    private static Object allowDamageInvoker() {
-        try {
-            Object event = Class.forName("net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents")
-                    .getField("ALLOW_DAMAGE").get(null);
-            for (Class<?> c = event.getClass(); c != null; c = c.getSuperclass()) {
-                try {
-                    var field = c.getDeclaredField("handlers");
-                    field.setAccessible(true);
-                    if (field.get(event) instanceof Object[] handlers && handlers.length == 0) return null;
-                    break;
-                } catch (NoSuchFieldException e) {
-                    // Up the classes.
-                }
-            }
-            return event.getClass().getMethod("invoker").invoke(event);
-        } catch (ReflectiveOperationException | RuntimeException | LinkageError e) {
-            return null;
         }
     }
 

@@ -121,6 +121,25 @@ public interface Loader120 {
     /** Where this runtime's mods' entities' ids start (Entities120's FIRST_ID, FORGE_FIRST_ID). */
     int firstEntityId();
 
+    /** The mods' lines added to an item's tooltip (`all`: its name and hover text so far). */
+    void tooltip(net.minecraft.world.item.ItemStack stack, net.minecraft.world.item.TooltipFlag flag,
+            List<net.minecraft.network.chat.Component> all);
+
+    /** A mob of Horizon's died: the mods' death listeners hear it. How many ran. */
+    int afterDeath(net.minecraft.world.entity.LivingEntity mob, net.minecraft.world.damagesource.DamageSource source);
+
+    /** Whether any mod listens to mobs being hurt (Horizon stops asking when none does). */
+    boolean listensToDamage();
+
+    /** See {@link #listensToDamage}: false when a mod cancels it. */
+    boolean allowDamage(net.minecraft.world.entity.LivingEntity mob, net.minecraft.world.damagesource.DamageSource source, float amount);
+
+    /** Mod id to its settings screen's maker (the parent screen given, null here). */
+    Map<String, java.util.function.Function<net.minecraft.client.gui.screens.Screen, net.minecraft.client.gui.screens.Screen>> settingsScreens();
+
+    /** A mod's name, its id when unknown. */
+    String modName(String id);
+
     /** The data packs' registries a world loads: vanilla's and those the loader's mods add. */
     java.util.List<net.minecraft.resources.RegistryDataLoader.RegistryData<?>> worldgenRegistries();
 

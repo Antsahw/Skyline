@@ -7,7 +7,8 @@ import java.util.Map;
 import java.util.TreeMap;
 
 /**
- * The 1.20.1 mods' settings screens (phase 5h), as Mod Menu finds them: each mod's `modmenu`
+ * The 1.20.1 mods' settings screens (phase 5h), each loader's (Loader120.settingsScreens).
+ * Fabric's, as Mod Menu finds them: each mod's `modmenu`
  * entrypoint (`ModMenuApi`) gives a factory for its screen (`getModConfigScreenFactory`), and some
  * give factories for other mods' (`getProvidedConfigScreenFactories`). Called by reflection, so a
  * mod's screen is found whether or not Mod Menu itself is among the mods (its API classes then
@@ -15,6 +16,50 @@ import java.util.TreeMap;
  */
 final class Config120 {
     private Config120() {}
+
+    private static Map<String, java.util.function.Function<net.minecraft.client.gui.screens.Screen, net.minecraft.client.gui.screens.Screen>> screens;
+
+    /** Mod id to its screen's maker, the loader's, found once. */
+    private static synchronized Map<String, java.util.function.Function<net.minecraft.client.gui.screens.Screen, net.minecraft.client.gui.screens.Screen>> screens() {
+        if (screens == null) screens = new TreeMap<>(Loader120.get().settingsScreens());
+        return screens;
+    }
+
+    /** Mod Menu's factories (`ConfigScreenFactory`), by mod id, as makers of their screens. */
+    static Map<String, java.util.function.Function<net.minecraft.client.gui.screens.Screen, net.minecraft.client.gui.screens.Screen>> modMenuFactories() {
+        Map<String, java.util.function.Function<net.minecraft.client.gui.screens.Screen, net.minecraft.client.gui.screens.Screen>> out = new TreeMap<>();
+        for (var entry : factories().entrySet()) {
+            Object factory = entry.getValue();
+            out.put(entry.getKey(), parent -> {
+                try {
+                    for (Method m : factory.getClass().getMethods()) {
+                        if (m.getName().equals("create") && m.getParameterCount() == 1) {
+                            m.setAccessible(true);
+                            return m.invoke(factory, new Object[] {parent}) instanceof net.minecraft.client.gui.screens.Screen screen ? screen : null;
+                        }
+                    }
+                    return null;
+                } catch (java.lang.reflect.InvocationTargetException e) {
+                    throw e.getCause() instanceof RuntimeException r ? r : new IllegalStateException(e.getCause());
+                } catch (IllegalAccessException e) {
+                    throw new IllegalStateException(e);
+                }
+            });
+        }
+        return out;
+    }
+
+    /** A mod's name, as Fabric Loader has it. */
+    static String modMenuName(String id) {
+        try {
+            Object loader = loader();
+            var found = (java.util.Optional<?>) loader.getClass().getMethod("getModContainer", String.class).invoke(loader, id);
+            if (found.isPresent()) return (String) call(call(found.get(), "getMetadata"), "getName");
+        } catch (ReflectiveOperationException e) {
+            // Its id, then.
+        }
+        return id;
+    }
 
     /** Mod id to factory (`ConfigScreenFactory`), found once. */
     private static Map<String, Object> factories;
@@ -73,42 +118,28 @@ final class Config120 {
     static Object[] mods() {
         List<String> ids = new ArrayList<>();
         List<String> names = new ArrayList<>();
-        for (String id : factories().keySet()) {
+        for (String id : screens().keySet()) {
             // Mod Menu's own entry for vanilla's options: Horizon has its own.
             if ("minecraft".equals(id)) continue;
             ids.add(id);
-            String name = id;
-            try {
-                Object loader = loader();
-                var found = (java.util.Optional<?>) loader.getClass().getMethod("getModContainer", String.class).invoke(loader, id);
-                if (found.isPresent()) name = (String) call(call(found.get(), "getMetadata"), "getName");
-            } catch (ReflectiveOperationException e) {
-                // Its id, then.
-            }
-            names.add(name);
+            names.add(Loader120.get().modName(id));
         }
         return new Object[] {ids.toArray(new String[0]), names.toArray(new String[0])};
     }
 
     /** The mod's settings screen, made with no parent (closing it closes it): opened on the client half. */
     static boolean open(String mod) {
-        Object factory = factories().get(mod);
+        var factory = screens().get(mod);
         if (factory == null) return false;
         // Settings screens measure their labels as they're built (Cloth Config's entries).
         Screens120.font();
         try {
-            Method create = null;
-            for (Method m : factory.getClass().getMethods()) {
-                if (m.getName().equals("create") && m.getParameterCount() == 1) create = m;
-            }
-            if (create == null) return false;
-            create.setAccessible(true);
-            Object screen = create.invoke(factory, new Object[] {null});
+            Object screen = factory.apply(null);
             if (!(screen instanceof net.minecraft.client.gui.screens.Screen s)) return false;
             net.minecraft.client.Minecraft.getInstance().setScreen(s);
             return true;
         } catch (Throwable e) {
-            Throwable cause = e instanceof java.lang.reflect.InvocationTargetException t && t.getCause() != null ? t.getCause() : e;
+            Throwable cause = e;
             Mirror120.log("the settings screen of " + mod + " didn't open: " + cause);
             for (StackTraceElement at : cause.getStackTrace()) Mirror120.log("    at " + at);
             return false;

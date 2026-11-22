@@ -194,4 +194,98 @@ final class FabricLoader120 implements Loader120 {
         }
         return new Object[] {keyProbeClicks};
     }
+
+    /** Fabric's client item API's ItemTooltipCallback, by reflection: the platform jar is built without it. */
+    @Override
+    public void tooltip(ItemStack stack, net.minecraft.world.item.TooltipFlag flag, List<net.minecraft.network.chat.Component> all) {
+        try {
+            Class<?> callback = Class.forName("net.fabricmc.fabric.api.client.item.v1.ItemTooltipCallback");
+            Object eventObject = callback.getField("EVENT").get(null);
+            Object invoker = eventObject.getClass().getMethod("invoker").invoke(eventObject);
+            var getTooltip = callback.getMethod("getTooltip", ItemStack.class,
+                    net.minecraft.world.item.TooltipFlag.class, java.util.List.class);
+            getTooltip.invoke(invoker, stack, flag, all);
+        } catch (ClassNotFoundException e) {
+            // No Fabric client item API: no tooltip mods.
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException(e.getCause() != null ? e.getCause() : e);
+        }
+    }
+
+    /** Fabric API's ServerLivingEntityEvents.AFTER_DEATH, by reflection. */
+    @Override
+    public int afterDeath(net.minecraft.world.entity.LivingEntity mob, net.minecraft.world.damagesource.DamageSource source) {
+        try {
+            Object event = Class.forName("net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents")
+                    .getField("AFTER_DEATH").get(null);
+            Object invoker = event.getClass().getMethod("invoker").invoke(event);
+            for (var m : invoker.getClass().getMethods()) {
+                if (m.getName().equals("afterDeath") && m.getParameterCount() == 2) {
+                    m.setAccessible(true);
+                    m.invoke(invoker, mob, source);
+                    return 1;
+                }
+            }
+            return 0;
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException(e.getCause() != null ? e.getCause() : e);
+        }
+    }
+
+    @Override
+    public boolean listensToDamage() {
+        return allowDamageInvoker() != null;
+    }
+
+    /** Fabric API's ServerLivingEntityEvents.ALLOW_DAMAGE. */
+    @Override
+    public boolean allowDamage(net.minecraft.world.entity.LivingEntity mob, net.minecraft.world.damagesource.DamageSource source, float amount) {
+        Object allow = allowDamageInvoker();
+        if (allow == null) return true;
+        try {
+            for (var m : allow.getClass().getMethods()) {
+                if (m.getName().equals("allowDamage") && m.getParameterCount() == 3) {
+                    m.setAccessible(true);
+                    return !Boolean.FALSE.equals(m.invoke(allow, mob, source, amount));
+                }
+            }
+            return true;
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException(e.getCause() != null ? e.getCause() : e);
+        }
+    }
+
+    /**
+     * Fabric's ALLOW_DAMAGE invoker, or null without Fabric's entity events or a mod listening
+     * (its ArrayBackedEvent's `handlers` empty).
+     */
+    private static Object allowDamageInvoker() {
+        try {
+            Object event = Class.forName("net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents")
+                    .getField("ALLOW_DAMAGE").get(null);
+            for (Class<?> c = event.getClass(); c != null; c = c.getSuperclass()) {
+                try {
+                    var field = c.getDeclaredField("handlers");
+                    field.setAccessible(true);
+                    if (field.get(event) instanceof Object[] handlers && handlers.length == 0) return null;
+                    break;
+                } catch (NoSuchFieldException e) {
+                    // Up the classes.
+                }
+            }
+            return event.getClass().getMethod("invoker").invoke(event);
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError e) {
+            return null;
+        }
+    }
+
+    @Override
+    public Map<String, java.util.function.Function<net.minecraft.client.gui.screens.Screen, net.minecraft.client.gui.screens.Screen>> settingsScreens() {
+        return Config120.modMenuFactories();
+    }
+
+    @Override
+    public String modName(String id) {
+        return Config120.modMenuName(id);
+    }
 }
