@@ -46,8 +46,18 @@ window off. Once every mod has loaded (`FMLLoadCompleteEvent`), `ForgeMod120` hi
 and connects back (`Child.serveInGame`, told where by `HORIZON_REMOTE_CONNECT`);
 `ForgeRuntime120` answers as Boot120 does: `start` (the mods Forge loaded), `facts` (Content120),
 and every Mirror120 call by name. Checked end to end with `examples/forge120.rs`: the report,
-a ping, and the content facts of Forge's registries (16 MB). Still to do: the game starting the
-Forge JVM beside the Fabric one when there are Forge mods, packets to the
+a ping, and the content facts of Forge's registries (16 MB); with Farmer's Delight for Forge
+(1.20.1-1.3.4, from Modrinth) Forge loads it and the facts hold its 132 blocks and 185 items.
+
+**In the game:** Forge's 1.20.1 mods go in `mods-java-forge-1.20.1/` beside `options.txt`, and run
+when `mods-java-1.20.1/` has none: one 1.20.1 runtime at a time for now, as the game's calls go
+to one runtime (`java_mods_120`'s `RUNTIME`). Its cache is `java-120-forge/` (the content, Forge's
+game folder with the mods copied in); the content is made by the same carry-over, told the
+instance is Forge's (`Runtime120::loader`), Forge's Jar-in-Jar (`META-INF/jarjar/`) read too.
+The Mods screen lists them under "Forge 1.20.1".
+
+Still to do: both runtimes at once (the game's calls routed by the mod that owns the block,
+item or entity), packets to the
 client half, models drawn by code, biome modifiers on the mirror's registries, mod key mappings
 by registration rather than by category, hiding the window.
 

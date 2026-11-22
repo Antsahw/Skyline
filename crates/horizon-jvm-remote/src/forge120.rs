@@ -16,6 +16,27 @@ use std::time::Duration;
 /// What `ForgeMod120` says it runs.
 pub const RUNTIME: &str = "dev.horizonlab.platform120.ForgeRuntime120";
 
+/// A Java Forge 1.20.1 runs on (its ModLauncher reads classes up to Java 21's):
+/// `HORIZON_FORGE_JAVA_HOME`, else an installed 21 or 17, else the one the Fabric runtime uses.
+pub fn find_java() -> PathBuf {
+    if let Some(home) = std::env::var_os("HORIZON_FORGE_JAVA_HOME") {
+        return PathBuf::from(home).join("bin").join("java");
+    }
+    for version in ["21", "17"] {
+        for dir in [
+            format!("/usr/lib/jvm/java-{version}-openjdk"),
+            format!("/usr/lib/jvm/java-{version}-openjdk-amd64"),
+            format!("/usr/lib/jvm/jdk-{version}"),
+        ] {
+            let java = Path::new(&dir).join("bin").join("java");
+            if java.exists() {
+                return java;
+            }
+        }
+    }
+    crate::boot120::find_java()
+}
+
 /// What [`start`] runs.
 pub struct Forge120 {
     /// A Java Forge 1.20.1 runs on: 17 to 21.
@@ -26,6 +47,8 @@ pub struct Forge120 {
     pub game_dir: PathBuf,
     /// The bridge's platform as a Forge mod; copied into `<game_dir>/mods`.
     pub platform: PathBuf,
+    /// The mods' jars; copied into `<game_dir>/mods`, in place of the jars there before.
+    pub mods: Vec<PathBuf>,
     /// The child's heap (`-Xmx`).
     pub max_heap: String,
     pub jvm_args: Vec<String>,
@@ -116,10 +139,23 @@ pub fn game_args(launch: &Launch, game_dir: &Path) -> Vec<String> {
 /// The game folder as Forge's client needs it: the platform among the mods, an empty asset
 /// index, and Forge's early window off (the window Horizon hides comes later; the early one
 /// would flash up first).
-pub fn prepare(game_dir: &Path, platform: &Path) -> Result<(), String> {
+pub fn prepare(game_dir: &Path, platform: &Path, jars: &[PathBuf]) -> Result<(), String> {
     let io = |p: &Path, e: std::io::Error| format!("{}: {e}", p.display());
     let mods = game_dir.join("mods");
     std::fs::create_dir_all(&mods).map_err(|e| io(&mods, e))?;
+    // The mods folder is the game's own copy: what was there from another set of mods goes.
+    for old in std::fs::read_dir(&mods)
+        .map_err(|e| io(&mods, e))?
+        .flatten()
+    {
+        if old.path().extension().is_some_and(|e| e == "jar") {
+            let _ = std::fs::remove_file(old.path());
+        }
+    }
+    for jar in jars {
+        let to = mods.join(jar.file_name().ok_or("a jar without a name")?);
+        std::fs::copy(jar, &to).map_err(|e| io(&to, e))?;
+    }
     let to = mods.join("horizon-platform120-forge.jar");
     std::fs::copy(platform, &to).map_err(|e| io(&to, e))?;
     let index = game_dir.join("assets/indexes/horizon.json");
@@ -139,7 +175,7 @@ pub fn prepare(game_dir: &Path, platform: &Path) -> Result<(), String> {
 /// runtime and its report (JSON: the mods Forge loaded).
 pub fn start(config: &Forge120) -> Result<(Runtime120, String), String> {
     let launch = launch(&config.install)?;
-    prepare(&config.game_dir, &config.platform)?;
+    prepare(&config.game_dir, &config.platform, &config.mods)?;
     let mut jvm_args = vec![format!("-Xmx{}", config.max_heap)];
     jvm_args.extend(launch.jvm_args.iter().cloned());
     jvm_args.extend(config.jvm_args.iter().cloned());
@@ -165,6 +201,7 @@ pub fn start(config: &Forge120) -> Result<(Runtime120, String), String> {
     let mut runtime = Runtime120 {
         child,
         log: config.log.clone(),
+        loader: crate::boot120::Loader::Forge,
     };
     let report = runtime.call("start")?;
     Ok((runtime, report))

@@ -14,7 +14,7 @@
 //! block entities (phase 3b: a mod's own block entity is kept as opaque NBT). What a mod drops
 //! or ejects, ticking machines and menus are the next steps.
 
-use horizon_jvm_remote::boot120::{self, Fabric120, Runtime120, Side};
+use horizon_jvm_remote::boot120::{self, Fabric120, Loader, Runtime120, Side};
 use horizon_jvm_remote::mirror120::{SetBlock, SetBlockEntity, SpawnItem, UseBlock, World120};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -49,6 +49,47 @@ pub(in crate::game) fn is_mods_id(id: &str) -> bool {
 /// The folder beside `options.txt` that holds the 1.20.1 Fabric mods.
 pub(in crate::game) const DIR: &str = "mods-java-1.20.1";
 
+/// The folder beside `options.txt` that holds the 1.20.1 Forge mods (docs/java-bridge-120-forge.md):
+/// they run in a Forge JVM of their own.
+pub(in crate::game) const FORGE_DIR: &str = "mods-java-forge-1.20.1";
+
+/// Which 1.20.1 loader's mods this game runs, and the folder they are in: Fabric's when
+/// `mods-java-1.20.1/` has jars, else Forge's. One 1.20.1 runtime at a time for now: the game's
+/// calls go to the one runtime, so Forge's mods wait while Fabric's are there.
+fn chosen() -> Option<(Loader, PathBuf)> {
+    let fabric = super::Game::options_path().with_file_name(DIR);
+    let forge = super::Game::options_path().with_file_name(FORGE_DIR);
+    match (!jars(&fabric).is_empty(), !jars(&forge).is_empty()) {
+        (true, forge_too) => {
+            if forge_too {
+                log::warn!(
+                    "1.20.1 mods: both {DIR} and {FORGE_DIR} have mods; only the Fabric ones run \
+                     until the game talks to both runtimes at once"
+                );
+            }
+            Some((Loader::Fabric, fabric))
+        }
+        (false, true) => Some((Loader::Forge, forge)),
+        (false, false) => None,
+    }
+}
+
+/// The runtime's own folder under the cache (its game folder, the content it made).
+fn runtime_home(loader: Loader) -> PathBuf {
+    super::mods::horizon_cache().join(match loader {
+        Loader::Fabric => "java-120",
+        Loader::Forge => "java-120-forge",
+    })
+}
+
+/// The bridge's platform jar for `loader` (build120.sh's, build120forge.sh's).
+fn platform_jar(loader: Loader) -> PathBuf {
+    install().join(match loader {
+        Loader::Fabric => "horizon/platform120.jar",
+        Loader::Forge => "horizon/platform120-forge.jar",
+    })
+}
+
 /// The jars in `dir`, sorted.
 fn jars(dir: &Path) -> Vec<PathBuf> {
     let mut out: Vec<PathBuf> = std::fs::read_dir(dir)
@@ -80,14 +121,13 @@ fn install() -> PathBuf {
 /// `base` (the prepared tables): read back from the cache when the jars are the ones they were
 /// made from, else made now with the 1.20.1 runtime (stopped again after).
 pub(in crate::game) fn content(base: &Path) -> Vec<PathBuf> {
-    let dir = super::Game::options_path().with_file_name(DIR);
-    let jars = jars(&dir);
-    if jars.is_empty() {
+    let Some((loader, dir)) = chosen() else {
         return Vec::new();
-    }
-    let home = super::mods::horizon_cache().join("java-120");
+    };
+    let jars = jars(&dir);
+    let home = runtime_home(loader);
     let cache = home.join("content");
-    if let Some(folders) = horizon_jvm_remote::content120::cached(&stamped(&jars), &cache) {
+    if let Some(folders) = horizon_jvm_remote::content120::cached(&stamped(loader, &jars), &cache) {
         remember_loot(&cache);
         remember_blocks(&cache);
         levels::register(&cache.join(horizon_jvm_remote::content120::WORLDGEN_PACK));
@@ -101,9 +141,9 @@ pub(in crate::game) fn content(base: &Path) -> Vec<PathBuf> {
         horizon_world::worldgen::foreign::set_foreign_pending(true);
         let (dir, home) = (dir.clone(), home.clone());
         let started = std::thread::Builder::new()
-            .name("fabric-1.20.1 start".into())
+            .name("1.20.1 runtime start".into())
             .spawn(move || {
-                match start(&dir, &home) {
+                match start(loader, &dir, &home) {
                     Ok((runtime, _)) => keep(runtime),
                     Err(e) => log::warn!("1.20.1 mods: their code doesn't run: {e}"),
                 }
@@ -115,7 +155,7 @@ pub(in crate::game) fn content(base: &Path) -> Vec<PathBuf> {
         }
         return folders;
     }
-    match make(&dir, &jars, base, &home, &cache) {
+    match make(loader, &dir, &jars, base, &home, &cache) {
         Ok(folders) => {
             remember_loot(&cache);
             remember_blocks(&cache);
@@ -245,15 +285,15 @@ fn keep(mut runtime: Runtime120) {
 
 /// What the content cache is stamped with: the mods' jars and the bridge's own platform jar,
 /// which writes what the mods register. A new build of either makes the content again.
-fn stamped(jars: &[PathBuf]) -> Vec<PathBuf> {
+fn stamped(loader: Loader, jars: &[PathBuf]) -> Vec<PathBuf> {
     let mut all = jars.to_vec();
-    all.push(install().join("horizon/platform120.jar"));
+    all.push(platform_jar(loader));
     all
 }
 
 /// Starts the 1.20.1 runtime with the jars in `dir` and the platform jar: the runtime and its
 /// report.
-fn start(dir: &Path, home: &Path) -> Result<(Runtime120, String), String> {
+fn start(loader: Loader, dir: &Path, home: &Path) -> Result<(Runtime120, String), String> {
     let install = install();
     if !install.join("launch.json").exists() {
         return Err(format!(
@@ -261,12 +301,30 @@ fn start(dir: &Path, home: &Path) -> Result<(Runtime120, String), String> {
             install.display()
         ));
     }
-    let platform = install.join("horizon/platform120.jar");
+    let platform = platform_jar(loader);
     if !platform.exists() {
         return Err(format!(
-            "no {} (run tools/java_bridge/build120.sh)",
-            platform.display()
+            "no {} (run tools/java_bridge/{})",
+            platform.display(),
+            match loader {
+                Loader::Fabric => "build120.sh",
+                Loader::Forge => "fetch120forge.py, then build120forge.sh",
+            }
         ));
+    }
+    if loader == Loader::Forge {
+        let config = horizon_jvm_remote::forge120::Forge120 {
+            java: horizon_jvm_remote::forge120::find_java(),
+            install,
+            game_dir: home.join("game"),
+            platform,
+            mods: jars(dir),
+            max_heap: "3G".into(),
+            jvm_args: Vec::new(),
+            timeout: Duration::from_secs(900),
+            log: Arc::new(|line: &str| log::info!("{line}")),
+        };
+        return horizon_jvm_remote::forge120::start(&config);
     }
     let bridge = home.join("bridge120.jar");
     horizon_jvm_remote::write_bridge120(&bridge)?;
@@ -287,6 +345,7 @@ fn start(dir: &Path, home: &Path) -> Result<(Runtime120, String), String> {
 }
 
 fn make(
+    loader: Loader,
     dir: &Path,
     jars: &[PathBuf],
     base: &Path,
@@ -298,7 +357,7 @@ fn make(
         "1.20.1 mods: making the content of {} jar(s) (once for this set of mods)",
         jars.len()
     );
-    let (mut runtime, report) = start(dir, home)?;
+    let (mut runtime, report) = start(loader, dir, home)?;
     log::info!(
         "1.20.1 mods: {} mods loaded",
         boot120::report_mods(&report).len()
@@ -313,7 +372,7 @@ fn make(
     // what the mods register (their creative tabs), so it makes the content again.
     let _ = std::fs::write(
         cache.join("stamp"),
-        horizon_jvm_remote::content120::stamp(&stamped(jars)),
+        horizon_jvm_remote::content120::stamp(&stamped(loader, jars)),
     );
     log::info!(
         "1.20.1 mods: {} content mod(s) made in {} ms",

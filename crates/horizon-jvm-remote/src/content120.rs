@@ -108,7 +108,10 @@ fn carried_jars(zip: &mut zip::ZipArchive<std::io::Cursor<&[u8]>>) -> Vec<String
         .filter_map(|j| j["file"].as_str().map(str::to_owned))
         .collect();
     for name in zip.file_names() {
-        if name.starts_with("META-INF/jars/") && name.ends_with(".jar") {
+        // Fabric's, and Forge's Jar-in-Jar.
+        if (name.starts_with("META-INF/jars/") || name.starts_with("META-INF/jarjar/"))
+            && name.ends_with(".jar")
+        {
             names.push(name.to_owned());
         }
     }
@@ -514,10 +517,11 @@ pub fn build(
         let bytes = std::fs::read(jar).map_err(|e| format!("{}: {e}", jar.display()))?;
         nested_jars(&bytes, &mods, 4);
     }
+    let (loader, loader_version) = runtime.loader.component();
     let pack = serde_json::json!({
         "components": [
             {"uid": "net.minecraft", "version": "1.20.1"},
-            {"uid": "net.fabricmc.fabric-loader", "version": "0.20.1"},
+            {"uid": loader, "version": loader_version},
         ]
     });
     std::fs::write(instance.join("mmc-pack.json"), pack.to_string())

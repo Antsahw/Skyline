@@ -94,6 +94,7 @@
   "horizon.mods.settings": "Settings",
   "horizon.mods.runtime.fabric_26_3": "Fabric 26.3",
   "horizon.mods.runtime.fabric_1_20_1": "Fabric 1.20.1",
+  "horizon.mods.runtime.forge_1_20_1": "Forge 1.20.1",
   "horizon.mods.runtime.server": "Server",
   "horizon.mods.in_world": " (leave the world to change)",
   "horizon.mods.open_folder": "Open Mod Folder",

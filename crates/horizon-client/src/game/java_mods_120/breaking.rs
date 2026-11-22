@@ -57,7 +57,10 @@ pub(in crate::game) fn stack_to_120(stack: &ItemStack) -> String {
         if let Some(Tag::Compound(custom)) = data.other("minecraft:custom_data") {
             for (k, v) in custom {
                 let key = k.to_string_lossy();
-                if !matches!(&*key, "Damage" | "Enchantments" | "StoredEnchantments" | "display") {
+                if !matches!(
+                    &*key,
+                    "Damage" | "Enchantments" | "StoredEnchantments" | "display"
+                ) {
                     rest.insert(k.clone(), v.clone());
                 }
             }

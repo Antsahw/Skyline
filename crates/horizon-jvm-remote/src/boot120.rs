@@ -219,6 +219,25 @@ pub fn new_java_options(major: Option<i64>) -> Vec<String> {
 pub struct Runtime120 {
     pub child: Child,
     pub(crate) log: Log,
+    /// The loader the runtime's game runs.
+    pub loader: Loader,
+}
+
+/// A 1.20.1 runtime's mod loader: each runs in a JVM of its own.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Loader {
+    Fabric,
+    Forge,
+}
+
+impl Loader {
+    /// As horizon-port-pack's instance names it (`mmc-pack.json`'s component), with the version.
+    pub fn component(self) -> (&'static str, &'static str) {
+        match self {
+            Loader::Fabric => ("net.fabricmc.fabric-loader", "0.20.1"),
+            Loader::Forge => ("net.minecraftforge", "47.4.28"),
+        }
+    }
 }
 
 /// Horizon's side of the conversation in phase 1: the runtime's log lines; no world yet, so
@@ -267,6 +286,7 @@ pub fn start(config: &Fabric120) -> Result<(Runtime120, String), String> {
     let mut runtime = Runtime120 {
         child,
         log: config.log.clone(),
+        loader: Loader::Fabric,
     };
     let report = runtime.call("start")?;
     Ok((runtime, report))
