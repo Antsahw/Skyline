@@ -271,7 +271,11 @@ final class ForgeLoader120 implements Loader120 {
             if (trace) System.out.println("ForgeLoader120: " + what + (taken ? "" : " (nobody took it)"));
         } catch (RuntimeException | LinkageError e) {
             if (PACKETS_FAILED.add(what + " " + e.getClass().getName())) {
-                Mirror120.log("a mod's packet " + what + " failed: " + e);
+                Throwable cause = e;
+                while (cause.getCause() != null && cause.getCause() != cause) cause = cause.getCause();
+                Mirror120.log("a mod's packet " + what + " failed: " + cause);
+                var frames = cause.getStackTrace();
+                for (int i = 0; i < Math.min(frames.length, 8); i++) Mirror120.log("    at " + frames[i]);
             }
         }
     }

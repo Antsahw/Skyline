@@ -59,4 +59,19 @@ public abstract class BlockableEventLoopMixin {
             horizon$running = false;
         }
     }
+
+    /**
+     * The mirror server's and the headless client's "thread" is whichever is calling: their
+     * work runs on the call that asks (above). So code that runs work at once on its own loop's
+     * thread and hands it on otherwise (Forge's NetworkEvent.Context.enqueueWork) runs it at
+     * once, where what it throws is seen, rather than in a future nobody reads.
+     */
+    @Inject(method = "isSameThread", at = @At("HEAD"), cancellable = true)
+    private void horizon$sameThread(org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable<Boolean> cir) {
+        Object self = this;
+        if (self == dev.horizonlab.platform120.Mirror120.server()
+                || (self == net.minecraft.client.Minecraft.getInstance() && dev.horizonlab.platform120.Loader120.headless())) {
+            cir.setReturnValue(true);
+        }
+    }
 }
