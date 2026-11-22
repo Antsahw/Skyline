@@ -81,8 +81,12 @@ Models drawn by code: a mod's state whose baked model is a class of its own (not
 Forge's) is drawn where it stands, from its quads with Forge's model data (as for Fabric, only
 those with a block entity are drawn again as they change).
 
-Still to do: a vanilla block's break heard by both runtimes' mods (it goes to the first), biome modifiers on the mirror's registries, mod key mappings by registration rather
-than by category.
+Biome modifiers: the mirror's registries are loaded with Forge's data pack registries, and the
+mods' biome modifiers applied to each biome's modifiable info as a server's start applies them
+(Farmer's Delight: 9 modifiers, its wild crops in 64 biomes).
+
+Still to do: a vanilla block's break heard by both runtimes' mods (it goes to the first), mod key
+mappings by registration rather than by category.
 
 ## License
 

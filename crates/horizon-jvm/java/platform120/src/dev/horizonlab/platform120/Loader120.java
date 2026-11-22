@@ -121,6 +121,9 @@ public interface Loader120 {
     /** Where this runtime's mods' entities' ids start (Entities120's FIRST_ID, FORGE_FIRST_ID). */
     int firstEntityId();
 
+    /** The data packs' registries a world loads: vanilla's and those the loader's mods add. */
+    java.util.List<net.minecraft.resources.RegistryDataLoader.RegistryData<?>> worldgenRegistries();
+
     // The bridge's own checks of the loader.
 
     /** A payload down to the client half and one back up: what each side got, and canSend. */

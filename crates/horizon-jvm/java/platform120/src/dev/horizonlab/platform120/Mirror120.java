@@ -175,18 +175,8 @@ public final class Mirror120 {
         return server;
     }
 
-    /**
-     * The data packs' registries a world loads: vanilla's, and those mods add through Fabric
-     * API's DynamicRegistries (which keeps its own list; its mixins hand it to a real server).
-     */
-    @SuppressWarnings("unchecked")
     private static java.util.List<net.minecraft.resources.RegistryDataLoader.RegistryData<?>> worldgenRegistries() {
-        try {
-            Class<?> fabric = Class.forName("net.fabricmc.fabric.impl.registry.sync.DynamicRegistriesImpl");
-            return (java.util.List<net.minecraft.resources.RegistryDataLoader.RegistryData<?>>) fabric.getMethod("getDynamicRegistries").invoke(null);
-        } catch (ReflectiveOperationException e) {
-            return net.minecraft.resources.RegistryDataLoader.WORLDGEN_REGISTRIES;
-        }
+        return Loader120.get().worldgenRegistries();
     }
 
     public static RegistryAccess.Frozen registries() {

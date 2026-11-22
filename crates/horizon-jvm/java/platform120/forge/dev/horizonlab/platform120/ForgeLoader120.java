@@ -381,10 +381,41 @@ final class ForgeLoader120 implements Loader120 {
         };
     }
 
-    /** Forge applies biome modifiers as its server starts; the mirror's levels are told later (phase 3). */
-    @Override public void finalizeBiomes(net.minecraft.core.RegistryAccess registries) {}
+    /**
+     * The mods' biome modifiers (data, `forge:biome_modifier`), applied to the mirror's biomes as
+     * Forge applies them to a server's as it starts: each biome's modifiable info, with every
+     * modifier the registries hold. A biome's features and spawns read the modified info after.
+     */
+    @Override
+    public void finalizeBiomes(net.minecraft.core.RegistryAccess registries) {
+        var found = registries.registry(net.minecraftforge.registries.ForgeRegistries.Keys.BIOME_MODIFIERS);
+        if (found.isEmpty()) {
+            Mirror120.log("the mirror's registries have no biome modifiers");
+            return;
+        }
+        List<net.minecraftforge.common.world.BiomeModifier> modifiers = found.get().stream().toList();
+        var biomes = registries.registryOrThrow(net.minecraft.core.registries.Registries.BIOME);
+        int done = 0;
+        for (var holder : biomes.holders().toList()) {
+            var info = holder.value().modifiableBiomeInfo();
+            if (info.getModifiedBiomeInfo() != null) continue;
+            try {
+                info.applyBiomeModifiers(holder, modifiers);
+                done++;
+            } catch (RuntimeException | LinkageError e) {
+                Mirror120.log("biome " + holder.key().location() + " can't be modified: " + e);
+            }
+        }
+        Mirror120.log(modifiers.size() + " biome modifier(s) applied to " + done + " biome(s)");
+    }
 
     @Override public int firstEntityId() { return Entities120.FORGE_FIRST_ID; }
+
+    /** Vanilla's and Forge's data pack registries (biome modifiers, the mods' own). */
+    @Override
+    public List<net.minecraft.resources.RegistryDataLoader.RegistryData<?>> worldgenRegistries() {
+        return net.minecraftforge.registries.DataPackRegistriesHooks.getDataPackRegistries();
+    }
 
     @Override public Object[] packetProbe(ServerPlayer player) { return new Object[] {-1, -1, false, false}; }
 

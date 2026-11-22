@@ -115,6 +115,21 @@ final class FabricLoader120 implements Loader120 {
 
     @Override public int firstEntityId() { return Entities120.FIRST_ID; }
 
+    /**
+     * Vanilla's, and those mods add through Fabric API's DynamicRegistries (which keeps its own
+     * list; its mixins hand it to a real server).
+     */
+    @Override
+    @SuppressWarnings("unchecked")
+    public java.util.List<net.minecraft.resources.RegistryDataLoader.RegistryData<?>> worldgenRegistries() {
+        try {
+            Class<?> fabric = Class.forName("net.fabricmc.fabric.impl.registry.sync.DynamicRegistriesImpl");
+            return (java.util.List<net.minecraft.resources.RegistryDataLoader.RegistryData<?>>) fabric.getMethod("getDynamicRegistries").invoke(null);
+        } catch (ReflectiveOperationException e) {
+            return net.minecraft.resources.RegistryDataLoader.WORLDGEN_REGISTRIES;
+        }
+    }
+
     // Probes of the loader's networking and key bindings (the bridge's own checks).
 
     private static volatile int probeClientGot = -1;

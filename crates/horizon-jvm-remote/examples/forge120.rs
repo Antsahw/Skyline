@@ -61,6 +61,13 @@ fn main() {
                         .map(|r| (r.len(), r.into_iter().take(5).collect::<Vec<_>>()))
                 );
             }
+            // The mods' biome changes too (`FORGE120_BIOMES=1`).
+            if std::env::var_os("FORGE120_BIOMES").is_some() {
+                match runtime.call("biomeChanges") {
+                    Ok(json) => println!("biomeChanges: {}", &json[..json.len().min(600)]),
+                    Err(e) => println!("biomeChanges: {e}"),
+                }
+            }
             runtime.stop();
         }
         Err(e) => {
