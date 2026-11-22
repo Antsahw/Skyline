@@ -1534,15 +1534,22 @@ impl<'a> Plan<'a> {
             "model-states.json" | "render-definitions.json" => {
                 let model = name == "model-states.json";
                 self.names(doc, !model);
+                // Faces beside a block that occludes nothing are drawn (`Block.shouldRenderFace`),
+                // own states or not: a Java mod's support stood in by stone hid the grass under it.
+                if !model {
+                    for b in &self.blocks {
+                        if b.decl.properties.occludes == Some(false)
+                            && let Some(entry) = doc.get_mut(&b.decl.id)
+                        {
+                            entry.set("can_occlude", J::Bool(false));
+                        }
+                    }
+                }
                 // A block with its own states has them from `names` already.
                 for b in self.blocks.iter().filter(|b| b.own.is_empty()) {
                     let Some(entry) = doc.get_mut(&b.decl.id) else {
                         continue;
                     };
-                    // Faces beside a block that occludes nothing are drawn (`Block.shouldRenderFace`).
-                    if !model && b.decl.properties.occludes == Some(false) {
-                        entry.set("can_occlude", J::Bool(false));
-                    }
                     if model && let Some(schema) = entry.get_mut("schema") {
                         for (property_name, property) in &b.decl.state_properties {
                             schema.set(
@@ -1715,7 +1722,11 @@ impl<'a> Plan<'a> {
     /// stood in by a full cube hid the floor's face under it: the sky showed through, a pale
     /// square).
     fn occlusion_shapes(&self, tag: &mut Tag) -> Result<()> {
+        // A block that occludes nothing hides no face, whatever its stand-in's shape.
         self.cached_shapes(tag, |b, i| {
+            if b.decl.properties.occludes == Some(false) {
+                return Some(VoxelShape::empty_ref());
+            }
             b.shapes
                 .as_ref()
                 .map(|s| &s[i])
