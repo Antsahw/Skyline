@@ -1197,7 +1197,21 @@ public final class Mirror120 {
             synchronized (PRESENT) {
                 PRESENT.put(level, here);
             }
+            // The blocks the last few mob ticks read, again: a mob's goals and collisions read
+            // the same blocks tick after tick, a round trip to Horizon per 4x4x4 cube each
+            // (most of a tick's time with a hundred mobs). Kept MOB_READS_TICKS ticks, with
+            // this side's own writes in: a block Horizon changed meanwhile is seen that late.
+            Map<Long, BlockState> kept = MOB_READS.get(level);
+            if (kept != null && mobReadsAge++ < MOB_READS_TICKS) {
+                READS.put(level, kept);
+            } else {
+                mobReadsAge = 0;
+            }
             Entities120.tick(level);
+            Map<Long, BlockState> read = READS.computeIfAbsent(level, l -> new HashMap<>());
+            Map<Long, BlockState> wrote = WRITES.get(level);
+            if (wrote != null) read.putAll(wrote);
+            MOB_READS.put(level, read);
             return Entities120.snapshot(level);
         } finally {
             finish();
@@ -1884,6 +1898,13 @@ public final class Mirror120 {
             finish();
         }
     }
+
+    /** The blocks the mob ticks read lately, by level (tickEntities). */
+    private static final Map<Level, Map<Long, BlockState>> MOB_READS = new HashMap<>();
+
+    /** How many mob ticks the reads are kept for, and how many they've been kept. */
+    private static final int MOB_READS_TICKS = 4;
+    private static int mobReadsAge;
 
     /** Each level's players this tick (tickEntities), as ServerLevel.players gives them. */
     private static final Map<Level, List<ServerPlayer>> PRESENT = new HashMap<>();

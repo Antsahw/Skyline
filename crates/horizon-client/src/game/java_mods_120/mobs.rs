@@ -32,10 +32,11 @@ static LAST_COUNTS: [Mutex<usize>; 2] = [Mutex::new(0), Mutex::new(0)];
 
 /// Each runtime's mobs' last looks (`renderEntities`' meshes), by id: a far one is drawn only
 /// every few ticks.
-static LOOKS: [Mutex<Option<HashMap<i32, Value>>>; 2] = [Mutex::new(None), Mutex::new(None)];
+static LOOKS: [Mutex<Option<HashMap<i32, Box<serde_json::value::RawValue>>>>; 2] =
+    [Mutex::new(None), Mutex::new(None)];
 
 /// Each runtime's mobs as last sent to the players' games.
-static LAST_ENTRIES: [Mutex<Vec<Value>>; 2] = [Mutex::new(Vec::new()), Mutex::new(Vec::new())];
+static LAST_ENTRIES: [Mutex<Vec<String>>; 2] = [Mutex::new(Vec::new()), Mutex::new(Vec::new())];
 
 /// The calls' runtime's count in [`LAST_COUNTS`].
 fn last_count() -> &'static Mutex<usize> {
@@ -367,7 +368,9 @@ impl Game<'_> {
             return;
         }
         // Each runtime ticks its own mobs; the players' games get them all in one message.
-        let mut entries: Vec<Value> = Vec::new();
+        // Each entry is its JSON already (the meshes as the runtime wrote them, never parsed
+        // here: megabytes a tick).
+        let mut entries: Vec<String> = Vec::new();
         let mut any = false;
         for loader in super::loaders() {
             let _route = super::route(loader);
@@ -388,7 +391,7 @@ impl Game<'_> {
         if !any {
             return;
         }
-        let data = serde_json::to_vec(&serde_json::json!({ "e": entries })).unwrap_or_default();
+        let data = format!("{{\"e\":[{}]}}", entries.join(",")).into_bytes();
         let Some(host) = self.lan.as_mut() else {
             return;
         };
@@ -413,7 +416,7 @@ impl Game<'_> {
 
     /// The calls' runtime's mobs ticked: their entries for the players' games, and whether
     /// there are or were any (else nothing need be sent). None when the tick was skipped.
-    fn tick_java120_mobs_of(&mut self) -> Option<(Vec<Value>, bool)> {
+    fn tick_java120_mobs_of(&mut self) -> Option<(Vec<String>, bool)> {
         let dimension = self.dim.id().to_owned();
         let answer = {
             // A chunk worker placing a feature holds the runtime for a moment: wait for it
@@ -477,29 +480,32 @@ impl Game<'_> {
         if ticked.entities.is_empty() && was == 0 {
             return Some((Vec::new(), false));
         }
-        let looks: Value = serde_json::from_str(&looks).unwrap_or(Value::Null);
+        // Each mob's meshes kept as the runtime wrote them: only scanned for where each ends.
+        let looks: HashMap<String, Box<serde_json::value::RawValue>> =
+            serde_json::from_str(&looks).unwrap_or_default();
         // A far mob is drawn every few ticks (Render120): between, its last look.
         let mut guard = LOOKS[super::current().index()]
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         let kept = guard.get_or_insert_with(HashMap::new);
-        if let Some(fresh) = looks.as_object() {
-            for (id, look) in fresh {
-                if let Ok(id) = id.parse::<i32>() {
-                    kept.insert(id, look.clone());
-                }
+        for (id, look) in looks {
+            if let Ok(id) = id.parse::<i32>() {
+                kept.insert(id, look);
             }
         }
         let alive: HashSet<i32> = ticked.entities.iter().map(|e| e.id).collect();
         kept.retain(|id, _| alive.contains(id));
-        let entries: Vec<Value> = ticked
+        let entries: Vec<String> = ticked
             .entities
             .iter()
             .map(|e| {
-                serde_json::json!({
-                    "id": e.id, "kind": e.kind, "p": e.pos, "r": e.rot, "s": e.size,
-                    "h": e.health, "m": kept.get(&e.id).cloned().unwrap_or(Value::Null),
+                let head = serde_json::json!({
+                    "id": e.id, "kind": e.kind, "p": e.pos, "r": e.rot, "s": e.size, "h": e.health,
                 })
+                .to_string();
+                let meshes = kept.get(&e.id).map_or("null", |m| m.get());
+                // `{...}` and the meshes: the head's closing brace makes way for "m".
+                format!("{},\"m\":{meshes}}}", &head[..head.len() - 1])
             })
             .collect();
         drop(guard);
