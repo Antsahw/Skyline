@@ -737,6 +737,7 @@ public final class Mirror120 {
         // The whole stack as 1.20.1 saves it, not just its name and count: an enchanted tool a
         // machine spat out keeps its enchantments, a renamed one its name. Horizon runs it
         // through vanilla's own 1.20.1 -> 26.3 fixes on the other side.
+        spawnedItems++;
         event.accept("spawnItem", new Object[] {
             dimension(level), dropped.getX(), dropped.getY(), dropped.getZ(),
             motion.x, motion.y, motion.z,
@@ -755,6 +756,9 @@ public final class Mirror120 {
     }
 
     private static final java.util.Set<String> TURNED_AWAY = new java.util.HashSet<>();
+
+    /** Items dropped into the world so far, for {@link #breakBlock} to see whether a break dropped any. */
+    private static int spawnedItems;
 
     /** Level.setBlockEntity: a mod's own, for this call and for Horizon when it ends. */
     public static void addBlockEntity(Level level, BlockEntity entity) {
@@ -2620,10 +2624,26 @@ public final class Mirror120 {
                     // Redstone gate on a cable) picks the piece aimed at there, and without it
                     // destroyBlock removes nothing. A block broken at once there is gone already.
                     BlockState was = level.getBlockState(pos);
+                    var wasEntity = was.hasBlockEntity() ? level.getBlockEntity(pos) : null;
+                    ItemStack tool = player.getMainHandItem().copy();
+                    int dropsBefore = spawnedItems;
                     player.gameMode.handleBlockBreakAction(pos,
                             net.minecraft.network.protocol.game.ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK,
                             net.minecraft.core.Direction.UP, level.getMaxBuildHeight(), 0);
                     goes = level.getBlockState(pos) != was || player.gameMode.destroyBlock(pos);
+                    // A survival break that went and dropped nothing: the block's own drops, as
+                    // Block.dropResources gives them, in case the mod's path lost them on the way
+                    // (vanilla's destroyBlock drops only when removeBlock says it removed).
+                    // Only once the whole block is gone: a container losing one part keeps the rest.
+                    if (goes && !creative && spawnedItems == dropsBefore && level.getBlockState(pos).isAir()
+                            && player.hasCorrectToolForDrops(was)) {
+                        var drops = net.minecraft.world.level.block.Block.getDrops(was, level, pos, wasEntity, player, tool);
+                        log("no drops from " + was + " broken in survival; its loot gives " + drops);
+                        for (ItemStack drop : drops) net.minecraft.world.level.block.Block.popResource(level, pos, drop);
+                        was.spawnAfterBreak(level, pos, tool, true);
+                    } else if (goes && !creative && spawnedItems == dropsBefore) {
+                        log("no drops from " + was + " broken in survival; the block is now " + level.getBlockState(pos));
+                    }
                 }
                 case BREAK_BEFORE -> {
                     BlockState was = level.getBlockState(pos);
