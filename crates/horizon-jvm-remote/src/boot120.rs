@@ -337,7 +337,12 @@ impl Runtime120 {
         args: &[Value],
         handler: &mut dyn Handler,
     ) -> Result<Vec<Value>, String> {
-        self.child.call(command, args, handler).map_err(|e| {
+        let started = timing::on().then(std::time::Instant::now);
+        let answer = self.child.call(command, args, handler);
+        if let Some(started) = started {
+            timing::record(self.loader, command, started.elapsed());
+        }
+        answer.map_err(|e| {
             let lines = self.child.last_lines();
             format!(
                 "{command}: {e}; the runtime's last lines:\n{}",
@@ -349,6 +354,65 @@ impl Runtime120 {
     /// Says goodbye and waits for the process to end.
     pub fn stop(mut self) {
         self.child.stop(Duration::from_secs(10));
+    }
+}
+
+/// How long the game waits on each runtime, by call (`HORIZON_120_TIMING=1`): every five
+/// seconds, each call's count, total and longest, the slowest first.
+pub mod timing {
+    use super::Loader;
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+    use std::time::{Duration, Instant};
+
+    struct Table {
+        since: Instant,
+        calls: HashMap<(Loader, String), (u32, Duration, Duration)>,
+    }
+
+    static TABLE: Mutex<Option<Table>> = Mutex::new(None);
+
+    pub(crate) fn on() -> bool {
+        static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        *ON.get_or_init(|| std::env::var_os("HORIZON_120_TIMING").is_some())
+    }
+
+    pub(crate) fn record(loader: Loader, command: &str, took: Duration) {
+        let mut guard = TABLE.lock().unwrap_or_else(|e| e.into_inner());
+        let table = guard.get_or_insert_with(|| Table {
+            since: Instant::now(),
+            calls: HashMap::new(),
+        });
+        let entry = table.calls.entry((loader, command.to_owned())).or_insert((
+            0,
+            Duration::ZERO,
+            Duration::ZERO,
+        ));
+        entry.0 += 1;
+        entry.1 += took;
+        entry.2 = entry.2.max(took);
+        let window = table.since.elapsed();
+        if window < Duration::from_secs(5) {
+            return;
+        }
+        let mut rows: Vec<_> = table.calls.drain().collect();
+        rows.sort_by_key(|row| std::cmp::Reverse(row.1.1));
+        let total: Duration = rows.iter().map(|r| r.1.1).sum();
+        let mut out = format!(
+            "1.20.1 timing: {:.0} ms of {:.0} ms waiting on the runtimes ({:.1}%)",
+            total.as_secs_f64() * 1000.0,
+            window.as_secs_f64() * 1000.0,
+            total.as_secs_f64() / window.as_secs_f64() * 100.0
+        );
+        for ((loader, command), (count, sum, max)) in rows.iter().take(12) {
+            out.push_str(&format!(
+                "\n  {loader:?} {command}: {count}x, {:.1} ms total, {:.2} ms max",
+                sum.as_secs_f64() * 1000.0,
+                max.as_secs_f64() * 1000.0
+            ));
+        }
+        eprintln!("{out}");
+        table.since = Instant::now();
     }
 }
 
