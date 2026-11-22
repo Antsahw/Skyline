@@ -225,8 +225,10 @@ fn vanilla(name: &str) -> Value {
 // Block states
 
 /// 26.2 writes a block or fluid state as `{"Name": ..., "Properties":
-/// {...}}`; 26.3 reads `{"id": ..., "properties": {...}}` (or the id alone
-/// for the default state).
+/// {...}}`; 26.3 reads `{"id": ..., "properties": {...}}`. The default state
+/// stays an object too (`{"id": ...}`), as 26.3's vanilla writes it: where a
+/// block state provider goes, a bare id names a provider of the
+/// `state_provider` registry, not a state.
 fn states(v: &mut Value) {
     match v {
         Value::Object(o) => {
@@ -234,12 +236,11 @@ fn states(v: &mut Value) {
                 && o.keys().all(|k| k == "Name" || k == "Properties");
             if state {
                 let name = o.remove("Name").unwrap_or_default();
-                match o.remove("Properties") {
-                    Some(Value::Object(p)) if !p.is_empty() => {
-                        o.insert("id".into(), name);
-                        o.insert("properties".into(), Value::Object(p));
-                    }
-                    _ => *v = name,
+                o.insert("id".into(), name);
+                if let Some(Value::Object(p)) = o.remove("Properties")
+                    && !p.is_empty()
+                {
+                    o.insert("properties".into(), Value::Object(p));
                 }
                 return;
             }
@@ -512,7 +513,7 @@ mod tests {
             s["default_fluid"],
             json!({"id": "minecraft:water", "properties": {"level": "0"}})
         );
-        assert_eq!(s["default_block"], json!("minecraft:stone"));
+        assert_eq!(s["default_block"], json!({"id": "minecraft:stone"}));
         assert!(s.get("aquifers").is_none());
         assert_eq!(
             s["noise_router"]["final_density"]["right"],
@@ -555,7 +556,7 @@ mod tests {
         assert_eq!(rules[0]["type"], json!("minecraft:ore_vein"));
         assert_eq!(
             rules[2],
-            json!({"type": "minecraft:block", "result_state": "minecraft:dirt"})
+            json!({"type": "minecraft:block", "result_state": {"id": "minecraft:dirt"}})
         );
         assert_eq!(
             s["spawn_target"],
@@ -577,7 +578,7 @@ mod tests {
         );
         assert_eq!(
             v,
-            json!({"type": "minecraft:disk", "state_provider": "minecraft:clay", "radius": 2})
+            json!({"type": "minecraft:disk", "state_provider": {"id": "minecraft:clay"}, "radius": 2})
         );
         let (v, _) = up(
             "data/x/worldgen/placed_feature/p.json",
@@ -608,7 +609,7 @@ mod tests {
         assert_eq!(
             v,
             json!({"type": "minecraft:random_selector", "features": [], "default": {
-                "feature": {"type": "minecraft:simple_block", "to_place": "minecraft:short_grass"},
+                "feature": {"type": "minecraft:simple_block", "to_place": {"id": "minecraft:short_grass"}},
                 "placement": [{"type": "minecraft:count", "count": 32},
                     {"type": "minecraft:offset", "x": spread(7), "y": spread(3), "z": spread(7)},
                     filter]}})
@@ -656,7 +657,7 @@ mod tests {
         );
         assert_eq!(
             v["state_provider"],
-            json!({"type": "minecraft:rule_based", "fallback": "minecraft:sand", "rules": []})
+            json!({"type": "minecraft:rule_based", "fallback": {"id": "minecraft:sand"}, "rules": []})
         );
         let (v, _) = up(
             "data/x/worldgen/configured_feature/r.json",
@@ -667,8 +668,49 @@ mod tests {
             v,
             json!({"type": "minecraft:block_blob", "can_place_on": {"type":
                 "minecraft:matching_block_tag", "tag": "minecraft:forest_rock_can_place_on"},
-                "state": "minecraft:mossy_cobblestone"})
+                "state": {"id": "minecraft:mossy_cobblestone"}})
         );
+    }
+
+    /// A 26.2 tree's dirt under its trunk is 26.3's `below_trunk_provider`: vanilla's rule
+    /// (dirt over what a trunk can replace), or the provider itself with `force_dirt`.
+    #[test]
+    fn a_trees_dirt_provider_is_its_below_trunk_provider() {
+        let dirt = json!({"type": "minecraft:simple_state_provider", "state": {"Name": "minecraft:dirt"}});
+        let (v, _) = up(
+            "data/x/worldgen/configured_feature/t.json",
+            json!({"type": "minecraft:tree", "config": {"dirt_provider": dirt, "force_dirt": false}}),
+        );
+        assert_eq!(v.get("dirt_provider"), None);
+        assert_eq!(v.get("force_dirt"), None);
+        assert_eq!(
+            v["below_trunk_provider"],
+            json!({"type": "minecraft:rule_based", "rules": [{"if_true": {
+                "type": "minecraft:not", "predicate": {"type": "minecraft:matching_block_tag",
+                "tag": "minecraft:cannot_replace_below_tree_trunk"}},
+                "then": {"id": "minecraft:dirt"}}]})
+        );
+        let (v, _) = up(
+            "data/x/worldgen/configured_feature/t.json",
+            json!({"type": "minecraft:tree", "config": {"dirt_provider": dirt, "force_dirt": true}}),
+        );
+        assert_eq!(v["below_trunk_provider"], json!({"id": "minecraft:dirt"}));
+    }
+
+    /// A placed feature of a vanilla patch 26.3 left out holds the patch itself, of 26.3's block.
+    #[test]
+    fn a_removed_vanilla_patch_is_written_out() {
+        let (v, _) = up(
+            "data/x/worldgen/placed_feature/p.json",
+            json!({"feature": "minecraft:patch_grass", "placement": []}),
+        );
+        assert_eq!(v["feature"]["default"]["feature"], json!("minecraft:grass"));
+        assert_eq!(v["feature"]["default"]["placement"][0], json!({"type": "minecraft:count", "count": 32}));
+        let (v, _) = up(
+            "data/x/worldgen/placed_feature/p.json",
+            json!({"feature": "minecraft:patch_fire", "placement": []}),
+        );
+        assert_eq!(v["feature"], json!("minecraft:patch_fire"));
     }
 
     /// 26.2's warped forest vegetation (spread 8 by 4) is 26.3's vanilla placement of it.
@@ -685,7 +727,7 @@ mod tests {
         assert_eq!(
             v["default"],
             json!({"feature": {"type": "minecraft:simple_block", "to_place": {"type":
-                "minecraft:weighted", "entries": [{"data": "minecraft:warped_roots", "weight": 85}]}},
+                "minecraft:weighted", "entries": [{"data": {"id": "minecraft:warped_roots"}, "weight": 85}]}},
                 "placement": [
                     {"type": "minecraft:block_predicate_filter", "predicate": {"type":
                         "minecraft:matching_block_tag", "offset": [0, -1, 0],

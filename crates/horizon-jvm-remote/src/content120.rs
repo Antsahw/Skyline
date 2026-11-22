@@ -23,8 +23,10 @@ use std::path::{Path, PathBuf};
 /// change vanilla's world generation (Terralith) get it as a data pack ([`worldgen_pack`]). 8: so
 /// do the mods with dimensions of their own. 9: the pools they add to loot tables ([`loot_added`]).
 /// 10: their spawn eggs drawn as in 1.20.1 ([`spawn_eggs`]). 11: the files their runtime resource
-/// packs hold, and their items drawn by code as models ([`code`]).
-const FORMAT: u32 = 11;
+/// packs hold, and their items drawn by code as models ([`code`]). 12: the worldgen pack carries
+/// the mods' block tags, and 26.3's shapes of trees, states and noise providers, so Horizon's
+/// generator places the mods' data features itself rather than the runtime.
+const FORMAT: u32 = 12;
 
 /// The file under the cache holding the pools the mods add to loot tables ([`loot_added`]).
 pub const LOOT_ADDED: &str = "loot_added.json";
@@ -626,6 +628,9 @@ fn is_worldgen(name: &str) -> bool {
             "dimension_type/",
             "worldgen/",
             "tags/worldgen/",
+            // The block tags the features' predicates name (`#terralith:stone`).
+            "tags/block/",
+            "tags/blocks/",
         ]
         .iter()
         .any(|k| path.starts_with(k))
@@ -719,11 +724,18 @@ fn loot_added(json: &str) -> std::collections::BTreeMap<String, Vec<serde_json::
         .collect()
 }
 
+/// Whether a jar entry is a block tag, in 1.20.1's folder or 26.3's.
+fn is_block_tag(name: &str) -> bool {
+    name.strip_prefix("data/")
+        .and_then(|r| r.split_once('/'))
+        .is_some_and(|(_, p)| p.starts_with("tags/blocks/") || p.starts_with("tags/block/"))
+}
+
 /// Whether a jar's world generation files (`is_worldgen`) need the pack: it changes vanilla's
 /// (a file under `minecraft` other than a tag) or adds a dimension of its own, whose level stem
 /// the generator reads only from a pack.
 fn needs_pack(names: &[String]) -> bool {
-    names.iter().any(|n| {
+    names.iter().filter(|n| !is_block_tag(n)).any(|n| {
         (n.starts_with("data/minecraft/") && !n.starts_with("data/minecraft/tags/"))
             || n.strip_prefix("data/")
                 .and_then(|r| r.split_once('/'))
@@ -789,7 +801,8 @@ fn drop_own_carvers(files: &mut std::collections::BTreeMap<String, Vec<u8>>) -> 
 /// keeps a mod's files under its own namespaces, so these changes never reached the game; as
 /// Fabric adds a mod's data as a pack, Horizon's generator reads this pack under the world's
 /// (`java_mods_120::worldgen_packs`). Such a mod's own worldgen comes along (the biomes its
-/// overworld names). What 1.20.x wrote differently comes first (`legacy120`: providers, biome
+/// overworld names), and every mod's block tags (the features' predicates name them, each entry
+/// optional). What 1.20.x wrote differently comes first (`legacy120`: providers, biome
 /// effects and carvers, surface rules' unknown biomes, 26.3's feature order, renamed ids), then
 /// every file is upgraded as a 26.2 pack is (`upgrade::upgrade_pack`: 26.3's folder names, block
 /// states, the noise router). How many files were written; none, and no pack, when no mod
@@ -819,13 +832,15 @@ fn worldgen_pack(
         let Ok(mut zip) = zip::ZipArchive::new(file) else {
             continue;
         };
-        let names: Vec<String> = zip
+        let mut names: Vec<String> = zip
             .file_names()
             .filter(|n| is_worldgen(n))
             .map(str::to_owned)
             .collect();
+        // Any mod's block tags may be named by another's features (`#c:ores`): those come
+        // along from every jar, the rest only from the jars that need the pack.
         if !needs_pack(&names) {
-            continue;
+            names.retain(|n| is_block_tag(n));
         }
         for name in names {
             let mut bytes = Vec::new();
@@ -841,10 +856,27 @@ fn worldgen_pack(
             {
                 bytes = serde_json::to_vec(&v).unwrap_or(bytes);
             }
+            // 1.20.1's `tags/blocks/` is 26.3's `tags/block/`. Each entry is optional: a block a
+            // mod's tag names that the game lacks (another mod's, not installed) must not take
+            // the whole tag away, nor vanilla's that include it.
+            let name = horizon_port_pack::legacy120::data_path(&name).unwrap_or(name);
+            if is_block_tag(&name)
+                && let Ok(mut v) = serde_json::from_slice::<serde_json::Value>(&bytes)
+                && let Some(values) = v.get_mut("values").and_then(|x| x.as_array_mut())
+            {
+                for entry in values.iter_mut() {
+                    if let Some(id) = entry.as_str() {
+                        *entry = serde_json::json!({"id": id, "required": false});
+                    } else if let Some(o) = entry.as_object_mut() {
+                        o.insert("required".into(), false.into());
+                    }
+                }
+                bytes = serde_json::to_vec(&v).unwrap_or(bytes);
+            }
             files.insert(name, bytes);
         }
     }
-    if files.is_empty() {
+    if files.keys().all(|n| is_block_tag(n)) {
         return Ok(0);
     }
     let own_carvers = drop_own_carvers(&mut files);
