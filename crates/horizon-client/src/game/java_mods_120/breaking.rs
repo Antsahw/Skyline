@@ -21,9 +21,9 @@ pub(in crate::game) enum Break120 {
     Horizon { after: bool },
 }
 
-/// A held stack as 1.20.1 item NBT: its id, count, damage, enchantments and name, the parts
-/// that change what a break drops and what a tool does. (The rest of 26.3's components have no
-/// way down yet: the downgrade direction, phase 3.)
+/// A held stack as 1.20.1 item NBT: its id, count, damage, enchantments and name, and a mod's
+/// own NBT (`custom_data` back at the tag's root), its block entity data and repair cost. (26.3's
+/// other components have no way down yet.)
 pub(in crate::game) fn stack_to_120(stack: &ItemStack) -> String {
     let mut tag: Vec<String> = Vec::new();
     if stack.damage > 0 {
@@ -48,6 +48,30 @@ pub(in crate::game) fn stack_to_120(stack: &ItemStack) -> String {
     if let Some(name) = stack.custom_name() {
         let json = serde_json::json!({ "text": name }).to_string();
         tag.push(format!("display:{{Name:{}}}", quoted(&json)));
+    }
+    if let Some(data) = stack.data() {
+        use horizon_world::nbt::{Compound, Tag};
+        let mut rest = Compound::new();
+        // A mod's own NBT: 1.20.5's componentization moved the tag's unknown keys into
+        // `custom_data`, so they go back to the tag's root (a filled tank's fluid, a tool's mode).
+        if let Some(Tag::Compound(custom)) = data.other("minecraft:custom_data") {
+            for (k, v) in custom {
+                let key = k.to_string_lossy();
+                if !matches!(&*key, "Damage" | "Enchantments" | "StoredEnchantments" | "display") {
+                    rest.insert(k.clone(), v.clone());
+                }
+            }
+        }
+        if let Some(entity) = data.other("minecraft:block_entity_data") {
+            rest.insert("BlockEntityTag".into(), entity.clone());
+        }
+        if let Some(cost) = data.other("minecraft:repair_cost") {
+            rest.insert("RepairCost".into(), cost.clone());
+        }
+        if !rest.is_empty() {
+            let text = horizon_world::snbt_text::to_snbt(&Tag::Compound(rest));
+            tag.push(text[1..text.len() - 1].to_owned());
+        }
     }
     let tag = if tag.is_empty() {
         String::new()
