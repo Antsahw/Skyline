@@ -138,18 +138,39 @@ impl super::super::Game<'_> {
             BreakHow::Before
         };
         let request = self.java120_break_request(pos, state, how);
-        // Their block to the runtime whose mods it is; another's break, for the mods' events,
-        // to the first runtime's.
+        if !theirs {
+            // Anyone else's (vanilla's, 26.3's): every runtime's mods hear it, and any of them
+            // can stop it. A busy runtime is skipped, never worth a stall.
+            let mut after = false;
+            for loader in super::loaders() {
+                let _route = super::route(loader);
+                let broke = {
+                    let Ok(mut guard) = runtime().try_lock() else {
+                        continue;
+                    };
+                    let Some(runtime) = guard.as_mut() else {
+                        continue;
+                    };
+                    runtime.break_block(&Level(self), &request)
+                };
+                trace120!(
+                    "{pos:?}: breaking {} ({how:?}, {loader:?}): {broke:?}",
+                    request.state
+                );
+                match broke {
+                    Ok(broke) if !broke.goes => return Break120::Stopped,
+                    Ok(_) => after = true,
+                    // Broken as if no mod were listening.
+                    Err(e) => log::warn!("1.20.1 mods: breaking {} failed: {e}", request.state),
+                }
+            }
+            return Break120::Horizon { after };
+        }
+        // Their block, to the runtime whose mods it is: the player waits on it, and nobody else
+        // can break it right, so a busy runtime is waited for.
         let _route = super::route_id(&request.state);
         let broke = {
-            // Their own block: the player waits on it, and nobody else can break it right, so
-            // a busy runtime is waited for. Anyone else's: the events only, never worth a stall.
-            let guard = if theirs {
-                wait_for_runtime()
-            } else {
-                runtime().try_lock().ok()
-            };
-            let Some(mut guard) = guard else {
+            let Some(mut guard) = wait_for_runtime() else {
                 return Break120::Horizon { after: false };
             };
             let Some(runtime) = guard.as_mut() else {
@@ -162,22 +183,10 @@ impl super::super::Game<'_> {
             Ok(broke) => broke,
             Err(e) => {
                 log::warn!("1.20.1 mods: breaking {} failed: {e}", request.state);
-                // Their block, which Horizon can't break right: left as it is. Anyone else's:
-                // broken as if no mod were listening.
-                return if theirs {
-                    Break120::Stopped
-                } else {
-                    Break120::Horizon { after: false }
-                };
+                // Horizon can't break it right: left as it is.
+                return Break120::Stopped;
             }
         };
-        if !theirs {
-            return if broke.goes {
-                Break120::Horizon { after: true }
-            } else {
-                Break120::Stopped
-            };
-        }
         self.java120_land_break(&broke);
         if broke.goes {
             Break120::Done
@@ -218,28 +227,35 @@ impl super::super::Game<'_> {
             return;
         }
         let request = self.java120_break_request(pos, state, BreakHow::After);
-        let _route = super::route_id(&request.state);
-        let broke = {
-            let Ok(mut guard) = runtime().try_lock() else {
-                return;
-            };
-            let Some(runtime) = guard.as_mut() else {
-                return;
-            };
-            runtime.break_block(&Level(self), &request)
+        // Their block's runtime; anyone else's, every runtime.
+        let loaders = match super::owner(&request.state) {
+            Some(loader) => vec![loader],
+            None => super::loaders(),
         };
-        match broke {
-            // What a listener did (a vein miner breaking the rest of the vein) lands too.
-            Ok(broke) => {
-                let dimension = self.dim.id().to_owned();
-                self.apply_java120(
-                    &dimension,
-                    &broke.set,
-                    &broke.block_entities,
-                    &broke.spawned,
-                );
+        for loader in loaders {
+            let _route = super::route(loader);
+            let broke = {
+                let Ok(mut guard) = runtime().try_lock() else {
+                    continue;
+                };
+                let Some(runtime) = guard.as_mut() else {
+                    continue;
+                };
+                runtime.break_block(&Level(self), &request)
+            };
+            match broke {
+                // What a listener did (a vein miner breaking the rest of the vein) lands too.
+                Ok(broke) => {
+                    let dimension = self.dim.id().to_owned();
+                    self.apply_java120(
+                        &dimension,
+                        &broke.set,
+                        &broke.block_entities,
+                        &broke.spawned,
+                    );
+                }
+                Err(e) => log::warn!("1.20.1 mods: after breaking {}: {e}", request.state),
             }
-            Err(e) => log::warn!("1.20.1 mods: after breaking {}: {e}", request.state),
         }
     }
 }

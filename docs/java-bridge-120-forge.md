@@ -90,7 +90,10 @@ Mod key mappings are the game's but vanilla's own (the options' fields). Tooltip
 LivingHurtEvent: cancelled, not hurt) and the mods' settings screens (their ConfigScreenFactory)
 go through the loader seam like the rest.
 
-Still to do: a vanilla block's break heard by both runtimes' mods (it goes to the first).
+A block that is neither runtime's (vanilla's, 26.3's) breaking is heard by both runtimes' mods,
+and either can stop it; a runtime's own block goes to that runtime only.
+
+Still to do: testing with more Forge mods (Create, JEI, Waystones).
 
 ## License
 
