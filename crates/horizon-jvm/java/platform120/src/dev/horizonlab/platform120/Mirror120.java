@@ -835,17 +835,22 @@ public final class Mirror120 {
         return new Object[0];
     }
 
-    /** The 3x3x3 around `pos` into `read`, in one call. */
+    /**
+     * The 4x4x4 cube (on the grid of four) holding `pos` into `read`, in one call: a feature
+     * reads across its area (a tree its column and crown), and whole cubes read once each beat
+     * overlapping 3x3x3s around each miss.
+     */
     private static void fill(Level level, BlockPos pos, Map<Long, BlockState> read) {
-        int[] wanted = new int[3 * 27];
-        long[] keys = new long[27];
+        int[] wanted = new int[3 * 64];
+        long[] keys = new long[64];
         int n = 0;
-        for (int dx = -1; dx <= 1; dx++) {
-            for (int dy = -1; dy <= 1; dy++) {
-                for (int dz = -1; dz <= 1; dz++) {
-                    int x = pos.getX() + dx;
-                    int y = pos.getY() + dy;
-                    int z = pos.getZ() + dz;
+        int x0 = pos.getX() & ~3, y0 = pos.getY() & ~3, z0 = pos.getZ() & ~3;
+        for (int dx = 0; dx < 4; dx++) {
+            for (int dy = 0; dy < 4; dy++) {
+                for (int dz = 0; dz < 4; dz++) {
+                    int x = x0 + dx;
+                    int y = y0 + dy;
+                    int z = z0 + dz;
                     // Already known, or not a position Horizon has: left out of the ask.
                     if (y < level.getMinBuildHeight() || y >= level.getMaxBuildHeight()) continue;
                     long key = BlockPos.asLong(x, y, z);

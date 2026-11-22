@@ -6,7 +6,7 @@
 
 use super::super::{Game, lan::LanHost};
 use super::breaking::stack_to_120;
-use super::{Level, runtime, runtime_within, tick_failed_once, wait_for_runtime};
+use super::{Level, runtime, tick_failed_once, wait_for_runtime};
 use horizon_client::mesher::Vertex;
 use horizon_core::geometry::{Aabb, Vec3};
 use horizon_jvm_remote::boot120::Loader;
@@ -330,7 +330,9 @@ impl Game<'_> {
         let answer = {
             // A chunk worker placing a feature holds the runtime for a moment: wait for it
             // rather than freeze the mobs for a tick.
-            let mut guard = runtime_within(std::time::Duration::from_millis(25))?;
+            // The chunk workers step aside meanwhile (they'd take it again between placements,
+            // and the mobs skipped tick after tick while the world generated).
+            let mut guard = super::runtime_ahead_of_worldgen(std::time::Duration::from_millis(25))?;
             let runtime = guard.as_mut()?;
             let level = Level(self);
             self.java120_bring_mobs(runtime, &level, &dimension);
