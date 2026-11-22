@@ -150,6 +150,90 @@ struct Window {
 
 static WINDOW: Mutex<Option<Window>> = Mutex::new(None);
 
+/// The latest tick's mobs not read yet ([`read_mobs`]): a newer one replaces it unread.
+static MOBS_IN: (Mutex<Option<Vec<u8>>>, std::sync::Condvar) =
+    (Mutex::new(None), std::sync::Condvar::new());
+
+/// A tick's mobs as the server sends them (`{"e": [...]}`).
+#[derive(serde::Deserialize)]
+struct MobsIn {
+    e: Vec<MobIn>,
+}
+
+#[derive(serde::Deserialize)]
+struct MobIn {
+    id: i64,
+    #[serde(default)]
+    kind: String,
+    #[serde(default)]
+    p: [f64; 3],
+    #[serde(default)]
+    s: [f32; 2],
+    #[serde(default)]
+    h: Option<f64>,
+    #[serde(default)]
+    m: Option<Vec<MeshIn>>,
+}
+
+#[derive(serde::Deserialize)]
+struct MeshIn {
+    tex: String,
+    #[serde(default)]
+    o: i64,
+    v: Vec<f32>,
+}
+
+/// The mobs' reader: each tick's JSON into the window, off the frame's thread.
+fn read_mobs() {
+    let (slot, ready) = &MOBS_IN;
+    loop {
+        let data = {
+            let mut waiting = slot.lock().unwrap_or_else(|e| e.into_inner());
+            loop {
+                if let Some(data) = waiting.take() {
+                    break data;
+                }
+                waiting = ready.wait(waiting).unwrap_or_else(|e| e.into_inner());
+            }
+        };
+        let Ok(read) = serde_json::from_slice::<MobsIn>(&data) else {
+            continue;
+        };
+        let now: HashMap<i32, Mob> = read
+            .e
+            .into_iter()
+            .map(|e| {
+                let meshes =
+                    e.m.unwrap_or_default()
+                        .into_iter()
+                        .map(|m| Mesh {
+                            sprite: sprite_key(&m.tex),
+                            overlay: m.o as u32,
+                            vertices: m
+                                .v
+                                .chunks_exact(9)
+                                .map(|c| std::array::from_fn(|i| c[i]))
+                                .collect(),
+                        })
+                        .collect();
+                (
+                    e.id as i32,
+                    Mob {
+                        kind: e.kind,
+                        health: e.h,
+                        pos: e.p,
+                        size: e.s,
+                        meshes,
+                    },
+                )
+            })
+            .collect();
+        let mut window = WINDOW.lock().unwrap_or_else(|e| e.into_inner());
+        let window = window.get_or_insert_with(Window::default);
+        window.before = std::mem::replace(&mut window.now, now);
+    }
+}
+
 /// A texture's name (`ns:textures/entity/x.png`) as the GUI atlas keys it (`ns:entity/x`).
 fn sprite_key(id: &str) -> String {
     let (ns, path) = id.split_once(':').unwrap_or(("minecraft", id));
@@ -693,30 +777,22 @@ impl Game<'_> {
         }
     }
 
-    /// The window: the mobs a tick of the server's has, in place of the last.
+    /// The window: the mobs a tick of the server's has, in place of the last. Read on a
+    /// thread of its own ([`read_mobs`]): a tick's meshes are megabytes of JSON, and reading
+    /// them here held a frame every tick (350 frames a second that felt like 50).
     pub(in crate::game) fn remote_java120_mobs(&mut self, data: &[u8]) {
-        let Ok(json) = serde_json::from_slice::<Value>(data) else {
-            return;
-        };
-        let mut now = HashMap::new();
-        for e in json["e"].as_array().into_iter().flatten() {
-            let Some(id) = e["id"].as_i64() else { continue };
-            let f = |v: &Value, i: usize| v.get(i).and_then(Value::as_f64).unwrap_or(0.0);
-            let meshes = parse_meshes(&e["m"]);
-            now.insert(
-                id as i32,
-                Mob {
-                    kind: e["kind"].as_str().unwrap_or_default().to_owned(),
-                    health: e["h"].as_f64(),
-                    pos: [f(&e["p"], 0), f(&e["p"], 1), f(&e["p"], 2)],
-                    size: [f(&e["s"], 0) as f32, f(&e["s"], 1) as f32],
-                    meshes,
-                },
-            );
-        }
-        let mut window = WINDOW.lock().unwrap_or_else(|e| e.into_inner());
-        let window = window.get_or_insert_with(Window::default);
-        window.before = std::mem::replace(&mut window.now, now);
+        let (slot, ready) = &MOBS_IN;
+        *slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(data.to_vec());
+        ready.notify_one();
+        static READER: std::sync::Once = std::sync::Once::new();
+        READER.call_once(|| {
+            let spawned = std::thread::Builder::new()
+                .name("1.20.1 mobs reader".into())
+                .spawn(read_mobs);
+            if let Err(e) = spawned {
+                log::warn!("1.20.1 mods: the mobs' reader didn't start: {e}");
+            }
+        });
     }
 
     /// The window's entity pass: each mob's quads, where it is between the last two ticks,
@@ -914,6 +990,22 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_ticks_mobs_read_as_the_server_writes_them() {
+        let data = br#"{"e":[{"id":7,"kind":"alexsmobs:seal","p":[1.5,64,2],"r":[0,0,0,0],"s":[0.9,0.6],"h":10.0,
+            "m":[{"tex":"alexsmobs:textures/entity/seal.png","o":655360,"v":[0,1,2,0.5,0.25,0,1,0,4294967295]}]},
+            {"id":8,"kind":"naturalist:bird","p":[0,0,0],"r":[0,0,0,0],"s":[0.4,0.4],"h":null,"m":null}]}"#;
+        let read: MobsIn = serde_json::from_slice(data).unwrap();
+        assert_eq!(read.e.len(), 2);
+        let seal = &read.e[0];
+        assert_eq!(seal.id, 7);
+        assert_eq!(seal.p, [1.5, 64.0, 2.0]);
+        let meshes = seal.m.as_ref().unwrap();
+        assert_eq!(meshes[0].v.len(), 9);
+        assert_eq!(meshes[0].o, 655360);
+        assert!(read.e[1].m.is_none() && read.e[1].h.is_none());
+    }
 
     fn mesh(sprite: &str, x: f32) -> Mesh {
         Mesh {
