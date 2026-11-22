@@ -7989,6 +7989,22 @@ impl Game<'_> {
                 {
                     return false;
                 }
+                // A 1.20.1 mod's block is placed by its own code on the server
+                // (`getStateForPlacement`: the stove facing the player), which this
+                // side can't run: a prediction would show it as Horizon guesses it
+                // (facing north) until the server's block replaced it.
+                #[cfg(feature = "java-mods-120")]
+                if !reacts
+                    && held
+                        .as_ref()
+                        .is_some_and(|s| super::java_mods_120::is_mods_id(&s.item))
+                {
+                    if let Some(r) = self.remote.as_mut() {
+                        r.placing = None;
+                    }
+                    self.with_hand(hand, Game::swing_arm);
+                    return true;
+                }
                 let placed = if reacts {
                     None
                 } else {

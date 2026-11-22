@@ -16,7 +16,7 @@
 
 use horizon_jvm_remote::boot120::{self, Fabric120, Runtime120, Side};
 use horizon_jvm_remote::mirror120::{SetBlock, SetBlockEntity, SpawnItem, UseBlock, World120};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -26,6 +26,19 @@ static RUNTIME: Mutex<Option<Runtime120>> = Mutex::new(None);
 
 /// The 1.20.1 mods' namespaces (their content mods' `assets/`): what routes a click to them.
 static NAMESPACES: Mutex<Option<HashSet<String>>> = Mutex::new(None);
+
+/// How many ticks each of the mods' blocks with no shape kept has been asked for one since the
+/// game started, by dimension: up to [`SHAPE_TRIES`].
+static SHAPE_ASKED: Mutex<Option<HashMap<(String, [i32; 3]), u8>>> = Mutex::new(None);
+/// A second of ticks: a block entity the runtime hasn't read by then has no shape of its own.
+const SHAPE_TRIES: u8 = 20;
+
+/// Whether `id` (an item or block) is one of the 1.20.1 mods'.
+pub(in crate::game) fn is_mods_id(id: &str) -> bool {
+    let namespaces = NAMESPACES.lock().unwrap_or_else(|e| e.into_inner());
+    id.split_once(':')
+        .is_some_and(|(ns, _)| namespaces.as_ref().is_some_and(|n| n.contains(ns)))
+}
 
 /// The folder beside `options.txt` that holds the 1.20.1 Fabric mods.
 pub(in crate::game) const DIR: &str = "mods-java-1.20.1";
@@ -841,6 +854,31 @@ impl super::Game<'_> {
             return;
         }
         let dimension = self.dim.id().to_owned();
+        // A mod's block with no shape kept (a world saved before shapes were, or one whose
+        // runtime hadn't read the block entity when asked): asked again, for a second.
+        let unasked: Vec<[i32; 3]> = {
+            let mut once = SHAPE_ASKED.lock().unwrap_or_else(|e| e.into_inner());
+            let once = once.get_or_insert_with(HashMap::new);
+            positions
+                .chunks_exact(3)
+                .map(|p| [p[0], p[1], p[2]])
+                .filter(|&[x, y, z]| {
+                    self.world
+                        .block_entities
+                        .attachments((x, y, z))
+                        .and_then(super::mod_block_shape::of)
+                        .is_none()
+                })
+                .filter(|p| {
+                    let tries = once.entry((dimension.clone(), *p)).or_insert(0);
+                    *tries += 1;
+                    *tries <= SHAPE_TRIES
+                })
+                .collect()
+        };
+        if !unasked.is_empty() {
+            self.refresh_java120_shapes(&dimension, &unasked);
+        }
         let ticked = {
             let Ok(mut guard) = RUNTIME.try_lock() else {
                 return;
@@ -1057,6 +1095,14 @@ impl super::Game<'_> {
             let Some(attachments) = self.world.block_entities.attachments_mut((x, y, z)) else {
                 continue;
             };
+            // Nothing, with the mod's block entity still there: the runtime hasn't read the
+            // block entity yet (a world just loaded, its LibMultiPart container still without
+            // its parts), not the block gone -- a container left with no parts takes its block
+            // away, which `gone` above handles. What was kept stays, and the shape is asked
+            // again (`tick_java120_block_entities`) while none is kept.
+            if boxes.is_empty() {
+                continue;
+            }
             if let Err(e) = attachments.set(&super::mod_block_shape::BLOCK_SHAPE, boxes) {
                 log::warn!("1.20.1 mods: keeping a block's shape at {x} {y} {z}: {e:?}");
                 continue;
