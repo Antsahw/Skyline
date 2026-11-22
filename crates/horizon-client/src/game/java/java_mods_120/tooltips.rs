@@ -256,7 +256,6 @@ impl Game<'_> {
     /// The server: `conn`'s game asks what the mods add to a stack's tooltip.
     pub(in crate::game) fn java120_tooltip_request(
         &mut self,
-        host: &mut LanHost,
         conn: u32,
         input: &Value,
     ) {
@@ -289,7 +288,7 @@ impl Game<'_> {
         let reply = json!({
             "stack": stack, "advanced": advanced, "hover": hover, "after": after, "image": image,
         });
-        host.hub.send_to(
+        self.hub_host().hub.send_to(
             conn,
             &C::CustomPayload(CustomPayload {
                 channel: CHANNEL.into(),

@@ -897,7 +897,6 @@ impl Game<'_> {
     /// else the mods' code runs it (`Runtime120::entity_action`).
     pub(in crate::game) fn java120_entity_action(
         &mut self,
-        host: &mut LanHost,
         conn: u32,
         id: i32,
         used: Option<&Interact>,
@@ -905,7 +904,7 @@ impl Game<'_> {
         if !IDS.contains(&id) {
             return false;
         }
-        let Some(guest) = host.hub.guest(conn) else {
+        let Some(guest) = self.hub_host().hub.guest(conn) else {
             return true;
         };
         if guest.spectator() {
@@ -927,10 +926,10 @@ impl Game<'_> {
             return true;
         }
         let swung = self
-            .as_guest(host, conn, |g| g.java120_act_on(id, used))
+            .as_guest(conn, |g| g.java120_act_on(id, used))
             .flatten();
         if used.is_some() {
-            self.lan_swing_back(host, conn, swung);
+            self.lan_swing_back(conn, swung);
         }
         true
     }

@@ -58,7 +58,6 @@ impl Game<'_> {
     }
     pub(in crate::game) fn java_mob_attack(
         &mut self,
-        _host: &mut LanHost,
         _conn: u32,
         _gi: usize,
         _id: i32,

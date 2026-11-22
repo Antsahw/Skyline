@@ -32,13 +32,12 @@ impl Game<'_> {
     /// menus are the mod's own; Horizon can't show those yet.
     pub(super) fn java_open_menu(
         &mut self,
-        host: &mut LanHost,
         uuid: &str,
         menu: &str,
         title: Option<&str>,
     ) {
         use super::super::stations::{Kind, Station};
-        let Some(g) = host.hub.guests.iter().find(|g| uuid_string(g.uuid) == uuid) else {
+        let Some(g) = self.hub_host().hub.guests.iter().find(|g| uuid_string(g.uuid) == uuid) else {
             return;
         };
         let conn = g.conn;
@@ -56,17 +55,17 @@ impl Game<'_> {
             _ => None,
         };
         if menu == "minecraft:crafting" {
-            self.lan_open_crafting(host, conn, at);
+            self.lan_open_crafting(conn, at);
         } else if let Some(kind) = station {
-            self.lan_open_station(host, conn, &Station::new(kind, at));
+            self.lan_open_station(conn, &Station::new(kind, at));
         } else if menu == "minecraft:generic_9x3"
             && title_json.to_string().contains("container.enderchest")
         {
             // PlayerEnderChestContainer: the guest's own ender chest items.
-            self.guest_container_closed(host, conn);
-            self.lan_station_closed(host, conn, None);
-            self.lan_crafting_closed(host, conn, None);
-            host.hub.open_unplaced_container(
+            self.guest_container_closed(conn);
+            self.lan_station_closed(conn, None);
+            self.lan_crafting_closed(conn, None);
+            self.hub_host().hub.open_unplaced_container(
                 conn,
                 menu,
                 horizon_client::lan::data::component_nbt(&title_json),
@@ -88,20 +87,19 @@ impl Game<'_> {
             }
             return;
         }
-        let window = host.hub.guest(conn).map(|g| g.next_window);
-        host.play.entry(conn).or_default().mod_window = window;
+        let window = self.hub_host().hub.guest(conn).map(|g| g.next_window);
+        self.hub_host().play.entry(conn).or_default().mod_window = window;
     }
 
     /// A click in the window of a Java mod's menu (a cabinet's): the menu runs it, in Java;
     /// false for other windows.
     pub(in crate::game) fn java_menu_click(
         &mut self,
-        host: &mut LanHost,
         conn: u32,
         p: &play::ContainerClick,
     ) -> bool {
         {
-            let Some(uuid) = java_window_of(host, conn, p.container) else {
+            let Some(uuid) = java_window_of(self.hub_host(), conn, p.container) else {
                 return false;
             };
             let (slot, button, input) = (i32::from(p.slot), i32::from(p.button), p.input);
@@ -110,7 +108,7 @@ impl Game<'_> {
             if let Err(e) = clicked {
                 log::warn!("Java mods: a click in a mod's menu failed: {e}");
             }
-            self.apply_java_actions(Some(host));
+            self.apply_java_actions(Some(self.hub_host()));
             true
         }
     }
@@ -119,7 +117,6 @@ impl Game<'_> {
     /// screen's own code runs it.
     pub(in crate::game) fn java_screen_input(
         &mut self,
-        host: &mut LanHost,
         conn: u32,
         data: &[u8],
     ) {
@@ -138,13 +135,13 @@ impl Game<'_> {
                 || window == super::super::java_screen::HUD_WINDOW
                 || window == super::super::java_screen::OVERLAY_WINDOW
             {
-                host.hub
+                self.hub_host().hub
                     .guests
                     .iter()
                     .find(|g| g.conn == conn)
                     .map(|g| uuid_string(g.uuid))
             } else {
-                java_window_of(host, conn, window)
+                java_window_of(self.hub_host(), conn, window)
             };
             let Some(uuid) = uuid else {
                 return;
@@ -154,20 +151,20 @@ impl Game<'_> {
             if let Err(e) = ran {
                 log::warn!("Java mods: input to a mod's screen failed: {e}");
             }
-            self.apply_java_actions(Some(host));
+            self.apply_java_actions(Some(self.hub_host()));
         }
     }
 
     /// A player's own skin from its game ([`OWN_SKIN`](super::super::java_screen::OWN_SKIN):
     /// slim flag, 64x64 RGBA): the Java mods' client builds that player's look from it.
-    pub(in crate::game) fn java_own_skin(&mut self, host: &mut LanHost, conn: u32, data: &[u8]) {
+    pub(in crate::game) fn java_own_skin(&mut self, conn: u32, data: &[u8]) {
         let Some((&slim, rgba)) = data.split_first() else {
             return;
         };
         if rgba.len() != 64 * 64 * 4 || !java_mods_on() {
             return;
         }
-        let Some(uuid) = host
+        let Some(uuid) = self.hub_host()
             .hub
             .guests
             .iter()
@@ -185,12 +182,11 @@ impl Game<'_> {
     /// The player closed the window of a Java mod's menu; false for other windows.
     pub(in crate::game) fn java_menu_closed(
         &mut self,
-        host: &mut LanHost,
         conn: u32,
         window: i32,
     ) -> bool {
         {
-            let Some(uuid) = java_window_of(host, conn, window) else {
+            let Some(uuid) = java_window_of(self.hub_host(), conn, window) else {
                 return false;
             };
             JAVA_WINDOWS
@@ -201,7 +197,7 @@ impl Game<'_> {
             if let Err(e) = closed {
                 log::warn!("Java mods: closing a mod's menu failed: {e}");
             }
-            self.apply_java_actions(Some(host));
+            self.apply_java_actions(Some(self.hub_host()));
             true
         }
     }

@@ -147,7 +147,6 @@ impl super::super::Game<'_> {
     /// the runtime as them. False when none does.
     pub(in crate::game) fn guest_java120_command(
         &mut self,
-        host: &mut LanHost,
         conn: u32,
         line: &str,
     ) -> bool {
@@ -156,7 +155,7 @@ impl super::super::Game<'_> {
             return false;
         };
         let _route = super::route(loader);
-        let Some(guest) = host.hub.guest(conn).filter(|g| g.placed) else {
+        let Some(guest) = self.hub_host().hub.guest(conn).filter(|g| g.placed) else {
             return false;
         };
         let (uuid, player, permission) = (
@@ -164,7 +163,7 @@ impl super::super::Game<'_> {
             guest.name.clone(),
             guest.permission,
         );
-        self.as_guest(host, conn, |g| {
+        self.as_guest(conn, |g| {
             let dimension = g.dim.id().to_owned();
             let ran = {
                 let mut guard = wait_for_runtime()?;
@@ -186,7 +185,7 @@ impl super::super::Game<'_> {
             }
             Some(())
         });
-        send_told(host);
+        send_told(self.hub_host());
         true
     }
 }

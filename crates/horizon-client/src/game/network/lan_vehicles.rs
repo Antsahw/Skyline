@@ -304,7 +304,7 @@ impl Game<'_> {
         // Java mods' heads of stopRiding/removeVehicle: one may keep the rider on.
         if keys.shift
             && self
-                .as_guest(host, conn, |game| game.java_dismount(vehicle, false))
+                .as_guest(conn, |game| game.java_dismount(vehicle, false))
                 .unwrap_or(false)
         {
             keys.shift = false;
@@ -350,7 +350,7 @@ impl Game<'_> {
         });
         // Off it now (the seat is gone): the ends of stopRiding/removeVehicle for the mods.
         if keys.shift && matches!(seat, Some(None)) {
-            self.as_guest(host, conn, |game| game.java_dismount(vehicle, true));
+            self.as_guest(conn, |game| game.java_dismount(vehicle, true));
         }
         if let Some(Some(at)) = seat
             && let Some(host) = self.lan.as_mut()

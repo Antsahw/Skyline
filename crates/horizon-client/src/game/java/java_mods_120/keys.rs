@@ -83,7 +83,7 @@ impl super::super::Game<'_> {
 
     /// A key the 1.20.1 mods bind, pressed or let go by `conn`'s player while playing. The
     /// 26.3 bridge takes the same input too, for its mods' keys.
-    pub(in crate::game) fn java120_key(&mut self, host: &mut LanHost, conn: u32, input: &Value) {
+    pub(in crate::game) fn java120_key(&mut self, conn: u32, input: &Value) {
         let (Some(key), Some(down)) = (
             input.get("key").and_then(Value::as_i64),
             input.get("down").and_then(Value::as_bool),
@@ -103,14 +103,14 @@ impl super::super::Game<'_> {
         if !bound {
             return;
         }
-        let Some(guest) = host.hub.guests.iter().find(|g| g.conn == conn) else {
+        let Some(guest) = self.hub_host().hub.guests.iter().find(|g| g.conn == conn) else {
             return;
         };
         let (uuid, name) = (uuid_string(guest.uuid), guest.name.clone());
         // To every runtime: a key no mod of its binds does nothing there.
         for loader in super::loaders() {
             let _route = super::route(loader);
-            self.as_guest(host, conn, |g| {
+            self.as_guest(conn, |g| {
                 let pressed = {
                     let mut guard = wait_for_runtime()?;
                     let runtime = guard.as_mut()?;

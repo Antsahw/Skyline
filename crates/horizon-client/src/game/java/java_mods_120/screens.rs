@@ -267,14 +267,14 @@ impl super::super::Game<'_> {
             return;
         };
         for conn in conns {
-            self.send_java120_frame(&mut host, conn);
+            self.send_java120_frame(conn);
         }
         self.lan = Some(host);
     }
 
     /// One frame of `conn`'s open screen, drawn now and sent if it changed; a screen whose
     /// menu closed (walked away from, its block broken) closes on their game.
-    fn send_java120_frame(&mut self, host: &mut LanHost, conn: u32) {
+    fn send_java120_frame(&mut self, conn: u32) {
         let Some((uuid, size, mouse, loader)) = open(|screens| {
             screens
                 .get(&conn)
@@ -283,7 +283,7 @@ impl super::super::Game<'_> {
             return;
         };
         let _route = super::route(loader);
-        let drawn = self.as_guest(host, conn, |g| {
+        let drawn = self.as_guest(conn, |g| {
             let inventory = inventory_json(&g.inventory);
             let at = g
                 .player
@@ -321,7 +321,7 @@ impl super::super::Game<'_> {
         let Some(frame) = frame else {
             trace120!("the screen of connection {conn} closed");
             open(|screens| screens.remove(&conn));
-            send_close(host, conn);
+            send_close(self.hub_host(), conn);
             return;
         };
         let changed = open(|screens| {
@@ -336,7 +336,7 @@ impl super::super::Game<'_> {
         });
         if changed {
             send(
-                host,
+                self.hub_host(),
                 conn,
                 format!(r#"{{"window":{CLIENT_WINDOW},"ops":{frame}}}"#),
             );
@@ -349,7 +349,6 @@ impl super::super::Game<'_> {
     /// bridge to take it.
     pub(in crate::game) fn java120_screen_input(
         &mut self,
-        host: &mut LanHost,
         conn: u32,
         data: &[u8],
     ) -> bool {
@@ -357,15 +356,15 @@ impl super::super::Game<'_> {
             return false;
         };
         if input.get("kind").and_then(Value::as_str) == Some("tooltip") {
-            self.java120_tooltip_request(host, conn, &input);
+            self.java120_tooltip_request(conn, &input);
             return true;
         }
         if input.get("kind").and_then(Value::as_str) == Some("bind") {
-            self.java120_key(host, conn, &input);
+            self.java120_key(conn, &input);
             return false;
         }
         if input.get("kind").and_then(Value::as_str) == Some("modconfig") {
-            return self.java120_open_config(host, conn, &input);
+            return self.java120_open_config(conn, &input);
         }
         // The HUD's size: the 1.20.1 mods' HUD is laid out in it, and the 26.3 bridge's too.
         if super::hud::take_size(conn, &input) {
@@ -390,12 +389,12 @@ impl super::super::Game<'_> {
             // The size or the mouse: the next frame shows them. A new size now, so the screen
             // isn't drawn at the wrong one for a tick.
             if input.get("kind").and_then(Value::as_str) == Some("size") {
-                self.send_java120_frame(host, conn);
+                self.send_java120_frame(conn);
             }
             return true;
         };
         let call = call.to_string();
-        let done = self.as_guest(host, conn, |g| {
+        let done = self.as_guest(conn, |g| {
             let inventory = inventory_json(&g.inventory);
             let done = {
                 let mut guard = super::wait_for_runtime()?;
@@ -428,10 +427,10 @@ impl super::super::Game<'_> {
             Some(done.open)
         });
         match done.flatten() {
-            Some(true) => self.send_java120_frame(host, conn),
+            Some(true) => self.send_java120_frame(conn),
             Some(false) => {
                 open(|screens| screens.remove(&conn));
-                send_close(host, conn);
+                send_close(self.hub_host(), conn);
             }
             // The runtime was busy: the input is lost, as a dropped packet would be.
             None => {}

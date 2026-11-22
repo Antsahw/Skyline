@@ -97,7 +97,7 @@ impl Game<'_> {
     /// eye. A boat, minecart, armor stand, item frame or painting is aimed at
     /// the point the client hit (the interact packet's location) when that
     /// is on it, else at its centre.
-    pub(super) fn look_at_entity(
+    pub(in crate::game) fn look_at_entity(
         &mut self,
         gi: usize,
         id: i32,
@@ -447,15 +447,16 @@ impl Game<'_> {
         let heard = self.audio.capture.as_ref().map_or(0, Vec::len);
         let used = self
             .as_guest_at(gi, conn, |g| {
-                    // ServerPlayerGameMode.useItem's head: a Java mod may take the click.
-                    if let Some(swing) = g.java_use_item(hand == Hand::Off, yaw, pitch) {
-                        return (swing, None);
-                    }
-                    // The same for a 1.20.1 mod's item.
-                    #[cfg(feature = "java-mods-120")]
-                    if let Some(swing) = g.java120_use_item(hand == Hand::Off) {
-                        return (swing, None);
-                    }
+                // ServerPlayerGameMode.useItem's head: a Java mod may take the click.
+                let (yaw, pitch) = rotation.unwrap_or((g.yaw, g.pitch));
+                if let Some(swing) = g.java_use_item(hand == Hand::Off, yaw, pitch) {
+                    return (swing, None, true);
+                }
+                // The same for a 1.20.1 mod's item.
+                #[cfg(feature = "java-mods-120")]
+                if let Some(swing) = g.java120_use_item(hand == Hand::Off) {
+                    return (swing, None, true);
+                }
                 // A horn's sound, inline instruments included.
                 let horn = g.with_hand(hand, |g| {
                     let held = g.held()?;
@@ -674,8 +675,8 @@ impl Game<'_> {
             }
             // Java mods that patch the attack itself: their Player.attack on
             // copies decides each mob's damage and knockback, the guest facing the mob.
-            if self.java_mob_attack(host, conn, gi, id) {
-                return;
+            if self.java_mob_attack(conn, gi, id) {
+                return Ok(true);
             }
             // A mace's smash sets the attacker's velocity and sends it at once, before the
             // Wind Burst's push (MaceItem.hurtEnemy, then the post-attack effects).

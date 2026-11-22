@@ -448,7 +448,6 @@ impl Game<'_> {
     /// ids): the mods' server runs `Player.attack`. False for Horizon's entities.
     pub(in crate::game) fn java_entity_attack(
         &mut self,
-        host: &mut LanHost,
         conn: u32,
         id: i32,
     ) -> bool {
@@ -457,9 +456,9 @@ impl Game<'_> {
                 return false;
             }
             if id < crate::game::java_entities::FIRST_ID {
-                return self.java_vanilla_entity(host, conn, id, None);
+                return self.java_vanilla_entity(conn, id, None);
             }
-            let Some(g) = host.hub.guest(conn) else {
+            let Some(g) = self.hub_host().hub.guest(conn) else {
                 return false;
             };
             if g.spectator() {
@@ -468,7 +467,7 @@ impl Game<'_> {
             let uuid = uuid_string(g.uuid);
             match self.with_java_world(|| horizon_jvm::events::attack_entity(&uuid, id)) {
                 Ok(hit) => {
-                    self.apply_java_actions(Some(host));
+                    self.apply_java_actions(Some(self.hub_host()));
                     hit
                 }
                 Err(e) => {
@@ -486,7 +485,6 @@ impl Game<'_> {
     /// up) goes without drops.
     pub(super) fn java_vanilla_entity(
         &mut self,
-        host: &mut LanHost,
         conn: u32,
         id: i32,
         interact: Option<&play::Interact>,
@@ -501,7 +499,7 @@ impl Game<'_> {
         else {
             return false;
         };
-        let Some(g) = host.hub.guest(conn) else {
+        let Some(g) = self.hub_host().hub.guest(conn) else {
             return false;
         };
         if g.spectator() {
@@ -527,7 +525,7 @@ impl Game<'_> {
         let result = self.with_java_world(|| {
             horizon_jvm::events::vanilla_entity(&uuid, dim, &snbt, using, hand, hit, selected)
         });
-        self.apply_java_actions(Some(host));
+        self.apply_java_actions(Some(self.hub_host()));
         match result {
             Ok(r) => {
                 if r.removed
@@ -548,7 +546,6 @@ impl Game<'_> {
     /// `Player.interactOn`. False for Horizon's entities.
     pub(in crate::game) fn java_entity_interact(
         &mut self,
-        host: &mut LanHost,
         conn: u32,
         p: &play::Interact,
     ) -> bool {
@@ -557,9 +554,9 @@ impl Game<'_> {
                 return false;
             }
             if p.id < crate::game::java_entities::FIRST_ID {
-                return self.java_vanilla_entity(host, conn, p.id, Some(p));
+                return self.java_vanilla_entity(conn, p.id, Some(p));
             }
-            let Some(g) = host.hub.guest(conn) else {
+            let Some(g) = self.hub_host().hub.guest(conn) else {
                 return false;
             };
             if g.spectator() {
@@ -574,7 +571,7 @@ impl Game<'_> {
                 log::warn!("Java mods: using an entity failed: {e}");
             }
             // The player's game swung its arm already.
-            self.apply_java_actions(Some(host));
+            self.apply_java_actions(Some(self.hub_host()));
             true
         }
     }
@@ -587,25 +584,26 @@ impl Game<'_> {
     /// A guest's attack on mob `id`, when Java mods patch the attack itself: their
     /// `Player.attack`, the guest facing the mob (its facing put back after). True when the
     /// mods took it.
-    pub(in crate::game) fn java_mob_attack(
-        &mut self,
-        host: &mut LanHost,
-        conn: u32,
-        gi: usize,
-        id: i32,
-    ) -> bool {
+    pub(in crate::game) fn java_mob_attack(&mut self, conn: u32, gi: usize, id: i32) -> bool {
         let Ok(mob) = u32::try_from(id) else {
             return false;
         };
-        let (yaw, pitch) = (host.hub.guests[gi].yaw, host.hub.guests[gi].pitch);
-        let taken = self.look_at_entity(host, gi, id, None).is_some()
+        let Some((yaw, pitch)) = self
+            .lan
+            .as_ref()
+            .map(|h| (h.hub.guests[gi].yaw, h.hub.guests[gi].pitch))
+        else {
+            return false;
+        };
+        let taken = self.look_at_entity(gi, id, None).is_some()
             && self
-                .as_guest(host, conn, |g| g.java_attack_mob(mob))
+                .as_guest(conn, |g| g.java_attack_mob(mob))
                 .unwrap_or(false);
-        host.hub.guests[gi].yaw = yaw;
-        host.hub.guests[gi].pitch = pitch;
-        if taken {
-            host.mob_players.insert(mob, conn);
+        if let Some(host) = self.lan.as_mut() {
+            host.hub.guests.update(gi, |g| (g.yaw, g.pitch) = (yaw, pitch));
+            if taken {
+                host.mob_players.insert(mob, conn);
+            }
         }
         taken
     }

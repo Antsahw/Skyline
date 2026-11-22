@@ -587,8 +587,8 @@ impl Game<'_> {
     }
 
     /// Server: a player's game runs some mods' client half itself (`data`: which, as it said).
-    pub(super) fn java_device_runs_own(&mut self, host: &mut LanHost, conn: u32, data: &[u8]) {
-        let Some(uuid) = host
+    pub(super) fn java_device_runs_own(&mut self, conn: u32, data: &[u8]) {
+        let Some(uuid) = self.hub_host()
             .hub
             .guests
             .iter()
@@ -607,7 +607,6 @@ impl Game<'_> {
     /// (Java takes it if so).
     pub(super) fn java_device_from_game(
         &mut self,
-        host: &mut LanHost,
         conn: u32,
         channel: &str,
         data: &[u8],
@@ -615,7 +614,7 @@ impl Game<'_> {
         if !super::java_mods::has_java_mods() || channel.starts_with("minecraft:") {
             return;
         }
-        let Some(uuid) = host
+        let Some(uuid) = self.hub_host()
             .hub
             .guests
             .iter()

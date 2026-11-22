@@ -148,17 +148,16 @@ impl Game<'_> {
     /// `/line` typed by a connection's player: true when a Java mod owns it.
     pub(in crate::game) fn guest_java_command(
         &mut self,
-        host: &mut LanHost,
         conn: u32,
         line: &str,
     ) -> bool {
         if !self.hears_players() {
             return false;
         }
-        let Some(g) = host.hub.guest(conn).filter(|g| g.placed) else {
+        let Some(g) = self.hub_host().hub.guest(conn).filter(|g| g.placed) else {
             return false;
         };
         let id = uuid_string(g.uuid);
-        self.java_command(Some(host), &id, line)
+        self.java_command(Some(self.hub_host()), &id, line)
     }
 }

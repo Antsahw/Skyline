@@ -122,21 +122,20 @@ impl super::super::Game<'_> {
             })
             .collect();
         for (conn, uuid, name, at) in players {
-            self.send_java120_hud(&mut host, conn, &uuid, &name, &at);
+            self.send_java120_hud(conn, &uuid, &name, &at);
         }
         self.lan = Some(host);
     }
 
     fn send_java120_hud(
         &mut self,
-        host: &mut LanHost,
         conn: u32,
         uuid: &str,
         name: &str,
         at: &Value,
     ) {
         let size = huds(|h| h.get(&conn).map_or(FIRST_SIZE, |hud| hud.size));
-        let drawn = self.as_guest(host, conn, |g| {
+        let drawn = self.as_guest(conn, |g| {
             let (dimension, mode, experience) = (
                 g.dim.id().to_owned(),
                 g.mode,
@@ -212,7 +211,7 @@ impl super::super::Game<'_> {
             changed
         });
         if view_changed {
-            host.hub.send_to(
+            self.hub_host().hub.send_to(
                 conn,
                 &C::CustomPayload(CustomPayload {
                     channel: super::super::java_screen::VIEW.into(),
@@ -233,7 +232,7 @@ impl super::super::Game<'_> {
             true
         });
         if changed {
-            send_hud_part(host, conn, HudPart::Mods120, &frame);
+            send_hud_part(self.hub_host(), conn, HudPart::Mods120, &frame);
         }
     }
 }

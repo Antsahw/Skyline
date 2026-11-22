@@ -112,7 +112,7 @@ impl Game<'_> {
                 .find(|g| uuid_string(g.uuid) == uuid)
                 .map(|g| g.conn);
             if let Some(conn) = conn {
-                self.as_guest(&mut host, conn, |g| {
+                self.as_guest(conn, |g| {
                     g.combat.projectile_direct = named;
                     g.hurt_player_from(amount, from, &kind, Some(None));
                     g.combat.projectile_direct = None;

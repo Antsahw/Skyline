@@ -436,7 +436,7 @@ impl Game<'_> {
             },
             // handleSetCarriedItem: a new slot stops a main-hand use.
             S::SetCarriedItem(p) => {
-                if self.java_guest_slot_refused(host, conn, gi, p.slot) {
+                if self.java_guest_slot_refused(conn, gi, p.slot) {
                     return;
                 }
                 if !(0..9).contains(&p.slot) {
@@ -479,7 +479,6 @@ impl Game<'_> {
                         return;
                     }
                 }
-                let (yaw, pitch) = (p.yaw, p.pitch);
                 self.as_guest(conn, |g| {
                     if changed
                         && g.using
@@ -642,7 +641,7 @@ impl Game<'_> {
                     });
                 }
             }
-            S::ContainerClick(p) if self.java_menu_click(host, conn, &p) => {}
+            S::ContainerClick(p) if self.java_menu_click(conn, &p) => {}
             // AbstractContainerMenu.quickMoveStack of a mod container: the mods first.
             S::ContainerClick(p) if self.lan_mod_quick_move(conn, &p) => {}
             S::ContainerClick(p) if self.lan_merchant_click(conn, &p) => {}

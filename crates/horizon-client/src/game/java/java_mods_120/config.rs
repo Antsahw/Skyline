@@ -108,7 +108,6 @@ impl Game<'_> {
     /// it isn't a 1.20.1 mod's (the 26.3 bridge's, then).
     pub(in crate::game) fn java120_open_config(
         &mut self,
-        host: &mut LanHost,
         conn: u32,
         input: &Value,
     ) -> bool {
@@ -125,12 +124,12 @@ impl Game<'_> {
             return false;
         };
         let _route = super::route(loader);
-        let Some(guest) = host.hub.guests.iter().find(|g| g.conn == conn) else {
+        let Some(guest) = self.hub_host().hub.guests.iter().find(|g| g.conn == conn) else {
             return true;
         };
         let (uuid, name) = (super::uuid_string(guest.uuid), guest.name.clone());
         let id = id.to_owned();
-        self.as_guest(host, conn, |g| {
+        self.as_guest(conn, |g| {
             let opened = {
                 let mut guard = wait_for_runtime()?;
                 let runtime = guard.as_mut()?;

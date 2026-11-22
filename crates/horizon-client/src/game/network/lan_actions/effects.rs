@@ -213,7 +213,7 @@ impl Game<'_> {
     /// client does not run uses itself, so it does not predict the swing; a
     /// client that did (a block placed) is still in the first half of its
     /// swing and ignores it (`SwingState.startIfAble`).
-    pub(super) fn lan_swing_back(&mut self, conn: u32, swung: Option<bool>) {
+    pub(in crate::game) fn lan_swing_back(&mut self, conn: u32, swung: Option<bool>) {
         let Some(host) = self.lan.as_ref() else {
             return;
         };

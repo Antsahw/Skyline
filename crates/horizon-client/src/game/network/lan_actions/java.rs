@@ -9,21 +9,30 @@ pub(super) fn set_actor(uuid: u128) -> Option<String> {
 }
 
 impl Game<'_> {
+    /// The hub, for the Java mods' answers to what a guest did (always in place while a guest
+    /// acts: its packets come through it).
+    pub(in crate::game) fn hub_host(&mut self) -> &mut LanHost {
+        self.lan.as_mut().expect("the hub is in place while a guest acts")
+    }
+
     /// A guest's payload on a channel nothing before took: the Java mods' devices' (a guest
     /// that runs its own, or what its game sends them; game/java_device.rs).
     #[cfg(feature = "java-mods")]
     pub(super) fn java_device_payload(
         &mut self,
-        host: &mut LanHost,
         conn: u32,
         channel: &str,
         data: &[u8],
     ) {
+        let Some(mut host) = self.lan.take() else {
+            return;
+        };
         if channel == horizon_jvm::device::RUNS_OWN_CHANNEL {
-            self.java_device_runs_own(host, conn, data)
+            self.java_device_runs_own(&mut host, conn, data)
         } else {
-            self.java_device_from_game(host, conn, channel, data)
+            self.java_device_from_game(&mut host, conn, channel, data)
         }
+        self.lan = Some(host);
     }
 
     /// ServerPlayer.teleport's head: a Java mod that cancels it leaves the guest where it was,
@@ -60,7 +69,6 @@ impl Game<'_> {
     /// the old slot, which the game is told. True when cancelled.
     pub(super) fn java_guest_slot_refused(
         &mut self,
-        host: &mut LanHost,
         conn: u32,
         gi: usize,
         slot: i16,
@@ -68,8 +76,9 @@ impl Game<'_> {
         let wanted = i32::from(slot);
         if (0..9).contains(&slot)
             && self
-                .as_guest(host, conn, |g| g.java_select_slot(wanted))
+                .as_guest(conn, |g| g.java_select_slot(wanted))
                 .unwrap_or(false)
+            && let Some(host) = self.lan.as_mut()
         {
             let kept = host.hub.guests[gi].selected as i32;
             host.hub
@@ -82,19 +91,21 @@ impl Game<'_> {
     /// Java mods' heads of Entity.startRiding: a cancel takes the guest off (true).
     pub(super) fn java_guest_ride_refused(
         &mut self,
-        host: &mut LanHost,
         conn: u32,
         gi: usize,
         before: Option<u32>,
     ) -> bool {
-        if let Some(vehicle) = host.hub.guests[gi].vehicle
+        let vehicle = self.lan.as_ref().and_then(|h| h.hub.guests[gi].vehicle);
+        if let Some(vehicle) = vehicle
             && before != Some(vehicle)
             && self
-                .as_guest(host, conn, |g| g.java_ride(vehicle))
+                .as_guest(conn, |g| g.java_ride(vehicle))
                 .unwrap_or(false)
         {
-            self.as_guest(host, conn, |g| g.stop_riding());
-            host.hub.guests[gi].vehicle = before;
+            self.as_guest(conn, |g| g.stop_riding());
+            if let Some(host) = self.lan.as_mut() {
+                host.hub.guests.update(gi, |g| g.vehicle = before);
+            }
             return true;
         }
         false
@@ -145,6 +156,10 @@ impl Game<'_> {
                 collision_binding: game.collision,
                 resources: game.motion,
                 health: &game.health_resources,
+                tag_items: Some(world_items!(game)),
+                loop_context: &game.loop_context,
+                damage_hooks: &game.damage_hooks,
+                block_registries: Some(&game.pack.block_registries),
             }
             .routed_fall_damage(damage, source, contact);
             events.append(&mut player.events);
@@ -159,13 +174,12 @@ impl Game<'_> {
     /// taken), or `None` when no mod took the pickup.
     pub(super) fn java_guest_item_touch(
         &mut self,
-        host: &mut LanHost,
         conn: u32,
         i: usize,
     ) -> Option<Option<ItemStack>> {
         let item = self.dropped[i].clone();
         let left = self
-            .as_guest(host, conn, |g| g.java_item_touch(&item))
+            .as_guest(conn, |g| g.java_item_touch(&item))
             .flatten()?;
         let before = item.stack.count;
         Some(match left {
@@ -182,7 +196,6 @@ impl Game<'_> {
     /// orb `index` (guest entity `id` at `at`).
     pub(super) fn java_guest_orb_touch(
         &mut self,
-        host: &mut LanHost,
         conn: u32,
         index: usize,
         id: i32,
@@ -190,22 +203,25 @@ impl Game<'_> {
     ) -> bool {
         let orb = self.orbs[index].clone();
         let Some((left, delay)) = self
-            .as_guest(host, conn, |game| game.java_orb_touch(&orb))
+            .as_guest(conn, |game| game.java_orb_touch(&orb))
             .flatten()
         else {
             return false;
+        };
+        let Some(host) = self.lan.as_mut() else {
+            return true;
         };
         let play = host.play.entry(conn).or_default();
         play.xp_delay = delay.max(0) as u32;
         if left >= orb.count {
             return true;
         }
+        host.hub.take_item(orb.id as i32, id, 1, at);
         if left == 0 {
             self.orbs.remove(index);
         } else {
             self.orbs[index].count = left;
         }
-        host.hub.take_item(orb.id as i32, id, 1, at);
         let pitch = (self.world.random.next_float() - self.world.random.next_float()) * 0.35 + 0.9;
         let p = orb.position;
         self.audio.play(
