@@ -255,9 +255,10 @@ final class ForgeLoader120 implements Loader120 {
 
     private static void deliver(String what, net.minecraftforge.network.ICustomPacket<?> payload,
             net.minecraft.network.Connection connection) {
-        if (System.getenv("HORIZON_120_PACKETS") != null) System.out.println("ForgeLoader120: " + what);
+        boolean trace = System.getenv("HORIZON_120_PACKETS") != null;
         try {
-            net.minecraftforge.network.NetworkHooks.onCustomPayload(payload, connection);
+            boolean taken = net.minecraftforge.network.NetworkHooks.onCustomPayload(payload, connection);
+            if (trace) System.out.println("ForgeLoader120: " + what + (taken ? "" : " (nobody took it)"));
         } catch (RuntimeException | LinkageError e) {
             if (PACKETS_FAILED.add(what + " " + e.getClass().getName())) {
                 Mirror120.log("a mod's packet " + what + " failed: " + e);

@@ -349,6 +349,9 @@ public final class Screens120 {
             if (player != null && CLIENT.remove(player.getUUID()) != null) {
                 SCREENS.remove(player.getUUID());
                 closeAsked = true;
+            } else if (acting != null) {
+                // A menu's screen closing itself as it takes an input (Waystones' Done).
+                closeAsked = true;
             }
             return;
         }
@@ -594,7 +597,9 @@ public final class Screens120 {
             acting = null;
             heldMods = 0;
         }
-        if (closeAsked) {
+        // Closed by the screen, or by the server as it took what the screen sent (the menu the
+        // screen was made for is no longer the player's).
+        if (closeAsked || (!client && MADE_FOR.get(player.getUUID()) != player.containerMenu)) {
             close(player);
             return false;
         }
