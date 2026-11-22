@@ -73,10 +73,13 @@ bindings, settings screens, fluids' looks, recipes, block entity types, loot add
 packs. Each runtime knows only its own mods' blocks: the other runtime's are strangers to it,
 stood in for by their shape as 26.3's own new blocks are.
 
-Still to do: a vanilla block's break heard by both runtimes' mods (it goes to the first),
-packets to the
-client half, models drawn by code, biome modifiers on the mirror's registries, mod key mappings
-by registration rather than by category, hiding the window.
+Mods' packets go between the halves through Forge's own hand-off (NetworkHooks.onCustomPayload),
+with every channel taken as present on the client (NetworkInstanceMixin): the client is this same
+game. The window is hidden from creation and the client parks once the mods' models are baked.
+
+Still to do: a vanilla block's break heard by both runtimes' mods (it goes to the first), models
+drawn by code, biome modifiers on the mirror's registries, mod key mappings by registration rather
+than by category.
 
 ## License
 

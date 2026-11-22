@@ -73,6 +73,8 @@ config.setdefault("minVersion", "0.8")
 for side in ("mixins", "client", "server"):
     if side in config:
         config[side] = [m for m in config[side] if m not in fabric_only]
+# On Forge's own classes (forge/.../mixin):
+config["mixins"] = config.get("mixins", []) + ["NetworkInstanceMixin"]
 json.dump(config, open(sys.argv[2], "w"), indent=2)
 PY
 mkdir -p "$TMP/classes/META-INF"

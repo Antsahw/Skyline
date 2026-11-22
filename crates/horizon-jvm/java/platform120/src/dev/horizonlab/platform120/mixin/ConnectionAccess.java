@@ -13,4 +13,7 @@ import org.spongepowered.asm.mixin.gen.Accessor;
 public interface ConnectionAccess {
     @Accessor("channel")
     void horizon$setChannel(io.netty.channel.Channel channel);
+
+    @Accessor("packetListener")
+    void horizon$setListener(net.minecraft.network.PacketListener listener);
 }

@@ -197,10 +197,55 @@ final class ForgeLoader120 implements Loader120 {
         return ItemStack.EMPTY;
     }
 
-    /** Forge's networking rides vanilla's custom payloads; the headless client's half comes later. */
-    @Override public void toClient(ServerPlayer player, Packet<?> packet) {}
+    /**
+     * Forge's networking rides vanilla's custom payloads: a payload the server sends a mirror
+     * player goes straight to Forge's client half (NetworkHooks.onCustomPayload, as the client's
+     * packet listener hands it on), and one the client sends to the server half.
+     */
+    @Override
+    public void toClient(ServerPlayer player, Packet<?> packet) {
+        if (!(packet instanceof net.minecraft.network.protocol.game.ClientboundCustomPayloadPacket payload)
+                || player == null) return;
+        Screens120.clientPlayer(player);
+        var listener = Minecraft.getInstance().getConnection();
+        deliver("to the client on " + payload.getIdentifier(), payload, clientConnection(listener));
+    }
 
-    @Override public void fromClient(Packet<?> packet) {}
+    @Override
+    public void fromClient(Packet<?> packet) {
+        if (!(packet instanceof net.minecraft.network.protocol.game.ServerboundCustomPayloadPacket payload)) return;
+        ServerPlayer player = Screens120.standingIn();
+        if (player == null) return;
+        deliver("to the server on " + payload.getIdentifier(), payload, player.connection.connection);
+    }
+
+    private static net.minecraft.network.Connection clientConnection;
+
+    /** The client listener's connection, for Forge's NetworkEvent.Context: no channel behind it. */
+    private static net.minecraft.network.Connection clientConnection(net.minecraft.network.PacketListener listener) {
+        if (clientConnection == null) {
+            var connection = Allocate.make(net.minecraft.network.Connection.class);
+            ((dev.horizonlab.platform120.mixin.ConnectionAccess) connection)
+                    .horizon$setChannel(new io.netty.channel.embedded.EmbeddedChannel());
+            clientConnection = connection;
+        }
+        ((dev.horizonlab.platform120.mixin.ConnectionAccess) clientConnection).horizon$setListener(listener);
+        return clientConnection;
+    }
+
+    private static final java.util.Set<String> PACKETS_FAILED = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    private static void deliver(String what, net.minecraftforge.network.ICustomPacket<?> payload,
+            net.minecraft.network.Connection connection) {
+        if (System.getenv("HORIZON_120_PACKETS") != null) System.out.println("ForgeLoader120: " + what);
+        try {
+            net.minecraftforge.network.NetworkHooks.onCustomPayload(payload, connection);
+        } catch (RuntimeException | LinkageError e) {
+            if (PACKETS_FAILED.add(what + " " + e.getClass().getName())) {
+                Mirror120.log("a mod's packet " + what + " failed: " + e);
+            }
+        }
+    }
 
     /** The client's own packs, as Forge's client loaded them: vanilla's and every mod's. */
     @Override

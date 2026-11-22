@@ -469,6 +469,7 @@ public final class Mirror120 {
             var connection = Allocate.make(net.minecraft.network.Connection.class);
             ((dev.horizonlab.platform120.mixin.ConnectionAccess) connection)
                     .horizon$setChannel(new io.netty.channel.embedded.EmbeddedChannel());
+            ((dev.horizonlab.platform120.mixin.ConnectionAccess) connection).horizon$setListener(player.connection);
             ((dev.horizonlab.platform120.mixin.ServerGamePacketListenerAccess) player.connection)
                     .horizon$setConnection(connection);
             PLAYERS.put(id, player);
