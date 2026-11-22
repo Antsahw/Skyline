@@ -1776,7 +1776,7 @@ impl Game<'_> {
     /// A server's player teleported into another level than theirs
     /// (ServerPlayer.teleport): queued to move after the command. False
     /// when `t` is not a player in another level.
-    fn teleport_across(
+    pub(super) fn teleport_across(
         &mut self,
         t: Target,
         level: super::Dim,

@@ -260,6 +260,9 @@ impl Handler for Phase1 {
     }
 
     fn event(&mut self, _: &mut Peer, method: &str, args: Vec<Value>) {
+        if method == "teleport" {
+            crate::mirror120::teleported(&args, &self.log);
+        }
         if method == "log"
             && let Some(line) = args.first().and_then(Value::as_str)
         {

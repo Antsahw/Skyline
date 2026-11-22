@@ -7995,6 +7995,8 @@ impl Game<'_> {
         #[cfg(feature = "java-mods-120")]
         self.tick_java120_neighbours();
         #[cfg(feature = "java-mods-120")]
+        self.tick_java120_teleports();
+        #[cfg(feature = "java-mods-120")]
         self.tick_java120_block_entities();
         #[cfg(feature = "java-mods-120")]
         self.tick_java120_fluids();

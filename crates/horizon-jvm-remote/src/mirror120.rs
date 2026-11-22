@@ -559,6 +559,7 @@ impl Handler for InRegion<'_> {
                     (self.log)(&format!("[fabric-1.20.1] {line}"));
                 }
             }
+            "teleport" => teleported(&args, &self.log),
             "setBlock" => match (at(&args), text(&args, 4)) {
                 (Ok(pos), Ok(state)) => self.region.set_block(pos, state),
                 _ => (self.log)("[fabric-1.20.1] a feature's setBlock unread"),
@@ -570,6 +571,41 @@ impl Handler for InRegion<'_> {
             // Items and the rest have no place in a chunk being generated.
             _ => {}
         }
+    }
+}
+
+/// A player the mods' code teleported (`Mirror120.teleported`): Horizon moves its player.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Teleport {
+    pub uuid: String,
+    pub dimension: String,
+    pub pos: [f64; 3],
+    pub yaw: f32,
+    pub pitch: f32,
+}
+
+/// The teleports heard from any runtime, until Horizon takes them ([`take_teleports`]).
+static TELEPORTS: std::sync::Mutex<Vec<Teleport>> = std::sync::Mutex::new(Vec::new());
+
+/// The teleports the mods' code made since the last take.
+pub fn take_teleports() -> Vec<Teleport> {
+    std::mem::take(&mut *TELEPORTS.lock().unwrap_or_else(|e| e.into_inner()))
+}
+
+/// A `teleport` event's arguments, kept for Horizon ([`take_teleports`]).
+pub(crate) fn teleported(args: &[Value], log: &Log) {
+    let parsed = (|| -> Result<Teleport, String> {
+        Ok(Teleport {
+            uuid: text(args, 0)?.to_owned(),
+            dimension: text(args, 1)?.to_owned(),
+            pos: [float(args, 2)?, float(args, 3)?, float(args, 4)?],
+            yaw: float(args, 5)? as f32,
+            pitch: float(args, 6)? as f32,
+        })
+    })();
+    match parsed {
+        Ok(t) => TELEPORTS.lock().unwrap_or_else(|e| e.into_inner()).push(t),
+        Err(e) => log(&format!("[1.20.1] a teleport unread: {e}")),
     }
 }
 
@@ -683,6 +719,7 @@ impl Handler for InWorld<'_> {
                     (self.log)(&format!("[fabric-1.20.1] {line}"));
                 }
             }
+            "teleport" => teleported(&args, &self.log),
             "setBlock" => {
                 let parsed = (|| -> Result<SetBlock, String> {
                     Ok(SetBlock {

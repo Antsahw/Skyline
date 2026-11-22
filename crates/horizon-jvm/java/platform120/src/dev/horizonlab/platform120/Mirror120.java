@@ -876,6 +876,23 @@ public final class Mirror120 {
     private static long removing = Long.MIN_VALUE;
 
     /** Level.setBlock of a mirror level: kept for this call and sent to Horizon. */
+    /**
+     * A mirror player teleported by the mods' code to x y z in `level` (`relative`: the axes
+     * given as offsets): moved there in the mirror, and Horizon told to move its player
+     * (`teleport`: uuid, dimension, x, y, z, yaw, pitch).
+     */
+    public static void teleported(ServerPlayer player, ServerLevel level, double x, double y, double z,
+            float yRot, float xRot, java.util.Set<net.minecraft.world.entity.RelativeMovement> relative) {
+        var r = relative == null ? java.util.Set.<net.minecraft.world.entity.RelativeMovement>of() : relative;
+        if (r.contains(net.minecraft.world.entity.RelativeMovement.X)) x += player.getX();
+        if (r.contains(net.minecraft.world.entity.RelativeMovement.Y)) y += player.getY();
+        if (r.contains(net.minecraft.world.entity.RelativeMovement.Z)) z += player.getZ();
+        if (r.contains(net.minecraft.world.entity.RelativeMovement.Y_ROT)) yRot += player.getYRot();
+        if (r.contains(net.minecraft.world.entity.RelativeMovement.X_ROT)) xRot += player.getXRot();
+        if (level == player.level()) player.absMoveTo(x, y, z, yRot, xRot);
+        event.accept("teleport", new Object[] {player.getUUID().toString(), dimension(level), x, y, z, (double) yRot, (double) xRot});
+    }
+
     public static boolean setBlock(Level level, BlockPos pos, BlockState state, int flags) {
         if (level.isOutsideBuildHeight(pos)) return false;
         BlockState before = blockState(level, pos);

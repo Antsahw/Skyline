@@ -42,6 +42,18 @@ public abstract class ServerGamePacketListenerMixin {
      * LibNetworkStack keeps no connection for a player whose handler says no, and GraphLib then
      * failed to tell the players of every graph merge: Wired Redstone's wires never linked.
      */
+    /**
+     * The player moved by the server (a waystone's teleport, a mod's /home): Horizon moves its
+     * player there (Mirror120.teleported). A mirror player has no client to send the position.
+     */
+    @Inject(method = "teleport(DDDFFLjava/util/Set;)V", at = @At("HEAD"), cancellable = true)
+    private void horizon$teleport(double x, double y, double z, float yRot, float xRot,
+            java.util.Set<net.minecraft.world.entity.RelativeMovement> relative, CallbackInfo ci) {
+        dev.horizonlab.platform120.Mirror120.teleported(this.player, (net.minecraft.server.level.ServerLevel) this.player.level(),
+                x, y, z, yRot, xRot, relative);
+        ci.cancel();
+    }
+
     @Inject(method = "isAcceptingMessages", at = @At("HEAD"), cancellable = true)
     private void horizon$accepting(CallbackInfoReturnable<Boolean> cir) {
         cir.setReturnValue(true);
