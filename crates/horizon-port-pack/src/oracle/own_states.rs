@@ -175,9 +175,10 @@ impl Facts {
             if differs(1, &st.collision) {
                 v["collision"] = st.collision.clone();
             }
-            if let Some(occlusion) = &st.occlusion
-                && differs(2, occlusion)
-            {
+            // Its occlusion always: Horizon's table may not hold the stand-in's as the oracle
+            // read it (leaves hide nothing in Java but are a full cube in the occlusion table,
+            // so a Decorative Blocks support stood in by them hid the grass under it).
+            if let Some(occlusion) = &st.occlusion {
                 v["occlusion"] = occlusion.clone();
             }
             if st.emission != default_light {

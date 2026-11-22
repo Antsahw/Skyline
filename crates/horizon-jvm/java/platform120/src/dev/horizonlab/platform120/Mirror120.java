@@ -175,18 +175,8 @@ public final class Mirror120 {
         return server;
     }
 
-    /**
-     * The data packs' registries a world loads: vanilla's, and those mods add through Fabric
-     * API's DynamicRegistries (which keeps its own list; its mixins hand it to a real server).
-     */
-    @SuppressWarnings("unchecked")
     private static java.util.List<net.minecraft.resources.RegistryDataLoader.RegistryData<?>> worldgenRegistries() {
-        try {
-            Class<?> fabric = Class.forName("net.fabricmc.fabric.impl.registry.sync.DynamicRegistriesImpl");
-            return (java.util.List<net.minecraft.resources.RegistryDataLoader.RegistryData<?>>) fabric.getMethod("getDynamicRegistries").invoke(null);
-        } catch (ReflectiveOperationException e) {
-            return net.minecraft.resources.RegistryDataLoader.WORLDGEN_REGISTRIES;
-        }
+        return Loader120.get().worldgenRegistries();
     }
 
     public static RegistryAccess.Frozen registries() {
@@ -420,7 +410,7 @@ public final class Mirror120 {
         ServerLevel level = makeLevel(dimension);
         if (!known) {
             serverLevels().put(level.dimension(), level);
-            if (Events120.started()) Events120.loaded(server, level);
+            if (Loader120.get().serverStarted()) Loader120.get().levelLoaded(server, level);
         }
         return level;
     }
@@ -466,15 +456,19 @@ public final class Mirror120 {
             // Whose connection it is: a packet sent through it goes to this player's client
             // half (ServerGamePacketListenerMixin, Packets120).
             player.connection.player = player;
+            var connection = Allocate.make(net.minecraft.network.Connection.class);
+            ((dev.horizonlab.platform120.mixin.ConnectionAccess) connection)
+                    .horizon$setChannel(new io.netty.channel.embedded.EmbeddedChannel());
+            ((dev.horizonlab.platform120.mixin.ConnectionAccess) connection).horizon$setListener(player.connection);
             ((dev.horizonlab.platform120.mixin.ServerGamePacketListenerAccess) player.connection)
-                    .horizon$setConnection(Allocate.make(net.minecraft.network.Connection.class));
+                    .horizon$setConnection(connection);
             PLAYERS.put(id, player);
             // On the server's player list, as a player who joined is: a mod's tick looking for
             // the players (getPlayers, getPlayer by UUID) finds Horizon's.
             playerList.getPlayers().add(player);
             ((dev.horizonlab.platform120.mixin.PlayerListAccess) playerList).horizon$setPlayersByUUID(
                     playersByUuid());
-            Events120.joined(server, player);
+            Loader120.get().playerJoined(server, player);
         }
         if (player.level() != level) player.setServerLevel(level);
         return player;
@@ -500,9 +494,6 @@ public final class Mirror120 {
         return map;
     }
 
-    private static volatile int probeClientGot = -1;
-    private static volatile int probeServerGot = -1;
-    private static boolean probeRegistered;
 
     /**
      * A round trip through Fabric's networking, for the tests: the server sends `uuid`'s player
@@ -516,34 +507,7 @@ public final class Mirror120 {
         try {
             ServerLevel level = level("minecraft:overworld");
             ServerPlayer player = player(uuid, name, level);
-            ResourceLocation down = new ResourceLocation("horizon", "probe_down");
-            ResourceLocation up = new ResourceLocation("horizon", "probe_up");
-            if (!probeRegistered) {
-                probeRegistered = true;
-                net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking.registerGlobalReceiver(down,
-                        (client, handler, buf, sender) -> {
-                            int got = buf.readVarInt();
-                            client.execute(() -> {
-                                probeClientGot = got;
-                                var reply = new net.minecraft.network.FriendlyByteBuf(io.netty.buffer.Unpooled.buffer());
-                                reply.writeVarInt(got + 1);
-                                net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking.send(up, reply);
-                            });
-                        });
-                net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.registerGlobalReceiver(up,
-                        (server, from, handler, buf, sender) -> {
-                            int got = buf.readVarInt();
-                            server.execute(() -> probeServerGot = got);
-                        });
-            }
-            probeClientGot = -1;
-            probeServerGot = -1;
-            boolean canDown = net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.canSend(player, down);
-            var buf = new net.minecraft.network.FriendlyByteBuf(io.netty.buffer.Unpooled.buffer());
-            buf.writeVarInt(41);
-            net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.send(player, down, buf);
-            boolean canUp = net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking.canSend(up);
-            return new Object[] {probeClientGot, probeServerGot, canDown, canUp};
+            return Loader120.get().packetProbe(player);
         } finally {
             finish();
         }
@@ -562,14 +526,14 @@ public final class Mirror120 {
             ServerLevel level = level(dimension);
             worldData.setGameTime(gameTime);
             ((dev.horizonlab.platform120.mixin.MinecraftServerAccess) server).horizon$setTickCount((int) gameTime);
-            Events120.start(server, LEVELS.values());
+            Loader120.get().serverStart(server, LEVELS.values());
             // The players' client ticks, where the mods read the keys pressed since the last.
             Keys120.tick(PLAYERS);
             // What the mods inject into a player's tick (Architectury's and Collective's player
             // tick events): Horizon ticks its players itself.
             boolean playerTicks = Mixins120.tickPlayers(level, PLAYERS.values());
-            if (!Events120.anyTickListeners()) return new Object[] {playerTicks};
-            Events120.tick(server, level, gameTime);
+            if (!Loader120.get().anyTickListeners()) return new Object[] {playerTicks};
+            Loader120.get().serverTick(server, level, gameTime);
             return new Object[] {true};
         } finally {
             finish();
@@ -737,6 +701,7 @@ public final class Mirror120 {
         // The whole stack as 1.20.1 saves it, not just its name and count: an enchanted tool a
         // machine spat out keeps its enchantments, a renamed one its name. Horizon runs it
         // through vanilla's own 1.20.1 -> 26.3 fixes on the other side.
+        spawnedItems++;
         event.accept("spawnItem", new Object[] {
             dimension(level), dropped.getX(), dropped.getY(), dropped.getZ(),
             motion.x, motion.y, motion.z,
@@ -755,6 +720,9 @@ public final class Mirror120 {
     }
 
     private static final java.util.Set<String> TURNED_AWAY = new java.util.HashSet<>();
+
+    /** Items dropped into the world so far, for {@link #breakBlock} to see whether a break dropped any. */
+    private static int spawnedItems;
 
     /** Level.setBlockEntity: a mod's own, for this call and for Horizon when it ends. */
     public static void addBlockEntity(Level level, BlockEntity entity) {
@@ -867,17 +835,22 @@ public final class Mirror120 {
         return new Object[0];
     }
 
-    /** The 3x3x3 around `pos` into `read`, in one call. */
+    /**
+     * The 4x4x4 cube (on the grid of four) holding `pos` into `read`, in one call: a feature
+     * reads across its area (a tree its column and crown), and whole cubes read once each beat
+     * overlapping 3x3x3s around each miss.
+     */
     private static void fill(Level level, BlockPos pos, Map<Long, BlockState> read) {
-        int[] wanted = new int[3 * 27];
-        long[] keys = new long[27];
+        int[] wanted = new int[3 * 64];
+        long[] keys = new long[64];
         int n = 0;
-        for (int dx = -1; dx <= 1; dx++) {
-            for (int dy = -1; dy <= 1; dy++) {
-                for (int dz = -1; dz <= 1; dz++) {
-                    int x = pos.getX() + dx;
-                    int y = pos.getY() + dy;
-                    int z = pos.getZ() + dz;
+        int x0 = pos.getX() & ~3, y0 = pos.getY() & ~3, z0 = pos.getZ() & ~3;
+        for (int dx = 0; dx < 4; dx++) {
+            for (int dy = 0; dy < 4; dy++) {
+                for (int dz = 0; dz < 4; dz++) {
+                    int x = x0 + dx;
+                    int y = y0 + dy;
+                    int z = z0 + dz;
                     // Already known, or not a position Horizon has: left out of the ask.
                     if (y < level.getMinBuildHeight() || y >= level.getMaxBuildHeight()) continue;
                     long key = BlockPos.asLong(x, y, z);
@@ -908,6 +881,23 @@ public final class Mirror120 {
     private static long removing = Long.MIN_VALUE;
 
     /** Level.setBlock of a mirror level: kept for this call and sent to Horizon. */
+    /**
+     * A mirror player teleported by the mods' code to x y z in `level` (`relative`: the axes
+     * given as offsets): moved there in the mirror, and Horizon told to move its player
+     * (`teleport`: uuid, dimension, x, y, z, yaw, pitch).
+     */
+    public static void teleported(ServerPlayer player, ServerLevel level, double x, double y, double z,
+            float yRot, float xRot, java.util.Set<net.minecraft.world.entity.RelativeMovement> relative) {
+        var r = relative == null ? java.util.Set.<net.minecraft.world.entity.RelativeMovement>of() : relative;
+        if (r.contains(net.minecraft.world.entity.RelativeMovement.X)) x += player.getX();
+        if (r.contains(net.minecraft.world.entity.RelativeMovement.Y)) y += player.getY();
+        if (r.contains(net.minecraft.world.entity.RelativeMovement.Z)) z += player.getZ();
+        if (r.contains(net.minecraft.world.entity.RelativeMovement.Y_ROT)) yRot += player.getYRot();
+        if (r.contains(net.minecraft.world.entity.RelativeMovement.X_ROT)) xRot += player.getXRot();
+        if (level == player.level()) player.absMoveTo(x, y, z, yRot, xRot);
+        event.accept("teleport", new Object[] {player.getUUID().toString(), dimension(level), x, y, z, (double) yRot, (double) xRot});
+    }
+
     public static boolean setBlock(Level level, BlockPos pos, BlockState state, int flags) {
         if (level.isOutsideBuildHeight(pos)) return false;
         BlockState before = blockState(level, pos);
@@ -1011,7 +1001,7 @@ public final class Mirror120 {
         ServerPlayer player = player(uuid, name, level);
         stand(player, px, py, pz, yaw, pitch, hx, hy, hz);
         mode(player, creative);
-        Events120.around(level, new BlockPos(x, y, z));
+        Loader120.get().around(level, new BlockPos(x, y, z));
         InteractionHand h = hand == 1 ? InteractionHand.OFF_HAND : InteractionHand.MAIN_HAND;
         ItemStack stack = stack(item, count, damage);
         player.setItemInHand(h, stack);
@@ -1046,8 +1036,6 @@ public final class Mirror120 {
         return screen == null ? null : new String[] {"screen:" + screen, ""};
     }
 
-    private static volatile int keyProbeClicks;
-    private static boolean keyProbeRegistered;
 
     /**
      * A key binding and a client-tick listener, for the tests, through Fabric's own API as a
@@ -1068,7 +1056,7 @@ public final class Mirror120 {
             int heard = 0;
             for (int i = 0; i + 2 < positions.length; i += 3) {
                 BlockPos source = new BlockPos(positions[i], positions[i + 1], positions[i + 2]);
-                Events120.around(level, source);
+                Loader120.get().around(level, source);
                 graphNodes(level, source);
                 BlockState from = level.getBlockState(source);
                 for (net.minecraft.core.Direction side : net.minecraft.core.Direction.values()) {
@@ -1131,14 +1119,14 @@ public final class Mirror120 {
     /** The mods' block states drawn by code (Models120), baking the client's models first. */
     public static Object[] drawnByCode() {
         setUp();
-        return new Object[] {Models120.drawnByCode()};
+        return new Object[] {Loader120.get().drawnByCode()};
     }
 
     /** The quads of the block at a position, as its own model draws it there (Models120.render). */
     public static Object[] renderBlock(String dimension, int x, int y, int z) {
         begin();
         try {
-            return Models120.render(level(dimension), new BlockPos(x, y, z));
+            return Loader120.get().render(level(dimension), new BlockPos(x, y, z));
         } finally {
             finish();
         }
@@ -1209,7 +1197,21 @@ public final class Mirror120 {
             synchronized (PRESENT) {
                 PRESENT.put(level, here);
             }
+            // The blocks the last few mob ticks read, again: a mob's goals and collisions read
+            // the same blocks tick after tick, a round trip to Horizon per 4x4x4 cube each
+            // (most of a tick's time with a hundred mobs). Kept MOB_READS_TICKS ticks, with
+            // this side's own writes in: a block Horizon changed meanwhile is seen that late.
+            Map<Long, BlockState> kept = MOB_READS.get(level);
+            if (kept != null && mobReadsAge++ < MOB_READS_TICKS) {
+                READS.put(level, kept);
+            } else {
+                mobReadsAge = 0;
+            }
             Entities120.tick(level);
+            Map<Long, BlockState> read = READS.computeIfAbsent(level, l -> new HashMap<>());
+            Map<Long, BlockState> wrote = WRITES.get(level);
+            if (wrote != null) read.putAll(wrote);
+            MOB_READS.put(level, read);
             return Entities120.snapshot(level);
         } finally {
             finish();
@@ -1460,17 +1462,9 @@ public final class Mirror120 {
             all.addAll(hover);
             int before = all.size();
             try {
-                Class<?> callback = Class.forName("net.fabricmc.fabric.api.client.item.v1.ItemTooltipCallback");
-                Object eventObject = callback.getField("EVENT").get(null);
-                Object invoker = eventObject.getClass().getMethod("invoker").invoke(eventObject);
-                var getTooltip = callback.getMethod("getTooltip", ItemStack.class,
-                        net.minecraft.world.item.TooltipFlag.class, java.util.List.class);
-                getTooltip.invoke(invoker, stack, flag, all);
-            } catch (ClassNotFoundException e) {
-                // No Fabric client item API: no tooltip mods.
-            } catch (Throwable t) {
-                Throwable cause = t instanceof java.lang.reflect.InvocationTargetException i && i.getCause() != null ? i.getCause() : t;
-                log("a tooltip mod failed on " + id + ": " + cause);
+                Loader120.get().tooltip(stack, flag, all);
+            } catch (RuntimeException | LinkageError t) {
+                log("a tooltip mod failed on " + id + ": " + t);
             }
             var hoverJson = new com.google.gson.JsonArray();
             for (var line : hover) hoverJson.add(net.minecraft.network.chat.Component.Serializer.toJsonTree(line));
@@ -1583,6 +1577,11 @@ public final class Mirror120 {
         return net.minecraft.client.gui.screens.inventory.tooltip.ClientTooltipComponent.create(data);
     }
 
+    /** The vanilla methods mods inject into (Mojang's `owner.method`), for a look at the index. */
+    public static Object[] mixinTargets() {
+        return new Object[] {Mixins120.index().keySet().stream().sorted().toArray(String[]::new)};
+    }
+
     /** Whether a fluid is a mod's (its own code runs it: phase 6e). */
     static boolean ourFluid(net.minecraft.world.level.material.Fluid fluid) {
         ResourceLocation id = BuiltInRegistries.FLUID.getKey(fluid);
@@ -1633,13 +1632,19 @@ public final class Mirror120 {
             if (block.isAir()) continue;
             String still = null, flow = null;
             int tint = -1;
+            String[] own = Loader120.get().fluidLook(fluid);
+            if (own != null && own[0] != null && own[1] != null) {
+                still = own[0];
+                flow = own[1];
+                tint = Integer.parseInt(own[2]);
+            }
             Object handler = null;
             try {
                 if (registry != null) handler = get.invoke(registry, fluid);
             } catch (Throwable t) {
                 handler = null;
             }
-            if (handler != null) {
+            if (handler != null && still == null) {
                 still = idField(handler, "stillTexture");
                 flow = idField(handler, "flowingTexture");
                 try {
@@ -1894,6 +1899,13 @@ public final class Mirror120 {
         }
     }
 
+    /** The blocks the mob ticks read lately, by level (tickEntities). */
+    private static final Map<Level, Map<Long, BlockState>> MOB_READS = new HashMap<>();
+
+    /** How many mob ticks the reads are kept for, and how many they've been kept. */
+    private static final int MOB_READS_TICKS = 4;
+    private static int mobReadsAge;
+
     /** Each level's players this tick (tickEntities), as ServerLevel.players gives them. */
     private static final Map<Level, List<ServerPlayer>> PRESENT = new HashMap<>();
 
@@ -2004,9 +2016,8 @@ public final class Mirror120 {
                 code = 1;
             } else {
                 Vec3 at = new Vec3(lx, ly, lz);
-                InteractionResult result = net.fabricmc.fabric.api.event.player.UseEntityCallback.EVENT.invoker()
-                        .interact(player, level, which, target,
-                                new net.minecraft.world.phys.EntityHitResult(target, at.add(target.position())));
+                InteractionResult result = Loader120.get().useEntity(player, level, which, target,
+                        new net.minecraft.world.phys.EntityHitResult(target, at.add(target.position())));
                 if (result == InteractionResult.PASS) {
                     result = target.interactAt(player, at, which);
                     if (!result.consumesAction()) result = player.interactOn(target, which);
@@ -2123,7 +2134,7 @@ public final class Mirror120 {
         var out = new com.google.gson.JsonObject();
         var root = java.nio.file.Path.of(dir);
         var type = net.minecraft.server.packs.PackType.CLIENT_RESOURCES;
-        try (var resources = Models120.clientResources()) {
+        try (var resources = Loader120.get().clientResources()) {
             for (var pack : resources.listPacks().toList()) {
                 String kind = pack.getClass().getName();
                 if (kind.startsWith("net.minecraft.") || kind.startsWith("net.fabricmc.")) continue;
@@ -2154,6 +2165,18 @@ public final class Mirror120 {
             }
         }
         return new Object[] {out.toString()};
+    }
+
+    /** The mods' block tints (Tints120.export): {json}. */
+    public static Object[] blockTints() {
+        setUp();
+        return new Object[] {Tints120.export()};
+    }
+
+    /** The mods' item tints (Tints120.items): {json}. */
+    public static Object[] itemTints() {
+        setUp();
+        return new Object[] {Tints120.items()};
     }
 
     /** The pools the mods add to loot tables in code (Loot120.added): {json}. */
@@ -2216,6 +2239,33 @@ public final class Mirror120 {
         return answer.length > 0 && answer[0] instanceof Integer h ? h : level.getMinBuildHeight();
     }
 
+    private static final Map<Level, net.minecraft.world.entity.ai.village.poi.PoiManager> POI =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    private static volatile boolean poiFailed;
+
+    /**
+     * A mirror level's points of interest: an empty manager of its own, kept in a folder of the
+     * runtime's temporary directory that nothing is saved to (it is never ticked). The mods
+     * looking for one find none rather than throw; null if it can't be made.
+     */
+    public static net.minecraft.world.entity.ai.village.poi.PoiManager poi(net.minecraft.server.level.ServerLevel level) {
+        if (poiFailed) return null;
+        try {
+            return POI.computeIfAbsent(level, l -> {
+                String name = l.dimension().location().toString().replace(':', '_');
+                var dir = java.nio.file.Path.of(System.getProperty("java.io.tmpdir"),
+                        "horizon-poi-" + ProcessHandle.current().pid(), name);
+                return new net.minecraft.world.entity.ai.village.poi.PoiManager(dir,
+                        net.minecraft.util.datafix.DataFixers.getDataFixer(), false, l.registryAccess(), l);
+            });
+        } catch (RuntimeException | LinkageError e) {
+            poiFailed = true;
+            log("points of interest: no manager for the mirror levels: " + e);
+            return null;
+        }
+    }
+
     private static final Map<Level, Biomes120> BIOME_MANAGERS = new HashMap<>();
 
     /** A mirror level's biome manager, which asks Horizon (Biomes120). */
@@ -2251,27 +2301,7 @@ public final class Mirror120 {
     }
 
     public static Object[] keyProbe() {
-        if (!keyProbeRegistered) {
-            keyProbeRegistered = true;
-            // Mods register their keys while they load, before the options exist; Fabric refuses
-            // one after. The probe comes later, so it registers with the options set aside.
-            var client = net.minecraft.client.Minecraft.getInstance();
-            var options = client.options;
-            var access = (dev.horizonlab.platform120.mixin.MinecraftAccess) client;
-            access.horizon$setOptions(null);
-            net.minecraft.client.KeyMapping mapping;
-            try {
-                mapping = net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper.registerKeyBinding(
-                        new net.minecraft.client.KeyMapping("key.horizon.probe", 75, "key.categories.misc"));
-            } finally {
-                access.horizon$setOptions(options);
-            }
-            var probe = mapping;
-            net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents.END_CLIENT_TICK.register(ticking -> {
-                while (probe.consumeClick()) keyProbeClicks++;
-            });
-        }
-        return new Object[] {keyProbeClicks};
+        return Loader120.get().keyProbe();
     }
 
     /** The keys the mods' key bindings are set to, as GLFW's codes (Keys120). */
@@ -2371,22 +2401,10 @@ public final class Mirror120 {
                 source = damageSource(level, damageType);
             }
             int ran = 0;
-            // Fabric API's entity events, by reflection: the platform jar is built without them.
             try {
-                Object event = Class.forName("net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents")
-                        .getField("AFTER_DEATH").get(null);
-                Object invoker = event.getClass().getMethod("invoker").invoke(event);
-                for (var m : invoker.getClass().getMethods()) {
-                    if (m.getName().equals("afterDeath") && m.getParameterCount() == 2) {
-                        m.setAccessible(true);
-                        m.invoke(invoker, mob, source);
-                        ran++;
-                        break;
-                    }
-                }
-            } catch (ReflectiveOperationException | RuntimeException | LinkageError e) {
-                Throwable cause = e.getCause() != null ? e.getCause() : e;
-                log("a mod's death listener failed for " + type + ": " + cause);
+                ran += Loader120.get().afterDeath(mob, source);
+            } catch (RuntimeException | LinkageError e) {
+                log("a mod's death listener failed for " + type + ": " + e);
             }
             ran += Mixins120.fire("net.minecraft.world.entity.LivingEntity.die", mob, new Object[] {source}, false).ran();
             return new Object[] {ran};
@@ -2406,11 +2424,11 @@ public final class Mirror120 {
             String damageType, double amount, int byPlayer) {
         begin();
         try {
-            Object allow = allowDamageInvoker();
+            boolean allow = Loader120.get().listensToDamage();
             boolean hooked = Mixins120.index().keySet().stream().anyMatch(t -> t.endsWith(".hurt")
                     && !t.startsWith("net.minecraft.server.level.ServerPlayer.")
                     && !t.startsWith("net.minecraft.world.entity.player."));
-            if (allow == null && !hooked) return new Object[] {false, false};
+            if (!allow && !hooked) return new Object[] {false, false};
             ServerLevel level = level(dimension);
             var kind = net.minecraft.world.entity.EntityType.byString(type).orElse(null);
             if (kind == null) return new Object[] {false, true};
@@ -2419,20 +2437,11 @@ public final class Mirror120 {
             mob.moveTo(x, y, z, 0f, 0f);
             var source = damageSource(level, byPlayer != 0 && (damageType == null || damageType.isEmpty())
                     ? "minecraft:player_attack" : damageType);
-            if (allow != null) {
+            if (allow) {
                 try {
-                    for (var m : allow.getClass().getMethods()) {
-                        if (m.getName().equals("allowDamage") && m.getParameterCount() == 3) {
-                            m.setAccessible(true);
-                            if (Boolean.FALSE.equals(m.invoke(allow, mob, source, (float) amount))) {
-                                return new Object[] {true, true};
-                            }
-                            break;
-                        }
-                    }
-                } catch (ReflectiveOperationException | RuntimeException | LinkageError e) {
-                    Throwable cause = e.getCause() != null ? e.getCause() : e;
-                    log("a mod's damage listener failed for " + type + ": " + cause);
+                    if (!Loader120.get().allowDamage(mob, source, (float) amount)) return new Object[] {true, true};
+                } catch (RuntimeException | LinkageError e) {
+                    log("a mod's damage listener failed for " + type + ": " + e);
                 }
             }
             Object[] args = {source, (float) amount};
@@ -2444,30 +2453,6 @@ public final class Mirror120 {
             return new Object[] {false, true};
         } finally {
             finish();
-        }
-    }
-
-    /**
-     * Fabric's ALLOW_DAMAGE invoker, or null without Fabric's entity events or a mod listening
-     * (its ArrayBackedEvent's `handlers` empty).
-     */
-    private static Object allowDamageInvoker() {
-        try {
-            Object event = Class.forName("net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents")
-                    .getField("ALLOW_DAMAGE").get(null);
-            for (Class<?> c = event.getClass(); c != null; c = c.getSuperclass()) {
-                try {
-                    var field = c.getDeclaredField("handlers");
-                    field.setAccessible(true);
-                    if (field.get(event) instanceof Object[] handlers && handlers.length == 0) return null;
-                    break;
-                } catch (NoSuchFieldException e) {
-                    // Up the classes.
-                }
-            }
-            return event.getClass().getMethod("invoker").invoke(event);
-        } catch (ReflectiveOperationException | RuntimeException | LinkageError e) {
-            return null;
         }
     }
 
@@ -2495,7 +2480,7 @@ public final class Mirror120 {
         try {
             Screens120.close(player);
             Keys120.forget(player.getUUID());
-            Events120.left(server, player);
+            Loader120.get().playerLeft(server, player);
             PLAYERS.remove(player.getUUID());
             playerList.getPlayers().remove(player);
             ((dev.horizonlab.platform120.mixin.PlayerListAccess) playerList).horizon$setPlayersByUUID(playersByUuid());
@@ -2611,7 +2596,7 @@ public final class Mirror120 {
             mode(player, creative);
             player.setItemInHand(InteractionHand.MAIN_HAND, heldStack(held));
             BlockPos pos = new BlockPos(x, y, z);
-            Events120.around(level, pos);
+            Loader120.get().around(level, pos);
             boolean goes;
             switch (how) {
                 case BREAK_THEIRS -> {
@@ -2620,29 +2605,89 @@ public final class Mirror120 {
                     // Redstone gate on a cable) picks the piece aimed at there, and without it
                     // destroyBlock removes nothing. A block broken at once there is gone already.
                     BlockState was = level.getBlockState(pos);
+                    var wasEntity = was.hasBlockEntity() ? level.getBlockEntity(pos) : null;
+                    ItemStack tool = player.getMainHandItem().copy();
+                    int dropsBefore = spawnedItems;
                     player.gameMode.handleBlockBreakAction(pos,
                             net.minecraft.network.protocol.game.ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK,
                             net.minecraft.core.Direction.UP, level.getMaxBuildHeight(), 0);
                     goes = level.getBlockState(pos) != was || player.gameMode.destroyBlock(pos);
+                    // A survival break that went and dropped nothing: the block's own drops, as
+                    // Block.dropResources gives them, in case the mod's path lost them on the way
+                    // (vanilla's destroyBlock drops only when removeBlock says it removed).
+                    // Only once the whole block is gone: a container losing one part keeps the rest.
+                    if (goes && !creative && spawnedItems == dropsBefore && level.getBlockState(pos).isAir()
+                            && player.hasCorrectToolForDrops(was)) {
+                        var drops = net.minecraft.world.level.block.Block.getDrops(was, level, pos, wasEntity, player, tool);
+                        log("no drops from " + was + " broken in survival; its loot gives " + drops);
+                        for (ItemStack drop : drops) net.minecraft.world.level.block.Block.popResource(level, pos, drop);
+                        was.spawnAfterBreak(level, pos, tool, true);
+                    } else if (goes && !creative && spawnedItems == dropsBefore) {
+                        log("no drops from " + was + " broken in survival; the block is now " + level.getBlockState(pos));
+                    }
                 }
                 case BREAK_BEFORE -> {
                     BlockState was = level.getBlockState(pos);
                     var entity = level.getBlockEntity(pos);
-                    goes = net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents.BEFORE.invoker()
-                            .beforeBlockBreak(level, player, pos, was, entity);
-                    if (!goes) {
-                        net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents.CANCELED.invoker()
-                                .onBlockBreakCanceled(level, player, pos, was, entity);
-                    }
+                    goes = Loader120.get().beforeBreak(level, player, pos, was, entity);
+                    if (!goes) Loader120.get().canceledBreak(level, player, pos, was, entity);
                 }
                 default -> {
-                    net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents.AFTER.invoker()
-                            .afterBlockBreak(level, player, pos, state(state), null);
+                    Loader120.get().afterBreak(level, player, pos, state(state), null);
                     goes = true;
                 }
             }
             ItemStack after = player.getMainHandItem();
             return new Object[] {goes ? 1 : 0, after.isEmpty() ? "" : after.save(new net.minecraft.nbt.CompoundTag()).toString()};
+        } finally {
+            finish();
+        }
+    }
+
+    /**
+     * The mods' block at x, y, z of `dimension` blown up by Horizon's explosion of `radius`
+     * (vanilla 1.20.1's {@code Explosion.finalizeExplosion} for one block): its drops by its own
+     * code ({@code getDrops} with the block entity, so a LibMultiPart container drops the parts
+     * in it), then the block gone and its {@code wasExploded}. The drops land as spawned items,
+     * the removal as a set block. `decay`: {@code DESTROY_WITH_DECAY}, the loot's explosion
+     * decay drawn from the radius. 1 when there was a block.
+     */
+    public static Object[] explodeBlock(String dimension, int x, int y, int z, double radius, boolean decay) {
+        begin();
+        try {
+            ServerLevel level = level(dimension);
+            BlockPos pos = new BlockPos(x, y, z);
+            Loader120.get().around(level, pos);
+            BlockState state = level.getBlockState(pos);
+            if (state.isAir()) return new Object[] {0};
+            var interaction = decay
+                    ? net.minecraft.world.level.Explosion.BlockInteraction.DESTROY_WITH_DECAY
+                    : net.minecraft.world.level.Explosion.BlockInteraction.DESTROY;
+            var explosion = new net.minecraft.world.level.Explosion(level, null,
+                    x + 0.5, y + 0.5, z + 0.5, (float) radius, false, interaction);
+            if (state.getBlock().dropFromExplosion(explosion)) {
+                var entity = state.hasBlockEntity() ? level.getBlockEntity(pos) : null;
+                var params = new net.minecraft.world.level.storage.loot.LootParams.Builder(level)
+                        .withParameter(net.minecraft.world.level.storage.loot.parameters.LootContextParams.ORIGIN,
+                                Vec3.atCenterOf(pos))
+                        .withParameter(net.minecraft.world.level.storage.loot.parameters.LootContextParams.TOOL,
+                                ItemStack.EMPTY)
+                        .withOptionalParameter(
+                                net.minecraft.world.level.storage.loot.parameters.LootContextParams.BLOCK_ENTITY,
+                                entity);
+                if (decay) {
+                    params.withParameter(
+                            net.minecraft.world.level.storage.loot.parameters.LootContextParams.EXPLOSION_RADIUS,
+                            (float) radius);
+                }
+                state.spawnAfterBreak(level, pos, ItemStack.EMPTY, false);
+                for (ItemStack drop : state.getDrops(params)) {
+                    net.minecraft.world.level.block.Block.popResource(level, pos, drop);
+                }
+            }
+            level.setBlock(pos, Blocks.AIR.defaultBlockState(), 3);
+            state.getBlock().wasExploded(level, pos, explosion);
+            return new Object[] {1};
         } finally {
             finish();
         }
@@ -2676,7 +2721,7 @@ public final class Mirror120 {
         int ticked = 0;
         for (int i = 0; i + 2 < positions.length; i += 3) {
             BlockPos pos = new BlockPos(positions[i], positions[i + 1], positions[i + 2]);
-            Events120.around(level, pos);
+            Loader120.get().around(level, pos);
             if (tickOne(level, pos)) ticked++;
         }
         finish();
@@ -2888,7 +2933,7 @@ public final class Mirror120 {
     public static Object[] hopperInsert(String dimension, int x, int y, int z, int face, String stacks) {
         begin();
         try {
-            return new Object[] {Hoppers120.insert(level(dimension), new BlockPos(x, y, z), face, stacks(stacks))};
+            return new Object[] {Loader120.get().hopperInsert(level(dimension), new BlockPos(x, y, z), face, stacks(stacks))};
         } catch (RuntimeException | LinkageError e) {
             hopperFailed(x, y, z, e);
             return new Object[] {Hoppers120.NO_STORAGE};
@@ -2906,7 +2951,7 @@ public final class Mirror120 {
     public static Object[] hopperExtract(String dimension, int x, int y, int z, int face, boolean anyRoom, String partial) {
         begin();
         try {
-            ItemStack one = Hoppers120.extract(level(dimension), new BlockPos(x, y, z), face, anyRoom, stacks(partial));
+            ItemStack one = Loader120.get().hopperExtract(level(dimension), new BlockPos(x, y, z), face, anyRoom, stacks(partial));
             if (one == null) return new Object[] {Hoppers120.NO_STORAGE, ""};
             if (one.isEmpty()) return new Object[] {Hoppers120.NOTHING, ""};
             return new Object[] {0, one.save(new net.minecraft.nbt.CompoundTag()).toString()};

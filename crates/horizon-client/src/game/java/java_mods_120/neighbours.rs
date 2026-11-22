@@ -5,7 +5,7 @@
 //! then `neighborChanged`, as vanilla's neighbour updater tells them: a Wired Redstone wire
 //! takes the power of a lever flipped beside it), and what they set and changed lands here.
 
-use super::{Level, NAMESPACES, RUNTIME, tick_failed_once};
+use super::{Level, NAMESPACES, runtime, tick_failed_once};
 use horizon_core::position::BlockPos;
 use horizon_world::registry::BlockStateId;
 use std::sync::{Mutex, OnceLock};
@@ -82,10 +82,53 @@ impl super::super::Game<'_> {
             positions.dedup();
             positions
         };
+        // By the runtimes whose blocks are beside each position (not the block at it, which may
+        // be gone: the lower half of a waystone just broken, its upper half to hear it).
+        for (loader, group) in self.java120_by_neighbours_owner(&positions) {
+            let _route = super::route(loader);
+            self.java120_neighbours_of(group);
+        }
+    }
+
+    /// `positions` by the runtimes owning a block beside each: a position beside blocks of both
+    /// goes to both.
+    fn java120_by_neighbours_owner(
+        &self,
+        positions: &[[i32; 3]],
+    ) -> Vec<(super::Loader, Vec<[i32; 3]>)> {
+        let mut groups: Vec<(super::Loader, Vec<[i32; 3]>)> = Vec::new();
+        for &[x, y, z] in positions {
+            let mut owners: Vec<super::Loader> = Vec::new();
+            for (dx, dy, dz) in [
+                (1, 0, 0),
+                (-1, 0, 0),
+                (0, 1, 0),
+                (0, -1, 0),
+                (0, 0, 1),
+                (0, 0, -1),
+            ] {
+                if let Some(loader) = self.java120_owner_at([x + dx, y + dy, z + dz])
+                    && !owners.contains(&loader)
+                {
+                    owners.push(loader);
+                }
+            }
+            for loader in owners {
+                match groups.iter_mut().find(|(l, _)| *l == loader) {
+                    Some((_, group)) => group.push([x, y, z]),
+                    None => groups.push((loader, vec![[x, y, z]])),
+                }
+            }
+        }
+        groups
+    }
+
+    /// The neighbours' changes at `positions`, told to the runtime calls go to now.
+    fn java120_neighbours_of(&mut self, positions: Vec<[i32; 3]>) {
         let dimension = self.dim.id().to_owned();
         let flat: Vec<i32> = positions.iter().flatten().copied().collect();
         let heard = {
-            let Ok(mut guard) = RUNTIME.try_lock() else {
+            let Ok(mut guard) = runtime().try_lock() else {
                 UPDATED
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
@@ -105,6 +148,33 @@ impl super::super::Game<'_> {
                 &heard.spawned,
             ),
             Err(e) => tick_failed_once(&e),
+        }
+    }
+
+    /// The players the mods' code teleported (a waystone's teleport): Horizon's player moves
+    /// there, into the other dimension when it is one.
+    pub(in crate::game) fn tick_java120_teleports(&mut self) {
+        if self.remote.is_some() {
+            return;
+        }
+        let me = self.java120_actor();
+        for teleport in horizon_jvm_remote::mirror120::take_teleports() {
+            if teleport.uuid != me {
+                continue;
+            }
+            let rotation = Some([teleport.yaw, teleport.pitch]);
+            let target = super::super::commands::Target::Player;
+            if teleport.dimension == self.dim.id() {
+                self.teleport_to_in_level(target, teleport.pos, rotation, false);
+            } else {
+                let level = super::super::Dim::from_id(&teleport.dimension);
+                if let Err(e) = self.teleport_across(target, level, teleport.pos, rotation, false) {
+                    log::warn!(
+                        "1.20.1 mods: a teleport into {} failed: {e:?}",
+                        teleport.dimension
+                    );
+                }
+            }
         }
     }
 }

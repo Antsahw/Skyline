@@ -76,8 +76,9 @@ pub(crate) struct ModFluid {
 static MOD_TINTS: std::sync::RwLock<Option<std::collections::HashMap<String, Vec<Tint>>>> =
     std::sync::RwLock::new(None);
 
-/// Sets the mods' tint sources: `{"mod:block": ["foliage", "none", "#rrggbb", ...]}`, one a
-/// tint index (`grass`, `foliage`, `dry_foliage`, `water`, `none` or a constant colour).
+/// Adds mods' tint sources: `{"mod:block": ["foliage", "none", "#rrggbb", ...]}`, one a
+/// tint index (`grass`, `foliage`, `dry_foliage`, `water`, `none` or a constant colour). Each
+/// bridge (26.3's, each 1.20.1 runtime's) adds its own mods'.
 pub fn set_mod_tints(json: &str) -> crate::Result<usize> {
     let map: std::collections::HashMap<String, Vec<String>> = serde_json::from_str(json)?;
     let tints: std::collections::HashMap<String, Vec<Tint>> = map
@@ -100,7 +101,11 @@ pub fn set_mod_tints(json: &str) -> crate::Result<usize> {
         })
         .collect();
     let n = tints.len();
-    *MOD_TINTS.write().unwrap_or_else(|e| e.into_inner()) = Some(tints);
+    MOD_TINTS
+        .write()
+        .unwrap_or_else(|e| e.into_inner())
+        .get_or_insert_with(Default::default)
+        .extend(tints);
     Ok(n)
 }
 

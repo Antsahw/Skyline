@@ -47,6 +47,7 @@ impl super::super::Game<'_> {
             creative: self.mode == horizon_client::command::args::GameMode::Creative,
             stance: self.java120_stance(),
         };
+        let _route = super::route_id(request.held.split('"').nth(1).unwrap_or_default());
         let used = {
             let mut guard = wait_for_runtime()?;
             let runtime = guard.as_mut()?;
@@ -94,22 +95,27 @@ impl super::super::Game<'_> {
 
     /// Player `uuid` left the game: the 1.20.1 mods hear it, their screen there closes.
     pub(in crate::game) fn java120_player_left(&mut self, conn: u32, uuid: u128) {
+        // Who joins next is sent the mods' blocks' kept shapes again (`tick_java120_block_entities`).
+        super::forget_sent_shapes();
         super::screens::forget(conn);
         if self.remote.is_some() {
             return;
         }
         let uuid = uuid_string(uuid);
-        let left = {
-            let Some(mut guard) = wait_for_runtime() else {
-                return;
+        for loader in super::loaders() {
+            let _route = super::route(loader);
+            let left = {
+                let Some(mut guard) = wait_for_runtime() else {
+                    continue;
+                };
+                let Some(runtime) = guard.as_mut() else {
+                    continue;
+                };
+                runtime.player_left(&Level(self), &uuid)
             };
-            let Some(runtime) = guard.as_mut() else {
-                return;
-            };
-            runtime.player_left(&Level(self), &uuid)
-        };
-        if let Err(e) = left {
-            log::warn!("1.20.1 mods: {uuid} leaving: {e}");
+            if let Err(e) = left {
+                log::warn!("1.20.1 mods: {uuid} leaving: {e}");
+            }
         }
     }
 
@@ -130,18 +136,21 @@ impl super::super::Game<'_> {
             .map_or("generic", |id| id.split('.').next().unwrap_or(id))
             .to_owned();
         let uuid = uuid_string(uuid);
-        let died = {
-            let Some(mut guard) = super::runtime_within(std::time::Duration::from_millis(25))
-            else {
-                return;
+        for loader in super::loaders() {
+            let _route = super::route(loader);
+            let died = {
+                let Some(mut guard) = super::runtime_within(std::time::Duration::from_millis(25))
+                else {
+                    continue;
+                };
+                let Some(runtime) = guard.as_mut() else {
+                    continue;
+                };
+                runtime.player_died(&Level(self), &uuid, name, dimension, &damage_type)
             };
-            let Some(runtime) = guard.as_mut() else {
-                return;
-            };
-            runtime.player_died(&Level(self), &uuid, name, dimension, &damage_type)
-        };
-        if let Err(e) = died {
-            log::warn!("1.20.1 mods: {uuid} dying: {e}");
+            if let Err(e) = died {
+                log::warn!("1.20.1 mods: {uuid} dying: {e}");
+            }
         }
     }
 }
@@ -166,6 +175,23 @@ impl super::super::Game<'_> {
             Some((uuid_string(g.uuid), g.name.clone()))
         });
         let dimension = self.dim.id().to_owned();
+        // Every runtime's mods hear it.
+        for loader in super::loaders() {
+            let _route = super::route(loader);
+            self.java120_mob_died_in(&dimension, kind, pos, damage_type, killer.as_ref());
+        }
+    }
+
+    /// [`Self::java120_mob_died`] in the runtime calls go to now.
+    fn java120_mob_died_in(
+        &mut self,
+        dimension: &str,
+        kind: &str,
+        pos: [f64; 3],
+        damage_type: &str,
+        killer: Option<&(String, String)>,
+    ) {
+        let dimension = dimension.to_owned();
         let died = {
             let Some(mut guard) = super::runtime_within(std::time::Duration::from_millis(25))
             else {
@@ -180,7 +206,7 @@ impl super::super::Game<'_> {
                 kind,
                 pos,
                 damage_type,
-                killer.as_ref().map(|(u, n)| (u.as_str(), n.as_str())),
+                killer.map(|(u, n)| (u.as_str(), n.as_str())),
             )
         };
         match died {
@@ -213,7 +239,10 @@ pub(in crate::game) fn remember_player(id: i32, uuid: String, name: String, dime
 static TICKING: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
 
 /// No mod listens to mobs' hurt (the runtime said so once): Horizon stops asking.
-static MOB_HURT_UNHEARD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static MOB_HURT_UNHEARD: [std::sync::atomic::AtomicBool; 2] = [
+    std::sync::atomic::AtomicBool::new(false),
+    std::sync::atomic::AtomicBool::new(false),
+];
 
 pub(in crate::game) fn set_ticking_dimension(dimension: &str) {
     let mut ticking = TICKING.lock().unwrap_or_else(|e| e.into_inner());
@@ -242,19 +271,23 @@ impl super::super::Game<'_> {
             log::debug!("1.20.1 mods: a hit on player {id}, whom the mods haven't met");
             return false;
         };
-        let Some(mut guard) = super::runtime_within(std::time::Duration::from_millis(25)) else {
-            return false;
-        };
-        let Some(runtime) = guard.as_mut() else {
-            return false;
-        };
-        match runtime.player_hurt(&uuid, &name, &dimension, source.damage_type, amount) {
-            Ok(canceled) => canceled,
-            Err(e) => {
-                log::warn!("1.20.1 mods: a hit on {name}: {e}");
-                false
+        // Every runtime's mods hear it; any of them cancels it.
+        let mut canceled = false;
+        for loader in super::loaders() {
+            let _route = super::route(loader);
+            let Some(mut guard) = super::runtime_within(std::time::Duration::from_millis(25))
+            else {
+                continue;
+            };
+            let Some(runtime) = guard.as_mut() else {
+                continue;
+            };
+            match runtime.player_hurt(&uuid, &name, &dimension, source.damage_type, amount) {
+                Ok(c) => canceled |= c,
+                Err(e) => log::warn!("1.20.1 mods: a hit on {name}: {e}"),
             }
         }
+        canceled
     }
 
     /// One of Horizon's vanilla mobs is about to be hurt (as [`Self::java120_hurt_player`]):
@@ -268,40 +301,48 @@ impl super::super::Game<'_> {
         let horizon_client::health::Hurting::Mob(mob, damage) = hurting else {
             return false;
         };
-        if MOB_HURT_UNHEARD.load(Ordering::Relaxed) || !mob.kind.id.starts_with("minecraft:") {
+        if !mob.kind.id.starts_with("minecraft:") {
             return false;
         }
         let dimension = TICKING.lock().unwrap_or_else(|e| e.into_inner()).clone();
         if dimension.is_empty() {
             return false;
         }
-        let Some(mut guard) = super::runtime_within(std::time::Duration::from_millis(25)) else {
-            return false;
-        };
-        let Some(runtime) = guard.as_mut() else {
-            return false;
-        };
         let by_player = damage.attacker == Some(horizon_client::mobs::Who::Player);
         let pos = [mob.position.x, mob.position.y, mob.position.z];
         let damage_type = super::super::creatures::source_damage_type(**damage);
-        match runtime.mob_hurt(
-            &dimension,
-            &mob.kind.id,
-            pos,
-            damage_type,
-            amount,
-            by_player,
-        ) {
-            Ok((canceled, listened)) => {
-                if !listened {
-                    MOB_HURT_UNHEARD.store(true, Ordering::Relaxed);
-                }
-                canceled
+        // Every runtime whose mods listen; any of them cancels it.
+        let mut canceled = false;
+        for loader in super::loaders() {
+            let unheard = &MOB_HURT_UNHEARD[loader.index()];
+            if unheard.load(Ordering::Relaxed) {
+                continue;
             }
-            Err(e) => {
-                log::warn!("1.20.1 mods: a hit on a {}: {e}", mob.kind.id);
-                false
+            let _route = super::route(loader);
+            let Some(mut guard) = super::runtime_within(std::time::Duration::from_millis(25))
+            else {
+                continue;
+            };
+            let Some(runtime) = guard.as_mut() else {
+                continue;
+            };
+            match runtime.mob_hurt(
+                &dimension,
+                &mob.kind.id,
+                pos,
+                damage_type,
+                amount,
+                by_player,
+            ) {
+                Ok((c, listened)) => {
+                    if !listened {
+                        unheard.store(true, Ordering::Relaxed);
+                    }
+                    canceled |= c;
+                }
+                Err(e) => log::warn!("1.20.1 mods: a hit on a {}: {e}", mob.kind.id),
             }
         }
+        canceled
     }
 }

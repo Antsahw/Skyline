@@ -209,6 +209,30 @@ fn renamed_feature(t: &str, n: &mut Map<String, Value>) {
                 provider.insert("type".into(), vanilla("rule_based"));
             }
         }
+        // 26.2's tree set the block under its trunk to `dirt_provider`'s unless it was dirt
+        // already (or always, with `force_dirt`); 26.3's names one provider for that block,
+        // vanilla's a rule-based dirt over all but the blocks a trunk can't replace.
+        "tree" => {
+            let force = n.remove("force_dirt").and_then(|f| f.as_bool()) == Some(true);
+            if let Some(dirt) = n.remove("dirt_provider")
+                && !n.contains_key("below_trunk_provider")
+            {
+                let below = if force {
+                    dirt
+                } else {
+                    json!({"type": "minecraft:rule_based", "rules": [{"if_true": {
+                        "type": "minecraft:not", "predicate": {
+                            "type": "minecraft:matching_block_tag",
+                            "tag": "minecraft:cannot_replace_below_tree_trunk"}},
+                        "then": dirt}]})
+                };
+                n.insert("below_trunk_provider".into(), below);
+            }
+        }
+        // 26.2's multiface growth grew glow lichen when it named no block; 26.3's names it.
+        "multiface_growth" => {
+            n.entry("block").or_insert_with(|| vanilla("glow_lichen"));
+        }
         "forest_rock" => {
             n.insert("type".into(), vanilla("block_blob"));
             n.insert(
@@ -263,6 +287,13 @@ fn nested(v: &mut Value, report: &mut Report) {
                         state => state,
                     };
                     return;
+                    // A noise provider's inline noise parameters, as the noise registry's.
+                    for key in ["noise", "slow_noise"] {
+                        if let Some(n) = o.get(key).filter(|n| n.is_object()) {
+                            let n = super::noise::noise(n, report);
+                            o.insert(key.into(), n);
+                        }
+                    }
                 }
                 o.insert("type".into(), vanilla(to));
             }
@@ -295,10 +326,52 @@ pub(crate) fn placed(v: &Value, report: &mut Report) -> Value {
     {
         v["feature"] = feature(&f, report);
     }
+    if let Some(patch) = v
+        .get("feature")
+        .and_then(Value::as_str)
+        .and_then(removed_patch)
+    {
+        v["feature"] = patch;
+    }
     if let Some(Value::Array(ms)) = v.get_mut("placement") {
         for m in ms.iter_mut() {
             placement(m);
         }
     }
     v
+}
+
+/// A vanilla patch feature 26.3 left out (`minecraft:patch_grass`): 26.3 keeps only the block
+/// (`minecraft:grass`), the patch being its placed features' placement. As 26.2's random patch
+/// of it, with 1.20's tries and spread: on a free block, and on grass for the crops that need it.
+fn removed_patch(id: &str) -> Option<Value> {
+    let name = id.strip_prefix("minecraft:")?.strip_prefix("patch_")?;
+    let (block, tries, xz, y) = match name {
+        "grass" | "grass_jungle" | "taiga_grass" => (name, 32, 7, 3),
+        "dead_bush" => (name, 4, 7, 3),
+        "cactus" | "waterlily" => (name, 10, 7, 3),
+        "sugar_cane" => (name, 20, 4, 0),
+        "melon" => (name, 64, 7, 3),
+        "large_fern" | "tall_grass" | "sunflower" | "berry_bush" | "pumpkin" | "red_mushroom"
+        | "brown_mushroom" | "bush" | "firefly_bush" | "leaf_litter" | "dry_grass" => {
+            (name, 96, 7, 3)
+        }
+        "berry_common" | "berry_rare" => ("berry_bush", 96, 7, 3),
+        _ => return None,
+    };
+    let mut filter = json!({"type": "minecraft:matching_block_tag", "tag": "minecraft:air"});
+    if matches!(block, "pumpkin" | "melon" | "berry_bush") {
+        filter = json!({"type": "minecraft:all_of", "predicates": [filter, {
+            "type": "minecraft:matching_blocks", "offset": [0, -1, 0],
+            "blocks": "minecraft:grass_block"}]});
+    }
+    let spread = |s: i64| json!({"type": "minecraft:trapezoid", "min": -s, "max": s, "plateau": 0});
+    Some(
+        json!({"type": "minecraft:random_selector", "features": [], "default": {
+        "feature": format!("minecraft:{block}"),
+        "placement": [
+            {"type": "minecraft:count", "count": tries},
+            {"type": "minecraft:offset", "x": spread(xz), "y": spread(y), "z": spread(xz)},
+            {"type": "minecraft:block_predicate_filter", "predicate": filter}]}}),
+    )
 }

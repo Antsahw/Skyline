@@ -73,7 +73,11 @@ public final class Hud120 {
                 part("renderPlayerHealth", () -> access.horizon$renderPlayerHealth(graphics));
             }
             part("renderExperienceBar", () -> access.horizon$renderExperienceBar(graphics, width / 2 - 91));
-            part("renderEffects", () -> access.horizon$renderEffects(graphics));
+            // The effect icons come from the texture manager a headless client never made: the
+            // part is left out until it has one (Horizon draws the effects meanwhile).
+            if (minecraft.getMobEffectTextures() != null) {
+                part("renderEffects", () -> access.horizon$renderEffects(graphics));
+            }
             renderHandlers(gui, graphics);
             part("field of view", () -> {
                 double factor = fovFactor(minecraft);
@@ -271,16 +275,10 @@ public final class Hud120 {
         if (DEBUG) {
             System.out.println("Hud120: client tick, looking at " + minecraft.hitResult.getType() + " "
                     + minecraft.hitResult.getLocation() + ", tick listeners "
-                    + Events120.listeners(net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents.END_CLIENT_TICK));
+                    + Loader120.get().clientTickListeners());
         }
         Keys120.holdFor(player.getUUID());
-        if (Events120.listeners(net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents.START_CLIENT_TICK) != 0
-                || Events120.listeners(net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents.END_CLIENT_TICK) != 0) {
-            Events120.fire(net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents.START_CLIENT_TICK,
-                    "client tick start", l -> l.onStartTick(minecraft));
-            Events120.fire(net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents.END_CLIENT_TICK,
-                    "client tick end", l -> l.onEndTick(minecraft));
-        }
+        if (Loader120.get().clientTickListeners()) Loader120.get().clientTick(minecraft);
     }
 
     /** Stand-ins of Horizon's mobs, by Horizon's entity id: kept while one is looked at. */

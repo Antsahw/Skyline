@@ -31,7 +31,10 @@
     "PlayerListMixin",
     "ServerPlayerMixin",
     "ServerPlayerMenuMixin",
-    "ServerGamePacketListenerMixin"
+    "ServerGamePacketListenerMixin",
+    "ConnectionAccess",
+    "ConnectionMixin",
+    "ChunkMapMixin"
   ],
   "client": [
     "AbstractClientPlayerAccess",
@@ -66,7 +69,9 @@
     "ScreenMixin",
     "SoundManagerMixin",
     "SpriteContentsAccess",
-    "TextureAtlasSpriteAccess"
+    "TextureAtlasSpriteAccess",
+    "MinecraftParkMixin",
+    "WindowHiddenMixin"
   ],
   "injectors": {
     "defaultRequire": 1

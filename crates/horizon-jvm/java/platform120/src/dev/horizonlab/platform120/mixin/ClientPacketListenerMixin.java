@@ -17,9 +17,23 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 public abstract class ClientPacketListenerMixin {
     @Inject(method = "send(Lnet/minecraft/network/protocol/Packet;)V", at = @At("HEAD"), cancellable = true)
     private void horizon$send(Packet<?> packet, CallbackInfo ci) {
-        dev.horizonlab.platform120.Packets120.fromClient(packet);
+        dev.horizonlab.platform120.Loader120.get().fromClient(packet);
         ci.cancel();
     }
+
+    /**
+     * Its connection, which the stand-in listener was made without: the one that hands what is
+     * sent through it to the server half (Screens120.clientConnection; Forge's SimpleChannel
+     * sends to the server through it).
+     */
+    @Inject(method = "getConnection()Lnet/minecraft/network/Connection;", at = @At("HEAD"), cancellable = true)
+    private void horizon$connection(CallbackInfoReturnable<net.minecraft.network.Connection> cir) {
+        if (connection == null) cir.setReturnValue(dev.horizonlab.platform120.Screens120.clientConnection());
+    }
+
+    @org.spongepowered.asm.mixin.Shadow
+    @org.spongepowered.asm.mixin.Final
+    private net.minecraft.network.Connection connection;
 
     @org.spongepowered.asm.mixin.Shadow
     @org.spongepowered.asm.mixin.Final

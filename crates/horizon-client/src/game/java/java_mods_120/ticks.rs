@@ -3,11 +3,11 @@
 //! server ticks a level. A mod set nobody of which listens to ticks costs a call every five
 //! seconds, to notice a listener registered later.
 
-use super::{Level, RUNTIME};
+use super::{Level, runtime};
 use std::sync::atomic::{AtomicI64, Ordering};
 
 /// The game time at which to ask again, when the last answer was that nobody listens.
-static QUIET_UNTIL: AtomicI64 = AtomicI64::new(i64::MIN);
+static QUIET_UNTIL: [AtomicI64; 2] = [AtomicI64::new(i64::MIN), AtomicI64::new(i64::MIN)];
 
 /// How long a mod set with no tick listeners is left alone (5 seconds).
 const QUIET_TICKS: i64 = 100;
@@ -19,13 +19,21 @@ impl super::super::Game<'_> {
         if self.remote.is_some() {
             return;
         }
+        for loader in super::loaders() {
+            let _route = super::route(loader);
+            self.tick_java120_events_of(&QUIET_UNTIL[loader.index()]);
+        }
+    }
+
+    /// The tick in the runtime calls go to now; `quiet` is till when its mods don't listen.
+    fn tick_java120_events_of(&mut self, quiet: &AtomicI64) {
         let now = self.world.game_time;
-        if now < QUIET_UNTIL.load(Ordering::Relaxed) {
+        if now < quiet.load(Ordering::Relaxed) {
             return;
         }
         let dimension = self.dim.id().to_owned();
         let ticked = {
-            let Ok(mut guard) = RUNTIME.try_lock() else {
+            let Ok(mut guard) = runtime().try_lock() else {
                 return;
             };
             let Some(runtime) = guard.as_mut() else {
@@ -36,7 +44,7 @@ impl super::super::Game<'_> {
         match ticked {
             Ok(ticked) => {
                 if !ticked.listening {
-                    QUIET_UNTIL.store(now + QUIET_TICKS, Ordering::Relaxed);
+                    quiet.store(now + QUIET_TICKS, Ordering::Relaxed);
                 }
                 self.apply_java120(
                     &dimension,
@@ -47,7 +55,7 @@ impl super::super::Game<'_> {
             }
             Err(e) => {
                 log::warn!("1.20.1 mods: a server tick failed: {e}");
-                QUIET_UNTIL.store(now + QUIET_TICKS, Ordering::Relaxed);
+                quiet.store(now + QUIET_TICKS, Ordering::Relaxed);
             }
         }
     }

@@ -100,6 +100,7 @@ public abstract class GlStateManagerMixin {
             "_viewport(IIII)V"
     }, at = @At("HEAD"), cancellable = true, require = 0)
     private static void horizon$noGl(CallbackInfo ci) {
+        if (!dev.horizonlab.platform120.Loader120.headless()) return;
         ci.cancel();
     }
 
@@ -109,6 +110,7 @@ public abstract class GlStateManagerMixin {
      */
     @Inject(method = "_scissorBox(IIII)V", at = @At("HEAD"), cancellable = true, require = 0)
     private static void horizon$scissorBox(int x, int y, int width, int height, CallbackInfo ci) {
+        if (!dev.horizonlab.platform120.Loader120.headless()) return;
         dev.horizonlab.platform120.Graphics120 to = dev.horizonlab.platform120.Graphics120.current();
         if (to != null) {
             to.glScissor(x, y, width, height);
@@ -118,6 +120,7 @@ public abstract class GlStateManagerMixin {
 
     @Inject(method = "_disableScissorTest()V", at = @At("HEAD"), cancellable = true, require = 0)
     private static void horizon$scissorOff(CallbackInfo ci) {
+        if (!dev.horizonlab.platform120.Loader120.headless()) return;
         dev.horizonlab.platform120.Graphics120 to = dev.horizonlab.platform120.Graphics120.current();
         if (to != null) {
             to.glUnscissor();

@@ -15,7 +15,7 @@ use super::super::Game;
 use super::super::java_screen::INPUT;
 use super::super::lan::LanHost;
 use super::breaking::stack_to_120;
-use super::{RUNTIME, wait_for_runtime};
+use super::{runtime, wait_for_runtime};
 use horizon_client::items::ItemStack;
 use horizon_client::text::Text;
 use horizon_protocol::packets::configuration::CustomPayload;
@@ -101,41 +101,18 @@ fn client<R>(f: impl FnOnce(&mut Client) -> R) -> R {
 /// The server: the players told that it answers tooltips.
 static TOLD: Mutex<BTreeSet<u32>> = Mutex::new(BTreeSet::new());
 
-/// A stack as the runtime reads it: [`stack_to_120`], with the stack's other data from 1.20.1
-/// (`minecraft:custom_data`, where the fixes put the NBT they don't know: a battery's charge)
-/// back in its `tag`.
+/// A stack as the runtime reads it: [`stack_to_120`], which carries the stack's other data from
+/// 1.20.1 (`minecraft:custom_data`: a battery's charge) back in its `tag`.
 fn stack_key(stack: &ItemStack) -> String {
-    let base = stack_to_120(stack);
-    let Some(horizon_world::nbt::Tag::Compound(custom)) =
-        stack.data().and_then(|d| d.other("minecraft:custom_data"))
-    else {
-        return base;
-    };
-    if custom.is_empty() {
-        return base;
-    }
-    let extra =
-        horizon_world::snbt_text::to_snbt(&horizon_world::nbt::Tag::Compound(custom.clone()));
-    // Only its own braces: nested compounds end in more of them.
-    let extra = extra.trim();
-    let inner = extra
-        .strip_prefix('{')
-        .and_then(|e| e.strip_suffix('}'))
-        .unwrap_or(extra);
-    if inner.is_empty() {
-        return base;
-    }
-    match base.find(",tag:{") {
-        // Its own NBT under Horizon's (damage, enchantments, name), which win.
-        Some(at) => {
-            let head = &base[..at + ",tag:{".len()];
-            format!("{head}{inner},{}", &base[at + ",tag:{".len()..])
-        }
-        None => format!(
-            "{},tag:{{{inner}}}}}",
-            base.strip_suffix('}').unwrap_or(&base)
-        ),
-    }
+    stack_to_120(stack)
+}
+
+/// The item id in a 1.20.1 stack's SNBT (`{Count:1b,id:"farmersdelight:stove"}`).
+fn stack_id(snbt: &str) -> &str {
+    snbt.split("id:\"")
+        .nth(1)
+        .and_then(|rest| rest.split('"').next())
+        .unwrap_or_default()
 }
 
 fn texts(lines: &Value) -> Vec<Text> {
@@ -246,7 +223,11 @@ impl Game<'_> {
 
     /// The server, each tick: each player's game told, once, that it answers tooltips.
     pub(in crate::game) fn tell_java120_tooltips(&mut self) {
-        if self.remote.is_some() || RUNTIME.try_lock().map(|r| r.is_none()).unwrap_or(false) {
+        let none_up = super::loaders().into_iter().all(|loader| {
+            let _route = super::route(loader);
+            runtime().try_lock().map(|r| r.is_none()).unwrap_or(false)
+        });
+        if self.remote.is_some() || none_up {
             return;
         }
         let Some(host) = self.lan.as_mut() else {
@@ -283,6 +264,8 @@ impl Game<'_> {
             return;
         };
         let advanced = input["advanced"].as_bool().unwrap_or(false);
+        // The item's mod's runtime (its id, in the stack's NBT: `{id:"ns:path",...}`).
+        let _route = super::route_id(stack_id(stack));
         let answer = {
             let Some(mut guard) = wait_for_runtime() else {
                 return;
@@ -341,7 +324,7 @@ mod tests {
         // Horizon's own NBT (here its damage) beside it.
         stack.damage = 3;
         let key = stack_key(&stack);
-        assert!(key.contains("tag:{energy:1200,Damage:3}"), "{key}");
+        assert!(key.contains("tag:{Damage:3,energy:1200}"), "{key}");
         horizon_world::nbt::parse_snbt(&key).expect("SNBT the runtime reads");
         // Nested compounds keep their braces (a cooking pot's meal under BlockEntityTag).
         let mut pot = ItemStack::new("farmersdelight:cooking_pot", 1);

@@ -190,6 +190,9 @@ public final class Boot120 implements RemoteRuntime {
             case "breakBlock":
                 // A player of Horizon's breaks a block (Mirror120.breakBlock).
                 return mirror("breakBlock", args);
+            case "explodeBlock":
+                // Horizon's explosion takes a mod's block (Mirror120.explodeBlock).
+                return mirror("explodeBlock", args);
             case "hopperInsert":
             case "hopperExtract":
                 // Horizon's hoppers and droppers at a mod's block (Mirror120, Hoppers120).

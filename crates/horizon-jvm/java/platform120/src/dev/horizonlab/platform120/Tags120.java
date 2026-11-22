@@ -66,11 +66,6 @@ final class Tags120 {
      * platform compiles against Minecraft alone.
      */
     private static RepositorySource fabricModPacks() {
-        try {
-            Class<?> creator = Class.forName("net.fabricmc.fabric.impl.resource.loader.ModResourcePackCreator");
-            return (RepositorySource) creator.getConstructor(PackType.class).newInstance(PackType.SERVER_DATA);
-        } catch (ReflectiveOperationException | RuntimeException e) {
-            return null;
-        }
+        return Loader120.get().modPacks(PackType.SERVER_DATA);
     }
 }

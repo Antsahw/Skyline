@@ -4,24 +4,46 @@
 //! code on the chunks being decorated: reads from the region, writes into it as they happen.
 
 use super::{DATA_VERSION_120, worldgen_runtime};
+use horizon_jvm_remote::boot120::Loader;
 use horizon_jvm_remote::mirror120::{PlaceFeature, Region120};
 use horizon_world::worldgen::foreign::{ForeignFeatures, ForeignPlacement, ForeignWorld};
 use horizon_world::worldgen::structure::foreign::{
     ForeignStart, ForeignStartWorld, ForeignStructures,
 };
-use std::collections::HashSet;
-use std::sync::Arc;
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Mutex};
 
+/// The mods' features, each with its runtime: both runtimes' in Horizon's one generator.
 struct Features120 {
-    features: HashSet<String>,
+    features: HashMap<String, Loader>,
 }
+
+/// What each runtime gave the generator so far ([`install`]): the generator's sets are made
+/// again from them as each runtime comes up.
+#[derive(Default)]
+struct Installed {
+    features: HashMap<String, Loader>,
+    types: HashMap<String, Loader>,
+    placements: HashMap<String, Loader>,
+    recipes: Vec<horizon_client::mod_list::ForeignRecipe>,
+}
+
+static INSTALLED: Mutex<Option<Installed>> = Mutex::new(None);
+
+/// A structure start's handle as Horizon keeps it: the Forge runtime's with this bit, so its
+/// pieces go back to the runtime that made it.
+const FORGE_HANDLE: i64 = 1 << 62;
 
 impl ForeignFeatures for Features120 {
     fn places(&self, feature: &str) -> bool {
-        self.features.contains(feature)
+        self.features.contains_key(feature)
     }
 
     fn place(&self, placement: &ForeignPlacement<'_>, world: &mut dyn ForeignWorld) -> bool {
+        let _route = self
+            .features
+            .get(placement.feature)
+            .map(|l| super::route(*l));
         let place = PlaceFeature {
             dimension: "minecraft:overworld".into(),
             feature: placement.feature.to_owned(),
@@ -52,9 +74,9 @@ impl ForeignFeatures for Features120 {
 
 /// The mods' own structure types, made and placed by the runtime (phase 6h).
 struct Structures120 {
-    types: HashSet<String>,
+    types: HashMap<String, Loader>,
     /// The mods' own placement types of structure sets (YUNG's), decided by their code.
-    placements: HashSet<String>,
+    placements: HashMap<String, Loader>,
     /// Their answers by set and chunk: a chunk's sets are asked again for each neighbour's
     /// exclusion zones and for `/locate`.
     answered: std::sync::Mutex<std::collections::HashMap<(String, i64, [i32; 2]), bool>>,
@@ -62,11 +84,11 @@ struct Structures120 {
 
 impl ForeignStructures for Structures120 {
     fn generates(&self, structure_type: &str) -> bool {
-        self.types.contains(structure_type)
+        self.types.contains_key(structure_type)
     }
 
     fn places(&self, placement_type: &str) -> bool {
-        self.placements.contains(placement_type)
+        self.placements.contains_key(placement_type)
     }
 
     fn placement_chunk(&self, set: &str, world_seed: i64, chunk: [i32; 2]) -> bool {
@@ -79,6 +101,8 @@ impl ForeignStructures for Structures120 {
         {
             return known;
         }
+        // The set's mod's runtime (its namespace's).
+        let _route = super::route_id(set);
         let answer = {
             let Some(mut guard) = worldgen_runtime() else {
                 return false;
@@ -110,6 +134,8 @@ impl ForeignStructures for Structures120 {
         chunk: [i32; 2],
         world: &mut dyn ForeignStartWorld,
     ) -> Option<ForeignStart> {
+        let _route = super::route_id(structure);
+        let forge = super::current() == Loader::Forge;
         let mut guard = worldgen_runtime()?;
         let runtime = guard.as_mut()?;
         let mut region = StartRegion { world };
@@ -121,7 +147,11 @@ impl ForeignStructures for Structures120 {
             chunk,
         ) {
             Ok(start) => start.map(|s| ForeignStart {
-                handle: s.handle,
+                handle: if forge {
+                    s.handle | FORGE_HANDLE
+                } else {
+                    s.handle
+                },
                 position: s.position,
                 boxes: s.boxes,
             }),
@@ -140,6 +170,12 @@ impl ForeignStructures for Structures120 {
         step: i32,
         world: &mut dyn ForeignWorld,
     ) -> bool {
+        let (loader, handle) = if handle & FORGE_HANDLE != 0 {
+            (Loader::Forge, handle & !FORGE_HANDLE)
+        } else {
+            (Loader::Fabric, handle)
+        };
+        let _route = super::route(loader);
         let Some(mut guard) = worldgen_runtime() else {
             return false;
         };
@@ -258,8 +294,9 @@ pub(super) fn state_from_120(state: &str) -> String {
     }
 }
 
-/// The runtime is up: Horizon's generator hands it the mods' own features from now on.
-pub(super) fn install(runtime: &mut horizon_jvm_remote::boot120::Runtime120) {
+/// `loader`'s runtime is up: Horizon's generator hands it its mods' own features from now on,
+/// beside the other runtime's.
+pub(super) fn install(loader: Loader, runtime: &mut horizon_jvm_remote::boot120::Runtime120) {
     let features: HashSet<String> = match runtime.mod_features() {
         Ok(features) => features.into_iter().collect(),
         Err(e) => {
@@ -271,11 +308,8 @@ pub(super) fn install(runtime: &mut horizon_jvm_remote::boot120::Runtime120) {
         "1.20.1 mods: {} feature(s) of theirs for the generator",
         features.len()
     );
-    horizon_world::worldgen::foreign::set_foreign_features(Some(Arc::new(Features120 {
-        features,
-    })));
     // The mods' recipes of their own types, for recipe viewers (they're not Horizon's).
-    match runtime.mod_recipes() {
+    let recipes = match runtime.mod_recipes() {
         Ok(json) => {
             let recipes = foreign_recipes(&json);
             if !recipes.is_empty() {
@@ -284,10 +318,13 @@ pub(super) fn install(runtime: &mut horizon_jvm_remote::boot120::Runtime120) {
                     recipes.len()
                 );
             }
-            horizon_client::mod_list::set_foreign_recipes(recipes);
+            recipes
         }
-        Err(e) => log::warn!("1.20.1 mods: their recipes can't be listed: {e}"),
-    }
+        Err(e) => {
+            log::warn!("1.20.1 mods: their recipes can't be listed: {e}");
+            Vec::new()
+        }
+    };
     let types = runtime.mod_structure_types().unwrap_or_else(|e| {
         log::warn!("1.20.1 mods: their structure types can't be listed: {e}");
         Vec::new()
@@ -308,11 +345,27 @@ pub(super) fn install(runtime: &mut horizon_jvm_remote::boot120::Runtime120) {
             placements.join(", ")
         );
     }
-    if !types.is_empty() || !placements.is_empty() {
+    let mut installed = INSTALLED.lock().unwrap_or_else(|e| e.into_inner());
+    let all = installed.get_or_insert_with(Installed::default);
+    for feature in features {
+        all.features.entry(feature).or_insert(loader);
+    }
+    for t in types {
+        all.types.entry(t).or_insert(loader);
+    }
+    for p in placements {
+        all.placements.entry(p).or_insert(loader);
+    }
+    all.recipes.extend(recipes);
+    horizon_world::worldgen::foreign::set_foreign_features(Some(Arc::new(Features120 {
+        features: all.features.clone(),
+    })));
+    horizon_client::mod_list::set_foreign_recipes(all.recipes.clone());
+    if !all.types.is_empty() || !all.placements.is_empty() {
         horizon_world::worldgen::structure::foreign::set_foreign_structures(Some(Arc::new(
             Structures120 {
-                types: types.into_iter().collect(),
-                placements: placements.into_iter().collect(),
+                types: all.types.clone(),
+                placements: all.placements.clone(),
                 answered: Default::default(),
             },
         )));

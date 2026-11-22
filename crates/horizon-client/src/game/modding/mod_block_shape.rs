@@ -89,6 +89,12 @@ impl super::Game<'_> {
     /// there is nothing there to aim at -- and is not the same as having no attachment.
     pub(super) fn mod_block_shape(&self, pos: [i32; 3]) -> Option<Boxes> {
         let [x, y, z] = pos;
+        // What the game's own server kept (`collisions::set_mod_outline`), for the block that
+        // is there now: a window serving its world sees it before (or without) the sync.
+        if let Some(found) = horizon_client::collisions::mod_outline(pos, self.world.block(x, y, z))
+        {
+            return Some(found);
+        }
         if let Some(r) = self.remote.as_ref() {
             let holder = horizon_world::attachments::Holder::BlockEntity([x, y, z]);
             if let Some(found) = r.attachments.get(&holder).and_then(of) {

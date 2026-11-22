@@ -66,6 +66,47 @@ public final class Child {
         System.exit(code);
     }
 
+    /**
+     * The same conversation from inside a game a loader started (Forge's client, which owns
+     * its process's main: docs/java-bridge-120-forge.md, phase 4): connects to
+     * {@code HORIZON_REMOTE_CONNECT} with {@code HORIZON_REMOTE_TOKEN}, says `runtime` is
+     * {@code HORIZON_REMOTE_RUNTIME}, and serves Horizon's calls on a thread of its own. The
+     * process ends with the conversation, as {@link #main}'s does. Does nothing (false) when
+     * Horizon didn't start this game.
+     */
+    public static boolean serveInGame(RemoteRuntime runtime) {
+        String connect = System.getenv("HORIZON_REMOTE_CONNECT");
+        if (connect == null || connect.isEmpty()) return false;
+        String token = System.getenv("HORIZON_REMOTE_TOKEN");
+        String name = System.getenv("HORIZON_REMOTE_RUNTIME");
+        Thread thread = new Thread(() -> {
+            int code = 0;
+            try {
+                SocketChannel channel = open(connect);
+                Peer peer = new Peer(Channels.newInputStream(channel), Channels.newOutputStream(channel));
+                Object[] welcome = peer.hello(Wire.PROTOCOL, token == null ? "" : token,
+                        name == null ? runtime.getClass().getName() : name,
+                        Runtime.version().toString(), ProcessHandle.current().pid());
+                String[] runtimeArgs = welcome.length > 1 && welcome[1] instanceof String[] a ? a : new String[0];
+                Host.attach(peer);
+                try {
+                    runtime.init(peer, runtimeArgs);
+                    peer.serve(runtime);
+                } finally {
+                    runtime.stop();
+                }
+            } catch (Throwable t) {
+                System.err.println("[horizon-remote] the runtime failed: " + t);
+                t.printStackTrace();
+                code = 1;
+            }
+            System.exit(code);
+        }, "Horizon conversation");
+        thread.setDaemon(true);
+        thread.start();
+        return true;
+    }
+
     private static SocketChannel open(String address) throws IOException {
         if (address.startsWith("unix:")) {
             SocketChannel channel = SocketChannel.open(StandardProtocolFamily.UNIX);

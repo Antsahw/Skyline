@@ -6,7 +6,7 @@
 
 use super::super::Game;
 use super::mobs::{Mesh, parse_meshes, push_meshes};
-use super::{Level, RUNTIME, tick_failed_once};
+use super::{Level, runtime, tick_failed_once};
 use horizon_client::mesher::Vertex;
 use horizon_protocol::packets::configuration::CustomPayload;
 use serde_json::Value;
@@ -68,25 +68,32 @@ impl Game<'_> {
             .collect();
         near.sort_unstable();
         near.truncate(MOST);
-        let positions: Vec<i32> = near.iter().flat_map(|(_, p)| *p).collect();
+        let near: Vec<[i32; 3]> = near.iter().map(|(_, p)| *p).collect();
         let dimension = self.dim.id().to_owned();
-        let drawn = if positions.is_empty() {
-            String::from("{}")
-        } else {
-            let Ok(mut guard) = RUNTIME.try_lock() else {
+        // Each runtime draws its own mods' block entities; the drawings are one object.
+        let mut all = serde_json::Map::new();
+        for (loader, group) in self.java120_by_owner(&near) {
+            let _route = super::route(loader);
+            let positions: Vec<i32> = group.iter().flatten().copied().collect();
+            let Ok(mut guard) = runtime().try_lock() else {
                 return;
             };
             let Some(runtime) = guard.as_mut() else {
                 return;
             };
             match runtime.render_block_entities(&Level(self), &dimension, &positions) {
-                Ok(drawn) => drawn,
+                Ok(drawn) => {
+                    if let Ok(serde_json::Value::Object(drawn)) = serde_json::from_str(&drawn) {
+                        all.extend(drawn);
+                    }
+                }
                 Err(e) => {
                     tick_failed_once(&e);
                     return;
                 }
             }
-        };
+        }
+        let drawn = serde_json::Value::Object(all).to_string();
         {
             let mut sent = SENT.lock().unwrap_or_else(|e| e.into_inner());
             let sent = sent.get_or_insert_with(HashMap::new);

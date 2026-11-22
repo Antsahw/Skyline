@@ -112,7 +112,7 @@ public final class Screens120 {
         language = true;
         try {
             net.minecraft.locale.Language.inject(net.minecraft.client.resources.language.ClientLanguage.loadFrom(
-                    Models120.clientResources(), java.util.List.of("en_us"), false));
+                    Loader120.get().clientResources(), java.util.List.of("en_us"), false));
         } catch (RuntimeException | LinkageError e) {
             Mirror120.log("the client's language didn't load: " + e);
         }
@@ -349,6 +349,9 @@ public final class Screens120 {
             if (player != null && CLIENT.remove(player.getUUID()) != null) {
                 SCREENS.remove(player.getUUID());
                 closeAsked = true;
+            } else if (acting != null) {
+                // A menu's screen closing itself as it takes an input (Waystones' Done).
+                closeAsked = true;
             }
             return;
         }
@@ -404,6 +407,30 @@ public final class Screens120 {
      * Horizon doesn't send yet: the book shows none), and the server player's inventory and
      * menus, so it sees what the menu moves.
      */
+    private static net.minecraft.network.Connection clientConnection;
+
+    /**
+     * The headless client's connection: no channel behind it (a netty one with nothing at the
+     * other end, for what asks its attributes), its listener the client's; what is sent through
+     * it goes to the server half (ConnectionMixin).
+     */
+    public static synchronized net.minecraft.network.Connection clientConnection() {
+        if (clientConnection == null) {
+            var connection = Allocate.make(net.minecraft.network.Connection.class);
+            ((dev.horizonlab.platform120.mixin.ConnectionAccess) connection)
+                    .horizon$setChannel(new io.netty.channel.embedded.EmbeddedChannel());
+            clientConnection = connection;
+        }
+        var listener = net.minecraft.client.Minecraft.getInstance().getConnection();
+        if (listener != null) ((dev.horizonlab.platform120.mixin.ConnectionAccess) clientConnection).horizon$setListener(listener);
+        return clientConnection;
+    }
+
+    /** The client's connection, or null before one is made. */
+    public static net.minecraft.network.Connection clientConnectionIfMade() {
+        return clientConnection;
+    }
+
     public static synchronized void clientPlayer(net.minecraft.server.level.ServerPlayer player) {
         var minecraft = net.minecraft.client.Minecraft.getInstance();
         if (local == null) {
@@ -570,7 +597,9 @@ public final class Screens120 {
             acting = null;
             heldMods = 0;
         }
-        if (closeAsked) {
+        // Closed by the screen, or by the server as it took what the screen sent (the menu the
+        // screen was made for is no longer the player's).
+        if (closeAsked || (!client && MADE_FOR.get(player.getUUID()) != player.containerMenu)) {
             close(player);
             return false;
         }

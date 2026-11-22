@@ -17,6 +17,7 @@ public abstract class MinecraftMixin {
             at = @At("HEAD"), cancellable = true)
     private void horizon$atlas(ResourceLocation atlas,
             CallbackInfoReturnable<Function<ResourceLocation, TextureAtlasSprite>> cir) {
+        if (!dev.horizonlab.platform120.Loader120.headless()) return;
         cir.setReturnValue(dev.horizonlab.platform120.Sprites120.atlas(atlas));
     }
 
@@ -26,6 +27,7 @@ public abstract class MinecraftMixin {
      */
     @Inject(method = "getWindow()Lcom/mojang/blaze3d/platform/Window;", at = @At("HEAD"), cancellable = true)
     private void horizon$window(CallbackInfoReturnable<com.mojang.blaze3d.platform.Window> cir) {
+        if (!dev.horizonlab.platform120.Loader120.headless()) return;
         cir.setReturnValue(dev.horizonlab.platform120.Screens120.window());
     }
 
@@ -38,6 +40,7 @@ public abstract class MinecraftMixin {
      */
     @Inject(method = "setScreen(Lnet/minecraft/client/gui/screens/Screen;)V", at = @At("HEAD"), cancellable = true)
     private void horizon$noScreen(net.minecraft.client.gui.screens.Screen screen, CallbackInfo ci) {
+        if (!dev.horizonlab.platform120.Loader120.headless()) return;
         dev.horizonlab.platform120.Screens120.clientOpened(screen);
         ci.cancel();
     }
@@ -49,6 +52,25 @@ public abstract class MinecraftMixin {
      */
     @Inject(method = "isTextFilteringEnabled()Z", at = @At("HEAD"), cancellable = true)
     private void horizon$noFilter(CallbackInfoReturnable<Boolean> cir) {
+        if (!dev.horizonlab.platform120.Loader120.headless()) return;
         cir.setReturnValue(false);
+    }
+
+    @org.spongepowered.asm.mixin.Shadow
+    @org.spongepowered.asm.mixin.Final
+    private net.minecraft.client.Timer timer;
+
+    /**
+     * The partial tick, which a mob's model reads as it poses (Alex's Mobs' setupAnim): the
+     * headless client never made its timer, so a whole tick (the bridge draws once a tick).
+     */
+    @Inject(method = "getFrameTime()F", at = @At("HEAD"), cancellable = true)
+    private void horizon$frameTime(CallbackInfoReturnable<Float> cir) {
+        if (timer == null) cir.setReturnValue(1.0f);
+    }
+
+    @Inject(method = "getDeltaFrameTime()F", at = @At("HEAD"), cancellable = true)
+    private void horizon$deltaFrameTime(CallbackInfoReturnable<Float> cir) {
+        if (timer == null) cir.setReturnValue(1.0f);
     }
 }

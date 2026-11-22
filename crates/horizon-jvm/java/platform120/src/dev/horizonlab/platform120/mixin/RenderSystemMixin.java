@@ -20,12 +20,14 @@ public abstract class RenderSystemMixin {
     @Inject(method = {"assertOnRenderThread()V", "assertOnRenderThreadOrInit()V"},
             at = @At("HEAD"), cancellable = true)
     private static void horizon$anyThread(CallbackInfo ci) {
+        if (!dev.horizonlab.platform120.Loader120.headless()) return;
         ci.cancel();
     }
 
     @Inject(method = "recordRenderCall(Lcom/mojang/blaze3d/pipeline/RenderCall;)V",
             at = @At("HEAD"), cancellable = true)
     private static void horizon$noQueue(CallbackInfo ci) {
+        if (!dev.horizonlab.platform120.Loader120.headless()) return;
         ci.cancel();
     }
 
@@ -35,6 +37,7 @@ public abstract class RenderSystemMixin {
      */
     @Inject(method = "setShaderTexture(ILnet/minecraft/resources/ResourceLocation;)V", at = @At("HEAD"))
     private static void horizon$shaderTexture(int slot, net.minecraft.resources.ResourceLocation texture, CallbackInfo ci) {
+        if (!dev.horizonlab.platform120.Loader120.headless()) return;
         if (slot == 0) dev.horizonlab.platform120.Graphics120.shaderTexture = texture;
     }
 }

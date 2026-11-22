@@ -63,6 +63,10 @@ pub(super) struct Decoration {
     names: Vec<String>,
     /// Executable roots by identity, or why the root cannot be executed.
     features: Vec<Result<PlacedFeatureDefinition, String>>,
+    /// By identity, for one Horizon can't execute: the chance of its first placement when that
+    /// is a `minecraft:rarity_filter`. Its first draw from the feature's random decides it, as in
+    /// vanilla, so the chunk doesn't ask whoever places it (a mod's runtime) only to hear no.
+    first_rarity: Vec<Option<i32>>,
     /// Placed features of each biome's generation settings, by BiomeId: a
     /// bit per FeatureIdentity.
     biome_features: Vec<Vec<u64>>,
@@ -226,15 +230,20 @@ impl Decoration {
         let mut ids = BTreeMap::<String, FeatureIdentity>::new();
         let mut names = Vec::new();
         let mut features = Vec::new();
+        let mut first_rarity = Vec::new();
         let mut identity = |name: &str| -> FeatureIdentity {
             *ids.entry(name.to_owned()).or_insert_with(|| {
                 let id = FeatureIdentity(names.len() as u32);
                 names.push(name.to_owned());
-                features.push(
-                    catalog
-                        .placed_feature_with_blocks(&Value::from(name).to_string(), &bindings)
-                        .map_err(|e| e.to_string()),
-                );
+                let feature = catalog
+                    .placed_feature_with_blocks(&Value::from(name).to_string(), &bindings)
+                    .map_err(|e| e.to_string());
+                first_rarity.push(if feature.is_err() {
+                    resources.placed.get(name).and_then(|j| leading_rarity(j))
+                } else {
+                    None
+                });
+                features.push(feature);
                 id
             })
         };
@@ -315,6 +324,7 @@ impl Decoration {
             plan,
             names,
             features,
+            first_rarity,
             biome_features,
             weather,
             blocks: FeatureBlocks::from_registry(registry)?,
@@ -560,6 +570,14 @@ impl Decoration {
                         && let Some((index, step)) = self.plan.seed(id)
                     {
                         stats.placed += 1;
+                        // `RarityFilter.shouldPlace` with the random seeded for this feature,
+                        // as its placer would draw it first: a miss places nothing anywhere.
+                        if let Some(chance) = self.first_rarity[id.0 as usize]
+                            && horizon_core::random::RandomSource::next_float(random)
+                                >= 1. / chance as f32
+                        {
+                            return Ok(false);
+                        }
                         let placement = super::foreign::ForeignPlacement {
                             feature: name,
                             world_seed: seed,
@@ -782,6 +800,19 @@ impl PlacementContext for OriginWorld<'_> {
     ) -> Result<bool, PlacementQueryError> {
         Ok((self.biome_allows)(position))
     }
+}
+
+/// The chance of a placed feature's first placement modifier (its JSON) when that is a
+/// `minecraft:rarity_filter`.
+fn leading_rarity(json: &str) -> Option<i32> {
+    let value: Value = serde_json::from_str(json).ok()?;
+    let first = value.get("placement")?.as_array()?.first()?;
+    let kind = first.get("type")?.as_str()?;
+    if kind != "minecraft:rarity_filter" && kind != "rarity_filter" {
+        return None;
+    }
+    let chance = i32::try_from(first.get("chance")?.as_i64()?).ok()?;
+    (chance >= 1).then_some(chance)
 }
 
 /// WorldGenRegion-style view: reads anywhere in the 3×3 region, writes within
@@ -1829,6 +1860,16 @@ fn set_feature_bit(bits: &mut Vec<u64>, feature: FeatureIdentity) {
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_leading_rarity_filter_is_read() {
+        let json = r#"{"feature":"farmersdelight:patch_wild_carrots","placement":[
+            {"type":"minecraft:rarity_filter","chance":120},{"type":"minecraft:in_square"}]}"#;
+        assert_eq!(super::leading_rarity(json), Some(120));
+        let later = r#"{"feature":"x:y","placement":[{"type":"minecraft:in_square"},
+            {"type":"minecraft:rarity_filter","chance":4}]}"#;
+        assert_eq!(super::leading_rarity(later), None);
+    }
+
     use super::loot_table_nbt;
     use crate::registry::BlockRegistry;
     use horizon_core::random::{LegacyRandom, RandomSource};

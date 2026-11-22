@@ -105,6 +105,42 @@ pub fn set_mod_collision(pos: [i32; 3], shape: Option<(BlockStateId, &[[f64; 6]]
     }
 }
 
+/// Blocks whose outline (where the player aims and what breaking shows) only their mod knows,
+/// by position, with the state it was asked for: as [`MOD_COLLISIONS`], the boxes inside the
+/// block as the mod gives them (`getShape`). The server sets it as the mods answer, and so
+/// does a world's load from what its block entities kept, so the game's own window sees it
+/// whether or not the attachment has reached it.
+static MOD_OUTLINES: std::sync::RwLock<
+    Option<std::collections::HashMap<[i32; 3], (BlockStateId, Vec<[f64; 6]>)>>,
+> = std::sync::RwLock::new(None);
+
+/// Sets (or, with `None`, forgets) the outline boxes a mod gives the block at `pos` while it
+/// is `state`.
+pub fn set_mod_outline(pos: [i32; 3], shape: Option<(BlockStateId, &[[f64; 6]])>) {
+    let mut all = MOD_OUTLINES.write().unwrap_or_else(|e| e.into_inner());
+    let all = all.get_or_insert_with(Default::default);
+    match shape {
+        Some((state, boxes)) => {
+            all.insert(pos, (state, boxes.to_vec()));
+        }
+        None => {
+            all.remove(&pos);
+        }
+    }
+}
+
+/// The outline a mod gave the block at `pos`, while the block there is still `state`.
+pub fn mod_outline(pos: [i32; 3], state: BlockStateId) -> Option<Vec<[f64; 6]>> {
+    let all = MOD_OUTLINES.read().unwrap_or_else(|e| e.into_inner());
+    let (at, boxes) = all.as_ref()?.get(&pos)?;
+    (*at == state).then(|| boxes.clone())
+}
+
+/// Whether a mod's collision is kept for the block at `pos` while it is `state`.
+pub fn has_mod_collision(pos: [i32; 3], state: BlockStateId) -> bool {
+    mod_collision(pos, state).is_some()
+}
+
 /// The shape a mod gave the block at `pos`, while the block there is still `state`.
 fn mod_collision(pos: [i32; 3], state: BlockStateId) -> Option<VoxelShape> {
     let all = MOD_COLLISIONS.read().unwrap_or_else(|e| e.into_inner());

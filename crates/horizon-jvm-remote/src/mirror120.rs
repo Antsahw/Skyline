@@ -559,6 +559,7 @@ impl Handler for InRegion<'_> {
                     (self.log)(&format!("[fabric-1.20.1] {line}"));
                 }
             }
+            "teleport" => teleported(&args, &self.log),
             "setBlock" => match (at(&args), text(&args, 4)) {
                 (Ok(pos), Ok(state)) => self.region.set_block(pos, state),
                 _ => (self.log)("[fabric-1.20.1] a feature's setBlock unread"),
@@ -570,6 +571,41 @@ impl Handler for InRegion<'_> {
             // Items and the rest have no place in a chunk being generated.
             _ => {}
         }
+    }
+}
+
+/// A player the mods' code teleported (`Mirror120.teleported`): Horizon moves its player.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Teleport {
+    pub uuid: String,
+    pub dimension: String,
+    pub pos: [f64; 3],
+    pub yaw: f32,
+    pub pitch: f32,
+}
+
+/// The teleports heard from any runtime, until Horizon takes them ([`take_teleports`]).
+static TELEPORTS: std::sync::Mutex<Vec<Teleport>> = std::sync::Mutex::new(Vec::new());
+
+/// The teleports the mods' code made since the last take.
+pub fn take_teleports() -> Vec<Teleport> {
+    std::mem::take(&mut *TELEPORTS.lock().unwrap_or_else(|e| e.into_inner()))
+}
+
+/// A `teleport` event's arguments, kept for Horizon ([`take_teleports`]).
+pub(crate) fn teleported(args: &[Value], log: &Log) {
+    let parsed = (|| -> Result<Teleport, String> {
+        Ok(Teleport {
+            uuid: text(args, 0)?.to_owned(),
+            dimension: text(args, 1)?.to_owned(),
+            pos: [float(args, 2)?, float(args, 3)?, float(args, 4)?],
+            yaw: float(args, 5)? as f32,
+            pitch: float(args, 6)? as f32,
+        })
+    })();
+    match parsed {
+        Ok(t) => TELEPORTS.lock().unwrap_or_else(|e| e.into_inner()).push(t),
+        Err(e) => log(&format!("[1.20.1] a teleport unread: {e}")),
     }
 }
 
@@ -683,6 +719,7 @@ impl Handler for InWorld<'_> {
                     (self.log)(&format!("[fabric-1.20.1] {line}"));
                 }
             }
+            "teleport" => teleported(&args, &self.log),
             "setBlock" => {
                 let parsed = (|| -> Result<SetBlock, String> {
                     Ok(SetBlock {
@@ -2152,6 +2189,45 @@ impl Runtime120 {
                 .and_then(Value::as_str)
                 .unwrap_or_default()
                 .to_owned(),
+            set: handler.set,
+            block_entities: handler.block_entities,
+            spawned: handler.spawned,
+        })
+    }
+
+    /// Horizon's explosion of `radius` takes the mods' block at `pos` (`Mirror120.explodeBlock`):
+    /// its own code drops what it drops (a LibMultiPart container its parts) and removes it.
+    /// `decay`: the blast decays its loot (`DESTROY_WITH_DECAY`). What it set, changed and
+    /// dropped, as a tick's.
+    pub fn explode_block(
+        &mut self,
+        world: &dyn World120,
+        dimension: &str,
+        pos: [i32; 3],
+        radius: f32,
+        decay: bool,
+    ) -> Result<Ticked, String> {
+        let args = [
+            Value::Str(dimension.to_owned()),
+            Value::I32(pos[0]),
+            Value::I32(pos[1]),
+            Value::I32(pos[2]),
+            Value::F64(f64::from(radius)),
+            Value::Bool(decay),
+        ];
+        let mut handler = InWorld {
+            world,
+            set: Vec::new(),
+            block_entities: Vec::new(),
+            spawned: Vec::new(),
+            log: self.log.clone(),
+        };
+        let values = self.call_values("explodeBlock", &args, &mut handler)?;
+        Ok(Ticked {
+            ticked: match values.first() {
+                Some(Value::I32(n)) => *n,
+                _ => 0,
+            },
             set: handler.set,
             block_entities: handler.block_entities,
             spawned: handler.spawned,

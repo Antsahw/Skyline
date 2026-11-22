@@ -6,15 +6,15 @@
 //! over the hotbar.
 
 use super::super::lan::LanHost;
-use super::{Level, RUNTIME, uuid_string, wait_for_runtime};
+use super::{Level, runtime, uuid_string, wait_for_runtime};
 use horizon_protocol::packets::play::{self, Clientbound as C};
-use std::collections::HashSet;
 use std::sync::{Mutex, OnceLock};
 
 /// The mods' commands (not vanilla's or Horizon's): their names, and their tree as a root of
 /// the commands report. Read once, as the runtime's server has loaded its data.
 struct Commands120 {
-    names: HashSet<String>,
+    /// Each command, by name, and its runtime.
+    owners: std::collections::HashMap<String, horizon_jvm_remote::boot120::Loader>,
     tree: serde_json::Value,
 }
 
@@ -52,39 +52,54 @@ fn commands() -> Option<&'static Commands120> {
     if let Some(commands) = COMMANDS.get() {
         return Some(commands);
     }
-    let Ok(mut guard) = RUNTIME.try_lock() else {
-        return None;
-    };
-    let runtime = guard.as_mut()?;
-    let names: Vec<String> = match runtime.command_names() {
-        Ok(names) => names.into_iter().filter(|n| !horizons(n)).collect(),
-        Err(e) => {
-            log::warn!("1.20.1 mods: their commands can't be read: {e}");
-            Vec::new()
+    // Every runtime's, each command's runtime kept for running it.
+    let mut names: Vec<String> = Vec::new();
+    let mut owners = std::collections::HashMap::new();
+    let mut children = serde_json::Map::new();
+    for loader in super::loaders() {
+        let _route = super::route(loader);
+        let Ok(mut guard) = runtime().try_lock() else {
+            return None;
+        };
+        let runtime = guard.as_mut()?;
+        let theirs: Vec<String> = match runtime.command_names() {
+            Ok(theirs) => theirs
+                .into_iter()
+                .filter(|n| !horizons(n) && !owners.contains_key(n))
+                .collect(),
+            Err(e) => {
+                log::warn!("1.20.1 mods: their commands can't be read: {e}");
+                Vec::new()
+            }
+        };
+        if theirs.is_empty() {
+            continue;
         }
-    };
-    let tree = if names.is_empty() {
-        serde_json::json!({"type": "root", "children": {}})
-    } else {
         match runtime
-            .command_tree(&names)
+            .command_tree(&theirs)
             .map_err(|e| e.to_string())
-            .and_then(|t| serde_json::from_str(&t).map_err(|e| e.to_string()))
+            .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).map_err(|e| e.to_string()))
         {
-            Ok(tree) => tree,
+            Ok(tree) => {
+                if let Some(c) = tree["children"].as_object() {
+                    children.extend(c.clone());
+                }
+            }
             Err(e) => {
                 log::warn!("1.20.1 mods: their command tree can't be read: {e}");
                 return None;
             }
         }
-    };
+        for name in &theirs {
+            owners.insert(name.clone(), loader);
+        }
+        names.extend(theirs);
+    }
+    let tree = serde_json::json!({"type": "root", "children": children});
     if !names.is_empty() {
         log::info!("1.20.1 mods: commands /{}", names.join(", /"));
     }
-    Some(COMMANDS.get_or_init(|| Commands120 {
-        names: names.into_iter().collect(),
-        tree,
-    }))
+    Some(COMMANDS.get_or_init(|| Commands120 { owners, tree }))
 }
 
 /// The tree a hub's players have, with `ours` merged in: a command of the same name already
@@ -137,9 +152,10 @@ impl super::super::Game<'_> {
         line: &str,
     ) -> bool {
         let name = line.split_whitespace().next().unwrap_or_default();
-        if !commands().is_some_and(|c| c.names.contains(name)) {
+        let Some(loader) = commands().and_then(|c| c.owners.get(name).copied()) else {
             return false;
-        }
+        };
+        let _route = super::route(loader);
         let Some(guest) = host.hub.guest(conn).filter(|g| g.placed) else {
             return false;
         };

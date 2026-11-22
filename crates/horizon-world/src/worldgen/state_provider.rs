@@ -331,7 +331,9 @@ impl BlockStateProvider {
         ) {
             (Ok(state), Err(_)) => Ok(Self(Node::Simple(state))),
             (Err(_), Ok(provider)) => Ok(provider),
-            _ => Err(DecodeError::Field("exclusive state or provider")),
+            // Neither: the provider's own error says what it lacks.
+            (Err(_), Err(e)) => Err(e),
+            (Ok(_), Ok(_)) => Err(DecodeError::Field("exclusive state or provider")),
         }
     }
     fn decode_typed(

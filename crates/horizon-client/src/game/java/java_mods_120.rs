@@ -15,21 +15,149 @@
 //! block entities (phase 3b: a mod's own block entity is kept as opaque NBT). What a mod drops
 //! or ejects, ticking machines and menus are the next steps.
 
-use horizon_jvm_remote::boot120::{self, Fabric120, Runtime120, Side};
+use horizon_jvm_remote::boot120::{self, Fabric120, Loader, Runtime120, Side};
 use horizon_jvm_remote::mirror120::{SetBlock, SetBlockEntity, SpawnItem, UseBlock, World120};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-/// The running 1.20.1 runtime, once it has booted (phase 3: the mods' code).
-static RUNTIME: Mutex<Option<Runtime120>> = Mutex::new(None);
+/// The running 1.20.1 runtimes, once booted, by loader (`Loader::index`): Fabric's mods in one
+/// JVM, Forge's in another (docs/java-bridge-120-forge.md).
+static RUNTIMES: [Mutex<Option<Runtime120>>; 2] = [Mutex::new(None), Mutex::new(None)];
+
+/// The loaders whose mods this game runs, the first being the one a call not routed to either
+/// goes to.
+static LOADERS: Mutex<Vec<Loader>> = Mutex::new(Vec::new());
+
+thread_local! {
+    /// The runtime this thread's calls go to ([`route`]); none: the first of [`LOADERS`].
+    static CURRENT: std::cell::Cell<Option<Loader>> = const { std::cell::Cell::new(None) };
+}
+
+/// The loaders whose mods this game runs.
+pub(in crate::game) fn loaders() -> Vec<Loader> {
+    LOADERS.lock().unwrap_or_else(|e| e.into_inner()).clone()
+}
+
+/// The runtime this thread's calls go to now: the one [`route`] chose, else the first.
+pub(in crate::game) fn runtime() -> &'static Mutex<Option<Runtime120>> {
+    &RUNTIMES[current().index()]
+}
+
+/// This thread's calls going to `loader`'s runtime while it lives; the one before after.
+pub(in crate::game) struct Route(Option<Loader>);
+
+impl Drop for Route {
+    fn drop(&mut self) {
+        CURRENT.with(|c| c.set(self.0));
+    }
+}
+
+/// Routes this thread's calls to `loader`'s runtime ([`Route`]).
+pub(in crate::game) fn route(loader: Loader) -> Route {
+    Route(CURRENT.with(|c| c.replace(Some(loader))))
+}
+
+/// Routes this thread's calls to the runtime whose mods own `id` (`ns:path`): its namespace's.
+/// An id of neither (vanilla's) leaves them where they were.
+pub(in crate::game) fn route_id(id: &str) -> Route {
+    match owner(id) {
+        Some(loader) => route(loader),
+        None => Route(CURRENT.with(|c| c.get())),
+    }
+}
+
+/// The runtime this thread's calls go to now.
+pub(in crate::game) fn current() -> Loader {
+    CURRENT
+        .with(|c| c.get())
+        .or_else(|| loaders().first().copied())
+        .unwrap_or(Loader::Fabric)
+}
+
+/// Where the Forge runtime's mobs' ids start (`Entities120.FORGE_FIRST_ID`): the upper half of
+/// the mods' range (`mobs::IDS`), the Fabric runtime's the lower.
+pub(in crate::game) const FORGE_IDS: i32 = 0x7ffe_8000;
+
+/// The runtime whose mob entity `id` is.
+pub(in crate::game) fn loader_of_entity(id: i32) -> Loader {
+    if id >= FORGE_IDS {
+        Loader::Forge
+    } else {
+        Loader::Fabric
+    }
+}
+
+/// The loader whose mods own `id`'s namespace.
+pub(in crate::game) fn owner(id: &str) -> Option<Loader> {
+    let (ns, _) = id.split_once(':')?;
+    OWNERS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()?
+        .get(ns)
+        .copied()
+}
 
 /// The 1.20.1 mods' namespaces (their content mods' `assets/`): what routes a click to them.
 static NAMESPACES: Mutex<Option<HashSet<String>>> = Mutex::new(None);
 
+/// Which runtime's mods each of those namespaces is.
+static OWNERS: Mutex<Option<HashMap<String, Loader>>> = Mutex::new(None);
+
+/// How many ticks each of the mods' blocks with no shape kept has been asked for one since the
+/// game started, by dimension: up to [`SHAPE_TRIES`].
+static SHAPE_ASKED: Mutex<Option<HashMap<(String, [i32; 3]), u8>>> = Mutex::new(None);
+/// The mods' blocks whose kept shape has gone to the clients since the game started.
+static SHAPE_SENT: Mutex<Option<HashSet<(String, [i32; 3])>>> = Mutex::new(None);
+/// Sends the kept shapes again from the next tick (a player left: the next to join has none).
+pub(in crate::game) fn forget_sent_shapes() {
+    *SHAPE_SENT.lock().unwrap_or_else(|e| e.into_inner()) = None;
+}
+/// A second of ticks: a block entity the runtime hasn't read by then has no shape of its own.
+const SHAPE_TRIES: u8 = 20;
+
+/// Whether `id` (an item or block) is one of the 1.20.1 mods'.
+pub(in crate::game) fn is_mods_id(id: &str) -> bool {
+    let namespaces = NAMESPACES.lock().unwrap_or_else(|e| e.into_inner());
+    id.split_once(':')
+        .is_some_and(|(ns, _)| namespaces.as_ref().is_some_and(|n| n.contains(ns)))
+}
+
 /// The folder beside `options.txt` that holds the 1.20.1 Fabric mods.
 pub(in crate::game) const DIR: &str = "mods-java-1.20.1";
+
+/// The folder beside `options.txt` that holds the 1.20.1 Forge mods (docs/java-bridge-120-forge.md):
+/// they run in a Forge JVM of their own.
+pub(in crate::game) const FORGE_DIR: &str = "mods-java-forge-1.20.1";
+
+/// The 1.20.1 loaders whose mods this game runs, and their folders: Fabric's when
+/// `mods-java-1.20.1/` has jars, Forge's when `mods-java-forge-1.20.1/` has; each runs in a JVM of
+/// its own, both at once.
+fn chosen() -> Vec<(Loader, PathBuf)> {
+    [(Loader::Fabric, DIR), (Loader::Forge, FORGE_DIR)]
+        .into_iter()
+        .map(|(loader, dir)| (loader, super::Game::options_path().with_file_name(dir)))
+        .filter(|(_, dir)| !jars(dir).is_empty())
+        .collect()
+}
+
+/// The runtime's own folder under the cache (its game folder, the content it made).
+fn runtime_home(loader: Loader) -> PathBuf {
+    super::mods::horizon_cache().join(match loader {
+        Loader::Fabric => "java-120",
+        Loader::Forge => "java-120-forge",
+    })
+}
+
+/// The bridge's platform jar for `loader` (build120.sh's, build120forge.sh's).
+fn platform_jar(loader: Loader) -> PathBuf {
+    install().join(match loader {
+        Loader::Fabric => "horizon/platform120.jar",
+        Loader::Forge => "horizon/platform120-forge.jar",
+    })
+}
 
 /// The jars in `dir`, sorted.
 fn jars(dir: &Path) -> Vec<PathBuf> {
@@ -62,47 +190,86 @@ fn install() -> PathBuf {
 /// `base` (the prepared tables): read back from the cache when the jars are the ones they were
 /// made from, else made now with the 1.20.1 runtime (stopped again after).
 pub(in crate::game) fn content(base: &Path) -> Vec<PathBuf> {
-    let dir = super::Game::options_path().with_file_name(DIR);
-    let jars = jars(&dir);
-    if jars.is_empty() {
-        return Vec::new();
+    let chosen = chosen();
+    *LOADERS.lock().unwrap_or_else(|e| e.into_inner()) = chosen.iter().map(|(l, _)| *l).collect();
+    // Each loader's content is made in its own runtime, so the two are made side by side (a
+    // Fabric and a Forge set of mods took 21 s + 31 s one after the other). What the game reads
+    // from them is taken in the loaders' order after, so it doesn't depend on which was first.
+    let made: Vec<(Loader, Vec<PathBuf>)> = std::thread::scope(|scope| {
+        let handles: Vec<_> = chosen
+            .into_iter()
+            .map(|(loader, dir)| {
+                let handle = std::thread::Builder::new()
+                    .name(format!("1.20.1 content {loader:?}"))
+                    .spawn_scoped(scope, move || content_of(loader, dir, base));
+                (loader, handle)
+            })
+            .collect();
+        handles
+            .into_iter()
+            .map(|(loader, handle)| {
+                let folders = match handle.map_err(|e| e.to_string()).and_then(|h| {
+                    h.join()
+                        .map_err(|_| "its content thread panicked".to_string())
+                }) {
+                    Ok(folders) => folders,
+                    Err(e) => {
+                        log::warn!("1.20.1 mods ({loader:?}): their content was not made: {e}");
+                        Vec::new()
+                    }
+                };
+                (loader, folders)
+            })
+            .collect()
+    });
+    let mut all = Vec::new();
+    for (loader, folders) in made {
+        if !folders.is_empty() {
+            let cache = runtime_home(loader).join("content");
+            remember_loot(&cache);
+            levels::register(&cache.join(horizon_jvm_remote::content120::WORLDGEN_PACK));
+        }
+        remember_namespaces(loader, &folders);
+        all.extend(folders);
     }
-    let home = super::mods::horizon_cache().join("java-120");
+    all
+}
+
+/// The content of `loader`'s mods in `dir`, made or from the cache, and their runtime started.
+fn content_of(loader: Loader, dir: PathBuf, base: &Path) -> Vec<PathBuf> {
+    let jars = jars(&dir);
+    let home = runtime_home(loader);
     let cache = home.join("content");
-    if let Some(folders) = horizon_jvm_remote::content120::cached(&stamped(&jars), &cache) {
-        remember_loot(&cache);
-        remember_blocks(&cache);
-        levels::register(&cache.join(horizon_jvm_remote::content120::WORLDGEN_PACK));
+    if let Some(folders) = horizon_jvm_remote::content120::cached(&stamped(loader, &jars), &cache) {
+        remember_tints(&cache);
+        remember_blocks(loader, &cache);
         log::info!(
             "1.20.1 mods: {} content mod(s) from the cache",
             folders.len()
         );
-        remember_namespaces(&folders);
         // Their code: the runtime boots beside the game's start (clicks pass until it's up). The
-        // generator waits for it, so no chunk misses their features and structures.
-        horizon_world::worldgen::foreign::set_foreign_pending(true);
+        // generator waits for it (for each runtime starting), so no chunk misses their features.
+        foreign_pending(true);
         let (dir, home) = (dir.clone(), home.clone());
         let started = std::thread::Builder::new()
-            .name("fabric-1.20.1 start".into())
+            .name("1.20.1 runtime start".into())
             .spawn(move || {
-                match start(&dir, &home) {
-                    Ok((runtime, _)) => keep(runtime),
+                match start(loader, &dir, &home) {
+                    Ok((runtime, _)) => keep(loader, runtime),
                     Err(e) => log::warn!("1.20.1 mods: their code doesn't run: {e}"),
                 }
-                horizon_world::worldgen::foreign::set_foreign_pending(false);
+                foreign_pending(false);
             });
         if let Err(e) = started {
-            horizon_world::worldgen::foreign::set_foreign_pending(false);
+            foreign_pending(false);
             log::warn!("1.20.1 mods: their code doesn't run: {e}");
         }
         return folders;
     }
-    match make(&dir, &jars, base, &home, &cache) {
+    match make(loader, &dir, &jars, base, &home, &cache) {
         Ok(folders) => {
-            remember_loot(&cache);
-            remember_blocks(&cache);
-            levels::register(&cache.join(horizon_jvm_remote::content120::WORLDGEN_PACK));
-            remember_namespaces(&folders);
+            remember_tints(&cache);
+            remember_blocks(loader, &cache);
             folders
         }
         Err(e) => {
@@ -114,22 +281,55 @@ pub(in crate::game) fn content(base: &Path) -> Vec<PathBuf> {
 
 /// The pools the mods add to loot tables in code, by table (`content120::loot_added`), once the
 /// content is ready.
-static LOOT_ADDED: std::sync::OnceLock<std::collections::BTreeMap<String, Vec<serde_json::Value>>> =
-    std::sync::OnceLock::new();
+static LOOT_ADDED: std::sync::RwLock<std::collections::BTreeMap<String, Vec<serde_json::Value>>> =
+    std::sync::RwLock::new(std::collections::BTreeMap::new());
+
+/// How many runtimes are starting: the generator waits while any is.
+static STARTING: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// One more runtime starting (`true`) or one done (`false`): the generator's wait for the mods'
+/// features lasts while any is.
+fn foreign_pending(starting: bool) {
+    use std::sync::atomic::Ordering::SeqCst;
+    let left = if starting {
+        STARTING.fetch_add(1, SeqCst) + 1
+    } else {
+        STARTING.fetch_sub(1, SeqCst).saturating_sub(1)
+    };
+    horizon_world::worldgen::foreign::set_foreign_pending(left > 0);
+}
+
+/// Hands the mods' block tints in the content cache to the mesher (Simple Farming's fruit
+/// leaves take the foliage colour).
+fn remember_tints(cache: &Path) {
+    let Ok(json) = std::fs::read_to_string(cache.join(horizon_jvm_remote::content120::BLOCK_TINTS))
+    else {
+        return;
+    };
+    match horizon_client::mesher::set_mod_tints(&json) {
+        Ok(n) => log::info!("1.20.1 mods: tints of {n} block(s)"),
+        Err(e) => log::warn!("1.20.1 mods: their block tints were not read: {e}"),
+    }
+}
 
 /// Reads the pools the mods add to loot tables from the content cache.
 fn remember_loot(cache: &Path) {
-    let added = std::fs::read(cache.join(horizon_jvm_remote::content120::LOOT_ADDED))
-        .ok()
-        .and_then(|b| serde_json::from_slice(&b).ok())
-        .unwrap_or_default();
-    let _ = LOOT_ADDED.set(added);
+    let added: std::collections::BTreeMap<String, Vec<serde_json::Value>> =
+        std::fs::read(cache.join(horizon_jvm_remote::content120::LOOT_ADDED))
+            .ok()
+            .and_then(|b| serde_json::from_slice(&b).ok())
+            .unwrap_or_default();
+    let mut all = LOOT_ADDED.write().unwrap_or_else(|e| e.into_inner());
+    for (table, pools) in added {
+        all.entry(table).or_default().extend(pools);
+    }
 }
 
 /// A loot table as it loads (`horizon_world::loot::native_loot_table_load`): the pools the 1.20.1
 /// mods add to it in code (Fabric's `LootTableEvents.MODIFY`) after its own, as Fabric adds them.
 pub(crate) fn loot_table_load(id: &str, table: &mut serde_json::Value) {
-    let Some(pools) = LOOT_ADDED.get().and_then(|a| a.get(id)) else {
+    let added = LOOT_ADDED.read().unwrap_or_else(|e| e.into_inner());
+    let Some(pools) = added.get(id) else {
         return;
     };
     let Some(obj) = table.as_object_mut() else {
@@ -145,20 +345,25 @@ pub(crate) fn loot_table_load(id: &str, table: &mut serde_json::Value) {
 /// Terralith's overworld), which Horizon's generator and the world's biome table read under the
 /// world's own packs, as Fabric adds a mod's data. None when no mod changes it.
 pub(in crate::game) fn worldgen_packs() -> Vec<horizon_client::datapack::DataPack> {
-    let dir = super::mods::horizon_cache()
-        .join("java-120/content")
-        .join(horizon_jvm_remote::content120::WORLDGEN_PACK);
-    if !dir.join("pack.mcmeta").is_file() {
-        return Vec::new();
-    }
-    vec![horizon_client::datapack::DataPack::folder(
-        "mod/fabric-1.20.1",
-        &dir,
-    )]
+    chosen()
+        .into_iter()
+        .filter_map(|(loader, _)| {
+            let dir = runtime_home(loader)
+                .join("content")
+                .join(horizon_jvm_remote::content120::WORLDGEN_PACK);
+            let name = match loader {
+                Loader::Fabric => "mod/fabric-1.20.1",
+                Loader::Forge => "mod/forge-1.20.1",
+            };
+            dir.join("pack.mcmeta")
+                .is_file()
+                .then(|| horizon_client::datapack::DataPack::folder(name, &dir))
+        })
+        .collect()
 }
 
-/// The namespaces under the content mods' `assets/`, but vanilla's.
-fn remember_namespaces(folders: &[PathBuf]) {
+/// The namespaces under `loader`'s content mods' `assets/`, but vanilla's: theirs from now on.
+fn remember_namespaces(loader: Loader, folders: &[PathBuf]) {
     let names: HashSet<String> = folders
         .iter()
         .flat_map(|f| {
@@ -170,7 +375,17 @@ fn remember_namespaces(folders: &[PathBuf]) {
         .filter_map(|e| e.file_name().into_string().ok())
         .filter(|n| n != "minecraft")
         .collect();
-    *NAMESPACES.lock().unwrap_or_else(|e| e.into_inner()) = Some(names);
+    let mut owners = OWNERS.lock().unwrap_or_else(|e| e.into_inner());
+    let owners = owners.get_or_insert_with(HashMap::new);
+    for name in &names {
+        // A namespace both have (a library mod in both folders) stays with the first.
+        owners.entry(name.clone()).or_insert(loader);
+    }
+    NAMESPACES
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get_or_insert_with(HashSet::new)
+        .extend(names);
 }
 
 /// The runtime from now on: the mods' code runs in it.
@@ -201,9 +416,10 @@ pub(in crate::game) fn block_entity_type(block: &str) -> Option<String> {
         .cloned()
 }
 
-fn keep(mut runtime: Runtime120) {
-    log::info!("1.20.1 mods: their code runs");
-    worldgen::install(&mut runtime);
+fn keep(loader: Loader, mut runtime: Runtime120) {
+    log::info!("1.20.1 mods ({loader:?}): their code runs");
+    let _route = route(loader);
+    worldgen::install(loader, &mut runtime);
     mobs::know_types(&mut runtime);
     match runtime.mod_block_entity_blocks() {
         Ok(blocks) => {
@@ -211,12 +427,14 @@ fn keep(mut runtime: Runtime120) {
                 "1.20.1 mods: {} block(s) of theirs with a block entity",
                 blocks.len()
             );
-            *BLOCK_ENTITIES.write().unwrap_or_else(|e| e.into_inner()) =
-                blocks.into_iter().collect();
+            BLOCK_ENTITIES
+                .write()
+                .unwrap_or_else(|e| e.into_inner())
+                .extend(blocks);
         }
         Err(e) => log::warn!("1.20.1 mods: their blocks' block entities can't be listed: {e}"),
     }
-    if let Some(old) = RUNTIME
+    if let Some(old) = RUNTIMES[loader.index()]
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .replace(runtime)
@@ -227,15 +445,15 @@ fn keep(mut runtime: Runtime120) {
 
 /// What the content cache is stamped with: the mods' jars and the bridge's own platform jar,
 /// which writes what the mods register. A new build of either makes the content again.
-fn stamped(jars: &[PathBuf]) -> Vec<PathBuf> {
+fn stamped(loader: Loader, jars: &[PathBuf]) -> Vec<PathBuf> {
     let mut all = jars.to_vec();
-    all.push(install().join("horizon/platform120.jar"));
+    all.push(platform_jar(loader));
     all
 }
 
 /// Starts the 1.20.1 runtime with the jars in `dir` and the platform jar: the runtime and its
 /// report.
-fn start(dir: &Path, home: &Path) -> Result<(Runtime120, String), String> {
+fn start(loader: Loader, dir: &Path, home: &Path) -> Result<(Runtime120, String), String> {
     let install = install();
     if !install.join("launch.json").exists() {
         return Err(format!(
@@ -243,12 +461,30 @@ fn start(dir: &Path, home: &Path) -> Result<(Runtime120, String), String> {
             install.display()
         ));
     }
-    let platform = install.join("horizon/platform120.jar");
+    let platform = platform_jar(loader);
     if !platform.exists() {
         return Err(format!(
-            "no {} (run tools/java_bridge/build120.sh)",
-            platform.display()
+            "no {} (run tools/java_bridge/{})",
+            platform.display(),
+            match loader {
+                Loader::Fabric => "build120.sh",
+                Loader::Forge => "fetch120forge.py, then build120forge.sh",
+            }
         ));
+    }
+    if loader == Loader::Forge {
+        let config = horizon_jvm_remote::forge120::Forge120 {
+            java: horizon_jvm_remote::forge120::find_java(),
+            install,
+            game_dir: home.join("game"),
+            platform,
+            mods: jars(dir),
+            max_heap: "3G".into(),
+            jvm_args: Vec::new(),
+            timeout: Duration::from_secs(900),
+            log: Arc::new(|line: &str| log::info!("{line}")),
+        };
+        return horizon_jvm_remote::forge120::start(&config);
     }
     let bridge = home.join("bridge120.jar");
     horizon_jvm_remote::write_bridge120(&bridge)?;
@@ -269,6 +505,7 @@ fn start(dir: &Path, home: &Path) -> Result<(Runtime120, String), String> {
 }
 
 fn make(
+    loader: Loader,
     dir: &Path,
     jars: &[PathBuf],
     base: &Path,
@@ -280,7 +517,7 @@ fn make(
         "1.20.1 mods: making the content of {} jar(s) (once for this set of mods)",
         jars.len()
     );
-    let (mut runtime, report) = start(dir, home)?;
+    let (mut runtime, report) = start(loader, dir, home)?;
     log::info!(
         "1.20.1 mods: {} mods loaded",
         boot120::report_mods(&report).len()
@@ -289,13 +526,13 @@ fn make(
         log::info!("{l}")
     });
     // Kept: the mods' code runs in it from now on.
-    keep(runtime);
+    keep(loader, runtime);
     let folders = built?;
     // Stamped with the platform jar too: a new bridge build (build120.sh) may write more of
     // what the mods register (their creative tabs), so it makes the content again.
     let _ = std::fs::write(
         cache.join("stamp"),
-        horizon_jvm_remote::content120::stamp(&stamped(jars)),
+        horizon_jvm_remote::content120::stamp(&stamped(loader, jars)),
     );
     log::info!(
         "1.20.1 mods: {} content mod(s) made in {} ms",
@@ -338,7 +575,7 @@ fn wait_for_runtime() -> Option<std::sync::MutexGuard<'static, Option<Runtime120
     // they take it again for every placement, and a lock that isn't fair let them keep it.
     let _waiting = Waiting::new();
     loop {
-        match RUNTIME.try_lock() {
+        match runtime().try_lock() {
             Ok(guard) => return Some(guard),
             // Another thread died holding it: its runtime is still the one to use.
             Err(std::sync::TryLockError::Poisoned(e)) => return Some(e.into_inner()),
@@ -404,7 +641,7 @@ static RETRY_SHAPES: std::sync::Mutex<Vec<(String, [i32; 3])>> = std::sync::Mute
 fn wait_for_runtime_quietly() -> Option<std::sync::MutexGuard<'static, Option<Runtime120>>> {
     let until = std::time::Instant::now() + BUSY_WAIT;
     loop {
-        match RUNTIME.try_lock() {
+        match runtime().try_lock() {
             Ok(guard) => return Some(guard),
             Err(std::sync::TryLockError::Poisoned(e)) => return Some(e.into_inner()),
             Err(std::sync::TryLockError::WouldBlock) => {
@@ -423,7 +660,7 @@ fn wait_for_runtime_quietly() -> Option<std::sync::MutexGuard<'static, Option<Ru
 fn runtime_within(wait: Duration) -> Option<std::sync::MutexGuard<'static, Option<Runtime120>>> {
     let until = std::time::Instant::now() + wait;
     loop {
-        match RUNTIME.try_lock() {
+        match runtime().try_lock() {
             Ok(guard) => return Some(guard),
             Err(std::sync::TryLockError::Poisoned(e)) => return Some(e.into_inner()),
             Err(std::sync::TryLockError::WouldBlock) => {
@@ -511,16 +748,17 @@ fn stack_from_120(snbt: &str) -> Option<horizon_client::items::ItemStack> {
 
 /// `minecraft:oak_log[axis=y]`: a state's name as both versions write it.
 /// The blocks 1.20.1 has, its own and the mods' (the content build's facts), once read.
-static BLOCKS_120: std::sync::OnceLock<HashSet<String>> = std::sync::OnceLock::new();
+static BLOCKS_120: [std::sync::OnceLock<HashSet<String>>; 2] =
+    [std::sync::OnceLock::new(), std::sync::OnceLock::new()];
 
 /// Reads the blocks 1.20.1 has from the content cache's facts.
-fn remember_blocks(cache: &Path) {
+fn remember_blocks(loader: Loader, cache: &Path) {
     let blocks = std::fs::read(cache.join("work/oracle/facts.json"))
         .ok()
         .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
         .and_then(|f| f["blocks"].as_object().map(|b| b.keys().cloned().collect()))
         .unwrap_or_default();
-    let _ = BLOCKS_120.set(blocks);
+    let _ = BLOCKS_120[loader.index()].set(blocks);
 }
 
 /// A block of 26.3's that 1.20.1 doesn't have (leaf litter, dry grass, pale moss carpet), as a
@@ -531,7 +769,14 @@ fn stand_in_120(
     name: &str,
     shape: Option<&horizon_core::geometry::VoxelShape>,
 ) -> Option<&'static str> {
-    stand_in_among(BLOCKS_120.get().filter(|b| !b.is_empty())?, name, shape)
+    // The blocks the runtime the call goes to knows: the other runtime's mods' blocks are
+    // strangers to it too.
+    let loader = current();
+    stand_in_among(
+        BLOCKS_120[loader.index()].get().filter(|b| !b.is_empty())?,
+        name,
+        shape,
+    )
 }
 
 fn stand_in_among(
@@ -741,6 +986,17 @@ impl super::Game<'_> {
             }
             trace120!("{pos:?}: {clicked} goes to the mods' code");
         }
+        // To the runtime whose mods the block is, else the held item's.
+        let _route = if clicked_is_ours {
+            route_id(&clicked)
+        } else {
+            route_id(
+                &held
+                    .as_ref()
+                    .map(|h| h.item.to_string())
+                    .unwrap_or_default(),
+            )
+        };
         let request = UseBlock {
             uuid: self.java120_actor(),
             name: self.acting_player_name().to_owned(),
@@ -842,14 +1098,112 @@ impl super::Game<'_> {
             return;
         }
         let dimension = self.dim.id().to_owned();
+        // What a loaded world's block entities kept (their attachments, saved with the chunk),
+        // for the game's own window and for walking, before the mods are asked again.
+        for p in positions.chunks_exact(3) {
+            let pos = [p[0], p[1], p[2]];
+            let state = self.world.block(pos[0], pos[1], pos[2]);
+            let Some(attachments) = self
+                .world
+                .block_entities
+                .attachments((pos[0], pos[1], pos[2]))
+            else {
+                continue;
+            };
+            if horizon_client::collisions::mod_outline(pos, state).is_none()
+                && let Some(boxes) = super::mod_block_shape::of(attachments)
+                && !boxes.is_empty()
+            {
+                horizon_client::collisions::set_mod_outline(pos, Some((state, &boxes)));
+            }
+            if !horizon_client::collisions::has_mod_collision(pos, state)
+                && let Ok(Some(solid)) = attachments.peek(&super::mod_block_shape::BLOCK_COLLISION)
+            {
+                horizon_client::collisions::set_mod_collision(pos, Some((state, &solid)));
+            }
+        }
+        // A mod's block with no shape kept (a world saved before shapes were, or one whose
+        // runtime hadn't read the block entity when asked): asked again, for a second.
+        let unasked: Vec<[i32; 3]> = {
+            let mut once = SHAPE_ASKED.lock().unwrap_or_else(|e| e.into_inner());
+            let once = once.get_or_insert_with(HashMap::new);
+            positions
+                .chunks_exact(3)
+                .map(|p| [p[0], p[1], p[2]])
+                .filter(|&[x, y, z]| {
+                    self.world
+                        .block_entities
+                        .attachments((x, y, z))
+                        .and_then(super::mod_block_shape::of)
+                        .is_none()
+                })
+                .filter(|p| {
+                    let tries = once.entry((dimension.clone(), *p)).or_insert(0);
+                    *tries += 1;
+                    if *tries == SHAPE_TRIES {
+                        log::info!(
+                            "1.20.1 mods: their block at {p:?} gave no shape in {SHAPE_TRIES} ticks; it keeps the registry's"
+                        );
+                    }
+                    *tries <= SHAPE_TRIES
+                })
+                .collect()
+        };
+        if !unasked.is_empty() {
+            self.refresh_java120_shapes(&dimension, &unasked);
+        }
+        // A shape kept from before (the world loaded with it) goes to the clients once, as a
+        // new one does: the client of this window's own server thread draws the outline from
+        // what it was sent, and a value read back from the save had not been.
+        let kept: Vec<[i32; 3]> = {
+            let mut once = SHAPE_SENT.lock().unwrap_or_else(|e| e.into_inner());
+            let once = once.get_or_insert_with(HashSet::new);
+            positions
+                .chunks_exact(3)
+                .map(|p| [p[0], p[1], p[2]])
+                .filter(|&[x, y, z]| {
+                    self.world
+                        .block_entities
+                        .attachments((x, y, z))
+                        .and_then(super::mod_block_shape::of)
+                        .is_some_and(|b| !b.is_empty())
+                })
+                .filter(|p| once.insert((dimension.clone(), *p)))
+                .collect()
+        };
+        for [x, y, z] in kept {
+            if let Some(attachments) = self.world.block_entities.attachments_mut((x, y, z))
+                && attachments
+                    .mark_sync(&super::mod_block_shape::BLOCK_SHAPE)
+                    .is_ok()
+            {
+                self.world
+                    .attachment_syncs
+                    .insert(horizon_world::attachments::Holder::BlockEntity([x, y, z]));
+            }
+        }
+        let all: Vec<[i32; 3]> = positions
+            .chunks_exact(3)
+            .map(|p| [p[0], p[1], p[2]])
+            .collect();
+        for (loader, group) in self.java120_by_owner(&all) {
+            let _route = route(loader);
+            let positions: Vec<i32> = group.iter().flatten().copied().collect();
+            self.tick_java120_block_entities_of(&dimension, &positions);
+        }
+    }
+
+    /// Ticks the block entities at `positions` in the runtime calls go to now, its mods' own.
+    fn tick_java120_block_entities_of(&mut self, dimension: &str, positions: &[i32]) {
+        let dimension = dimension.to_owned();
         let ticked = {
-            let Ok(mut guard) = RUNTIME.try_lock() else {
+            let Ok(mut guard) = runtime().try_lock() else {
                 return;
             };
             let Some(runtime) = guard.as_mut() else {
                 return;
             };
-            runtime.tick_block_entities(&Level(self), &dimension, &positions)
+            runtime.tick_block_entities(&Level(self), &dimension, positions)
         };
         let ticked = match ticked {
             Ok(ticked) => ticked,
@@ -974,6 +1328,7 @@ impl super::Game<'_> {
             .collect();
         for pos in gone {
             horizon_client::collisions::set_mod_collision(pos, None);
+            horizon_client::collisions::set_mod_outline(pos, None);
             if redstone::keep(pos, None) {
                 self.java120_signal_changed(pos);
             }
@@ -983,6 +1338,42 @@ impl super::Game<'_> {
             .copied()
             .filter(|p| is_mod(self, *p))
             .collect();
+        for (loader, group) in self.java120_by_owner(&asked) {
+            let _route = route(loader);
+            self.ask_java120_shapes(dimension, &group);
+        }
+    }
+
+    /// The loader whose mods own the block at `pos` (its namespace's), if either's.
+    pub(in crate::game) fn java120_owner_at(&self, [x, y, z]: [i32; 3]) -> Option<Loader> {
+        owner(&state_name(
+            self.pack.assets.registry,
+            self.world.block(x, y, z),
+        ))
+    }
+
+    /// `positions` by the runtime whose mods own the block at each: a call about them goes to
+    /// each with its own. A block of neither's is left out.
+    pub(in crate::game) fn java120_by_owner(
+        &self,
+        positions: &[[i32; 3]],
+    ) -> Vec<(Loader, Vec<[i32; 3]>)> {
+        let mut groups: Vec<(Loader, Vec<[i32; 3]>)> = Vec::new();
+        for &pos in positions {
+            let Some(loader) = self.java120_owner_at(pos) else {
+                continue;
+            };
+            match groups.iter_mut().find(|(l, _)| *l == loader) {
+                Some((_, group)) => group.push(pos),
+                None => groups.push((loader, vec![pos])),
+            }
+        }
+        groups
+    }
+
+    /// Asks the runtime calls go to now for the shapes and signals of its mods' blocks at
+    /// `asked` ([`Self::refresh_java120_shapes`]).
+    fn ask_java120_shapes(&mut self, dimension: &str, asked: &[[i32; 3]]) {
         if asked.is_empty() {
             return;
         }
@@ -1001,13 +1392,14 @@ impl super::Game<'_> {
             let Some(runtime) = guard.as_mut() else {
                 return;
             };
-            if !redstone::sources_known() {
+            if !redstone::sources_known(current()) {
                 let registry = self.pack.assets.registry;
                 let sources = runtime.signal_sources().unwrap_or_else(|e| {
                     log::warn!("1.20.1 mods: which of their blocks give redstone: {e}");
                     Vec::new()
                 });
                 redstone::set_sources(
+                    current(),
                     sources
                         .iter()
                         .filter_map(|n| {
@@ -1055,6 +1447,16 @@ impl super::Game<'_> {
         }
         for ([x, y, z], boxes) in asked.iter().copied().zip(shapes) {
             trace120!("{x} {y} {z}: the mods say its shape is {boxes:?}");
+            // Nothing, with the mod's block entity still there: the runtime hasn't read the
+            // block entity yet (a world just loaded, its LibMultiPart container still without
+            // its parts), not the block gone -- a container left with no parts takes its block
+            // away, which `gone` above handles. What was kept stays, and the shape is asked
+            // again (`tick_java120_block_entities`) while none is kept.
+            if boxes.is_empty() {
+                continue;
+            }
+            let state = self.world.block(x, y, z);
+            horizon_client::collisions::set_mod_outline([x, y, z], Some((state, &boxes)));
             let Some(attachments) = self.world.block_entities.attachments_mut((x, y, z)) else {
                 continue;
             };

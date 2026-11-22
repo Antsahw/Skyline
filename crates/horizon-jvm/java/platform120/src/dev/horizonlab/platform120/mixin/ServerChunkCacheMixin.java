@@ -67,4 +67,15 @@ public abstract class ServerChunkCacheMixin {
     private void horizon$track(CallbackInfo ci) {
         ci.cancel();
     }
+
+    /**
+     * Chunk tickets (a teleport loads the chunk it lands in: Waystones): the mirror loads no
+     * chunks, so there is nothing to keep loaded. Its distance manager was never made.
+     */
+    @Inject(method = {"addRegionTicket(Lnet/minecraft/server/level/TicketType;Lnet/minecraft/world/level/ChunkPos;ILjava/lang/Object;)V",
+            "removeRegionTicket(Lnet/minecraft/server/level/TicketType;Lnet/minecraft/world/level/ChunkPos;ILjava/lang/Object;)V"},
+            at = @At("HEAD"), cancellable = true)
+    private void horizon$noTickets(org.spongepowered.asm.mixin.injection.callback.CallbackInfo ci) {
+        ci.cancel();
+    }
 }

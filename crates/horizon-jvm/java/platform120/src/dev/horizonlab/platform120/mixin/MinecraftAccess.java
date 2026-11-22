@@ -66,4 +66,8 @@ public interface MinecraftAccess {
     @Mutable
     @Accessor("gameRenderer")
     void horizon$setGameRenderer(net.minecraft.client.renderer.GameRenderer renderer);
+
+    /** Its item colours (the mods' tints in them): Tints120. */
+    @Accessor("itemColors")
+    net.minecraft.client.color.item.ItemColors horizon$itemColors();
 }

@@ -5,7 +5,7 @@
 //! Fabric's `PlayerBlockBreakEvents.BEFORE` (which may stop it) and `AFTER` around it, so a
 //! 1.20.1 mod listening for breaks hears vanilla blocks too.
 
-use super::{Level, NAMESPACES, RUNTIME, stack_from_120, state_name, tracing, wait_for_runtime};
+use super::{Level, NAMESPACES, runtime, stack_from_120, state_name, tracing, wait_for_runtime};
 use horizon_client::items::ItemStack;
 use horizon_jvm_remote::mirror120::{BreakBlock, BreakHow, Broke};
 use horizon_world::registry::BlockStateId;
@@ -21,9 +21,9 @@ pub(in crate::game) enum Break120 {
     Horizon { after: bool },
 }
 
-/// A held stack as 1.20.1 item NBT: its id, count, damage, enchantments and name, the parts
-/// that change what a break drops and what a tool does. (The rest of 26.3's components have no
-/// way down yet: the downgrade direction, phase 3.)
+/// A held stack as 1.20.1 item NBT: its id, count, damage, enchantments and name, and a mod's
+/// own NBT (`custom_data` back at the tag's root), its block entity data and repair cost. (26.3's
+/// other components have no way down yet.)
 pub(in crate::game) fn stack_to_120(stack: &ItemStack) -> String {
     let mut tag: Vec<String> = Vec::new();
     if stack.damage > 0 {
@@ -48,6 +48,33 @@ pub(in crate::game) fn stack_to_120(stack: &ItemStack) -> String {
     if let Some(name) = stack.custom_name() {
         let json = serde_json::json!({ "text": name }).to_string();
         tag.push(format!("display:{{Name:{}}}", quoted(&json)));
+    }
+    if let Some(data) = stack.data() {
+        use horizon_world::nbt::{Compound, Tag};
+        let mut rest = Compound::new();
+        // A mod's own NBT: 1.20.5's componentization moved the tag's unknown keys into
+        // `custom_data`, so they go back to the tag's root (a filled tank's fluid, a tool's mode).
+        if let Some(Tag::Compound(custom)) = data.other("minecraft:custom_data") {
+            for (k, v) in custom {
+                let key = k.to_string_lossy();
+                if !matches!(
+                    &*key,
+                    "Damage" | "Enchantments" | "StoredEnchantments" | "display"
+                ) {
+                    rest.insert(k.clone(), v.clone());
+                }
+            }
+        }
+        if let Some(entity) = data.other("minecraft:block_entity_data") {
+            rest.insert("BlockEntityTag".into(), entity.clone());
+        }
+        if let Some(cost) = data.other("minecraft:repair_cost") {
+            rest.insert("RepairCost".into(), cost.clone());
+        }
+        if !rest.is_empty() {
+            let text = horizon_world::snbt_text::to_snbt(&Tag::Compound(rest));
+            tag.push(text[1..text.len() - 1].to_owned());
+        }
     }
     let tag = if tag.is_empty() {
         String::new()
@@ -111,15 +138,39 @@ impl super::super::Game<'_> {
             BreakHow::Before
         };
         let request = self.java120_break_request(pos, state, how);
+        if !theirs {
+            // Anyone else's (vanilla's, 26.3's): every runtime's mods hear it, and any of them
+            // can stop it. A busy runtime is skipped, never worth a stall.
+            let mut after = false;
+            for loader in super::loaders() {
+                let _route = super::route(loader);
+                let broke = {
+                    let Ok(mut guard) = runtime().try_lock() else {
+                        continue;
+                    };
+                    let Some(runtime) = guard.as_mut() else {
+                        continue;
+                    };
+                    runtime.break_block(&Level(self), &request)
+                };
+                trace120!(
+                    "{pos:?}: breaking {} ({how:?}, {loader:?}): {broke:?}",
+                    request.state
+                );
+                match broke {
+                    Ok(broke) if !broke.goes => return Break120::Stopped,
+                    Ok(_) => after = true,
+                    // Broken as if no mod were listening.
+                    Err(e) => log::warn!("1.20.1 mods: breaking {} failed: {e}", request.state),
+                }
+            }
+            return Break120::Horizon { after };
+        }
+        // Their block, to the runtime whose mods it is: the player waits on it, and nobody else
+        // can break it right, so a busy runtime is waited for.
+        let _route = super::route_id(&request.state);
         let broke = {
-            // Their own block: the player waits on it, and nobody else can break it right, so
-            // a busy runtime is waited for. Anyone else's: the events only, never worth a stall.
-            let guard = if theirs {
-                wait_for_runtime()
-            } else {
-                RUNTIME.try_lock().ok()
-            };
-            let Some(mut guard) = guard else {
+            let Some(mut guard) = wait_for_runtime() else {
                 return Break120::Horizon { after: false };
             };
             let Some(runtime) = guard.as_mut() else {
@@ -132,22 +183,10 @@ impl super::super::Game<'_> {
             Ok(broke) => broke,
             Err(e) => {
                 log::warn!("1.20.1 mods: breaking {} failed: {e}", request.state);
-                // Their block, which Horizon can't break right: left as it is. Anyone else's:
-                // broken as if no mod were listening.
-                return if theirs {
-                    Break120::Stopped
-                } else {
-                    Break120::Horizon { after: false }
-                };
+                // Horizon can't break it right: left as it is.
+                return Break120::Stopped;
             }
         };
-        if !theirs {
-            return if broke.goes {
-                Break120::Horizon { after: true }
-            } else {
-                Break120::Stopped
-            };
-        }
         self.java120_land_break(&broke);
         if broke.goes {
             Break120::Done
@@ -188,27 +227,35 @@ impl super::super::Game<'_> {
             return;
         }
         let request = self.java120_break_request(pos, state, BreakHow::After);
-        let broke = {
-            let Ok(mut guard) = RUNTIME.try_lock() else {
-                return;
-            };
-            let Some(runtime) = guard.as_mut() else {
-                return;
-            };
-            runtime.break_block(&Level(self), &request)
+        // Their block's runtime; anyone else's, every runtime.
+        let loaders = match super::owner(&request.state) {
+            Some(loader) => vec![loader],
+            None => super::loaders(),
         };
-        match broke {
-            // What a listener did (a vein miner breaking the rest of the vein) lands too.
-            Ok(broke) => {
-                let dimension = self.dim.id().to_owned();
-                self.apply_java120(
-                    &dimension,
-                    &broke.set,
-                    &broke.block_entities,
-                    &broke.spawned,
-                );
+        for loader in loaders {
+            let _route = super::route(loader);
+            let broke = {
+                let Ok(mut guard) = runtime().try_lock() else {
+                    continue;
+                };
+                let Some(runtime) = guard.as_mut() else {
+                    continue;
+                };
+                runtime.break_block(&Level(self), &request)
+            };
+            match broke {
+                // What a listener did (a vein miner breaking the rest of the vein) lands too.
+                Ok(broke) => {
+                    let dimension = self.dim.id().to_owned();
+                    self.apply_java120(
+                        &dimension,
+                        &broke.set,
+                        &broke.block_entities,
+                        &broke.spawned,
+                    );
+                }
+                Err(e) => log::warn!("1.20.1 mods: after breaking {}: {e}", request.state),
             }
-            Err(e) => log::warn!("1.20.1 mods: after breaking {}: {e}", request.state),
         }
     }
 }
@@ -241,5 +288,54 @@ mod tests {
             stack_to_120(&carrots),
             r#"{id:"minecraft:carrot",Count:5b}"#
         );
+    }
+}
+
+impl super::super::Game<'_> {
+    /// Horizon's explosion of `radius` takes the block at `pos`: a 1.20.1 mod's block is
+    /// blown up by its own code (`Runtime120::explode_block`: a Wired Redstone cable drops its
+    /// cables, a skillet itself), its drops landing as items; true when it was one. Any other
+    /// block, or a runtime that isn't up, is Horizon's to blow up (false).
+    pub(in crate::game) fn java120_exploded(
+        &mut self,
+        pos: [i32; 3],
+        radius: f32,
+        decay: bool,
+    ) -> bool {
+        if self.remote.is_some() {
+            return false;
+        }
+        let registry = self.pack.assets.registry;
+        let name = state_name(registry, self.world.block(pos[0], pos[1], pos[2]));
+        if !super::is_mods_id(&name) {
+            return false;
+        }
+        let dimension = self.dim.id().to_owned();
+        let _route = super::route_id(&name);
+        let blown = {
+            let Some(mut guard) = wait_for_runtime() else {
+                return false;
+            };
+            let Some(runtime) = guard.as_mut() else {
+                return false;
+            };
+            runtime.explode_block(&Level(self), &dimension, pos, radius, decay)
+        };
+        match blown {
+            Ok(blown) => {
+                trace120!("{pos:?}: blown up by the mods' code: {blown:?}");
+                self.apply_java120(
+                    &dimension,
+                    &blown.set,
+                    &blown.block_entities,
+                    &blown.spawned,
+                );
+                true
+            }
+            Err(e) => {
+                log::warn!("1.20.1 mods: blowing up {name} failed: {e}");
+                false
+            }
+        }
     }
 }

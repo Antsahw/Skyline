@@ -140,15 +140,23 @@ impl Game<'_> {
         if positions.is_empty() {
             return;
         }
-        let dimension = self.dim.id();
-        let Ok(mut guard) = super::RUNTIME.try_lock() else {
-            return;
-        };
-        let Some(runtime) = guard.as_mut() else {
-            return;
-        };
-        if let Err(e) = runtime.animate_ticks(&super::Level(self), dimension, &positions) {
-            super::tick_failed_once(&e);
+        let all: Vec<[i32; 3]> = positions
+            .chunks_exact(3)
+            .map(|p| [p[0], p[1], p[2]])
+            .collect();
+        let dimension = self.dim.id().to_owned();
+        for (loader, group) in self.java120_by_owner(&all) {
+            let _route = super::route(loader);
+            let positions: Vec<i32> = group.iter().flatten().copied().collect();
+            let Ok(mut guard) = super::runtime().try_lock() else {
+                continue;
+            };
+            let Some(runtime) = guard.as_mut() else {
+                continue;
+            };
+            if let Err(e) = runtime.animate_ticks(&super::Level(self), &dimension, &positions) {
+                super::tick_failed_once(&e);
+            }
         }
     }
 
@@ -254,6 +262,22 @@ impl Game<'_> {
     /// runtime's player with Horizon's numbers; what they changed (Comfort's healing,
     /// Nourishment's exhaustion taken back) comes back to Horizon's player.
     pub(in crate::game) fn java120_effect_ticks(&mut self, due: &[(&'static str, i32, i32)]) {
+        // Each effect's own mods' runtime runs it.
+        for loader in super::loaders() {
+            let mine: Vec<(&'static str, i32, i32)> = due
+                .iter()
+                .copied()
+                .filter(|(id, _, _)| super::owner(id) == Some(loader))
+                .collect();
+            if !mine.is_empty() {
+                let _route = super::route(loader);
+                self.java120_effect_ticks_of(&mine);
+            }
+        }
+    }
+
+    /// [`Self::java120_effect_ticks`] in the runtime calls go to now, for its mods' effects.
+    fn java120_effect_ticks_of(&mut self, due: &[(&'static str, i32, i32)]) {
         let uuid = self.java120_actor();
         let name = self.acting_player_name().to_owned();
         let dimension = self.dim.id().to_owned();

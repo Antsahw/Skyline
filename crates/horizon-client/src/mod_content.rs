@@ -1886,14 +1886,21 @@ impl<'a> Plan<'a> {
             "model-states.json" | "render-definitions.json" => {
                 let model = name == "model-states.json";
                 self.names(doc, !model);
+                // Faces beside a block that occludes nothing are drawn (`Block.shouldRenderFace`),
+                // own states or not: a Java mod's support stood in by stone hid the grass under it.
+                if !model {
+                    for b in &self.blocks {
+                        if b.decl.properties.occludes == Some(false)
+                            && let Some(entry) = doc.get_mut(&b.decl.id)
+                        {
+                            entry.set("can_occlude", J::Bool(false));
+                        }
+                    }
+                }
                 for b in &self.blocks {
                     let Some(entry) = doc.get_mut(&b.decl.id) else {
                         continue;
                     };
-                    // Faces beside a block that occludes nothing are drawn (`Block.shouldRenderFace`).
-                    if !model && b.decl.properties.occludes == Some(false) {
-                        entry.set("can_occlude", J::Bool(false));
-                    }
                     if model && let Some(schema) = entry.get_mut("schema") {
                         for (property_name, property) in &b.decl.state_properties {
                             schema.set(
@@ -2070,6 +2077,41 @@ impl<'a> Plan<'a> {
     fn declared_shapes(&self, tag: &mut Tag, collision: bool) -> Result<()> {
         let Tag::Compound(root) = tag else {
             return Err("collision table is not a compound".into());
+        };
+        // Blocks with their template's rows: where a template state has no cached shape
+        // (scaffolding, bamboo...), its rule is the template's (`CachedCollisionRegistry::template`).
+        root.insert(JavaString::from("templates"), self.collision_templates());
+        Ok(())
+    }
+
+    /// The occlusion table (`occlusion.nbt`, the faces that hide their neighbours' faces): a
+    /// block with shapes of its own occludes with its outline, as vanilla's
+    /// `BlockBehaviour.getOcclusionShape` does, and a Java mod's own state with the occlusion
+    /// Java gave it, not with its template's or its stand-in vanilla state's (Create's basin
+    /// stood in by a full cube hid the floor's face under it: the sky showed through, a pale
+    /// square).
+    fn occlusion_shapes(&self, tag: &mut Tag) -> Result<()> {
+        // A block that occludes nothing hides no face, whatever its stand-in's shape.
+        self.cached_shapes(tag, |b, i| {
+            if b.decl.properties.occludes == Some(false) {
+                return Some(VoxelShape::empty_ref());
+            }
+            b.shapes
+                .as_ref()
+                .map(|s| &s[i])
+                .or(b.own.get(i).and_then(|o| o.occlusion.as_ref()))
+        })
+    }
+
+    /// Each new state's row of a cached shape table (`shapes` and their `cached_shapes`
+    /// mapping): the shape `of` gives its block, else the template's row stays.
+    fn cached_shapes<'b>(
+        &'b self,
+        tag: &mut Tag,
+        of: impl Fn(&'b NewBlock<'b>, usize) -> Option<&'b VoxelShape>,
+    ) -> Result<()> {
+        let Tag::Compound(root) = tag else {
+            return Err("shape table is not a compound".into());
         };
         let mut indices = Vec::new();
         let Some(Tag::List(entries)) = root.get_mut(&JavaString::from("shapes")) else {

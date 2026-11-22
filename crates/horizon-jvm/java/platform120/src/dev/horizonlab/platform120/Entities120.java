@@ -32,8 +32,15 @@ public final class Entities120 implements LevelEntityGetter<Entity> {
     /** Where the mods' entities' ids start: Horizon's own are below. */
     public static final int FIRST_ID = 0x7ffe_0000;
 
+    /**
+     * Where the Forge runtime's start: the range's upper half, so Horizon tells the two
+     * runtimes' mobs apart by id and sends a call about one to its own runtime (Horizon's
+     * `java_mods_120::FORGE_IDS` is the same number).
+     */
+    public static final int FORGE_FIRST_ID = FIRST_ID + 0x8000;
+
     private static final Map<Level, Entities120> LEVELS = new HashMap<>();
-    private static int nextId = FIRST_ID;
+    private static int nextId = Loader120.get().firstEntityId();
 
     private final List<Entity> entities = new ArrayList<>();
 
@@ -83,9 +90,14 @@ public final class Entities120 implements LevelEntityGetter<Entity> {
         // tick: else they'd fall through the air an unloaded chunk reads as.
         long[] chunks = now.stream().mapToLong(e -> net.minecraft.world.level.ChunkPos.asLong(e.blockPosition())).distinct().toArray();
         Set<Long> loaded = Mirror120.loadedChunks(level, chunks);
+        // Only those within the simulation distance of a player here, as vanilla ticks only the
+        // entities of its entity-ticking chunks: those farther wait where they are.
+        List<int[]> players = new ArrayList<>();
+        for (var player : level.players()) players.add(new int[] {player.chunkPosition().x, player.chunkPosition().z});
         for (Entity entity : now) {
             if (entity.isRemoved()) continue;
             if (!loaded.contains(net.minecraft.world.level.ChunkPos.asLong(entity.blockPosition()))) continue;
+            if (!players.isEmpty() && !simulated(entity, players)) continue;
             try {
                 // ServerLevel.tick: a mob far from every player may go (Mob.checkDespawn).
                 entity.checkDespawn();
@@ -104,6 +116,19 @@ public final class Entities120 implements LevelEntityGetter<Entity> {
         synchronized (Entities120.class) {
             of(level).entities.removeIf(Entity::isRemoved);
         }
+    }
+
+    /** Vanilla's default simulation distance, in chunks (HORIZON_120_SIMULATION to change). */
+    private static final int SIMULATION = Integer.getInteger("horizon.120.simulation",
+            System.getenv("HORIZON_120_SIMULATION") != null ? Integer.parseInt(System.getenv("HORIZON_120_SIMULATION")) : 10);
+
+    /** Whether `entity` stands within the simulation distance of one of `players` (chunk x, z). */
+    private static boolean simulated(Entity entity, List<int[]> players) {
+        var chunk = entity.chunkPosition();
+        for (int[] p : players) {
+            if (Math.max(Math.abs(chunk.x - p[0]), Math.abs(chunk.z - p[1])) < SIMULATION) return true;
+        }
+        return false;
     }
 
     /**

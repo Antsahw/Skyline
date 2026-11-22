@@ -6,7 +6,7 @@
 
 use super::super::Game;
 use super::super::lan::LanHost;
-use super::{Level, RUNTIME, wait_for_runtime};
+use super::{Level, runtime, wait_for_runtime};
 use horizon_protocol::packets::configuration::CustomPayload;
 use serde_json::Value;
 use std::collections::BTreeSet;
@@ -16,13 +16,16 @@ use std::sync::Mutex;
 pub(in crate::game) const CHANNEL: &str = "horizon:java120_config_mods";
 
 struct Told {
-    /// The list, read once from the runtime.
+    /// The list, read once from the runtimes.
     mods: Option<Vec<(String, String)>>,
+    /// Each of those mods' runtime.
+    owners: std::collections::BTreeMap<String, horizon_jvm_remote::boot120::Loader>,
     conns: BTreeSet<u32>,
 }
 
 static TOLD: Mutex<Told> = Mutex::new(Told {
     mods: None,
+    owners: std::collections::BTreeMap::new(),
     conns: BTreeSet::new(),
 });
 
@@ -47,16 +50,26 @@ impl Game<'_> {
             return;
         }
         if told.mods.is_none() {
-            let Ok(mut guard) = RUNTIME.try_lock() else {
-                return;
-            };
-            let Some(runtime) = guard.as_mut() else {
-                return;
-            };
-            told.mods = Some(runtime.config_mods().unwrap_or_else(|e| {
-                log::warn!("1.20.1 mods: their settings screens can't be listed: {e}");
-                Vec::new()
-            }));
+            // Every runtime's, each mod's runtime kept for opening its screen.
+            let mut all = Vec::new();
+            for loader in super::loaders() {
+                let _route = super::route(loader);
+                let Ok(mut guard) = runtime().try_lock() else {
+                    return;
+                };
+                let Some(runtime) = guard.as_mut() else {
+                    return;
+                };
+                let mods = runtime.config_mods().unwrap_or_else(|e| {
+                    log::warn!("1.20.1 mods: their settings screens can't be listed: {e}");
+                    Vec::new()
+                });
+                for (id, _) in &mods {
+                    told.owners.insert(id.clone(), loader);
+                }
+                all.extend(mods);
+            }
+            told.mods = Some(all);
         }
         let mods = told.mods.clone().unwrap_or_default();
         let Some(host) = self.lan.as_mut() else {
@@ -102,15 +115,16 @@ impl Game<'_> {
         let Some(id) = input.get("mod").and_then(Value::as_str) else {
             return false;
         };
-        let theirs = TOLD
+        let Some(loader) = TOLD
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .mods
-            .as_ref()
-            .is_some_and(|mods| mods.iter().any(|(m, _)| m == id));
-        if !theirs {
+            .owners
+            .get(id)
+            .copied()
+        else {
             return false;
-        }
+        };
+        let _route = super::route(loader);
         let Some(guest) = host.hub.guests.iter().find(|g| g.conn == conn) else {
             return true;
         };

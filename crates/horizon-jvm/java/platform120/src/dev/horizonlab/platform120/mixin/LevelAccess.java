@@ -51,4 +51,8 @@ public interface LevelAccess {
     @Mutable
     @Accessor("damageSources")
     void horizon$setDamageSources(net.minecraft.world.damagesource.DamageSources sources);
+
+    /** Its entities (protected in Level; ServerLevel's are a stand-in client level's). */
+    @org.spongepowered.asm.mixin.gen.Invoker("getEntities")
+    net.minecraft.world.level.entity.LevelEntityGetter<net.minecraft.world.entity.Entity> horizon$entities();
 }

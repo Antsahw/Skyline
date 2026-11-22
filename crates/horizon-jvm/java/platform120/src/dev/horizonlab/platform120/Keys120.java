@@ -7,7 +7,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
-import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.server.level.ServerPlayer;
@@ -30,19 +29,9 @@ final class Keys120 {
     private static final Map<UUID, Set<Integer>> DOWN = new ConcurrentHashMap<>();
     private static final Map<UUID, List<Integer>> CLICKS = new ConcurrentHashMap<>();
 
-    /** The mods' key bindings (Fabric's registry of them), each as the GLFW key it is set to. */
-    @SuppressWarnings("unchecked")
+    /** The mods' key bindings (the loader's registry of them), each as the GLFW key it is set to. */
     static int[] modKeys() {
-        List<KeyMapping> mods;
-        try {
-            var field = net.fabricmc.fabric.impl.client.keybinding.KeyBindingRegistryImpl.class
-                    .getDeclaredField("MODDED_KEY_BINDINGS");
-            field.setAccessible(true);
-            mods = (List<KeyMapping>) field.get(null);
-        } catch (ReflectiveOperationException | RuntimeException e) {
-            Mirror120.log("the mods' key bindings could not be read: " + e);
-            return new int[0];
-        }
+        List<KeyMapping> mods = Loader120.get().modKeyMappings();
         List<Integer> keys = new ArrayList<>();
         for (KeyMapping mapping : mods) {
             InputConstants.Key key = ((dev.horizonlab.platform120.mixin.KeyMappingAccess) mapping).horizon$key();
@@ -95,12 +84,11 @@ final class Keys120 {
 
     /**
      * One client tick for each player with a key down or a click waiting: their keys set on
-     * the mods' mappings (as the keyboard handler leaves them), then Fabric's ClientTickEvents
-     * START and END with the headless client standing in for them.
+     * the mods' mappings (as the keyboard handler leaves them), then the loader's client tick
+     * start and end with the headless client standing in for them.
      */
     static void tick(Map<UUID, ServerPlayer> players) {
-        boolean listening = Events120.listeners(ClientTickEvents.START_CLIENT_TICK) != 0
-                || Events120.listeners(ClientTickEvents.END_CLIENT_TICK) != 0;
+        boolean listening = Loader120.get().clientTickListeners();
         for (UUID id : new ArrayList<>(players.keySet())) {
             var held = DOWN.getOrDefault(id, Set.of());
             var clicks = CLICKS.remove(id);
@@ -114,8 +102,7 @@ final class Keys120 {
                 for (int key : clicks) KeyMapping.click(InputConstants.Type.KEYSYM.getOrCreate(key));
             }
             Minecraft minecraft = Minecraft.getInstance();
-            Events120.fire(ClientTickEvents.START_CLIENT_TICK, "client tick start", l -> l.onStartTick(minecraft));
-            Events120.fire(ClientTickEvents.END_CLIENT_TICK, "client tick end", l -> l.onEndTick(minecraft));
+            Loader120.get().clientTick(minecraft);
             KeyMapping.releaseAll();
         }
     }

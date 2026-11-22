@@ -10,13 +10,18 @@ use horizon_core::geometry::Direction;
 use horizon_core::position::BlockPos;
 use horizon_world::registry::BlockStateId;
 use std::collections::{HashMap, HashSet};
-use std::sync::{Mutex, OnceLock};
+use std::sync::Mutex;
 
 /// Per position: the state it was asked for, and its signals (six `getSignal`, six
 /// `getDirectSignal`, in vanilla's side order).
 static SIGNALS: Mutex<Option<HashMap<[i32; 3], (BlockStateId, [u8; 12])>>> = Mutex::new(None);
 /// The mods' states that are redstone sources.
-static SOURCES: OnceLock<HashSet<u32>> = OnceLock::new();
+static SOURCES: std::sync::RwLock<Option<HashSet<u32>>> = std::sync::RwLock::new(None);
+/// Which runtimes' sources are known (by `Loader::index`).
+static KNOWN: [std::sync::atomic::AtomicBool; 2] = [
+    std::sync::atomic::AtomicBool::new(false),
+    std::sync::atomic::AtomicBool::new(false),
+];
 
 /// Vanilla's 3D data value of a side (down 0, up 1, north 2, south 3, west 4, east 5).
 fn side(direction: Direction) -> usize {
@@ -30,14 +35,20 @@ fn side(direction: Direction) -> usize {
     }
 }
 
-/// The mods' signal sources, once known (`Game::java120_signal_sources`).
-pub(super) fn set_sources(states: HashSet<u32>) {
-    let _ = SOURCES.set(states);
+/// `loader`'s mods' signal sources, once known (`Game::java120_signal_sources`), beside the
+/// other runtime's.
+pub(super) fn set_sources(loader: horizon_jvm_remote::boot120::Loader, states: HashSet<u32>) {
+    SOURCES
+        .write()
+        .unwrap_or_else(|e| e.into_inner())
+        .get_or_insert_with(HashSet::new)
+        .extend(states);
+    KNOWN[loader.index()].store(true, std::sync::atomic::Ordering::SeqCst);
 }
 
-/// Whether the sources are known yet.
-pub(super) fn sources_known() -> bool {
-    SOURCES.get().is_some()
+/// Whether `loader`'s sources are known yet.
+pub(super) fn sources_known(loader: horizon_jvm_remote::boot120::Loader) -> bool {
+    KNOWN[loader.index()].load(std::sync::atomic::Ordering::SeqCst)
 }
 
 /// Keeps what a block gives (or, with `None`, forgets it); whether that changed.
@@ -60,7 +71,12 @@ pub(super) fn keep(pos: [i32; 3], value: Option<(BlockStateId, [u8; 12])>) -> bo
 impl super::super::Game<'_> {
     /// `LevelAccess::adjust_signal_source`: a mod's state that its mod says is a source is one.
     pub(in crate::game) fn java120_signal_source(state: BlockStateId, vanilla: bool) -> bool {
-        vanilla || SOURCES.get().is_some_and(|s| s.contains(&state.0))
+        vanilla
+            || SOURCES
+                .read()
+                .unwrap_or_else(|e| e.into_inner())
+                .as_ref()
+                .is_some_and(|s| s.contains(&state.0))
     }
 
     /// `LevelAccess::adjust_signal`: what a mod's block at `pos` gives toward `direction`

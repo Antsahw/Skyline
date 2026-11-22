@@ -23,11 +23,20 @@ use std::path::{Path, PathBuf};
 /// change vanilla's world generation (Terralith) get it as a data pack ([`worldgen_pack`]). 8: so
 /// do the mods with dimensions of their own. 9: the pools they add to loot tables ([`loot_added`]).
 /// 10: their spawn eggs drawn as in 1.20.1 ([`spawn_eggs`]). 11: the files their runtime resource
-/// packs hold, and their items drawn by code as models ([`code`]).
-const FORMAT: u32 = 11;
+/// packs hold, and their items drawn by code as models ([`code`]). 12: the worldgen pack carries
+/// the mods' block tags, and 26.3's shapes of trees, states and noise providers, so Horizon's
+/// generator places the mods' data features itself rather than the runtime. 13: a mod's own
+/// files for 26.3 (its pack's overlays for 26.3's format: Geophilic's biomes) go in as they are.
+/// 14: a creative tab whose icon only code draws takes its first item's. 15: the mods' block
+/// tints ([`BLOCK_TINTS`]). 16: their items' tints ([`item_tints`]).
+const FORMAT: u32 = 16;
 
 /// The file under the cache holding the pools the mods add to loot tables ([`loot_added`]).
 pub const LOOT_ADDED: &str = "loot_added.json";
+
+/// The file under the cache holding the mods' block tints (the runtime's `blockTints`:
+/// `{"mod:block": ["foliage", ...]}`, as the mesher's `set_mod_tints` reads them).
+pub const BLOCK_TINTS: &str = "block_tints.json";
 
 /// The folder under the cache holding the mods' world generation as a 26.3 data pack.
 pub const WORLDGEN_PACK: &str = "worldgen";
@@ -43,6 +52,14 @@ pub fn stamp(jars: &[PathBuf]) -> String {
     sorted.sort();
     for jar in &sorted {
         jar.file_name().hash(&mut hasher);
+        // The bridge's own jar is written again by every build120.sh run: by what is in it
+        // (each entry's name and CRC), so a rebuild that changed nothing keeps the content.
+        if is_platform(jar)
+            && let Some(entries) = entries_crc(jar)
+        {
+            entries.hash(&mut hasher);
+            continue;
+        }
         if let Ok(meta) = std::fs::metadata(jar) {
             meta.len().hash(&mut hasher);
             if let Ok(t) = meta.modified() {
@@ -51,6 +68,26 @@ pub fn stamp(jars: &[PathBuf]) -> String {
         }
     }
     format!("{:016x}", hasher.finish())
+}
+
+/// Whether `jar` is one of the bridge's platform jars (`platform120.jar`, `platform120-forge.jar`).
+fn is_platform(jar: &Path) -> bool {
+    jar.file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(|n| n.starts_with("platform120") && n.ends_with(".jar"))
+}
+
+/// The names and CRCs of `jar`'s entries, sorted: what is in it, whatever its time.
+fn entries_crc(jar: &Path) -> Option<Vec<(String, u32)>> {
+    let file = std::fs::File::open(jar).ok()?;
+    let mut zip = zip::ZipArchive::new(std::io::BufReader::new(file)).ok()?;
+    let mut out = Vec::with_capacity(zip.len());
+    for i in 0..zip.len() {
+        let entry = zip.by_index_raw(i).ok()?;
+        out.push((entry.name().to_string(), entry.crc32()));
+    }
+    out.sort();
+    Some(out)
 }
 
 /// The content mod folders built for `jars` under `cache` before, when their stamp matches.
@@ -104,7 +141,10 @@ fn carried_jars(zip: &mut zip::ZipArchive<std::io::Cursor<&[u8]>>) -> Vec<String
         .filter_map(|j| j["file"].as_str().map(str::to_owned))
         .collect();
     for name in zip.file_names() {
-        if name.starts_with("META-INF/jars/") && name.ends_with(".jar") {
+        // Fabric's, and Forge's Jar-in-Jar.
+        if (name.starts_with("META-INF/jars/") || name.starts_with("META-INF/jarjar/"))
+            && name.ends_with(".jar")
+        {
             names.push(name.to_owned());
         }
     }
@@ -204,6 +244,21 @@ fn creative_tabs(facts: &Path, carried: &[PathBuf]) -> usize {
         let title = english
             .or_else(|| tab["title"].as_str().map(str::to_owned))
             .unwrap_or_else(|| path.to_owned());
+        // An icon drawn by code alone (`builtin/entity`: Alex's Mobs' `tab_icon`, a turning
+        // mob) draws nothing in a tab: the tab's first item stands for it.
+        let drawn_by_code = icon.split_once(':').is_some_and(|(ins, ipath)| {
+            carried.iter().any(|c| {
+                std::fs::read(
+                    c.join("assets")
+                        .join(ins)
+                        .join(format!("models/item/{ipath}.json")),
+                )
+                .ok()
+                .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
+                .is_some_and(|m| m["parent"].as_str() == Some("builtin/entity"))
+            })
+        });
+        let icon = if drawn_by_code { items[0] } else { icon };
         let dir = carry.join("data").join(ns).join("horizon/creative_tab");
         let file = serde_json::json!({ "title": title, "icon": icon, "items": items });
         if std::fs::create_dir_all(&dir).is_ok()
@@ -495,10 +550,11 @@ pub fn build(
         let bytes = std::fs::read(jar).map_err(|e| format!("{}: {e}", jar.display()))?;
         nested_jars(&bytes, &mods, 4);
     }
+    let (loader, loader_version) = runtime.loader.component();
     let pack = serde_json::json!({
         "components": [
             {"uid": "net.minecraft", "version": "1.20.1"},
-            {"uid": "net.fabricmc.fabric-loader", "version": "0.20.1"},
+            {"uid": loader, "version": loader_version},
         ]
     });
     std::fs::write(instance.join("mmc-pack.json"), pack.to_string())
@@ -549,6 +605,13 @@ pub fn build(
         serde_json::to_vec(&added).unwrap_or_default(),
     )
     .map_err(|e| format!("{LOOT_ADDED}: {e}"))?;
+    match runtime.call_with("blockTints", &[]) {
+        Ok(tints) => std::fs::write(cache.join(BLOCK_TINTS), tints)
+            .map_err(|e| format!("{BLOCK_TINTS}: {e}"))?,
+        Err(e) => log(format!(
+            "1.20.1 mods' content: their block tints were not read: {e}"
+        )),
+    }
     let changes = runtime.call_with("biomeChanges", &[])?;
     let modifiers = biome_modifiers(&changes, &carried(&work));
     if modifiers > 0 {
@@ -590,6 +653,19 @@ pub fn build(
             "1.20.1 mods' content: {eggs} spawn egg(s) drawn as 1.20.1 draws them"
         ));
     }
+    match runtime.call_with("itemTints", &[]) {
+        Ok(tints) => {
+            let tinted = item_tints(&tints, &carried(&work));
+            if tinted > 0 {
+                log(format!(
+                    "1.20.1 mods' content: {tinted} item(s) tinted as their code tints them"
+                ));
+            }
+        }
+        Err(e) => log(format!(
+            "1.20.1 mods' content: their item tints were not read: {e}"
+        )),
+    }
     let drawn = cache.join("code_items");
     let items = runtime.call_with(
         "codeItems",
@@ -626,6 +702,9 @@ fn is_worldgen(name: &str) -> bool {
             "dimension_type/",
             "worldgen/",
             "tags/worldgen/",
+            // The block tags the features' predicates name (`#terralith:stone`).
+            "tags/block/",
+            "tags/blocks/",
         ]
         .iter()
         .any(|k| path.starts_with(k))
@@ -697,6 +776,56 @@ fn spawn_eggs(eggs: &str, textures: &Path, carried: &[PathBuf]) -> usize {
     written
 }
 
+/// The mods' items tinted in code (the runtime's `itemTints`: `{item: [ARGB a tint index, -1
+/// none]}`, their ItemColors: a leaves item's foliage green). 26.3 tints in the item's
+/// definition, so each such item's gets the colours as constants on its model (a definition
+/// made for it when the carry-over gave none). How many items.
+fn item_tints(tints: &str, carried: &[PathBuf]) -> usize {
+    let Ok(serde_json::Value::Object(tints)) = serde_json::from_str(tints) else {
+        return 0;
+    };
+    let mut written = 0;
+    for (id, layers) in tints {
+        let (Some((ns, path)), Some(layers)) = (id.split_once(':'), layers.as_array()) else {
+            continue;
+        };
+        let Some(carry) = carrying(carried, ns) else {
+            continue;
+        };
+        let file = carry
+            .join("assets")
+            .join(ns)
+            .join("items")
+            .join(format!("{path}.json"));
+        let mut definition = std::fs::read(&file)
+            .ok()
+            .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
+            .unwrap_or_else(|| {
+                serde_json::json!({"model": {"type": "minecraft:model",
+                "model": format!("{ns}:item/{path}")}})
+            });
+        let model = &mut definition["model"];
+        // Only a plain model takes tints (one chosen by a condition or a select keeps its own).
+        if model["type"].as_str() != Some("minecraft:model") || model.get("tints").is_some() {
+            continue;
+        }
+        let constants: Vec<serde_json::Value> = layers
+            .iter()
+            .map(|c| {
+                serde_json::json!({"type": "minecraft:constant",
+                "value": c.as_i64().unwrap_or(-1) as i32})
+            })
+            .collect();
+        model["tints"] = serde_json::Value::Array(constants);
+        let ok = file
+            .parent()
+            .is_some_and(|d| std::fs::create_dir_all(d).is_ok())
+            && std::fs::write(&file, definition.to_string()).is_ok();
+        written += usize::from(ok);
+    }
+    written
+}
+
 /// The pools the mods add to loot tables in code (the runtime's `lootAdded`: Fabric's
 /// `LootTableEvents.MODIFY`, `{table: [pool]}` in 1.20.1's JSON) in 26.3's form, as the carry-over
 /// upgrades a 1.20.1 mod's own loot tables, by table id: what Horizon adds when it loads a table.
@@ -719,11 +848,90 @@ fn loot_added(json: &str) -> std::collections::BTreeMap<String, Vec<serde_json::
         .collect()
 }
 
+/// A multi-version data pack's files for 26.3 (Geophilic's `biomes_26_3`, `f26-3`): the overlay
+/// folders its `pack.mcmeta` lists for a pack format range holding 26.3's, in their order, each
+/// over the ones before. They are under `data/` as a pack's own, world generation and block tags
+/// only.
+fn native_overlays(
+    zip: &mut zip::ZipArchive<std::fs::File>,
+) -> std::collections::BTreeMap<String, Vec<u8>> {
+    use std::io::Read;
+    let mut out = std::collections::BTreeMap::new();
+    let mut meta = String::new();
+    if !zip
+        .by_name("pack.mcmeta")
+        .is_ok_and(|mut e| e.read_to_string(&mut meta).is_ok())
+    {
+        return out;
+    }
+    let Ok(meta) = serde_json::from_str::<serde_json::Value>(&meta) else {
+        return out;
+    };
+    let format = horizon_port_pack::upgrade::PACK_FORMAT;
+    let major = |v: &serde_json::Value| {
+        v.as_u64().or_else(|| {
+            v.as_array()
+                .and_then(|a| a.first())
+                .and_then(|x| x.as_u64())
+        })
+    };
+    let dirs: Vec<String> = meta["overlays"]["entries"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|e| {
+            let (min, max) = match (e.get("min_format"), e.get("max_format")) {
+                (Some(a), Some(b)) => (major(a), major(b)),
+                _ => match e.get("formats") {
+                    Some(serde_json::Value::Array(a)) if a.len() == 2 => {
+                        (major(&a[0]), major(&a[1]))
+                    }
+                    Some(f) if f.is_u64() => (f.as_u64(), f.as_u64()),
+                    Some(f) => (
+                        f.get("min_inclusive").and_then(|x| x.as_u64()),
+                        f.get("max_inclusive").and_then(|x| x.as_u64()),
+                    ),
+                    None => (None, None),
+                },
+            };
+            min.zip(max)
+                .is_some_and(|(a, b)| a <= format && format <= b)
+        })
+        .filter_map(|e| e["directory"].as_str().map(str::to_owned))
+        .collect();
+    for dir in dirs {
+        let prefix = format!("{dir}/");
+        let names: Vec<String> = zip
+            .file_names()
+            .filter_map(|n| n.strip_prefix(&prefix))
+            .filter(|n| is_worldgen(n))
+            .map(str::to_owned)
+            .collect();
+        for name in names {
+            let mut bytes = Vec::new();
+            if zip
+                .by_name(&format!("{prefix}{name}"))
+                .is_ok_and(|mut e| e.read_to_end(&mut bytes).is_ok())
+            {
+                out.insert(name, bytes);
+            }
+        }
+    }
+    out
+}
+
+/// Whether a jar entry is a block tag, in 1.20.1's folder or 26.3's.
+fn is_block_tag(name: &str) -> bool {
+    name.strip_prefix("data/")
+        .and_then(|r| r.split_once('/'))
+        .is_some_and(|(_, p)| p.starts_with("tags/blocks/") || p.starts_with("tags/block/"))
+}
+
 /// Whether a jar's world generation files (`is_worldgen`) need the pack: it changes vanilla's
 /// (a file under `minecraft` other than a tag) or adds a dimension of its own, whose level stem
 /// the generator reads only from a pack.
 fn needs_pack(names: &[String]) -> bool {
-    names.iter().any(|n| {
+    names.iter().filter(|n| !is_block_tag(n)).any(|n| {
         (n.starts_with("data/minecraft/") && !n.starts_with("data/minecraft/tags/"))
             || n.strip_prefix("data/")
                 .and_then(|r| r.split_once('/'))
@@ -789,7 +997,8 @@ fn drop_own_carvers(files: &mut std::collections::BTreeMap<String, Vec<u8>>) -> 
 /// keeps a mod's files under its own namespaces, so these changes never reached the game; as
 /// Fabric adds a mod's data as a pack, Horizon's generator reads this pack under the world's
 /// (`java_mods_120::worldgen_packs`). Such a mod's own worldgen comes along (the biomes its
-/// overworld names). What 1.20.x wrote differently comes first (`legacy120`: providers, biome
+/// overworld names), and every mod's block tags (the features' predicates name them, each entry
+/// optional). What 1.20.x wrote differently comes first (`legacy120`: providers, biome
 /// effects and carvers, surface rules' unknown biomes, 26.3's feature order, renamed ids), then
 /// every file is upgraded as a 26.2 pack is (`upgrade::upgrade_pack`: 26.3's folder names, block
 /// states, the noise router). How many files were written; none, and no pack, when no mod
@@ -812,6 +1021,8 @@ fn worldgen_pack(
         .collect();
     jars.sort();
     let mut files: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+    // The files a mod has for 26.3 itself (`native_overlays`), which go into the pack as they are.
+    let mut native: BTreeMap<String, Vec<u8>> = BTreeMap::new();
     for jar in jars {
         let Ok(file) = std::fs::File::open(&jar) else {
             continue;
@@ -819,13 +1030,19 @@ fn worldgen_pack(
         let Ok(mut zip) = zip::ZipArchive::new(file) else {
             continue;
         };
-        let names: Vec<String> = zip
+        let mut names: Vec<String> = zip
             .file_names()
             .filter(|n| is_worldgen(n))
             .map(str::to_owned)
             .collect();
-        if !needs_pack(&names) {
-            continue;
+        let own = native_overlays(&mut zip);
+        // Any mod's block tags may be named by another's features (`#c:ores`): those come
+        // along from every jar, the rest only from the jars that need the pack.
+        let own_names: Vec<String> = own.keys().cloned().collect();
+        if !needs_pack(&names) && !needs_pack(&own_names) {
+            names.retain(|n| is_block_tag(n));
+        } else {
+            native.extend(own);
         }
         for name in names {
             let mut bytes = Vec::new();
@@ -841,10 +1058,27 @@ fn worldgen_pack(
             {
                 bytes = serde_json::to_vec(&v).unwrap_or(bytes);
             }
+            // 1.20.1's `tags/blocks/` is 26.3's `tags/block/`. Each entry is optional: a block a
+            // mod's tag names that the game lacks (another mod's, not installed) must not take
+            // the whole tag away, nor vanilla's that include it.
+            let name = horizon_port_pack::legacy120::data_path(&name).unwrap_or(name);
+            if is_block_tag(&name)
+                && let Ok(mut v) = serde_json::from_slice::<serde_json::Value>(&bytes)
+                && let Some(values) = v.get_mut("values").and_then(|x| x.as_array_mut())
+            {
+                for entry in values.iter_mut() {
+                    if let Some(id) = entry.as_str() {
+                        *entry = serde_json::json!({"id": id, "required": false});
+                    } else if let Some(o) = entry.as_object_mut() {
+                        o.insert("required".into(), false.into());
+                    }
+                }
+                bytes = serde_json::to_vec(&v).unwrap_or(bytes);
+            }
             files.insert(name, bytes);
         }
     }
-    if files.is_empty() {
+    if files.keys().chain(native.keys()).all(|n| is_block_tag(n)) {
         return Ok(0);
     }
     let own_carvers = drop_own_carvers(&mut files);
@@ -857,6 +1091,7 @@ fn worldgen_pack(
     // The biomes that exist: vanilla's (26.3's, prepared) and the pack's.
     let biomes: std::collections::HashSet<String> = files
         .keys()
+        .chain(native.keys())
         .filter_map(|n| {
             let (ns, rest) = n.strip_prefix("data/")?.split_once('/')?;
             let path = rest
@@ -895,13 +1130,15 @@ fn worldgen_pack(
         "description": "The 1.20.1 mods' world generation",
     }});
     files.insert("pack.mcmeta".into(), meta.to_string().into_bytes());
-    let (upgraded, report) = horizon_port_pack::upgrade::upgrade_pack(&files);
+    let (mut upgraded, report) = horizon_port_pack::upgrade::upgrade_pack(&files);
     if !report.lossy.is_empty() || !report.unknown.is_empty() {
         log(format!(
             "1.20.1 mods' content: their world generation upgraded with losses {:?}, unknown {:?}",
             report.lossy, report.unknown
         ));
     }
+    // A mod's own 26.3 files over what was upgraded from its 1.20.1 ones.
+    upgraded.extend(native);
     let mut written = 0;
     for (path, bytes) in upgraded {
         if path.split('/').any(|p| p == ".." || p.is_empty()) || path.contains(['\\', ':']) {
@@ -1088,6 +1325,30 @@ mod tests {
                 "predicate": {"items": "farmersdelight:flint_knife"}}),
             "1.20.1's item list is a holder set, its condition list 26.3's one condition"
         );
+    }
+
+    #[test]
+    fn a_tinted_items_definition_takes_its_colours_and_one_is_made_for_an_item_without() {
+        let carry = std::env::temp_dir().join(format!("horizon-item-tints-{}", std::process::id()));
+        let items = carry.join("assets/simplefarming/items");
+        std::fs::create_dir_all(&items).unwrap();
+        std::fs::write(
+            items.join("apple_leaves.json"),
+            r#"{"model":{"type":"minecraft:model","model":"simplefarming:block/apple_leaves"}}"#,
+        )
+        .unwrap();
+        let tints = r#"{"simplefarming:apple_leaves":[-12012264],"simplefarming:plum_leaves":[-12012264,-1]}"#;
+        assert_eq!(item_tints(tints, std::slice::from_ref(&carry)), 2);
+        let read = |name: &str| -> serde_json::Value {
+            serde_json::from_slice(&std::fs::read(items.join(name)).unwrap()).unwrap()
+        };
+        let apple = read("apple_leaves.json");
+        assert_eq!(apple["model"]["model"], "simplefarming:block/apple_leaves");
+        assert_eq!(apple["model"]["tints"][0]["value"], -12012264);
+        let plum = read("plum_leaves.json");
+        assert_eq!(plum["model"]["model"], "simplefarming:item/plum_leaves");
+        assert_eq!(plum["model"]["tints"][1]["value"], -1);
+        let _ = std::fs::remove_dir_all(&carry);
     }
 
     #[test]
@@ -1430,6 +1691,21 @@ mod tests {
     }
 
     /// A jar with the given entries.
+    #[test]
+    fn a_platform_jar_written_again_the_same_keeps_the_stamp() {
+        let dir = std::env::temp_dir().join(format!("h120-stamp-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let platform = dir.join("platform120.jar");
+        std::fs::write(&platform, jar(&[("a.class", b"one")])).unwrap();
+        let first = stamp(std::slice::from_ref(&platform));
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        std::fs::write(&platform, jar(&[("a.class", b"one")])).unwrap();
+        assert_eq!(stamp(std::slice::from_ref(&platform)), first);
+        std::fs::write(&platform, jar(&[("a.class", b"two")])).unwrap();
+        assert_ne!(stamp(std::slice::from_ref(&platform)), first);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     fn jar(entries: &[(&str, &[u8])]) -> Vec<u8> {
         use std::io::Write;
         let mut out = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));

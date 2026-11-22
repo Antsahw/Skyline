@@ -14,7 +14,7 @@
 
 use super::super::java_screen::{CHANNEL, CLIENT_WINDOW};
 use super::super::lan::LanHost;
-use super::{Level, RUNTIME, stack_from_120, tracing};
+use super::{Level, runtime, stack_from_120, tracing};
 use horizon_protocol::packets::play::Clientbound as C;
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -32,6 +32,8 @@ struct Open {
     held: Option<i32>,
     /// The frame last sent: an unchanged one is not sent again.
     sent: Option<String>,
+    /// The runtime whose mod opened it: its frames and input go there.
+    loader: horizon_jvm_remote::boot120::Loader,
 }
 
 /// The screens open now, by the player's connection.
@@ -246,6 +248,7 @@ impl super::super::Game<'_> {
                     mouse: (-1, -1),
                     held: None,
                     sent: None,
+                    loader: super::current(),
                 },
             )
         });
@@ -272,13 +275,14 @@ impl super::super::Game<'_> {
     /// One frame of `conn`'s open screen, drawn now and sent if it changed; a screen whose
     /// menu closed (walked away from, its block broken) closes on their game.
     fn send_java120_frame(&mut self, host: &mut LanHost, conn: u32) {
-        let Some((uuid, size, mouse)) = open(|screens| {
+        let Some((uuid, size, mouse, loader)) = open(|screens| {
             screens
                 .get(&conn)
-                .map(|s| (s.uuid.clone(), s.size, s.mouse))
+                .map(|s| (s.uuid.clone(), s.size, s.mouse, s.loader))
         }) else {
             return;
         };
+        let _route = super::route(loader);
         let drawn = self.as_guest(host, conn, |g| {
             let inventory = inventory_json(&g.inventory);
             let at = g
@@ -286,7 +290,7 @@ impl super::super::Game<'_> {
                 .as_ref()
                 .map_or([0.0; 3], |p| [p.position.x, p.position.y, p.position.z]);
             // Busy (a click is being run): this tick's frame is skipped, the next one comes.
-            let Ok(mut guard) = RUNTIME.try_lock() else {
+            let Ok(mut guard) = runtime().try_lock() else {
                 return None;
             };
             let runtime = guard.as_mut()?;
@@ -371,12 +375,17 @@ impl super::super::Game<'_> {
         if window != CLIENT_WINDOW {
             return false;
         }
-        let Some((uuid, call)) = open(|screens| {
+        let Some((uuid, call, loader)) = open(|screens| {
             let screen = screens.get_mut(&conn)?;
-            Some((screen.uuid.clone(), for_runtime(&input, screen)))
+            Some((
+                screen.uuid.clone(),
+                for_runtime(&input, screen),
+                screen.loader,
+            ))
         }) else {
             return false;
         };
+        let _route = super::route(loader);
         let Some(call) = call else {
             // The size or the mouse: the next frame shows them. A new size now, so the screen
             // isn't drawn at the wrong one for a tick.
@@ -456,6 +465,7 @@ mod tests {
             mouse: (-1, -1),
             held: None,
             sent: None,
+            loader: horizon_jvm_remote::boot120::Loader::Fabric,
         };
         let press = for_runtime(
             &json!({"kind": "press", "x": 10, "y": 20, "button": 3, "mods": 3}),

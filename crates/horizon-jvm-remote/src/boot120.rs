@@ -219,6 +219,33 @@ pub fn new_java_options(major: Option<i64>) -> Vec<String> {
 pub struct Runtime120 {
     pub child: Child,
     pub(crate) log: Log,
+    /// The loader the runtime's game runs.
+    pub loader: Loader,
+}
+
+/// A 1.20.1 runtime's mod loader: each runs in a JVM of its own.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Loader {
+    Fabric,
+    Forge,
+}
+
+impl Loader {
+    /// Both, Fabric's first.
+    pub const ALL: [Loader; 2] = [Loader::Fabric, Loader::Forge];
+
+    /// Its index in [`Loader::ALL`].
+    pub fn index(self) -> usize {
+        self as usize
+    }
+
+    /// As horizon-port-pack's instance names it (`mmc-pack.json`'s component), with the version.
+    pub fn component(self) -> (&'static str, &'static str) {
+        match self {
+            Loader::Fabric => ("net.fabricmc.fabric-loader", "0.20.1"),
+            Loader::Forge => ("net.minecraftforge", "47.4.28"),
+        }
+    }
 }
 
 /// Horizon's side of the conversation in phase 1: the runtime's log lines; no world yet, so
@@ -233,6 +260,9 @@ impl Handler for Phase1 {
     }
 
     fn event(&mut self, _: &mut Peer, method: &str, args: Vec<Value>) {
+        if method == "teleport" {
+            crate::mirror120::teleported(&args, &self.log);
+        }
         if method == "log"
             && let Some(line) = args.first().and_then(Value::as_str)
         {
@@ -255,6 +285,7 @@ pub fn start(config: &Fabric120) -> Result<(Runtime120, String), String> {
         jvm_args,
         class_path,
         runtime: RUNTIME.into(),
+        main: None,
         runtime_args: runtime_args(config, &launch),
         dir: config.game_dir.clone(),
         tcp: false,
@@ -266,6 +297,7 @@ pub fn start(config: &Fabric120) -> Result<(Runtime120, String), String> {
     let mut runtime = Runtime120 {
         child,
         log: config.log.clone(),
+        loader: Loader::Fabric,
     };
     let report = runtime.call("start")?;
     Ok((runtime, report))
@@ -291,11 +323,7 @@ impl Runtime120 {
     }
 
     /// A call that asks Horizon nothing back, its answers as they come.
-    pub(crate) fn call_answers(
-        &mut self,
-        command: &str,
-        args: &[Value],
-    ) -> Result<Vec<Value>, String> {
+    pub fn call_answers(&mut self, command: &str, args: &[Value]) -> Result<Vec<Value>, String> {
         let mut handler = Phase1 {
             log: self.log.clone(),
         };
@@ -309,7 +337,19 @@ impl Runtime120 {
         args: &[Value],
         handler: &mut dyn Handler,
     ) -> Result<Vec<Value>, String> {
-        self.child.call(command, args, handler).map_err(|e| {
+        let answer = if timing::on() {
+            let started = std::time::Instant::now();
+            let mut counting = timing::Counting {
+                inner: handler,
+                command,
+            };
+            let answer = self.child.call(command, args, &mut counting);
+            timing::record(self.loader, command, started.elapsed());
+            answer
+        } else {
+            self.child.call(command, args, handler)
+        };
+        answer.map_err(|e| {
             let lines = self.child.last_lines();
             format!(
                 "{command}: {e}; the runtime's last lines:\n{}",
@@ -321,6 +361,119 @@ impl Runtime120 {
     /// Says goodbye and waits for the process to end.
     pub fn stop(mut self) {
         self.child.stop(Duration::from_secs(10));
+    }
+}
+
+/// How long the game waits on each runtime, by call (`HORIZON_120_TIMING=1`): every five
+/// seconds, each call's count, total and longest, the slowest first.
+pub mod timing {
+    use super::Loader;
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+    use std::time::{Duration, Instant};
+
+    struct Table {
+        since: Instant,
+        calls: HashMap<(Loader, String), (u32, Duration, Duration)>,
+        /// The runtime's calls back into Horizon during each call: (call, method).
+        back: HashMap<(String, String), (u32, Duration)>,
+    }
+
+    /// A call's handler, its calls back counted ([`TABLE`]'s `back`).
+    pub(crate) struct Counting<'a, 'b> {
+        pub(crate) inner: &'a mut dyn crate::peer::Handler,
+        pub(crate) command: &'b str,
+    }
+
+    impl crate::peer::Handler for Counting<'_, '_> {
+        fn call(
+            &mut self,
+            peer: &mut crate::peer::Peer,
+            method: &str,
+            args: Vec<crate::wire::Value>,
+        ) -> Result<Vec<crate::wire::Value>, String> {
+            let started = Instant::now();
+            let answer = self.inner.call(peer, method, args);
+            let took = started.elapsed();
+            let mut guard = TABLE.lock().unwrap_or_else(|e| e.into_inner());
+            let table = guard.get_or_insert_with(Table::new);
+            let entry = table
+                .back
+                .entry((self.command.to_owned(), method.to_owned()))
+                .or_insert((0, Duration::ZERO));
+            entry.0 += 1;
+            entry.1 += took;
+            answer
+        }
+
+        fn event(
+            &mut self,
+            peer: &mut crate::peer::Peer,
+            method: &str,
+            args: Vec<crate::wire::Value>,
+        ) {
+            self.inner.event(peer, method, args);
+        }
+    }
+
+    impl Table {
+        fn new() -> Self {
+            Table {
+                since: Instant::now(),
+                calls: HashMap::new(),
+                back: HashMap::new(),
+            }
+        }
+    }
+
+    static TABLE: Mutex<Option<Table>> = Mutex::new(None);
+
+    pub(crate) fn on() -> bool {
+        static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        *ON.get_or_init(|| std::env::var_os("HORIZON_120_TIMING").is_some())
+    }
+
+    pub(crate) fn record(loader: Loader, command: &str, took: Duration) {
+        let mut guard = TABLE.lock().unwrap_or_else(|e| e.into_inner());
+        let table = guard.get_or_insert_with(Table::new);
+        let entry = table.calls.entry((loader, command.to_owned())).or_insert((
+            0,
+            Duration::ZERO,
+            Duration::ZERO,
+        ));
+        entry.0 += 1;
+        entry.1 += took;
+        entry.2 = entry.2.max(took);
+        let window = table.since.elapsed();
+        if window < Duration::from_secs(5) {
+            return;
+        }
+        let mut rows: Vec<_> = table.calls.drain().collect();
+        rows.sort_by_key(|row| std::cmp::Reverse(row.1.1));
+        let total: Duration = rows.iter().map(|r| r.1.1).sum();
+        let mut out = format!(
+            "1.20.1 timing: {:.0} ms of {:.0} ms waiting on the runtimes ({:.1}%)",
+            total.as_secs_f64() * 1000.0,
+            window.as_secs_f64() * 1000.0,
+            total.as_secs_f64() / window.as_secs_f64() * 100.0
+        );
+        for ((loader, command), (count, sum, max)) in rows.iter().take(12) {
+            out.push_str(&format!(
+                "\n  {loader:?} {command}: {count}x, {:.1} ms total, {:.2} ms max",
+                sum.as_secs_f64() * 1000.0,
+                max.as_secs_f64() * 1000.0
+            ));
+        }
+        let mut back: Vec<_> = table.back.drain().collect();
+        back.sort_by_key(|row| std::cmp::Reverse(row.1.0));
+        for ((command, method), (count, sum)) in back.iter().take(6) {
+            out.push_str(&format!(
+                "\n  back into Horizon: {command} -> {method}: {count}x, {:.1} ms in Horizon",
+                sum.as_secs_f64() * 1000.0
+            ));
+        }
+        eprintln!("{out}");
+        table.since = Instant::now();
     }
 }
 

@@ -1252,6 +1252,7 @@
   "horizon.perf.link_hover": "Open the shared profile in your browser.",
   "horizon.mods.runtime.fabric_26_3": "Fabric 26.3",
   "horizon.mods.runtime.fabric_1_20_1": "Fabric 1.20.1",
+  "horizon.mods.runtime.forge_1_20_1": "Forge 1.20.1",
   "horizon.mods.runtime.server": "Server",
   "horizon.shader_packs.empty": "No shader packs: put them in the shaderpacks folder",
   "horizon.shader_packs.kind_horizon": " (Horizon)",

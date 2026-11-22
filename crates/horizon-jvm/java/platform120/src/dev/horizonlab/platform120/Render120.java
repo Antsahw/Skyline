@@ -52,7 +52,7 @@ final class Render120 {
         var client = net.minecraft.client.Minecraft.getInstance();
         // The renderers' font (a sign's text measured): the screens' measuring one.
         Screens120.font();
-        var resources = Models120.clientResources();
+        var resources = Loader120.get().clientResources();
         var models = new net.minecraft.client.model.geom.EntityModelSet();
         models.onResourceManagerReload(resources);
         // Some renderers ask the client for them as they're made (Deeper and Darker's skull).
@@ -64,7 +64,7 @@ final class Render120 {
         // Blocks a renderer draws (a moobloom's flowers on its back) through the client's baked
         // block models (Models120), on the stand-in sprites: split into sprites below.
         var shaper = new net.minecraft.client.renderer.block.BlockModelShaper(null);
-        shaper.replaceCache(Models120.baked());
+        shaper.replaceCache(Loader120.get().baked());
         var blocks = new net.minecraft.client.renderer.block.BlockRenderDispatcher(shaper, null, client.getBlockColors());
         // Some renderers ask the client for it (Friends & Foes' flower layer), as they're made.
         if (client.getBlockRenderer() == null) {
@@ -82,12 +82,12 @@ final class Render120 {
             }
         }
         Mirror120.log(renderers.size() + " mod entity renderer(s) made");
-        featureRenderers(context);
+        Loader120.get().featureRenderers(context);
 
         // Block entity renderers (phase 7b): a cutting board's item, a skillet's food. They draw
         // items through an ItemRenderer over the client's baked item models (Models120).
         var modelManager = Allocate.make(net.minecraft.client.resources.model.ModelManager.class);
-        var topLevel = Models120.topLevel();
+        var topLevel = Loader120.get().topLevel();
         ((dev.horizonlab.platform120.mixin.ModelManagerAccess) modelManager).horizon$setBakedRegistry(topLevel);
         ((dev.horizonlab.platform120.mixin.ModelManagerAccess) modelManager).horizon$setMissingModel(
                 topLevel.get(net.minecraft.client.resources.model.ModelBakery.MISSING_MODEL_LOCATION));
@@ -124,45 +124,6 @@ final class Render120 {
             }
         }
         Mirror120.log(blockRenderers.size() + " mod block entity renderer(s) made");
-    }
-
-    /**
-     * Fabric's `LivingEntityFeatureRendererRegistrationCallback`, as the client fires it while it
-     * makes its entity renderers: mods load their item models there (Epic Knights' shields, whose
-     * item renderer draws nothing until then). Fired once, for a pig's renderer, with a helper
-     * that keeps the layers nowhere (the mods' layers on vanilla's mobs are Horizon's to draw).
-     */
-    private static void featureRenderers(EntityRendererProvider.Context context) {
-        try {
-            // By reflection: Fabric's rendering API is the mods', not on the bridge's classpath.
-            var pig = new net.minecraft.client.renderer.entity.PigRenderer(context);
-            Class<?> callback = Class.forName(
-                    "net.fabricmc.fabric.api.client.rendering.v1.LivingEntityFeatureRendererRegistrationCallback");
-            Class<?> helperType = Class.forName(callback.getName() + "$RegistrationHelper");
-            Object helper = java.lang.reflect.Proxy.newProxyInstance(helperType.getClassLoader(),
-                    new Class<?>[] {helperType}, (proxy, method, args) -> {
-                        if (method.getDeclaringClass() == Object.class) {
-                            return switch (method.getName()) {
-                                case "hashCode" -> System.identityHashCode(proxy);
-                                case "equals" -> proxy == args[0];
-                                default -> "RegistrationHelper";
-                            };
-                        }
-                        return null;
-                    });
-            Object event = callback.getField("EVENT").get(null);
-            Object invoker = event.getClass().getMethod("invoker").invoke(event);
-            for (var method : callback.getMethods()) {
-                if (method.getName().equals("registerRenderers") && method.getParameterCount() == 4) {
-                    method.invoke(invoker, EntityType.PIG, pig, helper, context);
-                }
-            }
-        } catch (ReflectiveOperationException e) {
-            Mirror120.log("the mods' feature renderer hooks failed: " + (e.getCause() != null ? e.getCause() : e));
-        } catch (RuntimeException | LinkageError e) {
-            Mirror120.log("the mods' feature renderer hooks failed: " + e);
-            for (StackTraceElement at : e.getStackTrace()) Mirror120.log("    at " + at);
-        }
     }
 
     /**
@@ -248,7 +209,7 @@ final class Render120 {
         }
         Mirror120.log(custom + " mod item(s) drawn by their code, " + out.size() + " drew something");
         if (textures.isEmpty()) return out.toString();
-        try (var resources = Models120.clientResources()) {
+        try (var resources = Loader120.get().clientResources()) {
             for (String texture : textures) {
                 var location = net.minecraft.resources.ResourceLocation.tryParse(texture);
                 if (location == null) continue;
@@ -273,25 +234,94 @@ final class Render120 {
      */
     static String render(Level level) {
         setUp();
-        JsonObject out = new JsonObject();
+        // Only those a player could see: vanilla's Entity.shouldRenderAtSqrDistance (64 times
+        // the box's mean edge), from the mirror's players here. Horizon draws no farther, and
+        // every mob of a level, drawn each tick, was most of the game's time.
+        var players = level.players();
+        StringBuilder out = new StringBuilder(4096).append('{');
+        boolean first = true;
+        frame++;
         for (Entity entity : Entities120.of(level).getAll()) {
             if (entity.isRemoved()) continue;
+            if (!players.isEmpty() && !seen(entity, players)) continue;
+            // One far from every player is drawn every FAR_EVERY ticks, in turn by its id:
+            // Horizon keeps its last look between (Mobs' "m" left out).
+            if (!players.isEmpty() && (entity.getId() + frame) % FAR_EVERY != 0 && !near(entity, players)) continue;
+            // A type whose renderer threw once draws nothing: it's not asked again each tick.
+            if (BROKEN.contains(entity.getType())) continue;
             @SuppressWarnings("unchecked")
             EntityRenderer<Entity> renderer = (EntityRenderer<Entity>) renderers.get(entity.getType());
             if (renderer == null) continue;
+            String type = null;
+            if (!FAILED.isEmpty()) {
+                type = BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString();
+            }
             Capture capture = new Capture();
             try {
                 renderer.render(entity, entity.getYRot(), 1.0f, new PoseStack(), capture, 0xF000F0);
             } catch (RuntimeException | LinkageError e) {
-                String type = BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString();
+                if (type == null) type = BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString();
+                if (capture.meshes.isEmpty()) BROKEN.add(entity.getType());
                 if (FAILED.add(type)) {
                     Mirror120.log("a " + type + " didn't draw: " + e);
                     for (StackTraceElement at : e.getStackTrace()) Mirror120.log("    at " + at);
                 }
             }
-            out.add(Integer.toString(entity.getId()), capture.meshes());
+            if (!first) out.append(',');
+            first = false;
+            out.append('"').append(entity.getId()).append("\":");
+            capture.meshes(out);
         }
-        return out.toString();
+        return out.append('}').toString();
+    }
+
+    /** Draws counted (render), for the far entities' turns. */
+    private static long frame;
+
+    /** How often (in ticks) an entity far from every player is drawn. */
+    private static final int FAR_EVERY = 4;
+
+    /** Types whose renderer threw before drawing anything (not asked again). */
+    private static final Set<net.minecraft.world.entity.EntityType<?>> BROKEN = new HashSet<>();
+
+    /** Whether a player here is within 24 blocks of `entity` (drawn each tick). */
+    private static boolean near(Entity entity, List<? extends net.minecraft.world.entity.player.Player> players) {
+        for (var player : players) {
+            if (entity.distanceToSqr(player) < 24.0 * 24.0) return true;
+        }
+        return false;
+    }
+
+    /** Whether a player here is near enough to see `entity` (vanilla's render distance). */
+    private static boolean seen(Entity entity, List<? extends net.minecraft.world.entity.player.Player> players) {
+        double range = entity.getBoundingBox().getSize() * 64.0;
+        if (Double.isNaN(range)) range = 64.0;
+        double range2 = range * range;
+        for (var player : players) {
+            if (entity.distanceToSqr(player) < range2) return true;
+        }
+        return false;
+    }
+
+    /** A number as JSON, to four decimals (a vertex's place, UV and normal need no more). */
+    static void number(StringBuilder out, double value) {
+        long r = Math.round(value * 10000.0);
+        if (r < 0) {
+            out.append('-');
+            r = -r;
+        }
+        out.append(r / 10000);
+        long frac = r % 10000;
+        if (frac == 0) return;
+        out.append('.');
+        int digits = 4;
+        while (frac % 10 == 0) {
+            frac /= 10;
+            digits--;
+        }
+        String f = Long.toString(frac);
+        for (int i = f.length(); i < digits; i++) out.append('0');
+        out.append(f);
     }
 
     /** The buffers a renderer writes into: one mesh a texture. */
@@ -306,6 +336,12 @@ final class Render120 {
         }
 
         JsonArray meshes() {
+            StringBuilder out = new StringBuilder();
+            meshes(out);
+            return com.google.gson.JsonParser.parseString(out.toString()).getAsJsonArray();
+        }
+
+        void meshes(StringBuilder out) {
             // Quads written on an atlas (a block drawn on a mob) go each to its own sprite's
             // mesh: the stand-in sprites are slots of U (Sprites120), so a quad's U says which.
             Map<String, Mesh> split = new LinkedHashMap<>();
@@ -314,37 +350,49 @@ final class Render120 {
                     split.merge(e.getKey(), e.getValue(), (a, b) -> a);
                     continue;
                 }
-                List<Double> v = e.getValue().v;
-                for (int q = 0; q + 36 <= v.size(); q += 36) {
+                Mesh from = e.getValue();
+                for (int q = 0; q + 36 <= from.size; q += 36) {
                     double us = 0;
-                    for (int c = 0; c < 4; c++) us += v.get(q + c * 9 + 3);
+                    for (int c = 0; c < 4; c++) us += from.v[q + c * 9 + 3];
                     int slot = (int) Math.floor(us / 4);
                     var sprite = Sprites120.slot(slot);
                     if (sprite == null) continue;
                     String texture = sprite.getNamespace() + ":textures/" + sprite.getPath() + ".png";
                     Mesh mesh = split.computeIfAbsent(texture, t -> new Mesh());
-                    mesh.overlay = e.getValue().overlay;
-                    for (int i = 0; i < 36; i++) mesh.v.add(i % 9 == 3 ? v.get(q + i) - slot : v.get(q + i));
+                    mesh.overlay = from.overlay;
+                    for (int i = 0; i < 36; i++) mesh.add(i % 9 == 3 ? from.v[q + i] - slot : from.v[q + i]);
                 }
             }
-            JsonArray out = new JsonArray();
+            out.append('[');
+            boolean first = true;
             for (var e : split.entrySet()) {
-                if (e.getValue().v.isEmpty()) continue;
-                JsonObject mesh = new JsonObject();
-                mesh.addProperty("tex", e.getKey());
-                mesh.addProperty("o", e.getValue().overlay);
-                JsonArray v = new JsonArray();
-                for (double d : e.getValue().v) v.add((float) d);
-                mesh.add("v", v);
-                out.add(mesh);
+                Mesh mesh = e.getValue();
+                if (mesh.size == 0) continue;
+                if (!first) out.append(',');
+                first = false;
+                out.append("{\"tex\":\"").append(e.getKey()).append("\",\"o\":").append(mesh.overlay).append(",\"v\":[");
+                for (int i = 0; i < mesh.size; i++) {
+                    if (i > 0) out.append(',');
+                    // The ninth of each vertex is its colour, a whole number.
+                    if (i % 9 == 8) out.append((long) mesh.v[i]);
+                    else number(out, mesh.v[i]);
+                }
+                out.append("]}");
             }
-            return out;
+            out.append(']');
         }
     }
 
     /** One texture's vertices, as written. */
     private static final class Mesh implements VertexConsumer {
-        final List<Double> v = new ArrayList<>();
+        double[] v = new double[9 * 64];
+        int size;
+
+        void add(double value) {
+            if (size == v.length) v = java.util.Arrays.copyOf(v, size * 2);
+            v[size++] = value;
+        }
+
         double x, y, z;
         float u, vv, nx, ny, nz;
         int color = -1;
@@ -362,9 +410,9 @@ final class Render120 {
         @Override public void unsetDefaultColor() { fixed = false; }
 
         @Override public void endVertex() {
-            v.add(x); v.add(y); v.add(z); v.add((double) u); v.add((double) vv);
-            v.add((double) nx); v.add((double) ny); v.add((double) nz);
-            v.add((double) Integer.toUnsignedLong(fixed ? fixedColor : color));
+            add(x); add(y); add(z); add(u); add(vv);
+            add(nx); add(ny); add(nz);
+            add(Integer.toUnsignedLong(fixed ? fixedColor : color));
             color = -1;
         }
     }

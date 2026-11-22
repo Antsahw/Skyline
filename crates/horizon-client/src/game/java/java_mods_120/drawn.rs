@@ -6,7 +6,7 @@
 //! at that position (`mesher::set_code_model`). Only where this process runs the mods (single
 //! player, a LAN host's own window), as the 26.3 bridge's mods' fluids.
 
-use super::{Level, RUNTIME, wait_for_runtime};
+use super::{Level, runtime, wait_for_runtime};
 use horizon_jvm_remote::mirror120::{CodeQuad, World120};
 use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
@@ -38,20 +38,24 @@ impl super::super::Game<'_> {
         let mut guard = SERVER.lock().unwrap_or_else(|e| e.into_inner());
         let server = guard.get_or_insert_with(Server::default);
         if server.states.is_none() {
-            let Ok(mut runtime) = RUNTIME.try_lock() else {
-                return;
-            };
-            let Some(runtime) = runtime.as_mut() else {
-                return;
-            };
-            let registry = self.pack.assets.registry;
-            let names = match runtime.drawn_by_code() {
-                Ok(names) => names,
-                Err(e) => {
-                    log::warn!("1.20.1 mods: the blocks their code draws can't be listed: {e}");
-                    Vec::new()
+            // Every runtime's.
+            let mut names = Vec::new();
+            for loader in super::loaders() {
+                let _route = super::route(loader);
+                let Ok(mut runtime) = runtime().try_lock() else {
+                    return;
+                };
+                let Some(runtime) = runtime.as_mut() else {
+                    return;
+                };
+                match runtime.drawn_by_code() {
+                    Ok(theirs) => names.extend(theirs),
+                    Err(e) => {
+                        log::warn!("1.20.1 mods: the blocks their code draws can't be listed: {e}")
+                    }
                 }
-            };
+            }
+            let registry = self.pack.assets.registry;
             let ids: HashSet<u32> = names
                 .iter()
                 .filter_map(|n| {
@@ -109,14 +113,23 @@ impl super::super::Game<'_> {
             server.drawn.remove(&pos);
             out.push((pos, None));
         }
-        if !changed.is_empty() {
+        for loader in super::loaders() {
+            let mine: Vec<_> = changed
+                .iter()
+                .filter(|(pos, _)| self.java120_owner_at(*pos) == Some(loader))
+                .cloned()
+                .collect();
+            if mine.is_empty() {
+                continue;
+            }
+            let _route = super::route(loader);
             let Some(mut runtime) = wait_for_runtime() else {
                 return;
             };
             let Some(runtime) = runtime.as_mut() else {
                 return;
             };
-            for (pos, key) in changed {
+            for (pos, key) in mine {
                 match runtime.render_block(&level, &dimension, pos) {
                     Ok(quads) => {
                         server.drawn.insert(pos, key);

@@ -32,6 +32,9 @@ import net.fabricmc.tinyremapper.TinyUtils;
  *     official, intermediary and named (Mojang's names) in one Tiny v2 file
  * Remap120 remap MAPPINGS.tiny FROM TO IN.jar OUT.jar [CLASSPATH_JAR...]
  *     a jar from one namespace to another (classes, and resources as they are)
+ * Remap120 srg MAPPINGS.tiny MERGED.tsrg OUT.tiny
+ *     MAPPINGS.tiny with a fourth namespace, srg: the names Forge 1.20.1 runs under (Mojang's
+ *     class names, SRG member names), from the installer's mcp_config mappings-merged file
  * </pre>
  *
  * Mojang's 1.20.1 jar remapped to {@code named} is what platform120 compiles against; the
@@ -44,6 +47,8 @@ public final class Remap120 {
     public static void main(String[] args) throws Exception {
         if (args.length == 4 && args[0].equals("mappings")) {
             mappings(Path.of(args[1]), Path.of(args[2]), Path.of(args[3]));
+        } else if (args.length == 4 && args[0].equals("srg")) {
+            srg(Path.of(args[1]), Path.of(args[2]), Path.of(args[3]));
         } else if (args.length >= 6 && args[0].equals("remap")) {
             List<Path> classPath = new ArrayList<>();
             for (int i = 6; i < args.length; i++) classPath.add(Path.of(args[i]));
@@ -51,8 +56,22 @@ public final class Remap120 {
         } else {
             System.err.println("usage: Remap120 mappings INTERMEDIARY_JAR MOJANG_TXT OUT.tiny");
             System.err.println("       Remap120 remap MAPPINGS.tiny FROM TO IN.jar OUT.jar [CLASSPATH_JAR...]");
+            System.err.println("       Remap120 srg MAPPINGS.tiny MERGED.tsrg OUT.tiny");
             System.exit(2);
         }
+    }
+
+    /** {@code mappings}' file with Forge's runtime names added as {@code srg}. */
+    static void srg(Path tinyIn, Path merged, Path out) throws IOException {
+        MemoryMappingTree tree = new MemoryMappingTree();
+        MappingReader.read(tinyIn, MappingFormat.TINY_2_FILE, tree);
+        // The merged file maps official ("left") to Forge's runtime names ("right").
+        MappingReader.read(merged, MappingFormat.TSRG_2_FILE,
+                new MappingNsRenamer(tree, Map.of("left", "official", "right", "srg")));
+        try (var writer = MappingWriter.create(out, MappingFormat.TINY_2_FILE)) {
+            tree.accept(writer);
+        }
+        System.out.println("mappings: " + tree.getClasses().size() + " classes, namespaces " + tree.getSrcNamespace() + " " + tree.getDstNamespaces());
     }
 
     static void mappings(Path intermediaryJar, Path mojang, Path out) throws IOException {

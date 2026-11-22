@@ -1516,8 +1516,8 @@ pub(super) struct PreparedLoopContext {
 }
 
 /// The Mods page's section for each Java runtime with mods installed for it: Fabric 26.3's
-/// (`mods-java/`, when the player turned the Java mods on) and Fabric 1.20.1's
-/// (`mods-java-1.20.1/`), each mod as its jar names it.
+/// (`mods-java/`, when the player turned the Java mods on), Fabric 1.20.1's
+/// (`mods-java-1.20.1/`) and Forge 1.20.1's (`mods-java-forge-1.20.1/`), each mod as its jar names it.
 fn runtime_sections() -> Vec<horizon_client::mod_list::RuntimeMods> {
     #[allow(unused_mut)]
     let mut sections: Vec<horizon_client::mod_list::RuntimeMods> = Vec::new();
@@ -1527,8 +1527,17 @@ fn runtime_sections() -> Vec<horizon_client::mod_list::RuntimeMods> {
         mods: jar_mods(&super::java_mods::mod_jars().1),
     });
     #[cfg(feature = "java-mods-120")]
-    {
-        let dir = Game::options_path().with_file_name(super::java_mods_120::DIR);
+    for (dir, title) in [
+        (
+            super::java_mods_120::DIR,
+            "horizon.mods.runtime.fabric_1_20_1",
+        ),
+        (
+            super::java_mods_120::FORGE_DIR,
+            "horizon.mods.runtime.forge_1_20_1",
+        ),
+    ] {
+        let dir = Game::options_path().with_file_name(dir);
         let mut jars: Vec<_> = std::fs::read_dir(&dir)
             .into_iter()
             .flatten()
@@ -1538,7 +1547,7 @@ fn runtime_sections() -> Vec<horizon_client::mod_list::RuntimeMods> {
             .collect();
         jars.sort();
         sections.push(horizon_client::mod_list::RuntimeMods {
-            title: "horizon.mods.runtime.fabric_1_20_1".into(),
+            title: title.into(),
             mods: jar_mods(&jars),
         });
     }

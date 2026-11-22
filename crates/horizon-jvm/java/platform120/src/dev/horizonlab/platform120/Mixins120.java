@@ -6,8 +6,6 @@ import com.google.gson.JsonParser;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -132,35 +130,20 @@ public final class Mixins120 {
     static synchronized Map<String, List<Handler>> index() {
         if (index != null) return index;
         index = new HashMap<>();
-        try {
-            Object loader = Class.forName("net.fabricmc.loader.api.FabricLoader").getMethod("getInstance").invoke(null);
-            for (Object mod : (Iterable<?>) loader.getClass().getMethod("getAllMods").invoke(loader)) {
-                try {
-                    indexMod(mod);
-                } catch (Throwable e) {
-                    Mirror120.log("a mod's mixins couldn't be read: " + e);
-                }
+        for (var mod : Loader120.get().modMixins()) {
+            try {
+                indexMod(mod);
+            } catch (Throwable e) {
+                Mirror120.log("a mod's mixins couldn't be read: " + e);
             }
-        } catch (ReflectiveOperationException e) {
-            Mirror120.log("the mods' mixins can't be listed: " + e);
         }
         int handlers = index.values().stream().mapToInt(List::size).sum();
         Mirror120.log("the mods' mixins: " + handlers + " @Inject handlers on " + index.size() + " vanilla methods");
         return index;
     }
 
-    private static Optional<byte[]> read(Object mod, String path) throws ReflectiveOperationException {
-        Optional<?> found = (Optional<?>) mod.getClass().getMethod("findPath", String.class).invoke(mod, path);
-        if (found.isEmpty()) return Optional.empty();
-        try {
-            return Optional.of(Files.readAllBytes((Path) found.get()));
-        } catch (java.io.IOException e) {
-            return Optional.empty();
-        }
-    }
-
-    private static JsonObject json(Object mod, String path) throws ReflectiveOperationException {
-        Optional<byte[]> bytes = read(mod, path);
+    private static JsonObject json(Loader120.ModMixins mod, String path) {
+        Optional<byte[]> bytes = mod.read().apply(path);
         if (bytes.isEmpty()) return null;
         try {
             JsonElement e = JsonParser.parseString(new String(bytes.get(), StandardCharsets.UTF_8));
@@ -170,14 +153,8 @@ public final class Mixins120 {
         }
     }
 
-    private static void indexMod(Object mod) throws ReflectiveOperationException {
-        JsonObject meta = json(mod, "fabric.mod.json");
-        if (meta == null || !meta.has("mixins")) return;
-        for (JsonElement entry : meta.getAsJsonArray("mixins")) {
-            String config = entry.isJsonPrimitive() ? entry.getAsString()
-                    : entry.isJsonObject() && entry.getAsJsonObject().has("config")
-                            ? entry.getAsJsonObject().get("config").getAsString() : null;
-            if (config == null) continue;
+    private static void indexMod(Loader120.ModMixins mod) {
+        for (String config : mod.configs()) {
             JsonObject cfg = json(mod, config);
             if (cfg == null) continue;
             JsonObject refmap = null;
@@ -190,7 +167,7 @@ public final class Mixins120 {
                 if (!cfg.has(list) || !cfg.get(list).isJsonArray()) continue;
                 for (JsonElement name : cfg.getAsJsonArray(list)) {
                     String mixin = pkg + "." + name.getAsString();
-                    Optional<byte[]> bytes = read(mod, mixin.replace('.', '/') + ".class");
+                    Optional<byte[]> bytes = mod.read().apply(mixin.replace('.', '/') + ".class");
                     if (bytes.isEmpty()) continue;
                     JsonObject own = refmap != null && refmap.has(mixin.replace('.', '/'))
                             ? refmap.getAsJsonObject(mixin.replace('.', '/')) : null;
