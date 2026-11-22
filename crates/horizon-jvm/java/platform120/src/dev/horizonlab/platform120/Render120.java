@@ -240,9 +240,15 @@ final class Render120 {
         var players = level.players();
         StringBuilder out = new StringBuilder(4096).append('{');
         boolean first = true;
+        frame++;
         for (Entity entity : Entities120.of(level).getAll()) {
             if (entity.isRemoved()) continue;
             if (!players.isEmpty() && !seen(entity, players)) continue;
+            // One far from every player is drawn every FAR_EVERY ticks, in turn by its id:
+            // Horizon keeps its last look between (Mobs' "m" left out).
+            if (!players.isEmpty() && (entity.getId() + frame) % FAR_EVERY != 0 && !near(entity, players)) continue;
+            // A type whose renderer threw once draws nothing: it's not asked again each tick.
+            if (BROKEN.contains(entity.getType())) continue;
             @SuppressWarnings("unchecked")
             EntityRenderer<Entity> renderer = (EntityRenderer<Entity>) renderers.get(entity.getType());
             if (renderer == null) continue;
@@ -255,6 +261,7 @@ final class Render120 {
                 renderer.render(entity, entity.getYRot(), 1.0f, new PoseStack(), capture, 0xF000F0);
             } catch (RuntimeException | LinkageError e) {
                 if (type == null) type = BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString();
+                if (capture.meshes.isEmpty()) BROKEN.add(entity.getType());
                 if (FAILED.add(type)) {
                     Mirror120.log("a " + type + " didn't draw: " + e);
                     for (StackTraceElement at : e.getStackTrace()) Mirror120.log("    at " + at);
@@ -266,6 +273,23 @@ final class Render120 {
             capture.meshes(out);
         }
         return out.append('}').toString();
+    }
+
+    /** Draws counted (render), for the far entities' turns. */
+    private static long frame;
+
+    /** How often (in ticks) an entity far from every player is drawn. */
+    private static final int FAR_EVERY = 4;
+
+    /** Types whose renderer threw before drawing anything (not asked again). */
+    private static final Set<net.minecraft.world.entity.EntityType<?>> BROKEN = new HashSet<>();
+
+    /** Whether a player here is within 24 blocks of `entity` (drawn each tick). */
+    private static boolean near(Entity entity, List<? extends net.minecraft.world.entity.player.Player> players) {
+        for (var player : players) {
+            if (entity.distanceToSqr(player) < 24.0 * 24.0) return true;
+        }
+        return false;
     }
 
     /** Whether a player here is near enough to see `entity` (vanilla's render distance). */

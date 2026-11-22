@@ -86,6 +86,16 @@ public abstract class ServerLevelMixin {
         cir.setReturnValue(dev.horizonlab.platform120.Entities120.of((net.minecraft.world.level.Level) (Object) this));
     }
 
+    /**
+     * A mirror level's scoreboard, the mirror server's empty one, whatever server field the
+     * level was made with (an entity's team, asked as a renderer draws its name).
+     */
+    @Inject(method = "getScoreboard()Lnet/minecraft/server/ServerScoreboard;", at = @At("HEAD"), cancellable = true)
+    private void horizon$scoreboard(CallbackInfoReturnable<net.minecraft.server.ServerScoreboard> cir) {
+        var server = dev.horizonlab.platform120.Mirror120.server();
+        if (server != null && server.getScoreboard() != null) cir.setReturnValue(server.getScoreboard());
+    }
+
     /** A mirror level's players are Horizon's in it this tick (Mirror120.tickEntities). */
     @Inject(method = "players", at = @At("HEAD"), cancellable = true)
     private void horizon$players(CallbackInfoReturnable<java.util.List<net.minecraft.server.level.ServerPlayer>> cir) {

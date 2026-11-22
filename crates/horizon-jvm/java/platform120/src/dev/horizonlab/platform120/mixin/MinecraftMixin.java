@@ -55,4 +55,22 @@ public abstract class MinecraftMixin {
         if (!dev.horizonlab.platform120.Loader120.headless()) return;
         cir.setReturnValue(false);
     }
+
+    @org.spongepowered.asm.mixin.Shadow
+    @org.spongepowered.asm.mixin.Final
+    private net.minecraft.client.Timer timer;
+
+    /**
+     * The partial tick, which a mob's model reads as it poses (Alex's Mobs' setupAnim): the
+     * headless client never made its timer, so a whole tick (the bridge draws once a tick).
+     */
+    @Inject(method = "getFrameTime()F", at = @At("HEAD"), cancellable = true)
+    private void horizon$frameTime(CallbackInfoReturnable<Float> cir) {
+        if (timer == null) cir.setReturnValue(1.0f);
+    }
+
+    @Inject(method = "getDeltaFrameTime()F", at = @At("HEAD"), cancellable = true)
+    private void horizon$deltaFrameTime(CallbackInfoReturnable<Float> cir) {
+        if (timer == null) cir.setReturnValue(1.0f);
+    }
 }

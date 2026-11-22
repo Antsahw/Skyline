@@ -30,6 +30,10 @@ const IDLE_EVERY: u64 = 20;
 /// The server half: how many mobs the last tick had, by runtime (`Loader::index`).
 static LAST_COUNTS: [Mutex<usize>; 2] = [Mutex::new(0), Mutex::new(0)];
 
+/// Each runtime's mobs' last looks (`renderEntities`' meshes), by id: a far one is drawn only
+/// every few ticks.
+static LOOKS: [Mutex<Option<HashMap<i32, Value>>>; 2] = [Mutex::new(None), Mutex::new(None)];
+
 /// Each runtime's mobs as last sent to the players' games.
 static LAST_ENTRIES: [Mutex<Vec<Value>>; 2] = [Mutex::new(Vec::new()), Mutex::new(Vec::new())];
 
@@ -390,16 +394,31 @@ impl Game<'_> {
             return Some((Vec::new(), false));
         }
         let looks: Value = serde_json::from_str(&looks).unwrap_or(Value::Null);
+        // A far mob is drawn every few ticks (Render120): between, its last look.
+        let mut guard = LOOKS[super::current().index()]
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let kept = guard.get_or_insert_with(HashMap::new);
+        if let Some(fresh) = looks.as_object() {
+            for (id, look) in fresh {
+                if let Ok(id) = id.parse::<i32>() {
+                    kept.insert(id, look.clone());
+                }
+            }
+        }
+        let alive: HashSet<i32> = ticked.entities.iter().map(|e| e.id).collect();
+        kept.retain(|id, _| alive.contains(id));
         let entries: Vec<Value> = ticked
             .entities
             .iter()
             .map(|e| {
                 serde_json::json!({
                     "id": e.id, "kind": e.kind, "p": e.pos, "r": e.rot, "s": e.size,
-                    "h": e.health, "m": looks.get(e.id.to_string()).cloned().unwrap_or(Value::Null),
+                    "h": e.health, "m": kept.get(&e.id).cloned().unwrap_or(Value::Null),
                 })
             })
             .collect();
+        drop(guard);
         Some((entries, true))
     }
 
