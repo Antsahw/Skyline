@@ -290,7 +290,7 @@ impl TemplateStore {
             if from_pack {
                 // A pack's template may be an older version's (a 1.20.1 mod's): brought up to
                 // date first (`upgrade_template`), so its renamed blocks are found.
-                let mut tag = crate::nbt::read_named(&raw, Limits::templates()).ok()?.0.tag;
+                let mut tag = horizon_core::nbt::read_named(&raw, Limits::templates()).ok()?.0.tag;
                 upgrade_template(&mut tag);
                 return Some(StructureTemplate::from_nbt(
                     &tag,
@@ -507,28 +507,28 @@ impl StructureResources {
 /// runs it: a template saved by an older version (a mod's for 1.20.1) has its palettes' states,
 /// its blocks' block entities and its entities brought up from its `DataVersion` (500 when it
 /// has none). A block renamed since (`minecraft:grass`) is then found, not read as air.
-pub(crate) fn upgrade_template(tag: &mut crate::nbt::Tag) {
+pub(crate) fn upgrade_template(tag: &mut horizon_core::nbt::Tag) {
     use crate::datafix::{self, schema::Ty};
-    let crate::nbt::Tag::Compound(root) = tag else {
+    let horizon_core::nbt::Tag::Compound(root) = tag else {
         return;
     };
-    let from = match root.get(&crate::nbt::JavaString::from("DataVersion")) {
-        Some(crate::nbt::Tag::Int(v)) => *v,
+    let from = match root.get(&horizon_core::nbt::JavaString::from("DataVersion")) {
+        Some(horizon_core::nbt::Tag::Int(v)) => *v,
         _ => 500,
     };
     let to = horizon_core::version::DATA_VERSION;
     if from >= to {
         return;
     }
-    let fix = |ty: Ty, value: &mut crate::nbt::Tag| datafix::update(ty, value, from, to);
-    if let Some(crate::nbt::Tag::List(palette)) = root.get_mut(&crate::nbt::JavaString::from("palette")) {
+    let fix = |ty: Ty, value: &mut horizon_core::nbt::Tag| datafix::update(ty, value, from, to);
+    if let Some(horizon_core::nbt::Tag::List(palette)) = root.get_mut(&horizon_core::nbt::JavaString::from("palette")) {
         for state in palette.iter_mut() {
             fix(Ty::BlockState, state);
         }
     }
-    if let Some(crate::nbt::Tag::List(palettes)) = root.get_mut(&crate::nbt::JavaString::from("palettes")) {
+    if let Some(horizon_core::nbt::Tag::List(palettes)) = root.get_mut(&horizon_core::nbt::JavaString::from("palettes")) {
         for palette in palettes.iter_mut() {
-            if let crate::nbt::Tag::List(palette) = palette {
+            if let horizon_core::nbt::Tag::List(palette) = palette {
                 for state in palette.iter_mut() {
                     fix(Ty::BlockState, state);
                 }
@@ -539,22 +539,22 @@ pub(crate) fn upgrade_template(tag: &mut crate::nbt::Tag) {
         ("blocks", "nbt", Ty::BlockEntity),
         ("entities", "nbt", Ty::EntityTree),
     ] {
-        if let Some(crate::nbt::Tag::List(list)) = root.get_mut(&crate::nbt::JavaString::from(key)) {
+        if let Some(horizon_core::nbt::Tag::List(list)) = root.get_mut(&horizon_core::nbt::JavaString::from(key)) {
             for entry in list.iter_mut() {
-                if let crate::nbt::Tag::Compound(entry) = entry
-                    && let Some(value) = entry.get_mut(&crate::nbt::JavaString::from(inner))
+                if let horizon_core::nbt::Tag::Compound(entry) = entry
+                    && let Some(value) = entry.get_mut(&horizon_core::nbt::JavaString::from(inner))
                 {
                     fix(ty, value);
                 }
             }
         }
     }
-    root.insert(crate::nbt::JavaString::from("DataVersion"), crate::nbt::Tag::Int(to));
+    root.insert(horizon_core::nbt::JavaString::from("DataVersion"), horizon_core::nbt::Tag::Int(to));
 }
 
 #[cfg(test)]
 mod upgrade_tests {
-    use crate::nbt::{JavaString, Tag};
+    use horizon_core::nbt::{JavaString, Tag};
 
     fn state(name: &str) -> Tag {
         Tag::Compound([(JavaString::from("Name"), Tag::String(name.into()))].into())

@@ -46,7 +46,7 @@ impl ProtoChunk {
             structure_starts,
             own_starts,
             entities: Vec::new(),
-            features: true,
+            saved_root: Default::default(),
             full: false,
         }
     }

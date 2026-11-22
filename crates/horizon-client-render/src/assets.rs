@@ -427,7 +427,7 @@ impl RenderAssets {
                 sprites.insert(name)?;
             }
         }
-        mod_fluids::insert_mod_fluid_sprites(root, registry, &mut sprites, draws)?;
+        mod_fluids::insert_mod_fluid_sprites(root.prepared(), registry, &mut sprites, draws)?;
         for stage in 0..10 {
             sprites.insert(&format!("minecraft:block/destroy_stage_{stage}"))?;
             sprites.insert(&format!("minecraft:block/destroy_oit_stage_{stage}"))?;
@@ -481,8 +481,8 @@ impl RenderAssets {
         // Every block texture of the mods: a model a mod's code makes (LibMultipart's container,
         // drawn per position by the 1.20.1 runtime) names sprites no model file names.
         if draws {
-            for name in crate::mesher::mod_block_sprites(root) {
-                let _ = sprites.insert(root, &name);
+            for name in crate::mesher::mod_block_sprites(root.prepared()) {
+                let _ = sprites.insert(&name);
             }
         }
         sprites.save_disk_cache();

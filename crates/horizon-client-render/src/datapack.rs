@@ -41,6 +41,7 @@ impl DataPack {
             id,
             source,
             selection: None,
+            structures_only: false,
         }
     }
     pub fn source(&self) -> &ResourceSource {
@@ -107,6 +108,7 @@ impl DataPack {
             id,
             source: source.open()?,
             selection: None,
+            structures_only: false,
         })
     }
     /// The built-in `vanilla` pack: the game's own data directory.

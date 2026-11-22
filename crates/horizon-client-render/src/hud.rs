@@ -1267,25 +1267,14 @@ impl HudAtlas {
                 }
             }
         }
-        let assets = root.join("assets");
-        // A native mod's particle type names its textures `<ns>:particle/<path>`
-        // and needn't ship content, so every namespace's folder is packed.
-        if folders.contains(&"particle")
-            && let Ok(namespaces) = fs::read_dir(&assets)
-        {
-            for ns in namespaces.flatten() {
-                if ns.file_name() != "minecraft" {
-                    walk(&ns.path().join("textures/particle"), &mut files);
-                }
-            }
-        }
-        // Content mods' GUI textures, for their screens: `<namespace>:gui/...`.
-        if full && let Ok(namespaces) = fs::read_dir(&assets) {
-            for ns in namespaces.flatten() {
-                if ns.file_name() != "minecraft" {
-                    walk(&ns.path().join("textures/gui"), &mut files);
-                    mod_textures::walk_java_textures(&ns.path(), folders, &mut files);
-                }
+        // The Java mods' own folders (hud/mod_textures.rs).
+        if full {
+            for namespace in root
+                .namespaces("assets")
+                .into_iter()
+                .filter(|namespace| namespace != "minecraft")
+            {
+                mod_textures::walk_java_textures(root, &namespace, folders, &mut files);
             }
         }
         // Large menu pictures load on demand, outside the permanent HUD atlas.

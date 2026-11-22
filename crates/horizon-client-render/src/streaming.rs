@@ -1601,7 +1601,7 @@ impl Streaming {
                 key.0,
                 key.1
             );
-            return;
+            return None;
         }
         // A column that finished after the player moved away is dropped
         // whole: its block entities and saved entities too, or they would

@@ -33,7 +33,7 @@ pub(super) fn insert_mod_fluid_sprites(
             for suffix in ["still", "flow"] {
                 let file = root.join(format!("assets/{ns}/textures/{folder}/{path}_{suffix}.png"));
                 if file.is_file() {
-                    sprites.insert(root, &format!("{ns}:{folder}/{path}_{suffix}"))?;
+                    sprites.insert(&format!("{ns}:{folder}/{path}_{suffix}"))?;
                 }
             }
         }

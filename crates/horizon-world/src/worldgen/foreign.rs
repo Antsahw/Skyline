@@ -36,7 +36,7 @@ pub trait ForeignWorld {
     /// Sets a state (by name); false where it can't be written (outside the region, unknown).
     fn set_block(&mut self, position: [i32; 3], state: &str) -> bool;
     /// Keeps a block entity's NBT (as vanilla saves it) at a position.
-    fn set_block_entity(&mut self, position: [i32; 3], nbt: crate::nbt::Compound) -> bool;
+    fn set_block_entity(&mut self, position: [i32; 3], nbt: horizon_core::nbt::Compound) -> bool;
 }
 
 /// Whoever places the features the generator can't.

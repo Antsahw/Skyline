@@ -55,7 +55,6 @@ pub mod material_extensions;
 pub mod material_stage;
 pub mod material_surface;
 mod noise_seed;
-pub mod native_generate;
 pub mod mod_biome_sources;
 pub mod mod_density_functions;
 pub mod mod_generators;

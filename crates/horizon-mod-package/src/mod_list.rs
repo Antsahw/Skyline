@@ -442,6 +442,8 @@ impl ModList {
             wasm_memory_cap_mib,
             installed: Vec::new(),
             info: BTreeMap::new(),
+            java: Vec::new(),
+            runtimes: Vec::new(),
         }
     }
     pub fn serialize(&self) -> String {

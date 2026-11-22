@@ -5,7 +5,7 @@ use super::*;
 /// states: GUI sheets its code draws by name, Cloth Config's `cloth-config2`) is its too:
 /// nothing names those ids in JSON, but its screens need them.
 pub(super) fn only_textures(
-    zip: &zip::ZipArchive<fs::File>,
+    zip: &crate::zip_intake::Archive<fs::File>,
     candidates: BTreeSet<String>,
 ) -> Vec<String> {
     let mut claimed = Vec::new();

@@ -536,6 +536,24 @@ async fn open_with_retry(
         Ok(opened) => Ok(opened),
     }
 }
+/// Where another part of the process (the Java mods' GPU device) keeps a Vulkan instance it
+/// made, for the window to use too (`open_backend`). Unset: the window makes its own.
+pub static SHARED_INSTANCE: std::sync::OnceLock<fn() -> Option<(wgpu::Instance, wgpu::Adapter)>> =
+    std::sync::OnceLock::new();
+
+/// The window's own Vulkan instance, once made: [`own_instance`].
+static OWN_INSTANCE: std::sync::Mutex<Option<(wgpu::Instance, wgpu::Adapter)>> =
+    std::sync::Mutex::new(None);
+
+/// The window's Vulkan instance and adapter, if it made them, for another device in the process
+/// to share.
+pub fn own_instance() -> Option<(wgpu::Instance, wgpu::Adapter)> {
+    OWN_INSTANCE
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+}
+
 /// Intel Haswell (Gen 7.5) Mesa Vulkan driver (`hasvk`) reports 0.0.0.0 and suffers
 /// from severe vertex buffer corruption and polygon tearing (#9912), but its OpenGL driver
 /// (`crocus`) is fully conformant and stable. Ivy Bridge (`IVB`) keeps Vulkan (#4059).
@@ -561,6 +579,15 @@ async fn open_backend(
     allow_cpu: bool,
 ) -> std::result::Result<Opened, NoDevice> {
     let name = backends_name(backends);
+    // One Vulkan instance and adapter a process: the Java mods' GPU device may have made them
+    // already, and a second enumeration of the devices (another instance's or the same one's)
+    // crashed in the Vulkan loader on a Fedora 43 PC with RADV (linux_read_sorted_physical_devices).
+    let vulkan = backends.contains(wgpu::Backends::VULKAN) && !allow_nonconformant;
+    let shared = if vulkan {
+        SHARED_INSTANCE.get().and_then(|from| from())
+    } else {
+        None
+    };
     let open = |dx12_compiler| {
         wgpu::Instance::new(instance_descriptor(
             backends,
@@ -569,12 +596,45 @@ async fn open_backend(
             dx12_compiler,
         ))
     };
-    let instance = open(wgpu::Dx12Compiler::Fxc);
-    let (surface, adapter) = match surface_and_adapter(&instance, window, offscreen).await {
-        Ok(found) => found,
-        Err(NoDevice::Failed(e)) => return Err(NoDevice::Failed(format!("{name} surface: {e}"))),
-        Err(NoDevice::NoAdapter(e)) => return Err(NoDevice::NoAdapter(format!("{name}: {e}"))),
+    let named = |e: NoDevice| match e {
+        NoDevice::Failed(e) => NoDevice::Failed(format!("{name} surface: {e}")),
+        NoDevice::NoAdapter(e) => NoDevice::NoAdapter(format!("{name}: {e}")),
     };
+    let (instance, surface, adapter) = match shared {
+        Some((instance, adapter)) => {
+            log::info!("Horizon: the window shares the Java mods' Vulkan instance and adapter");
+            let surface = if offscreen {
+                None
+            } else {
+                match instance.create_surface(window.clone()) {
+                    Ok(surface) => Some(surface),
+                    Err(e) => return Err(NoDevice::Failed(format!("{name} surface: {e}"))),
+                }
+            };
+            if surface.as_ref().is_none_or(|s| adapter.is_surface_supported(s)) {
+                (instance, surface, adapter)
+            } else {
+                drop(surface);
+                let (surface, adapter) = surface_and_adapter(&instance, window, offscreen)
+                    .await
+                    .map_err(named)?;
+                (instance, surface, adapter)
+            }
+        }
+        None => {
+            let instance = open(wgpu::Dx12Compiler::Fxc);
+            let (surface, adapter) = surface_and_adapter(&instance, window, offscreen)
+                .await
+                .map_err(named)?;
+            (instance, surface, adapter)
+        }
+    };
+    if vulkan {
+        let mut own = OWN_INSTANCE.lock().unwrap_or_else(|e| e.into_inner());
+        if own.is_none() {
+            *own = Some((instance.clone(), adapter.clone()));
+        }
+    }
     // NoAdapter, so `open_with_retry` asks again: with the non-conformant
     // adapters shown, wgpu ranks a real GPU (hasvk on Ivy Bridge or Haswell)
     // above a software one. The second try's error is final either way.

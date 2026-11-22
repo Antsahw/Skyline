@@ -1,10 +1,6 @@
 //! The Java mod bridge's parts of the HUD atlas: slots for Java mods' dynamic textures
 //! (game/java_screen.rs) and the texture folders their screens, HUD and renderers draw from.
 use super::{PackedImage, walk};
-use std::{
-    fs,
-    path::{Path, PathBuf},
-};
 
 /// Atlas slots for Java mods' dynamic textures (images they draw in memory: Chunk Loaders'
 /// chunk maps; game/java_screen.rs), each [`JAVA_IMAGE_SIZE`] square; bigger images are shrunk.
@@ -76,43 +72,44 @@ fn java_gui_folder(name: &str) -> bool {
     )
 }
 
-/// Java mods (game/java_screen.rs, java_entities.rs): their entity textures,
-/// their block textures (models their block entity renderers draw: Chunk
-/// Loaders' floating core), their particles, HUD mods' sheets (AppleSkin's
-/// `textures/icons.png`, `textures/hud/`) and loose textures, of namespace folder `ns`.
-pub(super) fn walk_java_textures(ns: &Path, folders: &[&str], files: &mut Vec<PathBuf>) {
+/// The texture folders of namespace `ns` the Java mods' screens, HUD and renderers draw from,
+/// beside those the atlas packs for every namespace: their entities' and particles' (when the
+/// atlas isn't packing those folders already), their block textures (models their block entity
+/// renderers draw: Chunk Loaders' floating core), an empty slot's outline among the items, HUD
+/// mods' sheets (AppleSkin's `textures/icons.png`) and loose folders (`textures/hud/`).
+pub(super) fn walk_java_textures(
+    root: &horizon_assets::resource_source::ResourceSource,
+    ns: &str,
+    folders: &[&str],
+    files: &mut Vec<String>,
+) {
+    let textures = format!("assets/{ns}/textures");
     if !folders.contains(&"entity") {
-        walk(&ns.join("textures/entity"), files);
+        walk(root, &format!("{textures}/entity"), files);
     }
     if !folders.contains(&"particle") {
-        walk(&ns.join("textures/particle"), files);
+        walk(root, &format!("{textures}/particle"), files);
     }
-    walk(&ns.join("textures/block"), files);
-    // An empty slot's outline (a bowl where the bowl goes): in 1.20.1 a slot draws it from the
-    // blocks atlas, so it sits among the items, which are otherwise too many to pack here.
-    for file in fs::read_dir(ns.join("textures/item"))
-        .into_iter()
-        .flatten()
-        .flatten()
-    {
-        let name = file.file_name();
-        let name = name.to_string_lossy();
-        if name.starts_with("empty_") && name.ends_with(".png") {
-            files.push(file.path());
+    walk(root, &format!("{textures}/block"), files);
+    for name in root.list(&format!("{textures}/")) {
+        let Some(rest) = name.strip_prefix(&format!("{textures}/")) else {
+            continue;
+        };
+        if !rest.ends_with(".png") {
+            continue;
         }
-    }
-    for file in fs::read_dir(ns.join("textures"))
-        .into_iter()
-        .flatten()
-        .flatten()
-    {
-        let path = file.path();
-        if path.extension().is_some_and(|e| e == "png") {
-            files.push(path);
-        } else if path.is_dir() && file.file_name().to_str().is_some_and(java_gui_folder) {
-            // Any other folder their screens and HUD may blit from
-            // (Simple Voice Chat's `textures/icons/`, `textures/hud/`).
-            walk(&path, files);
+        match rest.split_once('/') {
+            // A sheet straight under `textures/` (AppleSkin's `icons.png`).
+            None => files.push(name.clone()),
+            // An empty slot's outline (a bowl where the bowl goes): in 1.20.1 a slot draws it
+            // from the blocks atlas, so it sits among the items, which are otherwise too many.
+            Some(("item", file)) if file.starts_with("empty_") && !file.contains('/') => {
+                files.push(name.clone())
+            }
+            // Any other folder their screens and HUD may blit from (Simple Voice Chat's
+            // `textures/icons/`, `textures/hud/`).
+            Some((folder, _)) if java_gui_folder(folder) => files.push(name.clone()),
+            _ => {}
         }
     }
 }

@@ -848,7 +848,7 @@ impl super::foreign::ForeignWorld for ForeignRegion<'_, '_> {
         };
         FeatureWorld::set_block(self.world, position, id, 3).unwrap_or(false)
     }
-    fn set_block_entity(&mut self, position: [i32; 3], nbt: crate::nbt::Compound) -> bool {
+    fn set_block_entity(&mut self, position: [i32; 3], nbt: horizon_core::nbt::Compound) -> bool {
         if !self
             .world
             .zone

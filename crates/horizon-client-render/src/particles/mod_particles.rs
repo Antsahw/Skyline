@@ -10,7 +10,7 @@ impl ParticleEngine {
     /// generic `SingleQuadParticle` with the type's sprites (animated by age when it has
     /// several), moving as sent, slowing as most do. Limited like `add`.
     pub fn add_mod(&mut self, id: &str, p: [f64; 3], v: [f64; 3], override_limiter: bool) {
-        let Some(&(set, _)) = self.mod_sets.get(id) else {
+        let Some(set) = self.mod_sets.get(id).map(|m| m.set) else {
             return;
         };
         let c = self.camera;
@@ -34,6 +34,6 @@ impl ParticleEngine {
             q.sprite = Sprite::Index(sprites[0]);
         }
         *self.made.entry("mod").or_default() += 1;
-        self.pending.push(q);
+        self.pending.push(PendingParticle::Ordinary(q));
     }
 }

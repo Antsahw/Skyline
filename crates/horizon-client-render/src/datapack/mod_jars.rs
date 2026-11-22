@@ -1,7 +1,7 @@
 //! Java mods' jars as data packs: a Fabric mod's data, which the mod loader adds as a pack of
 //! its own, and the structures-only packs whose structures alone reach Horizon's generator.
-use super::{DataPack, Source};
-use crate::zip::Zip;
+use super::DataPack;
+use horizon_assets::resource_source::ResourceSource;
 use std::path::Path;
 
 impl DataPack {
@@ -9,8 +9,9 @@ impl DataPack {
     pub fn folder(id: &str, dir: &Path) -> Self {
         DataPack {
             id: id.into(),
-            source: Source::Dir(dir.to_path_buf()),
+            source: ResourceSource::directory(dir.to_path_buf()),
             structures_only: false,
+            selection: None,
         }
     }
     /// A pack in an archive with `data/` at its root, under the id `id`: a
@@ -19,8 +20,9 @@ impl DataPack {
     pub fn archive(id: &str, path: &Path) -> std::io::Result<Self> {
         Ok(DataPack {
             id: id.into(),
-            source: Source::Zip(std::sync::Arc::new(Zip::open(path)?)),
+            source: ResourceSource::archive(path)?,
             structures_only: false,
+            selection: None,
         })
     }
     /// This pack with only its structures' files read by the generator:

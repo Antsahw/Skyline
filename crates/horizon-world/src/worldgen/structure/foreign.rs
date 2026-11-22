@@ -8,7 +8,7 @@
 //! the starts' references and the biome check, as its own starts'), and when a chunk they reach
 //! is decorated it asks it to place the start there (`StructureStart.placeInChunk`) in the region
 //! being decorated. Without one, such structures don't generate, as before.
-use super::BoundingBox;
+use horizon_core::bounding_box::BoundingBox;
 use super::legacy::{LegacyPiece, PieceContext, Result};
 use crate::heightmap::HeightmapType;
 use crate::worldgen::foreign::ForeignWorld;
@@ -181,7 +181,7 @@ impl ForeignWorld for PieceRegion<'_, '_> {
         let r = self.context.world.set(position, id, 2);
         self.keep(r).unwrap_or(false)
     }
-    fn set_block_entity(&mut self, position: [i32; 3], nbt: crate::nbt::Compound) -> bool {
+    fn set_block_entity(&mut self, position: [i32; 3], nbt: horizon_core::nbt::Compound) -> bool {
         if !self.context.chunk_box.is_inside(position) {
             return false;
         }

@@ -979,28 +979,8 @@ impl Attachments {
         ty: &AttachmentType<T>,
     ) -> Result<Option<T>, AttachmentError> {
         ty.validate_policy()?;
-        if self
-            .raw
-            .get(&ty.namespace.into())
-            .is_some_and(|tag| !matches!(tag, Tag::Compound(_)))
-        {
-            return Err(AttachmentError::InvalidNamespace);
-        }
-        match self.entries.get(&(ty.namespace.into(), ty.name.into())) {
-            Some(Entry::Raw(raw)) => {
-                let value = raw_value(raw).ok_or(AttachmentError::Decode)?;
-                Ok(Some((ty
-                    .codec
-                    .as_ref()
-                    .ok_or(AttachmentError::Decode)?
-                    .decode)(value)?))
-            }
-            Some(Entry::Decoded(value)) => value
-                .as_any()
-                .downcast_ref::<T>()
-                .cloned()
-                .map(Some)
-                .ok_or(AttachmentError::TypeMismatch),
+        match self.entry(ty.namespace, ty.name)? {
+            Some(entry) => entry.read(ty).map(|value| Some(value.clone())),
             None => Ok(None),
         }
     }

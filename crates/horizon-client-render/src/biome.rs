@@ -396,7 +396,7 @@ impl Biomes {
             list.push(BiomeInfo::from_json(name.clone(), &v, &maps));
             files_by_name.insert(name, v);
         }
-        mod_biomes::push_mod_biomes(root, &maps, &mut list)?;
+        mod_biomes::push_mod_biomes(root.prepared(), &maps, &mut list)?;
         let index = list
             .iter()
             .enumerate()
