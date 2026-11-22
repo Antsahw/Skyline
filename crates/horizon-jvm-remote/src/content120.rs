@@ -27,7 +27,8 @@ use std::path::{Path, PathBuf};
 /// the mods' block tags, and 26.3's shapes of trees, states and noise providers, so Horizon's
 /// generator places the mods' data features itself rather than the runtime. 13: a mod's own
 /// files for 26.3 (its pack's overlays for 26.3's format: Geophilic's biomes) go in as they are.
-const FORMAT: u32 = 13;
+/// 14: a creative tab whose icon only code draws takes its first item's.
+const FORMAT: u32 = 14;
 
 /// The file under the cache holding the pools the mods add to loot tables ([`loot_added`]).
 pub const LOOT_ADDED: &str = "loot_added.json";
@@ -207,6 +208,21 @@ fn creative_tabs(facts: &Path, carried: &[PathBuf]) -> usize {
         let title = english
             .or_else(|| tab["title"].as_str().map(str::to_owned))
             .unwrap_or_else(|| path.to_owned());
+        // An icon drawn by code alone (`builtin/entity`: Alex's Mobs' `tab_icon`, a turning
+        // mob) draws nothing in a tab: the tab's first item stands for it.
+        let drawn_by_code = icon.split_once(':').is_some_and(|(ins, ipath)| {
+            carried.iter().any(|c| {
+                std::fs::read(
+                    c.join("assets")
+                        .join(ins)
+                        .join(format!("models/item/{ipath}.json")),
+                )
+                .ok()
+                .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
+                .is_some_and(|m| m["parent"].as_str() == Some("builtin/entity"))
+            })
+        });
+        let icon = if drawn_by_code { items[0] } else { icon };
         let dir = carry.join("data").join(ns).join("horizon/creative_tab");
         let file = serde_json::json!({ "title": title, "icon": icon, "items": items });
         if std::fs::create_dir_all(&dir).is_ok()
