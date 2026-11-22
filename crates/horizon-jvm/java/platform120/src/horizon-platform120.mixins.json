@@ -33,7 +33,8 @@
     "ServerPlayerMenuMixin",
     "ServerGamePacketListenerMixin",
     "ConnectionAccess",
-    "ConnectionMixin"
+    "ConnectionMixin",
+    "ChunkMapMixin"
   ],
   "client": [
     "AbstractClientPlayerAccess",
