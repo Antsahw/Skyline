@@ -128,12 +128,8 @@ final class Models120 {
     static MultiPackResourceManager clientResources() {
         List<RepositorySource> sources = new ArrayList<>();
         sources.add(new net.minecraft.client.resources.ClientPackSource(java.nio.file.Path.of("assets-index-unused")));
-        try {
-            Class<?> creator = Class.forName("net.fabricmc.fabric.impl.resource.loader.ModResourcePackCreator");
-            sources.add((RepositorySource) creator.getConstructor(PackType.class).newInstance(PackType.CLIENT_RESOURCES));
-        } catch (ReflectiveOperationException | RuntimeException e) {
-            Mirror120.log("the mods' resource packs can't be listed: " + e);
-        }
+        RepositorySource mods = Loader120.get().modPacks(PackType.CLIENT_RESOURCES);
+        if (mods != null) sources.add(mods);
         PackRepository repository = new PackRepository(sources.toArray(new RepositorySource[0]));
         repository.reload();
         List<String> selected = new ArrayList<>();

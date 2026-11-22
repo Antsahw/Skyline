@@ -54,7 +54,7 @@ final class Worldgen120 {
         Map<ResourceKey<Biome>, List<Set<String>>> before = snapshot(biomes);
         Map<ResourceKey<Biome>, Map<String, JsonObject>> spawnsBefore = spawns(biomes);
         try {
-            net.fabricmc.fabric.impl.biome.modification.BiomeModificationImpl.INSTANCE.finalizeWorldGen(registries);
+            Loader120.get().finalizeBiomes(registries);
         } catch (RuntimeException | LinkageError e) {
             Mirror120.log("the mods' biome modifications failed: " + e);
         }

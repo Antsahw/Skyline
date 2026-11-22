@@ -52,7 +52,7 @@ final class Render120 {
         var client = net.minecraft.client.Minecraft.getInstance();
         // The renderers' font (a sign's text measured): the screens' measuring one.
         Screens120.font();
-        var resources = Models120.clientResources();
+        var resources = Loader120.get().clientResources();
         var models = new net.minecraft.client.model.geom.EntityModelSet();
         models.onResourceManagerReload(resources);
         // Some renderers ask the client for them as they're made (Deeper and Darker's skull).
@@ -64,7 +64,7 @@ final class Render120 {
         // Blocks a renderer draws (a moobloom's flowers on its back) through the client's baked
         // block models (Models120), on the stand-in sprites: split into sprites below.
         var shaper = new net.minecraft.client.renderer.block.BlockModelShaper(null);
-        shaper.replaceCache(Models120.baked());
+        shaper.replaceCache(Loader120.get().baked());
         var blocks = new net.minecraft.client.renderer.block.BlockRenderDispatcher(shaper, null, client.getBlockColors());
         // Some renderers ask the client for it (Friends & Foes' flower layer), as they're made.
         if (client.getBlockRenderer() == null) {
@@ -87,7 +87,7 @@ final class Render120 {
         // Block entity renderers (phase 7b): a cutting board's item, a skillet's food. They draw
         // items through an ItemRenderer over the client's baked item models (Models120).
         var modelManager = Allocate.make(net.minecraft.client.resources.model.ModelManager.class);
-        var topLevel = Models120.topLevel();
+        var topLevel = Loader120.get().topLevel();
         ((dev.horizonlab.platform120.mixin.ModelManagerAccess) modelManager).horizon$setBakedRegistry(topLevel);
         ((dev.horizonlab.platform120.mixin.ModelManagerAccess) modelManager).horizon$setMissingModel(
                 topLevel.get(net.minecraft.client.resources.model.ModelBakery.MISSING_MODEL_LOCATION));
@@ -248,7 +248,7 @@ final class Render120 {
         }
         Mirror120.log(custom + " mod item(s) drawn by their code, " + out.size() + " drew something");
         if (textures.isEmpty()) return out.toString();
-        try (var resources = Models120.clientResources()) {
+        try (var resources = Loader120.get().clientResources()) {
             for (String texture : textures) {
                 var location = net.minecraft.resources.ResourceLocation.tryParse(texture);
                 if (location == null) continue;

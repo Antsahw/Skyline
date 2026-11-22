@@ -420,7 +420,7 @@ public final class Mirror120 {
         ServerLevel level = makeLevel(dimension);
         if (!known) {
             serverLevels().put(level.dimension(), level);
-            if (Events120.started()) Events120.loaded(server, level);
+            if (Loader120.get().serverStarted()) Loader120.get().levelLoaded(server, level);
         }
         return level;
     }
@@ -474,7 +474,7 @@ public final class Mirror120 {
             playerList.getPlayers().add(player);
             ((dev.horizonlab.platform120.mixin.PlayerListAccess) playerList).horizon$setPlayersByUUID(
                     playersByUuid());
-            Events120.joined(server, player);
+            Loader120.get().playerJoined(server, player);
         }
         if (player.level() != level) player.setServerLevel(level);
         return player;
@@ -500,9 +500,6 @@ public final class Mirror120 {
         return map;
     }
 
-    private static volatile int probeClientGot = -1;
-    private static volatile int probeServerGot = -1;
-    private static boolean probeRegistered;
 
     /**
      * A round trip through Fabric's networking, for the tests: the server sends `uuid`'s player
@@ -516,34 +513,7 @@ public final class Mirror120 {
         try {
             ServerLevel level = level("minecraft:overworld");
             ServerPlayer player = player(uuid, name, level);
-            ResourceLocation down = new ResourceLocation("horizon", "probe_down");
-            ResourceLocation up = new ResourceLocation("horizon", "probe_up");
-            if (!probeRegistered) {
-                probeRegistered = true;
-                net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking.registerGlobalReceiver(down,
-                        (client, handler, buf, sender) -> {
-                            int got = buf.readVarInt();
-                            client.execute(() -> {
-                                probeClientGot = got;
-                                var reply = new net.minecraft.network.FriendlyByteBuf(io.netty.buffer.Unpooled.buffer());
-                                reply.writeVarInt(got + 1);
-                                net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking.send(up, reply);
-                            });
-                        });
-                net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.registerGlobalReceiver(up,
-                        (server, from, handler, buf, sender) -> {
-                            int got = buf.readVarInt();
-                            server.execute(() -> probeServerGot = got);
-                        });
-            }
-            probeClientGot = -1;
-            probeServerGot = -1;
-            boolean canDown = net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.canSend(player, down);
-            var buf = new net.minecraft.network.FriendlyByteBuf(io.netty.buffer.Unpooled.buffer());
-            buf.writeVarInt(41);
-            net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.send(player, down, buf);
-            boolean canUp = net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking.canSend(up);
-            return new Object[] {probeClientGot, probeServerGot, canDown, canUp};
+            return Loader120.get().packetProbe(player);
         } finally {
             finish();
         }
@@ -562,14 +532,14 @@ public final class Mirror120 {
             ServerLevel level = level(dimension);
             worldData.setGameTime(gameTime);
             ((dev.horizonlab.platform120.mixin.MinecraftServerAccess) server).horizon$setTickCount((int) gameTime);
-            Events120.start(server, LEVELS.values());
+            Loader120.get().serverStart(server, LEVELS.values());
             // The players' client ticks, where the mods read the keys pressed since the last.
             Keys120.tick(PLAYERS);
             // What the mods inject into a player's tick (Architectury's and Collective's player
             // tick events): Horizon ticks its players itself.
             boolean playerTicks = Mixins120.tickPlayers(level, PLAYERS.values());
-            if (!Events120.anyTickListeners()) return new Object[] {playerTicks};
-            Events120.tick(server, level, gameTime);
+            if (!Loader120.get().anyTickListeners()) return new Object[] {playerTicks};
+            Loader120.get().serverTick(server, level, gameTime);
             return new Object[] {true};
         } finally {
             finish();
@@ -1015,7 +985,7 @@ public final class Mirror120 {
         ServerPlayer player = player(uuid, name, level);
         stand(player, px, py, pz, yaw, pitch, hx, hy, hz);
         mode(player, creative);
-        Events120.around(level, new BlockPos(x, y, z));
+        Loader120.get().around(level, new BlockPos(x, y, z));
         InteractionHand h = hand == 1 ? InteractionHand.OFF_HAND : InteractionHand.MAIN_HAND;
         ItemStack stack = stack(item, count, damage);
         player.setItemInHand(h, stack);
@@ -1050,8 +1020,6 @@ public final class Mirror120 {
         return screen == null ? null : new String[] {"screen:" + screen, ""};
     }
 
-    private static volatile int keyProbeClicks;
-    private static boolean keyProbeRegistered;
 
     /**
      * A key binding and a client-tick listener, for the tests, through Fabric's own API as a
@@ -1072,7 +1040,7 @@ public final class Mirror120 {
             int heard = 0;
             for (int i = 0; i + 2 < positions.length; i += 3) {
                 BlockPos source = new BlockPos(positions[i], positions[i + 1], positions[i + 2]);
-                Events120.around(level, source);
+                Loader120.get().around(level, source);
                 graphNodes(level, source);
                 BlockState from = level.getBlockState(source);
                 for (net.minecraft.core.Direction side : net.minecraft.core.Direction.values()) {
@@ -1135,14 +1103,14 @@ public final class Mirror120 {
     /** The mods' block states drawn by code (Models120), baking the client's models first. */
     public static Object[] drawnByCode() {
         setUp();
-        return new Object[] {Models120.drawnByCode()};
+        return new Object[] {Loader120.get().drawnByCode()};
     }
 
     /** The quads of the block at a position, as its own model draws it there (Models120.render). */
     public static Object[] renderBlock(String dimension, int x, int y, int z) {
         begin();
         try {
-            return Models120.render(level(dimension), new BlockPos(x, y, z));
+            return Loader120.get().render(level(dimension), new BlockPos(x, y, z));
         } finally {
             finish();
         }
@@ -2126,7 +2094,7 @@ public final class Mirror120 {
         var out = new com.google.gson.JsonObject();
         var root = java.nio.file.Path.of(dir);
         var type = net.minecraft.server.packs.PackType.CLIENT_RESOURCES;
-        try (var resources = Models120.clientResources()) {
+        try (var resources = Loader120.get().clientResources()) {
             for (var pack : resources.listPacks().toList()) {
                 String kind = pack.getClass().getName();
                 if (kind.startsWith("net.minecraft.") || kind.startsWith("net.fabricmc.")) continue;
@@ -2254,27 +2222,7 @@ public final class Mirror120 {
     }
 
     public static Object[] keyProbe() {
-        if (!keyProbeRegistered) {
-            keyProbeRegistered = true;
-            // Mods register their keys while they load, before the options exist; Fabric refuses
-            // one after. The probe comes later, so it registers with the options set aside.
-            var client = net.minecraft.client.Minecraft.getInstance();
-            var options = client.options;
-            var access = (dev.horizonlab.platform120.mixin.MinecraftAccess) client;
-            access.horizon$setOptions(null);
-            net.minecraft.client.KeyMapping mapping;
-            try {
-                mapping = net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper.registerKeyBinding(
-                        new net.minecraft.client.KeyMapping("key.horizon.probe", 75, "key.categories.misc"));
-            } finally {
-                access.horizon$setOptions(options);
-            }
-            var probe = mapping;
-            net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents.END_CLIENT_TICK.register(ticking -> {
-                while (probe.consumeClick()) keyProbeClicks++;
-            });
-        }
-        return new Object[] {keyProbeClicks};
+        return Loader120.get().keyProbe();
     }
 
     /** The keys the mods' key bindings are set to, as GLFW's codes (Keys120). */
@@ -2498,7 +2446,7 @@ public final class Mirror120 {
         try {
             Screens120.close(player);
             Keys120.forget(player.getUUID());
-            Events120.left(server, player);
+            Loader120.get().playerLeft(server, player);
             PLAYERS.remove(player.getUUID());
             playerList.getPlayers().remove(player);
             ((dev.horizonlab.platform120.mixin.PlayerListAccess) playerList).horizon$setPlayersByUUID(playersByUuid());
@@ -2614,7 +2562,7 @@ public final class Mirror120 {
             mode(player, creative);
             player.setItemInHand(InteractionHand.MAIN_HAND, heldStack(held));
             BlockPos pos = new BlockPos(x, y, z);
-            Events120.around(level, pos);
+            Loader120.get().around(level, pos);
             boolean goes;
             switch (how) {
                 case BREAK_THEIRS -> {
@@ -2675,7 +2623,7 @@ public final class Mirror120 {
         try {
             ServerLevel level = level(dimension);
             BlockPos pos = new BlockPos(x, y, z);
-            Events120.around(level, pos);
+            Loader120.get().around(level, pos);
             BlockState state = level.getBlockState(pos);
             if (state.isAir()) return new Object[] {0};
             var interaction = decay
@@ -2739,7 +2687,7 @@ public final class Mirror120 {
         int ticked = 0;
         for (int i = 0; i + 2 < positions.length; i += 3) {
             BlockPos pos = new BlockPos(positions[i], positions[i + 1], positions[i + 2]);
-            Events120.around(level, pos);
+            Loader120.get().around(level, pos);
             if (tickOne(level, pos)) ticked++;
         }
         finish();
@@ -2951,7 +2899,7 @@ public final class Mirror120 {
     public static Object[] hopperInsert(String dimension, int x, int y, int z, int face, String stacks) {
         begin();
         try {
-            return new Object[] {Hoppers120.insert(level(dimension), new BlockPos(x, y, z), face, stacks(stacks))};
+            return new Object[] {Loader120.get().hopperInsert(level(dimension), new BlockPos(x, y, z), face, stacks(stacks))};
         } catch (RuntimeException | LinkageError e) {
             hopperFailed(x, y, z, e);
             return new Object[] {Hoppers120.NO_STORAGE};
@@ -2969,7 +2917,7 @@ public final class Mirror120 {
     public static Object[] hopperExtract(String dimension, int x, int y, int z, int face, boolean anyRoom, String partial) {
         begin();
         try {
-            ItemStack one = Hoppers120.extract(level(dimension), new BlockPos(x, y, z), face, anyRoom, stacks(partial));
+            ItemStack one = Loader120.get().hopperExtract(level(dimension), new BlockPos(x, y, z), face, anyRoom, stacks(partial));
             if (one == null) return new Object[] {Hoppers120.NO_STORAGE, ""};
             if (one.isEmpty()) return new Object[] {Hoppers120.NOTHING, ""};
             return new Object[] {0, one.save(new net.minecraft.nbt.CompoundTag()).toString()};

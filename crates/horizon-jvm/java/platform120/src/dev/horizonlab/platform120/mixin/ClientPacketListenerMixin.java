@@ -17,7 +17,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 public abstract class ClientPacketListenerMixin {
     @Inject(method = "send(Lnet/minecraft/network/protocol/Packet;)V", at = @At("HEAD"), cancellable = true)
     private void horizon$send(Packet<?> packet, CallbackInfo ci) {
-        dev.horizonlab.platform120.Packets120.fromClient(packet);
+        dev.horizonlab.platform120.Loader120.get().fromClient(packet);
         ci.cancel();
     }
 

@@ -24,7 +24,7 @@ public abstract class ServerGamePacketListenerMixin {
     @Inject(method = "send(Lnet/minecraft/network/protocol/Packet;)V",
             at = @At("HEAD"), cancellable = true)
     private void horizon$send(Packet<?> packet, CallbackInfo ci) {
-        dev.horizonlab.platform120.Packets120.toClient(this.player, packet);
+        dev.horizonlab.platform120.Loader120.get().toClient(this.player, packet);
         ci.cancel();
     }
 
@@ -32,7 +32,7 @@ public abstract class ServerGamePacketListenerMixin {
             at = @At("HEAD"), cancellable = true)
     private void horizon$sendWithListener(Packet<?> packet,
             net.minecraft.network.PacketSendListener listener, CallbackInfo ci) {
-        dev.horizonlab.platform120.Packets120.toClient(this.player, packet);
+        dev.horizonlab.platform120.Loader120.get().toClient(this.player, packet);
         ci.cancel();
     }
 

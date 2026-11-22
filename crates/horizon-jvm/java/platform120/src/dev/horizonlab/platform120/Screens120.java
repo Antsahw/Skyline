@@ -112,7 +112,7 @@ public final class Screens120 {
         language = true;
         try {
             net.minecraft.locale.Language.inject(net.minecraft.client.resources.language.ClientLanguage.loadFrom(
-                    Models120.clientResources(), java.util.List.of("en_us"), false));
+                    Loader120.get().clientResources(), java.util.List.of("en_us"), false));
         } catch (RuntimeException | LinkageError e) {
             Mirror120.log("the client's language didn't load: " + e);
         }
