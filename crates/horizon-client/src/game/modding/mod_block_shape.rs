@@ -15,8 +15,8 @@
 //! them. An empty list means the mod says there is nothing to aim at, which is not the same as
 //! having no attachment at all -- that one means nobody has asked.
 
-use horizon_world::attachments::{AttachmentCodec, AttachmentError, AttachmentType, Attachments};
-use horizon_world::nbt::{Compound, Tag};
+use horizon_mod_runtime::attachments::{AttachmentCodec, AttachmentError, AttachmentType, Attachments};
+use horizon_core::nbt::{Compound, Tag};
 
 /// One block's boxes, as a mod gives them.
 pub type Boxes = Vec<[f64; 6]>;
@@ -96,7 +96,7 @@ impl super::Game<'_> {
             return Some(found);
         }
         if let Some(r) = self.remote.as_ref() {
-            let holder = horizon_world::attachments::Holder::BlockEntity([x, y, z]);
+            let holder = horizon_mod_runtime::attachments::Holder::BlockEntity([x, y, z]);
             if let Some(found) = r.attachments.get(&holder).and_then(of) {
                 return Some(found);
             }

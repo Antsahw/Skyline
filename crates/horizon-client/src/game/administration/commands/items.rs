@@ -11,7 +11,9 @@ use horizon_client::{
 };
 use horizon_core::nbt::Tag;
 
+#[path = "items/contents.rs"]
 mod contents;
+#[path = "items/slot_sources.rs"]
 pub(in crate::game) mod slot_sources;
 use contents::Component;
 
@@ -3110,4 +3112,5 @@ mod set_custom_data_tests {
 }
 
 #[cfg(test)]
+#[path = "items/item_entity_contents_tests.rs"]
 mod item_entity_contents_tests;

@@ -203,4 +203,5 @@ impl Game<'_> {
 mod tick_status_broadcast_tests;
 
 #[cfg(test)]
+#[path = "misc/random_command_tests.rs"]
 mod random_command_tests;

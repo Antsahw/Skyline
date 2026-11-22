@@ -6,6 +6,7 @@
 //! objective displayed below names. Other players' names (on a LAN host
 //! or a server) show whenever `LivingEntityRenderer.shouldShowName` allows,
 //! and the player's own in third person with the `ownNameTag` extra.
+#[path = "names/java.rs"]
 mod java;
 use super::{Game, view_vector};
 use horizon_client::{

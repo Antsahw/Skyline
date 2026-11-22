@@ -154,7 +154,7 @@ fn floats<const N: usize>(v: &Value) -> Option<[f32; N]> {
 }
 
 fn item(v: &Value) -> Option<Item> {
-    let (tag, _) = horizon_world::nbt::parse_snbt(v.get("item")?.as_str()?).ok()?;
+    let (tag, _) = horizon_core::nbt::parse_snbt(v.get("item")?.as_str()?).ok()?;
     Some(Item {
         stack: horizon_items::item_nbt::item_from_nbt(&tag)?,
         context: horizon_assets::item_model::DisplayContext::by_name(v.get("ctx")?.as_str()?)?,

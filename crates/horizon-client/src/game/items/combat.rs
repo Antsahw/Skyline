@@ -1,5 +1,6 @@
 //! The player's `CombatTracker`: the damage taken lately, who dealt it and
 //! where the player fell from, turned into the vanilla death message.
+#[path = "combat/java.rs"]
 mod java;
 use super::{Game, commands::Target};
 

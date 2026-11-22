@@ -3,6 +3,7 @@ use super::*;
 use horizon_client::vanillagen::TerrainResources;
 use horizon_world::item_defaults::ItemData;
 
+#[path = "world_loading/java.rs"]
 mod java;
 
 pub(super) struct WorldRequest {

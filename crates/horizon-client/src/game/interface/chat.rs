@@ -1,5 +1,6 @@
 //! Chat, the command registries and the per-world state behind commands
 //! (game rules, the world clock, difficulty), bound to the game.
+#[path = "chat/java.rs"]
 mod java;
 #[cfg(test)]
 #[path = "chat/suggestion_completion_tests.rs"]

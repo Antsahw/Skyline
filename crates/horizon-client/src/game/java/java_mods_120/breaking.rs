@@ -50,7 +50,7 @@ pub(in crate::game) fn stack_to_120(stack: &ItemStack) -> String {
         tag.push(format!("display:{{Name:{}}}", quoted(&json)));
     }
     if let Some(data) = stack.data() {
-        use horizon_world::nbt::{Compound, Tag};
+        use horizon_core::nbt::{Compound, Tag};
         let mut rest = Compound::new();
         // A mod's own NBT: 1.20.5's componentization moved the tag's unknown keys into
         // `custom_data`, so they go back to the tag's root (a filled tank's fluid, a tool's mode).

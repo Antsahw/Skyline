@@ -5,10 +5,17 @@
 //! `java_worldgen.rs`, `java_device.rs`).
 #![cfg(not(feature = "java-mods"))]
 
+#[path = "java_hooks/blocks.rs"]
 mod blocks;
+#[path = "java_hooks/entities.rs"]
 mod entities;
+#[path = "java_hooks/lan.rs"]
 mod lan;
+#[path = "java_hooks/players.rs"]
 mod players;
+#[path = "java_hooks/remote.rs"]
 mod remote;
+#[path = "java_hooks/screens.rs"]
 mod screens;
+#[path = "java_hooks/worldgen.rs"]
 mod worldgen;

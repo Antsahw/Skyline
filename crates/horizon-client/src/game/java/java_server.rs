@@ -88,23 +88,31 @@ impl Game<'_> {
 }
 
 #[cfg(not(feature = "java-mods"))]
+#[path = "java_server/off.rs"]
 mod off;
 #[cfg(not(feature = "java-mods"))]
 pub(super) use off::*;
 
 #[cfg(feature = "java-mods")]
+#[path = "java_server/blocks.rs"]
 mod blocks;
 #[cfg(feature = "java-mods")]
+#[path = "java_server/commands.rs"]
 mod commands;
 #[cfg(feature = "java-mods")]
+#[path = "java_server/entities.rs"]
 mod entities;
 #[cfg(feature = "java-mods")]
+#[path = "java_server/items.rs"]
 mod items;
 #[cfg(feature = "java-mods")]
+#[path = "java_server/menus.rs"]
 mod menus;
 #[cfg(feature = "java-mods")]
+#[path = "java_server/players.rs"]
 mod players;
 #[cfg(feature = "java-mods")]
+#[path = "java_server/tick.rs"]
 mod tick;
 #[cfg(feature = "java-mods")]
 pub(super) use self::{blocks::java_block_set, tick::JavaServerState};

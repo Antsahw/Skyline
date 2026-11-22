@@ -2124,18 +2124,23 @@ mod loot_table_tests {
 }
 
 #[cfg(test)]
+#[path = "data/compute_tests.rs"]
 mod compute_tests;
 
 #[cfg(test)]
+#[path = "data/saved_tag_tests.rs"]
 mod saved_tag_tests;
 
 #[cfg(test)]
+#[path = "data/mod_block_entity_tests.rs"]
 mod mod_block_entity_tests;
 
 #[cfg(test)]
+#[path = "data/spectral_merge_tests.rs"]
 mod spectral_merge_tests;
 
 #[cfg(test)]
+#[path = "data/residency_tests.rs"]
 mod residency_tests;
 
 #[cfg(test)]

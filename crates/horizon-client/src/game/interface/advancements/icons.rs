@@ -22,4 +22,5 @@ impl Game<'_> {
 }
 
 #[cfg(test)]
+#[path = "icons/tests.rs"]
 mod tests;

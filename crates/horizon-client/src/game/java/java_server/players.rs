@@ -209,7 +209,7 @@ impl Game<'_> {
                 continue;
             }
             let stack = match item {
-                Some(snbt) => match horizon_world::nbt::parse_snbt(snbt) {
+                Some(snbt) => match horizon_core::nbt::parse_snbt(snbt) {
                     Ok((tag, _)) => horizon_items::item_nbt::item_from_nbt(&tag),
                     Err(_) => continue,
                 },

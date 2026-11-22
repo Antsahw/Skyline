@@ -159,7 +159,7 @@ impl Game<'_> {
         });
         match moved {
             Ok(HopperMove::Moved(snbt)) => Some(
-                horizon_world::nbt::parse_snbt(&snbt)
+                horizon_core::nbt::parse_snbt(&snbt)
                     .ok()
                     .and_then(|(tag, _)| horizon_items::item_nbt::item_from_nbt(&tag)),
             ),
@@ -342,7 +342,7 @@ impl Game<'_> {
             let velocity = change.get("vel").and_then(vec3);
             let new_stack: Option<Option<horizon_client::items::ItemStack>> =
                 match change.get("stack") {
-                    Some(Value::String(snbt)) => match horizon_world::nbt::parse_snbt(snbt) {
+                    Some(Value::String(snbt)) => match horizon_core::nbt::parse_snbt(snbt) {
                         Ok((tag, _)) => Some(horizon_items::item_nbt::item_from_nbt(&tag)),
                         Err(_) => None,
                     },
@@ -571,7 +571,7 @@ impl Game<'_> {
         for drop in now {
             // A vanilla mob a mod added (Carry On putting a carried cow down): Horizon's own.
             if let horizon_jvm::events::Action::SpawnEntity { snbt, .. } = &drop {
-                match horizon_world::nbt::parse_snbt(snbt) {
+                match horizon_core::nbt::parse_snbt(snbt) {
                     Ok((tag, _)) => {
                         if self.load_mob(tag, None).is_none() {
                             log::debug!("Java mods: a mod added an entity Horizon can't load");

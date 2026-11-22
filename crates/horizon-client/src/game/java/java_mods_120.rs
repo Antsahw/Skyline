@@ -675,8 +675,8 @@ fn runtime_within(wait: Duration) -> Option<std::sync::MutexGuard<'static, Optio
 
 /// 26.3's item stacks in `tag`, wherever they are, as 1.20.1 saves them: `count` (an int) is
 /// `Count` (a byte). Components have no way down yet (stack_to_120's are for held items).
-fn stacks_to_120(tag: &mut horizon_world::nbt::Tag) {
-    use horizon_world::nbt::Tag;
+fn stacks_to_120(tag: &mut horizon_core::nbt::Tag) {
+    use horizon_core::nbt::Tag;
     match tag {
         Tag::Compound(c) => {
             let stack = c.contains_key(&"id".into()) && !c.contains_key(&"Count".into());
@@ -726,7 +726,7 @@ const DATA_VERSION_120: i32 = 3465;
 /// spat out keeps its enchantments, and a renamed one its name.
 fn stack_from_120(snbt: &str) -> Option<horizon_client::items::ItemStack> {
     use horizon_world::datafix::{self, schema::Ty};
-    let (mut tag, _) = match horizon_world::nbt::parse_snbt(snbt) {
+    let (mut tag, _) = match horizon_core::nbt::parse_snbt(snbt) {
         Ok(parsed) => parsed,
         Err(e) => {
             log::warn!("1.20.1 mods: a dropped item was not read: {e}");
@@ -861,14 +861,14 @@ impl World120 for Level<'_, '_> {
         // `keepPacked`. A 1.20.1 mod's own block entity is opaque NBT here
         // (`BlockEntity::Mod`), so its items and progress cross as the mod wrote them.
         let mut tag = game.block_entity_nbt([x, y, z])?;
-        if let horizon_world::nbt::Tag::Compound(c) = &mut tag {
+        if let horizon_core::nbt::Tag::Compound(c) = &mut tag {
             c.remove(&"keepPacked".into());
             // Vanilla's block entities are Horizon's, saved as 26.3 saves them: their stacks
             // go down to 1.20.1's form, or they load empty there (a furnace's contents, which
             // Jade shows from the server half).
             let vanilla = matches!(
                 c.get(&"id".into()),
-                Some(horizon_world::nbt::Tag::String(id)) if id.to_string().is_ok_and(|id| id.starts_with("minecraft:"))
+                Some(horizon_core::nbt::Tag::String(id)) if id.to_string().is_ok_and(|id| id.starts_with("minecraft:"))
             );
             if vanilla {
                 stacks_to_120(&mut tag);
@@ -1179,7 +1179,7 @@ impl super::Game<'_> {
             {
                 self.world
                     .attachment_syncs
-                    .insert(horizon_world::attachments::Holder::BlockEntity([x, y, z]));
+                    .insert(horizon_mod_runtime::attachments::Holder::BlockEntity([x, y, z]));
             }
         }
         let all: Vec<[i32; 3]> = positions
@@ -1469,7 +1469,7 @@ impl super::Game<'_> {
             // aims at anything.
             self.world
                 .attachment_syncs
-                .insert(horizon_world::attachments::Holder::BlockEntity([x, y, z]));
+                .insert(horizon_mod_runtime::attachments::Holder::BlockEntity([x, y, z]));
             self.world.modified.insert((x >> 4, z >> 4));
         }
     }
@@ -1478,7 +1478,7 @@ impl super::Game<'_> {
     /// is at `pos` from now on. A mod's own type is kept opaquely (`BlockEntity::Mod`), so it
     /// saves and reloads with the world without Horizon knowing the mod.
     fn set_block_entity_120(&mut self, [x, y, z]: [i32; 3], snbt: &str) {
-        let tag = match horizon_world::nbt::parse_snbt(snbt) {
+        let tag = match horizon_core::nbt::parse_snbt(snbt) {
             Ok((tag, _)) => tag,
             Err(e) => {
                 log::warn!("1.20.1 mods: a block entity at {x} {y} {z}: {e}");
@@ -1501,7 +1501,7 @@ mod tests {
 
     #[test]
     fn a_vanilla_block_entitys_stacks_go_down_to_1_20_1() {
-        let (mut tag, _) = horizon_world::nbt::parse_snbt(
+        let (mut tag, _) = horizon_core::nbt::parse_snbt(
             r#"{id:"minecraft:furnace",Items:[{Slot:0b,id:"minecraft:iron_ore",count:5},{Slot:1b,id:"minecraft:coal",count:300}],CookTime:3s}"#,
         )
         .expect("snbt");
@@ -1588,24 +1588,43 @@ mod tests {
     }
 }
 
+#[path = "java_mods_120/block_renders.rs"]
 pub(in crate::game) mod block_renders;
+#[path = "java_mods_120/breaking.rs"]
 mod breaking;
+#[path = "java_mods_120/commands.rs"]
 mod commands;
+#[path = "java_mods_120/fluids.rs"]
 mod fluids;
+#[path = "java_mods_120/levels.rs"]
 mod levels;
 pub(in crate::game) use fluids::{changed as fluid_changed, is_fluid};
+#[path = "java_mods_120/config.rs"]
 pub(in crate::game) mod config;
+#[path = "java_mods_120/drawn.rs"]
 mod drawn;
+#[path = "java_mods_120/effects.rs"]
 mod effects;
+#[path = "java_mods_120/mobs.rs"]
 pub(in crate::game) mod mobs;
+#[path = "java_mods_120/neighbours.rs"]
 mod neighbours;
+#[path = "java_mods_120/redstone.rs"]
 mod redstone;
 pub(in crate::game) use breaking::Break120;
+#[path = "java_mods_120/hoppers.rs"]
 mod hoppers;
+#[path = "java_mods_120/hud.rs"]
 mod hud;
+#[path = "java_mods_120/items.rs"]
 pub(in crate::game) mod items;
+#[path = "java_mods_120/keys.rs"]
 mod keys;
+#[path = "java_mods_120/screens.rs"]
 mod screens;
+#[path = "java_mods_120/ticks.rs"]
 mod ticks;
+#[path = "java_mods_120/tooltips.rs"]
 pub(in crate::game) mod tooltips;
+#[path = "java_mods_120/worldgen.rs"]
 mod worldgen;

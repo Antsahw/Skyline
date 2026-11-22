@@ -8,6 +8,7 @@
 //!
 //! Every single-player world runs this way; LAN guests and dedicated servers
 //! use the same server code.
+#[path = "integrated/thread_end.rs"]
 mod thread_end;
 use super::{
     Dim, Game, Options, PackResources, Resources, UiResources, WorldIcon,

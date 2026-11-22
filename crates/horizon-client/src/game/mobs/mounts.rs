@@ -4,7 +4,9 @@
 //! mount's health and jump bar on the HUD.
 use super::Game;
 
+#[path = "mounts/java.rs"]
 mod java;
+#[path = "mounts/jump.rs"]
 mod jump;
 use horizon_client::actions::Action;
 use horizon_client::{

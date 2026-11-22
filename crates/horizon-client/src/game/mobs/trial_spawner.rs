@@ -24,6 +24,7 @@ use std::collections::HashMap;
 
 type Pos = (i32, i32, i32);
 
+#[path = "trial_spawner/java.rs"]
 mod java;
 
 impl TrialSpawnerLevel for GameLevel<'_, '_> {

@@ -33,11 +33,13 @@ pub(super) struct JavaGame {
 }
 
 #[cfg(feature = "java-mods")]
+#[path = "java_mods/bridge.rs"]
 mod bridge;
 #[cfg(feature = "java-mods")]
 pub(crate) use bridge::*;
 
 #[cfg(not(feature = "java-mods"))]
+#[path = "java_mods/off.rs"]
 mod off;
 #[cfg(not(feature = "java-mods"))]
 pub(crate) use off::*;

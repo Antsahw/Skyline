@@ -290,7 +290,7 @@ impl JavaTerrain {
     /// The chunk the Java side gave (vanilla's save form), as Horizon's final column.
     fn read(&self, x: i32, z: i32, bytes: &[u8]) -> Option<Chunk> {
         let (root, _) =
-            horizon_world::nbt::read_named(bytes, horizon_world::nbt::Limits::default()).ok()?;
+            horizon_core::nbt::read_named(bytes, horizon_core::nbt::Limits::default()).ok()?;
         // With the save tables, the chunk's scheduled ticks come too: the fluids and blocks
         // the features scheduled (a lake's water, a spring's lava) flow once it is live.
         let tables = self
@@ -309,18 +309,18 @@ impl JavaTerrain {
         // ProtoChunk's post-processing marks (vanilla's PostProcessing: per section, packed
         // x | y << 4 | z << 8): fluids an aquifer or a feature left to update, as
         // LevelChunk.postProcessGeneration does once the chunk is live.
-        if let Some(horizon_world::nbt::Tag::List(sections)) = root.tag.get("PostProcessing") {
+        if let Some(horizon_core::nbt::Tag::List(sections)) = root.tag.get("PostProcessing") {
             let base = match root.tag.get("yPos") {
-                Some(horizon_world::nbt::Tag::Int(y)) => *y,
+                Some(horizon_core::nbt::Tag::Int(y)) => *y,
                 _ => horizon_client::chunk::MIN_Y >> 4,
             };
             for (i, marks) in sections.iter().enumerate() {
-                let horizon_world::nbt::Tag::List(marks) = marks else {
+                let horizon_core::nbt::Tag::List(marks) = marks else {
                     continue;
                 };
                 let sy = (base + i as i32) * 16;
                 for mark in marks {
-                    if let horizon_world::nbt::Tag::Short(p) = mark {
+                    if let horizon_core::nbt::Tag::Short(p) = mark {
                         let p = i32::from(*p);
                         chunk.postprocess.push([
                             x * 16 + (p & 15),
@@ -332,7 +332,7 @@ impl JavaTerrain {
             }
         }
         // Structures' mobs (a villager in its house), as a generated proto chunk holds them.
-        if let Some(horizon_world::nbt::Tag::List(entities)) = root.tag.get("entities") {
+        if let Some(horizon_core::nbt::Tag::List(entities)) = root.tag.get("entities") {
             chunk.entities = entities.clone();
         }
         for s in &mut chunk.sections {
@@ -489,16 +489,16 @@ impl ChunkGenerator for JavaTerrain {
             .flatten()?;
         let column = self.read(p.x, p.z, &bytes)?;
         let (root, _) =
-            horizon_world::nbt::read_named(&bytes, horizon_world::nbt::Limits::default()).ok()?;
+            horizon_core::nbt::read_named(&bytes, horizon_core::nbt::Limits::default()).ok()?;
         let list = |key: &str| match root.tag.get(key) {
-            Some(horizon_world::nbt::Tag::List(l)) => l.clone(),
+            Some(horizon_core::nbt::Tag::List(l)) => l.clone(),
             _ => Vec::new(),
         };
         Some(horizon_client::chunk::SavedProto {
             column,
             decorated: matches!(
                 root.tag.get("horizon:decorated"),
-                Some(horizon_world::nbt::Tag::Byte(1))
+                Some(horizon_core::nbt::Tag::Byte(1))
             ),
             block_entities: list("block_entities"),
             entities: list("entities"),
@@ -529,7 +529,7 @@ impl ChunkGenerator for JavaTerrain {
                 palette.len() as i32 - 1
             });
         }
-        let snbt = |tags: &[horizon_world::nbt::Tag]| -> Vec<String> {
+        let snbt = |tags: &[horizon_core::nbt::Tag]| -> Vec<String> {
             tags.iter().map(horizon_client::snbt::to_snbt).collect()
         };
         if let Err(e) = horizon_jvm::events::worldgen_restore(

@@ -237,7 +237,7 @@ impl Game<'_> {
     /// Horizon's own.
     fn load_mob_120(&mut self, snbt: &str) {
         use horizon_world::datafix::{self, schema::Ty};
-        let mut tag = match horizon_world::nbt::parse_snbt(snbt) {
+        let mut tag = match horizon_core::nbt::parse_snbt(snbt) {
             Ok((tag, _)) => tag,
             Err(e) => {
                 log::warn!("1.20.1 mods: a mob they made was not read: {e}");

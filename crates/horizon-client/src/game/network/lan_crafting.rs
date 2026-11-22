@@ -4,6 +4,7 @@
 //! guest's inventory, with vanilla's packets: OpenScreen, container clicks
 //! and their corrections, and the grid back into the inventory when the menu
 //! closes (`AbstractContainerMenu.clearContainer`).
+#[path = "lan_crafting/java.rs"]
 mod java;
 use super::{Game, transactions::decision::MenuOwner};
 use horizon_client::lan::recipes;

@@ -17,8 +17,10 @@ use serde_json::{Value, json};
 use winit::keyboard::KeyCode;
 
 #[cfg(feature = "java-mods")]
+#[path = "java_screen/host.rs"]
 mod host;
 #[cfg(any(feature = "java-mods", feature = "java-mods-120"))]
+#[path = "java_screen/hud_parts.rs"]
 mod hud_parts;
 #[cfg(feature = "java-mods-120")]
 pub(super) use hud_parts::forget_hud;
@@ -294,7 +296,7 @@ fn sprite_key(id: &str) -> String {
 
 fn stack(o: &Value) -> Option<ItemStack> {
     let snbt = o.get("item")?.as_str()?;
-    let (tag, _) = horizon_world::nbt::parse_snbt(snbt).ok()?;
+    let (tag, _) = horizon_core::nbt::parse_snbt(snbt).ok()?;
     horizon_items::item_nbt::item_from_nbt(&tag)
 }
 

@@ -949,7 +949,7 @@ impl Game<'_> {
                     }
                     let item = |s: &Option<String>| {
                         let snbt = s.as_deref()?;
-                        match horizon_world::nbt::parse_snbt(snbt) {
+                        match horizon_core::nbt::parse_snbt(snbt) {
                             Ok((tag, _)) => horizon_items::item_nbt::item_from_nbt(&tag),
                             Err(e) => {
                                 log::warn!("Java mods: a mod's item {snbt}: {e}");
@@ -1026,7 +1026,7 @@ impl Game<'_> {
                         continue;
                     };
                     let stack = match &item {
-                        Some(snbt) => match horizon_world::nbt::parse_snbt(snbt) {
+                        Some(snbt) => match horizon_core::nbt::parse_snbt(snbt) {
                             Ok((tag, _)) => horizon_items::item_nbt::item_from_nbt(&tag),
                             Err(e) => {
                                 log::warn!("Java mods: a mod's item {snbt}: {e}");
@@ -1081,8 +1081,8 @@ impl Game<'_> {
 
     /// UUIDs in a component (a hover's `show_entity`) as vanilla's NBT has them: int arrays
     /// (UUIDUtil.CODEC), not the lists of ints JSON gives.
-    pub(super) fn uuid_int_arrays(tag: horizon_world::nbt::Tag) -> horizon_world::nbt::Tag {
-        use horizon_world::nbt::Tag;
+    pub(super) fn uuid_int_arrays(tag: horizon_core::nbt::Tag) -> horizon_core::nbt::Tag {
+        use horizon_core::nbt::Tag;
         match tag {
             Tag::Compound(entries) => Tag::Compound(
                 entries

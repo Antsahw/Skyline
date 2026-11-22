@@ -7,6 +7,7 @@
 //! another level: a Respawn packet keeping all data, then a teleport to the
 //! exit once the destination has loaded around them.
 
+#[path = "server_travel/java.rs"]
 mod java;
 use super::end::GatewayJob;
 use super::nether_portal::{PLAYER_DELAY, Plan};

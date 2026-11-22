@@ -12,10 +12,15 @@ use horizon_dualsense::xbox;
 use serde_json::{Value, json};
 use std::time::{Duration, Instant};
 
+#[path = "hardware/face_buttons.rs"]
 mod face_buttons;
+#[path = "hardware/hid_layout.rs"]
 mod hid_layout;
+#[path = "hardware/sdl_row.rs"]
 mod sdl_row;
+#[path = "hardware/trigger_effects.rs"]
 mod trigger_effects;
+#[path = "hardware/triggers.rs"]
 mod triggers;
 
 /// The controllers gilrs sees and the pads' own outputs.

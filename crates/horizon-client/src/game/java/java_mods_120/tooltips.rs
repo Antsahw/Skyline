@@ -320,15 +320,15 @@ mod tests {
             key, r#"{id:"techreborn:red_cell_battery",Count:1b,tag:{energy:1200}}"#,
             "its charge under tag"
         );
-        horizon_world::nbt::parse_snbt(&key).expect("SNBT the runtime reads");
+        horizon_core::nbt::parse_snbt(&key).expect("SNBT the runtime reads");
         // Horizon's own NBT (here its damage) beside it.
         stack.damage = 3;
         let key = stack_key(&stack);
         assert!(key.contains("tag:{Damage:3,energy:1200}"), "{key}");
-        horizon_world::nbt::parse_snbt(&key).expect("SNBT the runtime reads");
+        horizon_core::nbt::parse_snbt(&key).expect("SNBT the runtime reads");
         // Nested compounds keep their braces (a cooking pot's meal under BlockEntityTag).
         let mut pot = ItemStack::new("farmersdelight:cooking_pot", 1);
-        let custom = horizon_world::nbt::parse_snbt(
+        let custom = horizon_core::nbt::parse_snbt(
             r#"{BlockEntityTag:{Inventory:{Items:[{Slot:6b,id:"farmersdelight:beef_stew",Count:2b}]}}}"#,
         )
         .expect("snbt")
@@ -336,7 +336,7 @@ mod tests {
         pot.data_mut()
             .set_other("minecraft:custom_data", Some(custom));
         let key = stack_key(&pot);
-        horizon_world::nbt::parse_snbt(&key).expect("SNBT the runtime reads");
+        horizon_core::nbt::parse_snbt(&key).expect("SNBT the runtime reads");
         assert!(key.contains("Count:2b"), "{key}");
         // A stack with nothing of its own is as before.
         let plain = ItemStack::new("minecraft:bread", 3);

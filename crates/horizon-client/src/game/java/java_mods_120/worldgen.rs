@@ -268,8 +268,8 @@ impl Region120 for Region<'_, '_> {
         }
     }
     fn set_block_entity(&mut self, pos: [i32; 3], snbt: &str) {
-        if let Ok((horizon_world::nbt::Tag::Compound(nbt), _)) =
-            horizon_world::nbt::parse_snbt(snbt)
+        if let Ok((horizon_core::nbt::Tag::Compound(nbt), _)) =
+            horizon_core::nbt::parse_snbt(snbt)
         {
             self.world.set_block_entity(pos, nbt);
         }
@@ -280,7 +280,7 @@ impl Region120 for Region<'_, '_> {
 /// `minecraft:short_grass` since 1.20.3).
 pub(super) fn state_from_120(state: &str) -> String {
     use horizon_world::datafix::{self, schema::Ty};
-    use horizon_world::nbt::Tag;
+    use horizon_core::nbt::Tag;
     let mut tag = Tag::String(state.into());
     datafix::update(
         Ty::FlatBlockState,

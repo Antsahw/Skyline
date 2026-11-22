@@ -12,6 +12,7 @@
 //! game rules, the scoreboard, the maps and the entities waiting to arrive
 //! through a portal.
 
+#[path = "levels/java.rs"]
 mod java;
 use super::commands::Target;
 use super::entity_residency::{define_resident_access, resident_owners};

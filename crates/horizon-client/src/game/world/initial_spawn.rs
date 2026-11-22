@@ -4,6 +4,7 @@
 //! the world spawn within the respawn radius.
 use super::Game;
 
+#[path = "initial_spawn/java.rs"]
 mod java;
 use horizon_client::{
     Result,

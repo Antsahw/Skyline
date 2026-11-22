@@ -224,7 +224,7 @@ impl horizon_jvm::world::Blocks for JavaBlocks<'_> {
         let name = self.registry.state(state)?.name.clone();
         // BlockEntity.saveWithFullMetadata: no chunk-only keepPacked.
         let mut tag = horizon_client::save::encode_block_entity((x, y, z), e, &name);
-        if let horizon_world::nbt::Tag::Compound(c) = &mut tag {
+        if let horizon_core::nbt::Tag::Compound(c) = &mut tag {
             c.remove(&"keepPacked".into());
         }
         Some(horizon_client::snbt::to_snbt(&tag))
@@ -533,7 +533,7 @@ impl Game<'_> {
         if dimension != self.dim.id() {
             return;
         }
-        let tag = match horizon_world::nbt::parse_snbt(snbt) {
+        let tag = match horizon_core::nbt::parse_snbt(snbt) {
             Ok((tag, _)) => tag,
             Err(e) => {
                 log::warn!("Java mods: a block entity at {x} {y} {z}: {e}");
