@@ -149,11 +149,32 @@ public interface Loader120 {
         Holder.headless = true;
     }
 
+    /**
+     * `then` on the render thread once the client has finished loading (its first resource
+     * reload done: the models baked, the loading overlay gone), before it goes headless: Forge's
+     * mods have loaded well before that (FMLLoadCompleteEvent), its models not.
+     */
+    static void whenLoaded(Runnable then) {
+        Holder.whenLoaded = then;
+    }
+
+    /** MinecraftParkMixin, each frame until it has run: the {@link #whenLoaded} waiting, if due. */
+    static void runWhenLoaded(boolean loaded) {
+        Runnable then = Holder.whenLoaded;
+        if (then != null && loaded) {
+            Holder.whenLoaded = null;
+            then.run();
+        }
+    }
+
     final class Holder {
         private Holder() {}
 
         /** Read by the GL mixins from the first GL call: not through LOADER, which is made later. */
         static volatile boolean headless = exists("net.fabricmc.loader.api.FabricLoader");
+
+        /** What waits for the client to finish loading ({@link #whenLoaded}). */
+        static volatile Runnable whenLoaded;
 
         static final Loader120 LOADER = find();
 

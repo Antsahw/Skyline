@@ -44,6 +44,14 @@ fn main() {
                 let path = horizon_jvm_remote::wire::Value::Str(path);
                 println!("facts: {:?}", runtime.call_with("facts", &[path]));
             }
+            // The items drawn by code too (`FORGE120_CODE_ITEMS=DIR`): the models must be baked.
+            if let Ok(dir) = std::env::var("FORGE120_CODE_ITEMS") {
+                let dir = horizon_jvm_remote::wire::Value::Str(dir);
+                println!(
+                    "codeItems: {:?}",
+                    runtime.call_with("codeItems", &[dir]).map(|r| r.len())
+                );
+            }
             runtime.stop();
         }
         Err(e) => {

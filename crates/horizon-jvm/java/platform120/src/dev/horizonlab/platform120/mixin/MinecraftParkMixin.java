@@ -17,7 +17,10 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public abstract class MinecraftParkMixin {
     @Inject(method = "runTick(Z)V", at = @At("HEAD"), cancellable = true)
     private void horizon$park(boolean render, CallbackInfo ci) {
-        if (!dev.horizonlab.platform120.Loader120.headless()) return;
+        if (!dev.horizonlab.platform120.Loader120.headless()) {
+            dev.horizonlab.platform120.Loader120.runWhenLoaded(((Minecraft) (Object) this).getOverlay() == null);
+            return;
+        }
         try {
             Thread.sleep(50);
         } catch (InterruptedException e) {
