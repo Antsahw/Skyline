@@ -137,8 +137,8 @@ pub fn game_args(launch: &Launch, game_dir: &Path) -> Vec<String> {
 }
 
 /// The game folder as Forge's client needs it: the platform among the mods, an empty asset
-/// index, and Forge's early window off (the window Horizon hides comes later; the early one
-/// would flash up first).
+/// index, Forge's early window off (the window Horizon hides comes later; the early one
+/// would flash up first) and Flywheel's backend off.
 pub fn prepare(game_dir: &Path, platform: &Path, jars: &[PathBuf]) -> Result<(), String> {
     let io = |p: &Path, e: std::io::Error| format!("{}: {e}", p.display());
     let mods = game_dir.join("mods");
@@ -168,7 +168,29 @@ pub fn prepare(game_dir: &Path, platform: &Path, jars: &[PathBuf]) -> Result<(),
         std::fs::create_dir_all(fml.parent().unwrap_or(game_dir)).map_err(|e| io(&fml, e))?;
         std::fs::write(&fml, "earlyWindowControl = false\n").map_err(|e| io(&fml, e))?;
     }
+    flywheel_off(&game_dir.join("config/flywheel-client.toml"))?;
     Ok(())
+}
+
+/// Flywheel (Create's renderer) with its backend off: it then leaves the mods' block entities
+/// to their renderers, which the bridge captures, rather than drawing them on the GPU itself
+/// (nothing the bridge sees; the client is hidden). Its config's `backend` line, set before
+/// it loads; the rest of the file as it is.
+fn flywheel_off(path: &Path) -> Result<(), String> {
+    let io = |p: &Path, e: std::io::Error| format!("{}: {e}", p.display());
+    const OFF: &str = "backend = \"flywheel:off\"";
+    let text = std::fs::read_to_string(path).unwrap_or_default();
+    let mut lines: Vec<String> = text.lines().map(str::to_string).collect();
+    match lines
+        .iter_mut()
+        .find(|l| l.trim_start().starts_with("backend"))
+    {
+        Some(line) if line.trim() == OFF => return Ok(()),
+        Some(line) => *line = OFF.to_string(),
+        None => lines.insert(0, OFF.to_string()),
+    }
+    std::fs::create_dir_all(path.parent().unwrap_or(path)).map_err(|e| io(path, e))?;
+    std::fs::write(path, lines.join("\n") + "\n").map_err(|e| io(path, e))
 }
 
 /// Starts Forge's client with the mods and waits for the platform to connect. Returns the
@@ -210,6 +232,28 @@ pub fn start(config: &Forge120) -> Result<(Runtime120, String), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn flywheel_is_set_off_and_its_other_settings_kept() {
+        let dir = std::env::temp_dir().join(format!("horizon-flywheel-{}", std::process::id()));
+        let file = dir.join("config/flywheel-client.toml");
+        flywheel_off(&file).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            "backend = \"flywheel:off\"\n"
+        );
+        std::fs::write(
+            &file,
+            "#Select\nbackend = \"DEFAULT\"\nlimitUpdates = true\n",
+        )
+        .unwrap();
+        flywheel_off(&file).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            "#Select\nbackend = \"flywheel:off\"\nlimitUpdates = true\n"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn the_launch_is_read_and_the_game_gets_its_folders() {
