@@ -45,7 +45,7 @@ fn carries_a_hyphenated_id_and_its_texture_namespace() {
             .join("assets/cloth-config2/textures/gui/cloth_config.png")
             .is_file()
     );
-    let package = horizon_mods::Package::read(&carried).unwrap();
+    let package = horizon_mod_package::Package::read(&carried).unwrap();
     assert_eq!(package.manifest.id, "cloth_config");
     assert_eq!(
         package.manifest.namespaces,

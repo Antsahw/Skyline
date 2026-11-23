@@ -401,6 +401,7 @@ impl PlayerSender {
         let outbox = io_pool::Outbox::new(Arc::clone(&pending), false).unwrap();
         let inspect = outbox.clone();
         let sender = Self {
+            tapped: false,
             payload_transport: transport,
             undrained: Arc::default(),
             pending,
@@ -4329,6 +4330,7 @@ mod outgoing_budget_tests {
             io_pool::Outbox::new(Arc::clone(&pending), !matches!(framing, Framing::Memory))
                 .unwrap();
         PlayerSender {
+            tapped: false,
             payload_transport: Transport::empty(),
             undrained: Arc::default(),
             pending,

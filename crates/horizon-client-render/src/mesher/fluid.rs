@@ -669,6 +669,7 @@ mod tests {
                 (false, false, true, false, false),
                 &pad,
                 || 0x00FF00,
+                None,
                 &mut mesh,
                 [0, 0, 0],
             );
@@ -704,6 +705,7 @@ mod tests {
             (false, false, true, false, false),
             &pad,
             || 0x00FF00,
+            None,
             &mut mesh,
             [0, 0, 0],
         );
@@ -736,6 +738,7 @@ mod tests {
                     keys,
                     &pad,
                     || 0x3F76E4,
+                    None,
                     &mut mesh,
                     [0; 3],
                 );
@@ -785,6 +788,7 @@ mod tests {
                     keys,
                     &pad,
                     || 0x3F76E4,
+                    None,
                     &mut mesh,
                     [0; 3],
                 );

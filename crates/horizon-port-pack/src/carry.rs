@@ -3556,7 +3556,7 @@ mod tests {
         let package = horizon_mod_package::Package::read(&carried).unwrap();
         assert_eq!(package.manifest.namespaces, ["kaisyn", "towers_wg"]);
         // Its structures change the world: every player joining needs it.
-        assert_eq!(package.manifest.side, horizon_mods::Side::Both);
+        assert_eq!(package.manifest.side, horizon_mod_package::manifest::Side::Both);
         let content = horizon_mod_package::Content::read(&carried, &package.manifest).unwrap();
         assert!(
             content
@@ -3608,8 +3608,8 @@ mod tests {
             mods: &|_| false,
         };
         carry(&jar, &info, &out, None, &|_| true, &pack, &BTreeMap::new()).unwrap();
-        let package = horizon_mods::Package::read(&out.join("carry")).unwrap();
-        assert_eq!(package.manifest.side, horizon_mods::Side::Client);
+        let package = horizon_mod_package::Package::read(&out.join("carry")).unwrap();
+        assert_eq!(package.manifest.side, horizon_mod_package::manifest::Side::Client);
         fs::remove_dir_all(&dir).unwrap();
     }
 

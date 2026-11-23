@@ -4,7 +4,7 @@ use super::*;
 /// From this many own states, a block's declaration lists them as a `state_table` (each
 /// property's values and the distinct shapes once, a row of indices per state) instead of a
 /// `states` array: ALA Industrial's pipes (76,832 states each) took 18.8 MB as an array, over
-/// the content fence (`horizon_mods::content::MAX_FILE`), and the whole mod was dropped.
+/// the content fence (`horizon_mod_package::content::MAX_FILE`), and the whole mod was dropped.
 pub const STATE_TABLE_FROM: usize = 1024;
 
 /// `states` (the declaration's array) as it goes in the file: the array itself when short,
@@ -130,11 +130,11 @@ mod tests {
         let files: &[(&str, &[u8])] = &[("data/pipes/horizon/block/pipe.json", &file)];
         std::fs::write(
             &path,
-            horizon_mods::Package::write_files(manifest, None, files).unwrap(),
+            horizon_mod_package::Package::write_files(manifest, files).unwrap(),
         )
         .unwrap();
-        let package = horizon_mods::Package::read(&path).unwrap();
-        let content = horizon_mods::Content::read(&path, &package.manifest).unwrap();
+        let package = horizon_mod_package::Package::read(&path).unwrap();
+        let content = horizon_mod_package::Content::read(&path, &package.manifest).unwrap();
         std::fs::remove_dir_all(&dir).unwrap();
         let read = &content.blocks[0].states;
         assert_eq!(read.len(), states.len());

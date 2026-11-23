@@ -3216,7 +3216,8 @@ mod tests {
         let facts = serde_json::json!({"defaults": {"minecraft:air": 0, "minecraft:water": 1},
             "states": [["minecraft:air", false, false, "", "minecraft:air"], row("0"), row("1")]});
         let registry = BlockRegistry::from_facts_json(facts.to_string().as_bytes()).unwrap();
-        let read = |raw: Value| state(&registry, &raw).unwrap().0;
+        let codec = crate::registry::BlockStateJsonCodec::new(&registry, Default::default()).unwrap();
+        let read = |raw: Value| state(&codec, &raw).unwrap().0;
         assert_eq!(
             read(serde_json::json!({"id": "minecraft:water", "properties": {"level": "1"}})),
             2

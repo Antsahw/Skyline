@@ -25,7 +25,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let start = kept_mb();
     let assets = Assets::load(root)?;
     let after_assets = kept_mb();
-    let render = RenderAssets::load(root, &assets)?;
+    let render = RenderAssets::load(
+        &horizon_client_render::resource_source::ResourceRoot::directory(root.to_path_buf()),
+        &assets,
+    )?;
     let after_render = kept_mb();
     let pixels = render.pixels.len() >> 20;
     let mut render = render;
@@ -41,10 +44,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     step("the item model library", &mut last);
     render.animations = Vec::new();
     step("the animations' frames", &mut last);
-    render.pixels = Vec::new();
     render.pbr_normals = Vec::new();
     render.pbr_specular = Vec::new();
-    step("the pixels and PBR maps", &mut last);
+    step("the PBR maps", &mut last);
     drop(render);
     let after_drop = kept_mb();
     eprintln!(

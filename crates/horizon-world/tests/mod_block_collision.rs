@@ -15,10 +15,10 @@ use horizon_world::{
     entity_obstruction::EntityIdentity,
     fluid::FluidState,
     liquid_collision::LiquidCollisionWorld,
-    nbt::Tag,
     powder_snow_collision::{PowderSnowEntity, PowderSnowWorld},
     registry::{BlockRegistry, BlockStateId},
 };
+use horizon_core::nbt::Tag;
 use std::sync::Arc;
 
 /// No block entities, no fluids: every query the shapes here make has an answer.

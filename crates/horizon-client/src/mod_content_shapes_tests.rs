@@ -27,7 +27,9 @@ fn own_states_boxes_drive_outline_collision_and_occlusion() {
             ),
         ],
     );
-    let root = resource_root(&base, &[m], &scratch.join("cache")).unwrap();
+    let mods = [m];
+    let root =
+        resource_root_fixture(&base, Path::new(""), &mods, &scratch.join("cache")).unwrap();
     let assets = Assets::load(&root).unwrap();
     let registry = assets.registry;
     let facts = BlockFacts::load(&root, registry).unwrap();

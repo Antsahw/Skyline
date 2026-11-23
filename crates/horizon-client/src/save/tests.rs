@@ -4062,7 +4062,6 @@ fn world_stem_compatibility_flags_unstable_and_customized_worlds() {
             7,
             WorldGen {
                 preset,
-                    mod_preset: None,
                 mod_preset: None,
                 structures: true,
                 bonus_chest: false,
@@ -4371,6 +4370,7 @@ fn the_debug_preset_is_saved_and_read_back() {
         7,
         WorldGen {
             preset: WorldPreset::Debug,
+            mod_preset: None,
             structures: true,
             bonus_chest: false,
         },

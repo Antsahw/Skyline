@@ -87,6 +87,7 @@ fn faces(tables: &MeshTables, parts: &PartTables) -> [Vec<u16>; 6] {
         (false, false, true, false, false),
         &pad,
         || 0x3F76E4,
+        None,
         &mut mesh,
         [0, 0, 0],
     );

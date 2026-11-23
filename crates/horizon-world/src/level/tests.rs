@@ -884,6 +884,7 @@ fn a_set_block_names_the_position_whose_neighbours_it_updates() {
             self.seen.borrow_mut().push(source);
         }
     }
+    impl crate::level::BlockEntityNeighbors for Observer {}
     let Some(f) = fixture() else { return };
     let b = &f.behaviours;
     let mut level = Observer {
