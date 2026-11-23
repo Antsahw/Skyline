@@ -29,7 +29,7 @@ use std::path::{Path, PathBuf};
 /// files for 26.3 (its pack's overlays for 26.3's format: Geophilic's biomes) go in as they are.
 /// 14: a creative tab whose icon only code draws takes its first item's. 15: the mods' block
 /// tints ([`BLOCK_TINTS`]). 16: their items' tints ([`item_tints`]).
-const FORMAT: u32 = 16;
+const FORMAT: u32 = 17;
 
 /// The file under the cache holding the pools the mods add to loot tables ([`loot_added`]).
 pub const LOOT_ADDED: &str = "loot_added.json";

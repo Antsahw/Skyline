@@ -755,6 +755,8 @@ pub struct Streaming {
     /// Cached face visibility and scratch buffers for synchronous edit meshing (`mesh_immediate`).
     immediate_faces: Faces,
     immediate_scratch: MeshScratch,
+    /// Frames left before nearby sections are meshed synchronously again (`NEARBY_COOLDOWN_FRAMES`).
+    nearby_cooldown: immediate_mesh::NearbyCooldown,
 }
 /// Snapshot only after a scan found no missing candidates. Public range fields
 /// and `World::chunks` can change without going through Streaming, so compare
@@ -1340,6 +1342,7 @@ impl Streaming {
             band_ranked: None,
             immediate_faces: None,
             immediate_scratch: MeshScratch::default(),
+            nearby_cooldown: Default::default(),
         }
     }
     /// Shares generation resources, but gives distant work its own worker state.

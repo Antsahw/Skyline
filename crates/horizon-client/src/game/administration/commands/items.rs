@@ -618,6 +618,7 @@ impl Game<'_> {
         slot: &Slot,
         stack: Option<ItemStack>,
     ) -> bool {
+        let stack = stack.filter(|s| s.count > 0 && &*s.item != "minecraft:air");
         self.equipment_slot_accepts(slot, &stack) && self.slot_set(slot, stack)
     }
     /// Put a stack (or nothing) in a slot; false when the slot cannot take it.
@@ -632,6 +633,7 @@ impl Game<'_> {
         stack: Option<ItemStack>,
         effects: bool,
     ) -> bool {
+        let stack = stack.filter(|s| s.count > 0 && &*s.item != "minecraft:air");
         if matches!(
             s,
             Slot::Inv(_) | Slot::MainHand | Slot::Armor(_) | Slot::Offhand | Slot::Equipment(_)

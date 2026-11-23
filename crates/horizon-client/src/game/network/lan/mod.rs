@@ -3490,6 +3490,8 @@ impl Game<'_> {
             // Players held until the Java mods' load functions ran (lan/java.rs).
             .chain(self.held_joins_spawn_area())
             .chain(self.viewed_extra())
+            // The chunk the world spawn search is waiting for after a reset, which no player has loaded.
+            .chain(self.world_spawn_search_area())
             .collect();
     }
 

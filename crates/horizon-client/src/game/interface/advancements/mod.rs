@@ -27,6 +27,7 @@ use std::{
     time::Instant,
 };
 
+mod location_memo;
 #[cfg(test)]
 mod progress_tests;
 
@@ -163,6 +164,9 @@ pub(super) struct AdvState {
     inventory_index: Option<(Arc<Tree>, Arc<adv::InventoryIndex>)>,
     /// Reusable candidate list for `tick_advancements` so matching ticks avoid allocating.
     tick_candidates: Vec<(usize, usize)>,
+    /// How many `/reload`s the game has applied: the tree stays the same one when the packs add
+    /// no advancements, though the tags the criteria read changed.
+    reloads: u32,
 }
 impl AdvState {
     /// Drop the prefetched tree and the index built for the old one (a
@@ -170,6 +174,7 @@ impl AdvState {
     pub(super) fn reset_tree(&mut self) {
         self.pending_tree = None;
         self.inventory_index = None;
+        self.reloads = self.reloads.wrapping_add(1);
     }
 }
 /// The game's world for predicates.
@@ -1638,16 +1643,7 @@ impl Game<'_> {
         if self.own_tick_count().is_some_and(|n| n % 20 == 0)
             && self.has_open_trigger("minecraft:location")
         {
-            let me = self.player_entity_for("minecraft:location");
-            self.trigger("minecraft:location", |c, w| {
-                let ctx = adv::Entities {
-                    this: Some(&me),
-                    origin: me.position,
-                    tool: None,
-                    block_pos: None,
-                };
-                adv::conditions(&c["player"], &ctx, w)
-            });
+            self.tick_location();
         }
     }
     /// A player condition plus one entity (`player`, `entity` keys).
@@ -2846,6 +2842,7 @@ impl Game<'_> {
         }
         for id in &p.removed {
             self.adv.progress.criteria.remove(id);
+            self.adv.progress.memo = None;
         }
         for a in p.added {
             list.retain(|o| o.id != a.id);
@@ -2903,6 +2900,7 @@ impl Game<'_> {
                 .map(|(name, _)| (name, String::new()))
                 .collect();
             self.adv.progress.criteria.insert(id, obtained);
+            self.adv.progress.memo = None;
             let a = &tree.list[i];
             if !p.reset
                 && p.show

@@ -1306,6 +1306,23 @@ pub trait LevelsBackendMut {
         count: i32,
     ) -> bool;
     /// Side: server.
+    /// `level_send_particles` around each of `positions`, in order, in one call:
+    /// every position is checked as the single one is, and all of them are
+    /// queued or none if any would be refused. It saves the mod's calls only:
+    /// each position is still a request of its own. An empty list queues
+    /// nothing and answers true; more than 4096 positions answer false.
+    #[access(WorldOnly)]
+    fn level_send_particles_at(
+        &mut self,
+        level: LevelRef,
+        options: &ParticleOptions,
+        state: Option<BlockState>,
+        positions: &[[f64; 3]],
+        spread: [f64; 3],
+        speed: f64,
+        count: i32,
+    ) -> bool;
+    /// Side: server.
     /// Plays level event `id` at `pos` with `data` for the players near it
     /// (`Level.levelEvent(null, id, pos, data)`): `1000`s are sounds, `2000`s
     /// particles, as vanilla's `LevelEvent` numbers them (`2001` breaks a
@@ -1552,7 +1569,8 @@ pub trait LevelsBackendMut {
     /// they award). True once the orbs are awarded, even if a mod keeps a new
     /// one out (`entity_join_level`). False, with no orbs, for 0, a
     /// value that isn't finite, on a client, for a stale handle or a level
-    /// not in place.
+    /// not in place. One call awards at most 1,000,000 points (about 400
+    /// orbs): a larger `amount` is cut to that, so award in several calls.
     #[access(WorldOnly)]
     fn level_award_experience(
         &mut self,
