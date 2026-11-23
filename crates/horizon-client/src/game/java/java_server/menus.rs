@@ -108,7 +108,7 @@ impl Game<'_> {
             if let Err(e) = clicked {
                 log::warn!("Java mods: a click in a mod's menu failed: {e}");
             }
-            self.apply_java_actions(Some(self.hub_host()));
+            self.apply_java_actions(None);
             true
         }
     }
@@ -151,7 +151,7 @@ impl Game<'_> {
             if let Err(e) = ran {
                 log::warn!("Java mods: input to a mod's screen failed: {e}");
             }
-            self.apply_java_actions(Some(self.hub_host()));
+            self.apply_java_actions(None);
         }
     }
 
@@ -197,7 +197,7 @@ impl Game<'_> {
             if let Err(e) = closed {
                 log::warn!("Java mods: closing a mod's menu failed: {e}");
             }
-            self.apply_java_actions(Some(self.hub_host()));
+            self.apply_java_actions(None);
             true
         }
     }

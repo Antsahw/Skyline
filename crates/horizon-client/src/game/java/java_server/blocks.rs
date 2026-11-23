@@ -223,10 +223,7 @@ impl horizon_jvm::world::Blocks for JavaBlocks<'_> {
         let state = chunks.get(&(x >> 4, z >> 4))?.block(x & 15, y, z & 15);
         let name = self.registry.state(state)?.name.clone();
         // BlockEntity.saveWithFullMetadata: no chunk-only keepPacked.
-        let mut tag = horizon_client::save::encode_block_entity((x, y, z), e, &name);
-        if let horizon_core::nbt::Tag::Compound(c) = &mut tag {
-            c.remove(&"keepPacked".into());
-        }
+        let tag = horizon_client::save::block_entity_data((x, y, z), e, &name, None);
         Some(horizon_client::snbt::to_snbt(&tag))
     }
     fn light(&self, dimension: &str, x: i32, y: i32, z: i32) -> Option<u8> {

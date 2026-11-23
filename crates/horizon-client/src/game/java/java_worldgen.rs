@@ -59,6 +59,7 @@ pub(super) struct NoiseWorld {
     /// The game's biomes with the world's packs over them.
     pub(super) biomes: Arc<Biomes>,
     pub(super) seed: i64,
+    pub(super) item_data: Arc<horizon_world::item_defaults::ItemData>,
 }
 
 /// The land of a dimension whose noise the mods change (Tectonic's density functions): the
@@ -113,11 +114,16 @@ impl NoiseLand {
         for warning in warnings {
             log::warn!("Java mods: far terrain's noise: {warning}");
         }
+        let resources = horizon_client::vanillagen::TerrainResources {
+            data: None,
+            dir: &w.bundle,
+            registry: self.registry,
+            biomes: &w.biomes,
+            item_data: &w.item_data,
+        };
         match VanillaTerrain::for_world_with(
-            &w.bundle,
+            resources,
             &overrides,
-            self.registry,
-            &w.biomes,
             w.seed,
             &w.preset,
             &self.dimension,

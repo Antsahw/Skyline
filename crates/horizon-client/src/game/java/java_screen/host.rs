@@ -46,6 +46,7 @@ impl Game<'_> {
 
     /// A frame of a player's mod screen, from Java: to their game, for their window.
     pub(in crate::game) fn send_java_screen_frame(
+        host: &mut LanHost,
         conn: u32,
         window: i32,
         frame: &str,

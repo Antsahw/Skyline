@@ -53,6 +53,9 @@ pub enum Action {
     Back,
     /// Config: the settings page of the native mod at this index of `ModList::installed`.
     Config(usize),
+    /// Config of a Java mod (Skyline): its settings screen, `ModList::java`'s index; the
+    /// server opens it (game/java_screen.rs).
+    JavaConfig(usize),
     /// Homepage, Issues or the license: this link, through a confirmation.
     Link(String),
     /// A click to copy the mod id or version.
@@ -78,6 +81,8 @@ struct Entry {
     index: Option<usize>,
     /// It has a settings page for Config to open.
     config: bool,
+    /// A Java mod's settings screen Config opens instead (`ModList::java`'s index).
+    java_config: Option<usize>,
     /// Why it is not running, or that it is not on; stays above the scroller.
     status: Option<Text>,
     /// Dependency-policy notices, independently scrollable below the status.
@@ -325,9 +330,36 @@ impl ModsScreen {
                     .native
                     .as_ref()
                     .is_some_and(|page| !page.settings.is_empty()),
+                java_config: None,
                 status,
                 note,
             });
+        }
+        // Skyline: each Java runtime's mods (Fabric 26.3, Fabric/Forge 1.20.1), with the
+        // runtime as their status line.
+        for (r, runtime) in mods.runtimes.iter().enumerate() {
+            for (m, java) in runtime.mods.iter().enumerate() {
+                let key = format!("java/{r}/{m}/icon");
+                if let Some(icon) = &java.icon {
+                    icons.insert(key.clone(), Arc::from(icon.as_slice()));
+                }
+                let (name, version) = java
+                    .title
+                    .rsplit_once(' ')
+                    .map_or((java.title.clone(), String::new()), |(n, v)| {
+                        (n.to_owned(), v.to_owned())
+                    });
+                entries.push(Entry {
+                    id: java.id.clone(),
+                    name,
+                    version,
+                    description: java.description.clone(),
+                    icon: java.icon.is_some().then_some(key),
+                    java_config: mods.java.iter().position(|(id, _)| *id == java.id),
+                    status: Some(tr(&runtime.title).with_color(d::GRAY)),
+                    ..Entry::default()
+                });
+            }
         }
         let mut search = TextField::new(0, 0, SIDEBAR_W - SORT_W - 4, CONTROL_H);
         search.max_length = 64;
@@ -740,8 +772,9 @@ impl ModsScreen {
             let action = match i {
                 0 => link(&e.homepage),
                 1 => link(&e.issues),
-                _ => match (e.config, e.index) {
-                    (true, Some(index)) => Action::Config(index),
+                _ => match (e.config, e.index, e.java_config) {
+                    (true, Some(index), _) => Action::Config(index),
+                    (_, _, Some(java)) => Action::JavaConfig(java),
                     _ => Action::None,
                 },
             };
@@ -1007,7 +1040,7 @@ impl ModsScreen {
         let enabled = [
             e.is_some_and(|e| e.homepage.is_some()),
             e.is_some_and(|e| e.issues.is_some()),
-            e.is_some_and(|e| e.config && e.index.is_some()),
+            e.is_some_and(|e| (e.config && e.index.is_some()) || e.java_config.is_some()),
         ];
         let labels = ["homepage", "issues", "config"];
         for ((r, active), label) in g.buttons.into_iter().zip(enabled).zip(labels) {

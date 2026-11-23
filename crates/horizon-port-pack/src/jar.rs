@@ -4,7 +4,7 @@
 //! only; license and dependency fields are not interpreted.
 use crate::zip_intake::{self, Archive};
 use serde::{Deserialize, Serialize};
-use std::{fs, io::Read, path::Path};
+use std::{fs, path::Path};
 mod lenient_json;
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]

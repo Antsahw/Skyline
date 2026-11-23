@@ -85,7 +85,6 @@ impl Game<'_> {
         let Some(r) = self.remote.as_ref() else {
             return;
         };
-        let level_dim = client_level(&spawn.dimension, &dimension, shape);
         // handleRespawn keeps the ClientLevel only for the same level key:
         // two levels sharing a dimension type are still two levels.
         let same = keep_world && r.heard_level.as_deref() == Some(spawn.dimension.as_str());
@@ -107,6 +106,7 @@ impl Game<'_> {
         r.chunk_format = format.chunk_format;
         r.level_facts = format.facts;
         r.level_environment = format.environment;
+        let dimension_name = dimension.clone();
         r.dimension = dimension;
         r.resolve_clocks();
         self.world.day_time = r.clock_time(r.default_clock);
@@ -130,7 +130,7 @@ impl Game<'_> {
         r.position_sender = Default::default();
         r.predictions.clear();
         self.set_mode_id(spawn.game_type);
-        self.dim = level_dim;
+        self.dim = client_level(&spawn.dimension, &dimension_name, shape);
         self.audio.set_world(&spawn.dimension);
         // ClientPacketListener.handleLogin / handleRespawn: the server's
         // Player.getLastDeathLocation, for the recovery compass.

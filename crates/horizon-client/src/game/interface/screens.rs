@@ -534,8 +534,7 @@ impl Game<'_> {
                 });
             }
         }
-        let icons = pause_icons(w, h, links, additions.is_some(), &self.pause_rows());
-        let (mx, my) = mods_icon(&icons);
+        let (mx, my) = mods_icon(&layout.icons);
         let hover = ui::hovered(self.cursor, mx, my, 20.0, 20.0) || self.pause_focus == Some(16);
         horizon_client::widgets::record("horizon.mod_menu.button", [mx, my, 20.0, 20.0], true);
         ui::button(

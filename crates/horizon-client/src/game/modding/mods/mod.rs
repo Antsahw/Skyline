@@ -98,6 +98,7 @@ pub(super) struct ModsState {
     pub(super) load_notices: Arc<Mutex<Vec<horizon_mod_package::dependencies::Notice>>>,
     pub(super) selected: std::sync::Arc<[horizon_mod_package::selection::SelectedPackage]>,
     /// The Java mods' server side (`java_server.rs`).
+    #[cfg_attr(not(feature = "java-mods"), allow(dead_code))]
     pub(super) java: super::java_server::JavaServerState,
     /// The content mods the loaded resources were built with: a switch the
     /// game can apply live moves it to the player's choice (`switch_mods`).
@@ -698,7 +699,6 @@ pub(super) fn content_overlay(
     jar_store: &std::path::Path,
 ) -> horizon_client::Result<ContentOverlay> {
     use horizon_client::mod_content::{self, ContentMod};
-    let here = std::env::current_dir().unwrap_or_default();
     let original_base = root.to_owned();
 
     let requirements = collect_jar_requirements(

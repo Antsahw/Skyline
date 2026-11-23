@@ -2353,11 +2353,11 @@ impl Game<'_> {
                     self.take_parent_vehicle(&mut guest);
                     self.save_guest(&mut guest);
                     drop(logout);
-                    let host = self.lan.as_mut()?;
-                    host.play.remove(&guest.conn);
                     // The 1.20.1 mods hear the player leave (Fabric's DISCONNECT).
                     #[cfg(feature = "java-mods-120")]
                     self.java120_player_left(guest.conn, guest.uuid);
+                    let host = self.lan.as_mut()?;
+                    host.play.remove(&guest.conn);
                     host.forget_menus(guest.conn);
                     self.clear_guest_book_connection(guest.conn);
                     self.native_guest_left(&guest);

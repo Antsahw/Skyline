@@ -1,7 +1,7 @@
 //! Hooks about players without the `java-mods` feature (bodies: `java_server/players.rs`,
 //! `tick.rs`, `commands.rs`, `items.rs`): the server's tick, hurts, effects, falls, jumps,
 //! teleports, deaths, chat, commands, slots, advancements, pickups. No mod has a say.
-use super::super::{Game, java_server::Who, lan::LanHost};
+use super::super::{Game, java_server::Who};
 use horizon_client::effects::EffectInstance;
 
 impl Game<'_> {
@@ -25,7 +25,6 @@ impl Game<'_> {
     }
     pub(in crate::game) fn guest_java_command(
         &mut self,
-        _host: &mut LanHost,
         _conn: u32,
         _line: &str,
     ) -> bool {

@@ -1,7 +1,7 @@
 //! Hooks about entities without the `java-mods` feature (bodies: `java_entities.rs`,
 //! `java_server/entities.rs`, `creatures/java.rs`, `mounts/java.rs`): mods' entities drawn,
 //! aimed at, hit, ridden, among mobs and projectiles' targets. There are none.
-use super::super::{Game, lan::LanHost};
+use super::super::Game;
 use horizon_client::hud::HudBatch;
 use horizon_client::mesher::Vertex;
 use horizon_client::projectiles::{Hit, Projectile};
@@ -72,7 +72,6 @@ impl Game<'_> {
     }
     pub(in crate::game) fn java_entity_attack(
         &mut self,
-        _host: &mut LanHost,
         _conn: u32,
         _id: i32,
     ) -> bool {
@@ -80,7 +79,6 @@ impl Game<'_> {
     }
     pub(in crate::game) fn java_entity_interact(
         &mut self,
-        _host: &mut LanHost,
         _conn: u32,
         _p: &horizon_protocol::packets::play::Interact,
     ) -> bool {

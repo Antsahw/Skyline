@@ -184,6 +184,9 @@ impl Game<'_> {
                 source: s.source,
                 volume: s.volume,
                 pitch: s.pitch,
+                seed: self.lan.as_ref().map_or(0, |h| h.hub.next_sound_seed()),
+                except: None,
+                entity: None,
             });
         }
         let particles: Vec<SentParticles> = {

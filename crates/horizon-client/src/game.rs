@@ -3951,7 +3951,6 @@ impl Game<'_> {
         if canceled {
             return Ok(false);
         }
-        let broken = state;
         let facts = self.res.facts().get(state).clone();
         let held = self.held().cloned();
         let key = (pos[0], pos[1], pos[2]);

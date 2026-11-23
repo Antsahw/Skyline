@@ -104,27 +104,24 @@ impl Game<'_> {
         } else {
             "minecraft:generic".to_owned()
         };
-        if let Some(mut host) = self.lan.take() {
-            let conn = host
-                .hub
+        let conn = self.lan.as_ref().and_then(|host| {
+            host.hub
                 .guests
                 .iter()
                 .find(|g| uuid_string(g.uuid) == uuid)
-                .map(|g| g.conn);
-            if let Some(conn) = conn {
-                self.as_guest(conn, |g| {
-                    g.combat.projectile_direct = named;
-                    g.hurt_player_from(amount, from, &kind, Some(None));
-                    g.combat.projectile_direct = None;
-                });
-                self.lan = Some(host);
-                return;
-            }
-            self.lan = Some(host);
+                .map(|g| g.conn)
+        });
+        if let Some(conn) = conn {
+            self.as_guest(conn, |g| {
+                g.combat.projectile_direct = named;
+                g.hurt_player_from(amount, from, &kind, Some(None), false);
+                g.combat.projectile_direct = None;
+            });
+            return;
         }
         if self.serving.is_none() && self.remote.is_none() {
             self.combat.projectile_direct = named;
-            self.hurt_player_from(amount, from, &kind, Some(None));
+            self.hurt_player_from(amount, from, &kind, Some(None), false);
             self.combat.projectile_direct = None;
         }
     }

@@ -17,9 +17,6 @@ pub(in crate::game) struct JavaServerState {
     pub(super) events: Vec<ModEvent>,
     /// Blocks Java mods set, by dimension, made before that level's next tick.
     pub(super) block_writes: Vec<(String, [i32; 3], String)>,
-    /// The connection a Java mod's level event being played now leaves out (its source
-    /// player's: `Action::LevelEvent`'s `except`), for `lan_record_events`.
-    pub(super) event_except: Option<u32>,
 }
 
 /// A player on this game's server as the Java mods see them.
@@ -41,13 +38,6 @@ pub(super) struct JavaPlayer {
 pub(super) static JAVA_CONNS: std::sync::Mutex<Vec<(String, u32)>> =
     std::sync::Mutex::new(Vec::new());
 
-impl Game<'_> {
-    /// The connection the level event being played now leaves out, when a Java mod made it
-    /// with a player as its source (vanilla's broadcast leaves its source out).
-    pub(in crate::game) fn java_event_except(&self) -> Option<u32> {
-        self.mods.java.event_except
-    }
-}
 
 /// The actions besides breaking, using and random ticks that Java mods patch
 /// (`events::routed_actions`: "item_pickup", "experience_orbs"), asked once Fabric runs.
@@ -409,12 +399,13 @@ impl Game<'_> {
         // Horizon's game rules and difficulty, when they changed: the mods' spawner, their
         // mobs' griefing and despawning in peaceful read the mirror's (HorizonServer.gameRules).
         let rules = {
-            use horizon_client::gamerules::{RULES, Value};
+            use horizon_client::gamerules::Value;
             static LAST: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
-            let now: String = RULES
-                .iter()
+            let registry = horizon_client::gamerules::rule_registry();
+            let now: String = registry
+                .available_rules(true)
                 .filter_map(|r| {
-                    Some(match self.ui.rules.get(r.name)? {
+                    Some(match self.ui.rules.get(&r.name)? {
                         Value::Bool(b) => format!("minecraft:{}={b}", r.name),
                         Value::Int(i) => format!("minecraft:{}={i}", r.name),
                     })
@@ -646,13 +637,14 @@ impl Game<'_> {
                     // GameRules.set from Java: Horizon's rule takes the value (as
                     // `/gamerule` sets it), so the world plays by the pack's rules.
                     use horizon_client::gamerules::{self, Value};
-                    if let Some(rule) = gamerules::rule(&id) {
+                    let registry = gamerules::rule_registry();
+                    if let Some(rule) = registry.rule(&id) {
                         let parsed = match rule.default {
                             Value::Bool(_) => value.parse().ok().map(Value::Bool),
                             Value::Int(_) => value.parse().ok().map(Value::Int),
                         };
                         if let Some(v) = parsed {
-                            self.ui.rules.set(rule.name, v);
+                            self.ui.rules.set(&rule.name, v);
                             self.sync_rules();
                         }
                     }
@@ -758,11 +750,8 @@ impl Game<'_> {
                     host.hub.set_tab_name(id, name);
                 }
                 horizon_jvm::events::Action::OpenMenu { uuid, menu, title } => {
-                    if let Some(h) = host.as_deref_mut() {
-                        self.java_open_menu(h, &uuid, &menu, title.as_deref());
-                    } else if let Some(mut lan) = self.lan.take() {
-                        self.java_open_menu(&mut lan, &uuid, &menu, title.as_deref());
-                        self.lan = Some(lan);
+                    if self.lan.is_some() {
+                        self.java_open_menu(&uuid, &menu, title.as_deref());
                     }
                 }
                 horizon_jvm::events::Action::SetBlockEntity {
@@ -875,15 +864,18 @@ impl Game<'_> {
                     food,
                     saturation,
                 } => {
-                    let guest = host.as_deref_mut().or(self.lan.as_mut()).and_then(|h| {
-                        h.hub
-                            .guests
-                            .iter_mut()
-                            .find(|g| uuid_string(g.uuid) == uuid)
+                    let fed = host.as_deref_mut().or(self.lan.as_mut()).is_some_and(|h| {
+                        let Some(i) = h.hub.guests.iter().position(|g| uuid_string(g.uuid) == uuid)
+                        else {
+                            return false;
+                        };
+                        h.hub.guests.update(i, |g| {
+                            g.food = food.clamp(0, 20);
+                            g.saturation = saturation.max(0.0);
+                        });
+                        true
                     });
-                    if let Some(g) = guest {
-                        g.food = food.clamp(0, 20);
-                        g.saturation = saturation.max(0.0);
+                    if fed {
                     } else if uuid == self.java_local_id()
                         && let Some(p) = self.player.as_mut()
                     {
@@ -1035,15 +1027,13 @@ impl Game<'_> {
                         },
                         None => None,
                     };
-                    if let Some(g) = host
-                        .hub
-                        .guests
-                        .iter_mut()
-                        .find(|g| uuid_string(g.uuid) == uuid)
-                        && let Some(at) = guest_slot(g, slot)
-                    {
+                    if let Some(i) = host.hub.guests.iter().position(|g| uuid_string(g.uuid) == uuid) {
                         // The hub sends the changed slot with the tick's other changes.
-                        *at = stack;
+                        host.hub.guests.update(i, |g| {
+                            if let Some(at) = guest_slot(g, slot) {
+                                *at = stack;
+                            }
+                        });
                     }
                 }
                 horizon_jvm::events::Action::ChunkTickets { dimension, chunks } => {

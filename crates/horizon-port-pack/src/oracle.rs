@@ -558,8 +558,12 @@ impl Facts {
         }
         // 26.3 components as the bridge's exporter writes them, carried as they are.
         let mut components = components::carried(item, id, &mut differences);
-        if food && !components.contains_key("minecraft:food") {
-            return Err("food without its components (an older exporter)".into());
+        // An older exporter's food numbers, as upstream reads them.
+        if food
+            && !components.contains_key("minecraft:food")
+            && let Some(f) = item.food.as_ref()
+        {
+            components.extend(food_26_3(f, &mut differences));
         }
         if item.max_stack_size != 64 {
             decl["max_stack_size"] = json!(item.max_stack_size);

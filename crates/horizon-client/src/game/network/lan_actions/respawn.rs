@@ -364,13 +364,12 @@ impl Game<'_> {
             let drops = (g.game_mode != SPECTATOR)
                 .then(|| [at[0], at[1] + g.eye_height() - f64::from(0.3f32), at[2]]);
             let cause = host.play.get_mut(&conn).and_then(|p| p.death_cause.take());
+            #[cfg(feature = "java-mods-120")]
+            let dimension = host.hub.guests[gi].dimension.clone();
             // Java mods first (java_server.rs), then native ones.
             self.java_player_died(uuid, cause.as_deref(), Some(conn));
             #[cfg(feature = "java-mods-120")]
-            {
-                let dimension = host.hub.guests[gi].dimension.clone();
-                self.java120_player_died(uuid, &name, &dimension, cause.as_deref());
-            }
+            self.java120_player_died(uuid, &name, &dimension, cause.as_deref());
             // ServerPlayer.die opens with `gameEvent(ENTITY_DIE)` at the player:
             // sculk sensors and wardens hear the death.
             if here {

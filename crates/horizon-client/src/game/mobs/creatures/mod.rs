@@ -2024,7 +2024,7 @@ impl Game<'_> {
         };
     }
     /// Remember the acting player for a mob's `lastHurtByPlayer`.
-    pub(super) fn remember_mob_player_credit(&mut self, victim: u32) {
+    pub(in crate::game) fn remember_mob_player_credit(&mut self, victim: u32) {
         if let Some(uuid) = self.player_uuid_of(self.lan_acting) {
             self.last_hurt_by_player.insert(
                 victim,

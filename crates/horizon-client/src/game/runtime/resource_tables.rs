@@ -33,7 +33,7 @@ impl Resources {
     pub(super) fn item_defaults(&self) -> &horizon_world::item_defaults::ItemDefaults {
         self.core.item_data.defaults()
     }
-    pub(super) fn items(&self) -> &Items {
+    pub(in crate::game) fn items(&self) -> &Items {
         &self.rest().items
     }
     pub(super) fn recipes(&self) -> &Recipes {

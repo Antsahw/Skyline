@@ -5,7 +5,6 @@
 //! from there it is one of their screens like any mod's own (drawn, clicked, typed into).
 
 use super::super::Game;
-use super::super::lan::LanHost;
 use super::{Level, runtime, wait_for_runtime};
 use horizon_protocol::packets::configuration::CustomPayload;
 use serde_json::Value;

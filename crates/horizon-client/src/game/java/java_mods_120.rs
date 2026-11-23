@@ -1172,9 +1172,9 @@ impl super::Game<'_> {
                 .collect()
         };
         for [x, y, z] in kept {
-            if let Some(attachments) = self.world.block_entities.attachments_mut((x, y, z))
-                && attachments
-                    .mark_sync(&super::mod_block_shape::BLOCK_SHAPE)
+            if self.world.block_entities.attachments_mut((x, y, z)).is_some()
+                && super::mod_block_shape::BLOCK_SHAPE
+                    .sync_data(self, horizon_mod_runtime::attachments::Holder::BlockEntity([x, y, z]))
                     .is_ok()
             {
                 self.world
@@ -1432,11 +1432,16 @@ impl super::Game<'_> {
         for ((pos, solid), signals) in asked.iter().copied().zip(solid).zip(signals) {
             let state = self.world.block(pos[0], pos[1], pos[2]);
             horizon_client::collisions::set_mod_collision(pos, Some((state, &solid)));
-            if let Some(attachments) = self
+            if self
                 .world
                 .block_entities
                 .attachments_mut((pos[0], pos[1], pos[2]))
-                && let Err(e) = attachments.set(&super::mod_block_shape::BLOCK_COLLISION, solid)
+                .is_some()
+                && let Err(e) = super::mod_block_shape::BLOCK_COLLISION.set(
+                    self,
+                    horizon_mod_runtime::attachments::Holder::BlockEntity(pos),
+                    solid,
+                )
             {
                 log::warn!("1.20.1 mods: keeping what is solid of a block at {pos:?}: {e:?}");
             }
@@ -1457,10 +1462,12 @@ impl super::Game<'_> {
             }
             let state = self.world.block(x, y, z);
             horizon_client::collisions::set_mod_outline([x, y, z], Some((state, &boxes)));
-            let Some(attachments) = self.world.block_entities.attachments_mut((x, y, z)) else {
+            if self.world.block_entities.attachments_mut((x, y, z)).is_none() {
                 continue;
-            };
-            if let Err(e) = attachments.set(&super::mod_block_shape::BLOCK_SHAPE, boxes) {
+            }
+            if let Err(e) =
+                super::mod_block_shape::BLOCK_SHAPE.set(self, horizon_mod_runtime::attachments::Holder::BlockEntity([x, y, z]), boxes)
+            {
                 log::warn!("1.20.1 mods: keeping a block's shape at {x} {y} {z}: {e:?}");
                 continue;
             }

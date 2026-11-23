@@ -814,7 +814,7 @@ impl Game<'_> {
                 }
             }
             S::ChatCommand(c) => self.guest_chat_command(conn, &c.command),
-            S::CustomPayload(p) if p.channel == super::java_screen::INPUT => {
+            S::CustomPayload(p) if p.channel == crate::game::java_screen::INPUT => {
                 // A 1.20.1 mod's screen takes its own input; any other is the 26.3 bridge's.
                 #[cfg(feature = "java-mods-120")]
                 if self.java120_screen_input(conn, &p.data) {
@@ -822,7 +822,7 @@ impl Game<'_> {
                 }
                 self.java_screen_input(conn, &p.data)
             }
-            S::CustomPayload(p) if p.channel == super::java_screen::OWN_SKIN => {
+            S::CustomPayload(p) if p.channel == crate::game::java_screen::OWN_SKIN => {
                 self.java_own_skin(conn, &p.data)
             }
             S::CustomPayload(p) if p.channel == horizon_protocol::quiet::CHANNEL => {

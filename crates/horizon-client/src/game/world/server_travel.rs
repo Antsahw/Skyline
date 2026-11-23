@@ -901,7 +901,10 @@ impl Game<'_> {
             return;
         };
         // ServerPlayer.teleport's head: a Java mod may cancel it (server_travel/java.rs).
-        let Some((uuid, look)) = self.java_portal_teleport(host, i, target) else {
+        let Some((uuid, look)) = self.java_portal_teleport(i, target) else {
+            return;
+        };
+        let Some(host) = self.lan.as_mut() else {
             return;
         };
         if target != self.dim {
@@ -1509,9 +1512,12 @@ impl Game<'_> {
             };
             let source = self.dim;
             // ServerPlayer.teleport's head: a Java mod may cancel it (server_travel/java.rs).
-            if self.java_level_teleport_refused(host, i, &t) {
+            if self.java_level_teleport_refused(i, &t) {
                 continue;
             }
+            let Some(host) = self.lan.as_mut() else {
+                return;
+            };
             if t.dim != source {
                 drop_hook(host, t.conn);
             }

@@ -297,7 +297,7 @@ impl Game<'_> {
             return;
         };
         // A Java mod may take the pickup (lan_actions/java.rs).
-        if self.java_guest_orb_touch(conn, touching[pick], id, at) {
+        if self.java_guest_orb_touch(conn, touching[pick as usize], id, at) {
             return;
         }
         // A merged orb gives its value once per count and goes at zero.

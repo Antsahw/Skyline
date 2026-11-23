@@ -145,11 +145,6 @@ pub(crate) fn feature(v: &Value, report: &mut Report) -> Value {
     if REPLACED_FEATURES.contains(&t) {
         report.unknown(format!("feature {t} (written as data in 26.3)"));
     }
-    // 26.2's flower features were random patches, as 1.20's.
-    if matches!(t, "random_patch" | "flower" | "no_bonemeal_flower") {
-        let config = o.get("config").cloned().unwrap_or_default();
-        return random_patch(&config, report);
-    }
     let mut n = Map::new();
     n.insert("type".into(), o["type"].clone());
     if let Some(Value::Object(config)) = o.get("config") {
@@ -245,32 +240,6 @@ fn renamed_feature(t: &str, n: &mut Map<String, Value>) {
     }
 }
 
-/// A `random_patch` as 26.3 writes vanilla's: the patch's tries and spread are placement
-/// modifiers (a count, then an offset per axis, triangular as `nextInt(s + 1) - nextInt(s + 1)`
-/// was) in front of the placed feature's own, under a selector with no choice but its default.
-/// A placed feature named by id keeps its own placement, one selector further in.
-fn random_patch(config: &Value, report: &mut Report) -> Value {
-    let int = |k: &str, default: i64| config.get(k).and_then(Value::as_i64).unwrap_or(default);
-    let spread = |s: i64| json!({"type": "minecraft:trapezoid", "min": -s, "max": s, "plateau": 0});
-    let (xz, y) = (spread(int("xz_spread", 7)), spread(int("y_spread", 3)));
-    let mut placement = vec![
-        json!({"type": "minecraft:count", "count": int("tries", 128)}),
-        json!({"type": "minecraft:offset", "x": xz.clone(), "y": y, "z": xz}),
-    ];
-    let inner = config.get("feature").cloned().unwrap_or_default();
-    let feature = if inner.is_object() {
-        let inner = placed(&inner, report);
-        if let Some(Value::Array(own)) = inner.get("placement") {
-            placement.extend(own.iter().cloned());
-        }
-        inner.get("feature").cloned().unwrap_or_default()
-    } else {
-        json!({"type": "minecraft:random_selector", "features": [], "default": inner})
-    };
-    json!({"type": "minecraft:random_selector", "features": [],
-        "default": {"feature": feature, "placement": placement}})
-}
-
 /// Inside a feature: block state providers, placed features and
 /// configured features held inline.
 fn nested(v: &mut Value, report: &mut Report) {
@@ -287,15 +256,15 @@ fn nested(v: &mut Value, report: &mut Report) {
                         state => state,
                     };
                     return;
-                    // A noise provider's inline noise parameters, as the noise registry's.
-                    for key in ["noise", "slow_noise"] {
-                        if let Some(n) = o.get(key).filter(|n| n.is_object()) {
-                            let n = super::noise::noise(n, report);
-                            o.insert(key.into(), n);
-                        }
-                    }
                 }
                 o.insert("type".into(), vanilla(to));
+                // A noise provider's inline noise parameters, as the noise registry's.
+                for key in ["noise", "slow_noise"] {
+                    if let Some(n) = o.get(key).filter(|n| n.is_object()) {
+                        let n = super::noise::noise(n, report);
+                        o.insert(key.into(), n);
+                    }
+                }
             }
             // An inline placed feature: {feature, placement}.
             if o.contains_key("placement") && o.contains_key("feature") {

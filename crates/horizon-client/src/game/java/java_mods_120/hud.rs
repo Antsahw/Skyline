@@ -9,7 +9,6 @@
 //! game draws it over its own HUD and says the HUD's size, which the next frame is laid out in.
 
 use super::super::java_screen::{HUD_WINDOW, HudPart, forget_hud, send_hud_part};
-use super::super::lan::LanHost;
 use super::{Level, runtime, uuid_string};
 use horizon_client::command::args::GameMode;
 use horizon_protocol::packets::configuration::CustomPayload;
@@ -107,7 +106,7 @@ impl super::super::Game<'_> {
         if self.remote.is_some() {
             return;
         }
-        let Some(mut host) = self.lan.take() else {
+        let Some(host) = self.lan.as_ref() else {
             return;
         };
         let players: Vec<(u32, String, String, Value)> = host
@@ -124,7 +123,6 @@ impl super::super::Game<'_> {
         for (conn, uuid, name, at) in players {
             self.send_java120_hud(conn, &uuid, &name, &at);
         }
-        self.lan = Some(host);
     }
 
     fn send_java120_hud(

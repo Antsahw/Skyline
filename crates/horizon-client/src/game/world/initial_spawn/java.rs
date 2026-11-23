@@ -9,7 +9,7 @@ impl Game<'_> {
         if let Some(terrain) = self.end.locator().filter(|t| !t.oracle_decided()) {
             // The first chunk made decides it: a dedicated server with nobody online
             // makes none on its own, so it asks for the origin's (else it waited forever).
-            if self.standalone_server()
+            if self.is_dedicated_server()
                 && let Ok(((cx, cz), _)) = terrain.spawn_origin()
             {
                 self.request_spawn_chunk(cx, cz);
@@ -33,7 +33,7 @@ impl Game<'_> {
             // A dedicated server with nobody online streams nothing around a center: the chunk
             // is asked for alone, as the spiral below asks for its chunks (else it waited
             // forever: "Preparing level" and no more).
-            if self.standalone_server() {
+            if self.is_dedicated_server() {
                 if !self.world.chunks.contains_key(&(ox, oz)) {
                     self.request_spawn_chunk(ox, oz);
                     return None;

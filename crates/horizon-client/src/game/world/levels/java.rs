@@ -15,11 +15,14 @@ impl Parked {
 impl Levels {
     /// The item entities of a parked level.
     pub(in crate::game) fn parked_items(&self, dim: Dim) -> Option<&[ItemEntity]> {
-        self.parked.get(&dim).map(|level| level.dropped.as_slice())
+        self.parked.get(&dim).map(|level| &level.dropped[..])
     }
 
     /// The item entities of a parked level, to change.
-    pub(in crate::game) fn parked_items_mut(&mut self, dim: Dim) -> Option<&mut Vec<ItemEntity>> {
-        self.parked.get_mut(&dim).map(|level| &mut *level.dropped)
+    pub(in crate::game) fn parked_items_mut(
+        &mut self,
+        dim: Dim,
+    ) -> Option<&mut horizon_client::join_seq::JoinList<ItemEntity>> {
+        self.parked.get_mut(&dim).map(|level| &mut level.dropped)
     }
 }

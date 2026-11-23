@@ -13,7 +13,6 @@
 
 use super::super::Game;
 use super::super::java_screen::INPUT;
-use super::super::lan::LanHost;
 use super::breaking::stack_to_120;
 use super::{runtime, wait_for_runtime};
 use horizon_client::items::ItemStack;

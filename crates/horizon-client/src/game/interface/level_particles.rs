@@ -446,7 +446,7 @@ impl Game<'_> {
         self.level_event_from(None, id, pos, data);
     }
 
-    pub(super) fn level_event_from(
+    pub(in crate::game) fn level_event_from(
         &mut self,
         source: Option<horizon_world::level::LevelEventPlayer>,
         id: i32,

@@ -606,16 +606,12 @@ impl Game<'_> {
                 // Its source player's game made it already (a routed break's 2001):
                 // vanilla's broadcast leaves that player out. The events queued before
                 // are played first, with their own.
-                let except = except.as_ref().and_then(|uuid| {
-                    let conns = super::JAVA_CONNS.lock().unwrap_or_else(|e| e.into_inner());
-                    conns.iter().find(|(u, _)| u == uuid).map(|(_, c)| *c)
-                });
-                if except.is_some() {
-                    let _ = self.process_level_events();
-                }
-                self.mods.java.event_except = except;
-                self.level_event_at(*id, *position, data);
-                self.mods.java.event_except = None;
+                // Upstream's level events carry their source player, whom the broadcast skips.
+                let source = except
+                    .as_deref()
+                    .and_then(|uuid| u128::from_str_radix(&uuid.replace('-', ""), 16).ok())
+                    .map(horizon_world::level::LevelEventPlayer);
+                self.level_event_from(source, *id, *position, data);
                 continue;
             }
             let horizon_jvm::events::Action::DropItem {

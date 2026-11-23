@@ -4,9 +4,4 @@
 #[derive(Clone, Default)]
 pub(in crate::game) struct JavaServerState;
 
-impl JavaServerState {
-    /// The connection a Java mod's level event leaves out: none.
-    pub(in crate::game) fn event_except(&self) -> Option<u32> {
-        None
-    }
-}
+

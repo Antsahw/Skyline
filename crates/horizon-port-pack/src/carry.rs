@@ -1883,7 +1883,7 @@ pub fn carry(
         "client"
     };
     let mut manifest = format!(
-        "# Carried over from {jar} by horizon-port-pack, for local use only.\n# Licence: {license}\nid = {}\nname = {}\nversion = {}\napi = \"0.2\"\nside = \"both\"\ncapabilities = [\"registries\"]\n",
+        "# Carried over from {jar} by horizon-port-pack, for local use only.\n# Licence: {license}\nid = {}\nname = {}\nversion = {}\napi = \"0.2\"\nside = \"{side}\"\ncapabilities = [\"registries\"]\n",
         q(&folder),
         q(name),
         q(&info.version),

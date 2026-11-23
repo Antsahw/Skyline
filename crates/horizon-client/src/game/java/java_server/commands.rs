@@ -158,6 +158,6 @@ impl Game<'_> {
             return false;
         };
         let id = uuid_string(g.uuid);
-        self.java_command(Some(self.hub_host()), &id, line)
+        self.java_command(None, &id, line)
     }
 }

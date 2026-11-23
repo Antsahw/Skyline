@@ -2494,5 +2494,8 @@ fn client_level(
         coordinate_scale: 1.0,
         looks_like,
     };
-    horizon_client::chunk::register_extra_level(level).map_or(Dim::Overworld, Dim::Extra)
+    if horizon_client::chunk::register_extra_level(level).is_none() {
+        return Dim::Overworld;
+    }
+    Dim::from_id(name)
 }

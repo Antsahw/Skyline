@@ -8,12 +8,11 @@ impl Game<'_> {
     /// vanilla's does. Else the player's UUID and look.
     pub(super) fn java_portal_teleport(
         &mut self,
-        host: &LanHost,
         i: usize,
         target: Dim,
     ) -> Option<(u128, [f32; 2])> {
         let (uuid, look, here) = {
-            let g = &host.hub.guests[i];
+            let g = &self.lan.as_ref()?.hub.guests[i];
             (g.uuid, [g.yaw, g.pitch], g.position)
         };
         if self.java_player_teleport(uuid, target.id(), here, look, false) {
@@ -26,11 +25,13 @@ impl Game<'_> {
     /// mod that cancels it keeps the player in its level (true).
     pub(super) fn java_level_teleport_refused(
         &mut self,
-        host: &LanHost,
         i: usize,
         t: &LevelTeleport,
     ) -> bool {
         let (uuid, look) = {
+            let Some(host) = self.lan.as_ref() else {
+                return false;
+            };
             let g = &host.hub.guests[i];
             (g.uuid, t.rotation.unwrap_or([g.yaw, g.pitch]))
         };

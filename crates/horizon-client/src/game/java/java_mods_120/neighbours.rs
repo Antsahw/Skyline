@@ -165,10 +165,17 @@ impl super::super::Game<'_> {
             let rotation = Some([teleport.yaw, teleport.pitch]);
             let target = super::super::commands::Target::Player;
             if teleport.dimension == self.dim.id() {
-                self.teleport_to_in_level(target, teleport.pos, rotation, false);
+                self.teleport_to_in_level(target, teleport.pos, rotation, [false; 3], false);
             } else {
                 let level = super::super::Dim::from_id(&teleport.dimension);
-                if let Err(e) = self.teleport_across(target, level, teleport.pos, rotation, false) {
+                if let Err(e) = self.teleport_across(
+                    target,
+                    level,
+                    teleport.pos,
+                    rotation,
+                    false,
+                    crate::game::vehicle_teleport::TeleportMotion::Stop,
+                ) {
                     log::warn!(
                         "1.20.1 mods: a teleport into {} failed: {e:?}",
                         teleport.dimension

@@ -25,14 +25,3 @@ pub(super) fn send_login_finished(
     c.send(finished)
 }
 
-/// Sends `body`, kept for the Java mods' client if `memory` (the window's own player).
-pub(super) fn send_tapped(
-    c: &mut Connection,
-    memory: bool,
-    body: &[u8],
-) -> horizon_protocol::Result<()> {
-    if memory {
-        super::super::packet_tap::keep(body);
-    }
-    c.send(body)
-}

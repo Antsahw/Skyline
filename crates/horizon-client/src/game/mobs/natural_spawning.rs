@@ -1480,6 +1480,7 @@ impl<'a> Game<'a> {
         let extras = {
             let level = self.natural_level();
             laps.lap("sn_level");
+            #[cfg_attr(not(feature = "java-mods-120"), allow(unused_mut))]
             let mut counted: Vec<Counted> = self
                 .mobs
                 .iter()

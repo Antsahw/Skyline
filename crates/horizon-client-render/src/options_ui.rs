@@ -15,7 +15,7 @@ use crate::{
     gamepad::{self, GlyphStyle},
     hdr_calibration::Picture,
     hud::{HudAtlas, HudBatch, rgba},
-    keybinds::{self, CATEGORIES, all_mappings},
+    keybinds::{self, CATEGORIES},
     lang::{self, LanguageInfo},
     settings::{SOUND_SOURCES, Settings},
     settings_shell as shell,
@@ -1567,8 +1567,6 @@ pub(crate) enum Act {
     PvpPreset,
     /// PvP & HUD's Edit HUD button.
     HudEditor,
-    /// A Java mod's settings screen (`s.mods.java[i]`), which the server opens.
-    JavaModSettings(usize),
     /// A native mod's key (mod, key) waits for a key; a button of its page.
     /// A key a native mod registered (mod, mapping) waits for a key, or is reset.
     ModKey(usize, usize),
@@ -1737,9 +1735,6 @@ pub enum Event {
     NativePackOptions(usize),
     /// Native mod `.0`'s page opened: the game reads its settings' kept values again.
     NativeSettings(usize),
-    /// Button `.1` of native mod `.0`'s page was pressed: the game tells the
-    /// mod and refreshes the page.
-    NativeButton(usize, usize),
     /// Setting `.1` of native mod `.0`'s page changed (`settings.mods`): the game keeps it and
     /// tells the mod (`setting_changed`).
     NativeSetting(usize, usize),
@@ -3295,6 +3290,7 @@ impl OptionsUi {
                     self.push(Page::NativeMod(i));
                     events.push(Event::NativeSettings(i));
                 }
+                Do::JavaConfig(i) => events.push(Event::JavaModSettings(i)),
                 Do::Link(url) => events.push(Event::OpenLink(url)),
                 Do::Copy(text) => events.push(Event::CopyText(text)),
             }
@@ -3514,10 +3510,6 @@ impl OptionsUi {
                                 setting.value.click();
                                 events.push(Event::NativeSetting(*i, *j));
                             }
-                        }
-                        Act::JavaModSettings(i) => {
-                            events.push(Event::ButtonClick);
-                            events.push(Event::JavaModSettings(*i));
                         }
                         Act::ModProject(i) => {
                             if let Some(listing) = self.mod_browser.listings.get(*i) {
@@ -4551,11 +4543,6 @@ impl OptionsUi {
                             self.selected_key = Some(MOD_KEY);
                             self.selected_mod_key = Some((i, k));
                             self.pending_mod_key = None;
-                        }
-                        Act::JavaModSettings(i) => {
-                            self.focus = None;
-                            self.can_change_value = false;
-                            events.push(Event::JavaModSettings(i));
                         }
                         Act::ResetModKey(i, k) => {
                             if let Some((id, mapping)) = mod_mapping(s, i, k) {

@@ -35,6 +35,7 @@ fn merge_hud(parts: &[String; 2]) -> String {
 
 /// `part` of `conn`'s HUD drew `frame` (`[...]`): the whole HUD, both bridges' parts, to them.
 pub(in crate::game) fn send_hud_part(
+    host: &mut crate::game::lan::LanHost,
     conn: u32,
     part: HudPart,
     frame: &str,
@@ -48,7 +49,7 @@ pub(in crate::game) fn send_hud_part(
         parts[part as usize] = frame.to_owned();
         merge_hud(parts)
     };
-    self.hub_host().hub.send_to(
+    host.hub.send_to(
         conn,
         &horizon_protocol::packets::play::Clientbound::CustomPayload(CustomPayload {
             channel: HUD_CHANNEL.into(),

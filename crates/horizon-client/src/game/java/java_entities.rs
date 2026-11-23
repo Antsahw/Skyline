@@ -680,7 +680,7 @@ impl Game<'_> {
         }
         // What mods draw on this game's own player, seen from outside (third person): at the
         // player as drawn.
-        if !self.camera_type.first_person()
+        if !self.camera_type.is_first_person()
             && let Some(m) = self.player_model.as_ref()
         {
             let at = glam::DVec3::new(m.position.x, m.position.y, m.position.z);
@@ -1021,7 +1021,7 @@ impl Game<'_> {
                 let at = Vec3::new(n.2, n.3, n.4);
                 let mut m = horizon_client::mobs::Mob::new(n.0, kind, at, n.8);
                 m.health = n.7;
-                let mut seen = m.seen(uuid);
+                let mut seen = m.seen(uuid, self.res.items());
                 let half = f64::from(n.5) / 2.0;
                 seen.bounds = Aabb::new(
                     Vec3::new(at.x - half, at.y, at.z - half),

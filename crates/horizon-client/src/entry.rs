@@ -152,8 +152,6 @@ pub fn start<G>(
         }
         (launch.context.home.clone(), "client", "Render thread")
     };
-    // Before the log opens, so a mod's injection hears its first lines.
-    logging::set_line_hook(crate::native_client_hooks::native_log_line);
     logging::init(
         logging::player_dir_override().unwrap_or(home.as_path()),
         thread,

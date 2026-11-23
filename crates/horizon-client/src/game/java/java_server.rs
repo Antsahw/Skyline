@@ -14,6 +14,7 @@ use super::Game;
 
 /// Who did something the Java mods hear about, resolved at the tick's end.
 #[cfg_attr(not(feature = "java-mods"), allow(dead_code))]
+#[derive(Clone, Copy)]
 pub(super) enum Who {
     /// The window's own player, in-frame.
     Local,
@@ -51,6 +52,7 @@ impl JavaBreak {
 
 /// What players did during a tick, for the Java mods at its end.
 #[cfg_attr(not(feature = "java-mods"), allow(dead_code))]
+#[derive(Clone)]
 pub(super) enum ModEvent {
     Chat(Who, String),
     Block {

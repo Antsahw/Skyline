@@ -6,7 +6,7 @@
 //! their channels goes to the mods' server code.
 #![cfg(feature = "java-mods")]
 
-use super::{Game, lan::LanHost};
+use super::Game;
 use horizon_protocol::packets::{configuration::CustomPayload, play::Serverbound as S};
 use serde_json::{Value, json};
 use std::sync::Mutex;
@@ -323,7 +323,7 @@ impl Game<'_> {
         for action in horizon_jvm::events::take_actions() {
             match action {
                 horizon_jvm::events::Action::Tell { text, .. } => {
-                    self.chat_line(chat_text(&text), horizon_client::chat::ChatSource::Server);
+                    self.chat_line(chat_text(&text));
                 }
                 horizon_jvm::events::Action::Overlay { text, .. } => {
                     self.titles.set_overlay(chat_text(&text), false);
@@ -507,7 +507,7 @@ impl Game<'_> {
         for action in horizon_jvm::events::take_actions() {
             match action {
                 horizon_jvm::events::Action::Tell { text, .. } => {
-                    self.chat_line(chat_text(&text), horizon_client::chat::ChatSource::Server);
+                    self.chat_line(chat_text(&text));
                 }
                 horizon_jvm::events::Action::Overlay { text, .. } => {
                     self.titles.set_overlay(chat_text(&text), false);

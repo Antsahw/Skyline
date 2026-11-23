@@ -4,7 +4,7 @@
 //! each player those in its dimension on [`CHANNEL`]. The window draws the quads where the mob
 //! is, moving between the last two ticks as vanilla's renderer does.
 
-use super::super::{Game, lan::LanHost};
+use super::super::Game;
 use super::breaking::stack_to_120;
 use super::{Level, runtime, tick_failed_once, wait_for_runtime};
 use horizon_client::mesher::Vertex;

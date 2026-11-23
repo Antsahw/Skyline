@@ -504,7 +504,7 @@ impl Game<'_> {
                 if !reacts
                     && held
                         .as_ref()
-                        .is_some_and(|s| super::java_mods_120::is_mods_id(&s.item))
+                        .is_some_and(|s| crate::game::java_mods_120::is_mods_id(&s.item))
                 {
                     if let Some(r) = self.remote.as_mut() {
                         r.placing = None;

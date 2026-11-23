@@ -816,6 +816,9 @@ impl Game<'_> {
         let new_mode = self.mode_id();
         let turn_previous = std::mem::replace(&mut self.previous_mode, outer_previous);
         let turn_abilities = std::mem::replace(&mut self.acting_abilities, outer_abilities);
+        // ServerPlayer.teleport's head: a Java mod may cancel what moved the guest this turn
+        // (lan_actions/java.rs), asked before the hub's record takes the move.
+        let java_refused = self.java_guest_turn_refused(i);
         let Some(host) = self.lan.as_mut() else {
             unreachable!("LanHost dropped inside a guest turn; closes are deferred");
         };
@@ -939,9 +942,9 @@ impl Game<'_> {
                 m.teleported_delta = [false; 3];
                 let mut moved: f64 = (0..3).map(|k| (at[k] - g.position[k]).powi(2)).sum();
                 let mut turned = turned;
-                // ServerPlayer.teleport's head: a Java mod may cancel it (lan_actions/java.rs).
-                let moves = moved > 0.0001 || teleported;
-                if self.java_guest_teleport_refused(g, &mut m, at, old_look, moves) {
+                if java_refused {
+                    m.position = Vec3::new(g.position[0], g.position[1], g.position[2]);
+                    [g.yaw, g.pitch] = old_look;
                     (teleported, moved, turned) = (false, 0.0, false);
                 }
                 let at = if moved > 0.0 { at } else { g.position };
@@ -981,7 +984,6 @@ impl Game<'_> {
             Some(TurnTeleport::Rider(at)) => host.hub.teleport_rider(i, at),
             None => {}
         }
-        self.java_guest_teleported(java_teleport);
         let g = &host.hub.guests[i];
         if new_mode != g.game_mode {
             let conn = g.conn;
@@ -1080,6 +1082,8 @@ impl Game<'_> {
                 self.lan_building_boxes
                     .for_turn(actor, None, building_players(host));
         }
+        // Java mods hear the guest's teleport (java_server.rs).
+        self.java_guest_teleported(java_teleport);
         if let Some(payload) = panic {
             std::panic::resume_unwind(payload);
         }

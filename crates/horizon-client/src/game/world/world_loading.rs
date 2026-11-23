@@ -1358,7 +1358,13 @@ pub(super) fn make_streaming(
                 "1.20.1 mods: their world generation can't be built ({e}): the world generates without it"
             );
             overrides =
-                world_worldgen_overrides(world_root, &options.resources, &biomes, enabled_features);
+                world_worldgen_overrides(
+                    world_root,
+                    &options.resources,
+                    &biomes,
+                    enabled_features,
+                    &pack.additional_data,
+                );
             built = build(&overrides);
         }
         let mut inner = built.map_err(|e| {

@@ -97,7 +97,7 @@ impl super::Game<'_> {
         }
         if let Some(r) = self.remote.as_ref() {
             let holder = horizon_mod_runtime::attachments::Holder::BlockEntity([x, y, z]);
-            if let Some(found) = r.attachments.get(&holder).and_then(of) {
+            if let Some(found) = r.attachments.get(&holder).and_then(|a| of(a)) {
                 return Some(found);
             }
         }

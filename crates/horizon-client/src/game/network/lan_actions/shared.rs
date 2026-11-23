@@ -12,7 +12,7 @@ pub(super) enum MenuOpen {
 pub(super) struct GuestPlay {
     /// The window of a menu a server mod opened (a Java mod's `/workbench`): no block
     /// behind it, so it stays valid wherever the guest goes (the mod's `stillValid`).
-    pub(super) mod_window: Option<i32>,
+    pub(in crate::game) mod_window: Option<i32>,
     mining: Option<Mining>,
     destroy_delay: u32,
     using: Option<(usize, u32)>,

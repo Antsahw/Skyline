@@ -56,7 +56,6 @@ impl Game<'_> {
                 Dim::Overworld | Dim::Extra(_) => Dimension::Overworld,
                 Dim::Nether => Dimension::Nether,
                 Dim::End => Dimension::End,
-                Dim::Extra(_) => Dimension::Other,
             },
             mode: match self.mode {
                 GameMode::Survival => horizon_hooks::GameMode::Survival,

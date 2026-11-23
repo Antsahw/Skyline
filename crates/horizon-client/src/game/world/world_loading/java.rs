@@ -38,6 +38,7 @@ impl Game<'_> {
                 preset: preset.to_string(),
                 biomes: biomes.clone(),
                 seed,
+                item_data: res.core.item_data.clone(),
             },
         )?;
         Some(Streaming::new(

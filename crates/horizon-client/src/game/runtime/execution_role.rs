@@ -22,7 +22,7 @@ impl Game<'_> {
 
     /// Whether this game is a dedicated server, not the integrated server thread (which
     /// keeps `options.dedicated` set too).
-    pub(super) fn is_dedicated_server(&self) -> bool {
+    pub(in crate::game) fn is_dedicated_server(&self) -> bool {
         self.options.execution_role.is_dedicated_server()
     }
 }

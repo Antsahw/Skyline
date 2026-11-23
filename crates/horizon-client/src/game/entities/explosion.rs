@@ -1845,6 +1845,20 @@ impl Game<'_> {
         } else if let Some(tag) = super::spill::saved_entity(&self.world, pos) {
             self.pending.record_saved(pos, &tag);
         }
+        // A 1.20.1 mod's block: its own code drops what it drops (the parts in a LibMultiPart
+        // container, which its loot table alone doesn't know) and removes it.
+        #[cfg(feature = "java-mods-120")]
+        if !is_tnt
+            && self.java120_exploded(
+                pos,
+                radius,
+                interaction == BlockInteraction::DestroyWithDecay,
+            )
+        {
+            self.pending.clear(pos);
+            self.level_set(pos, self.world.air)?;
+            return Ok(true);
+        }
         // Block.dropFromExplosion (only TntBlock refuses), or what the
         // block's parts answer: it gates spawnAfterBreak and the loot.
         let drops = self

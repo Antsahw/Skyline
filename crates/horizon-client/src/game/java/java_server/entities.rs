@@ -42,7 +42,8 @@ impl Game<'_> {
             amount,
         );
         if knockback > 0.0 {
-            self.mobs[index].knockback(knockback, knock_x, knock_z, &source);
+            let level = crate::game::entity::damage_level_of!(self);
+            self.mobs[index].knockback(level, knockback, knock_x, knock_z, &source, amount);
         }
         let mob = &self.mobs[index];
         let actual = old_health - mob.health;
@@ -75,8 +76,8 @@ impl Game<'_> {
                 randomization: 0,
             });
         }
-        self.last_hurt_by_player
-            .insert(self.mobs[index].id, self.lan_acting);
+        let victim_id = self.mobs[index].id;
+        self.remember_mob_player_credit(victim_id);
         if primary {
             self.audio
                 .play("minecraft:entity.player.attack.strong", from, 1.0, 1.0);
@@ -415,24 +416,33 @@ impl Game<'_> {
             from,
             attacker_species: None,
         };
-        let hurt = |m: &mut horizon_client::mobs::Mob| {
+        let hurt = |m: &mut horizon_client::mobs::Mob,
+                    level: &mut horizon_client::health::DamageLevel<'_>| {
             if !m.alive() || m.removed {
                 return;
             }
             if reset_invulnerable {
                 m.invulnerable = 0;
             }
-            if m.damage(amount, damage) {
+            if m.damage(level, amount, damage) {
                 // LivingEntity.hurtServer's knockback: 0.4 away from the attacker.
                 if let Some(f) = from {
-                    m.knockback(0.4, f[0] - m.position.x, f[2] - m.position.z, &damage);
+                    m.knockback(
+                        level,
+                        0.4,
+                        f[0] - m.position.x,
+                        f[2] - m.position.z,
+                        &damage,
+                        amount,
+                    );
                 }
                 m.needs_sync = true;
             }
         };
         if self.dim.id() == dimension {
-            if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
-                hurt(m);
+            if let Some(i) = self.mobs.iter().position(|m| m.id == id) {
+                let level = crate::game::entity::damage_level_of!(self);
+                hurt(&mut self.mobs[i], level);
             }
             return;
         }
@@ -440,7 +450,7 @@ impl Game<'_> {
         if let Some(level) = self.levels.parked_mut(dim)
             && let Some(m) = level.mobs.iter_mut().find(|m| m.id == id)
         {
-            hurt(m);
+            hurt(m, crate::game::entity::damage_level_of!(self));
         }
     }
 
@@ -467,7 +477,7 @@ impl Game<'_> {
             let uuid = uuid_string(g.uuid);
             match self.with_java_world(|| horizon_jvm::events::attack_entity(&uuid, id)) {
                 Ok(hit) => {
-                    self.apply_java_actions(Some(self.hub_host()));
+                    self.apply_java_actions(None);
                     hit
                 }
                 Err(e) => {
@@ -525,7 +535,7 @@ impl Game<'_> {
         let result = self.with_java_world(|| {
             horizon_jvm::events::vanilla_entity(&uuid, dim, &snbt, using, hand, hit, selected)
         });
-        self.apply_java_actions(Some(self.hub_host()));
+        self.apply_java_actions(None);
         match result {
             Ok(r) => {
                 if r.removed
@@ -571,7 +581,7 @@ impl Game<'_> {
                 log::warn!("Java mods: using an entity failed: {e}");
             }
             // The player's game swung its arm already.
-            self.apply_java_actions(Some(self.hub_host()));
+            self.apply_java_actions(None);
             true
         }
     }

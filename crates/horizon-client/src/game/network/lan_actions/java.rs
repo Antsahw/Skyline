@@ -1,7 +1,6 @@
 //! Java mods' hooks in what guests do (game/java_server.rs answers them): their cancels of a
 //! teleport, a slot change, a ride, and their own item and orb pickups and fall damage.
 use super::*;
-use horizon_client::lan::guest::Guest;
 
 /// Java mods' hooks are about guest `uuid` while it acts: the player they were about before.
 pub(super) fn set_actor(uuid: u128) -> Option<String> {
@@ -24,36 +23,35 @@ impl Game<'_> {
         channel: &str,
         data: &[u8],
     ) {
-        let Some(mut host) = self.lan.take() else {
-            return;
-        };
         if channel == horizon_jvm::device::RUNS_OWN_CHANNEL {
-            self.java_device_runs_own(&mut host, conn, data)
+            self.java_device_runs_own(conn, data)
         } else {
-            self.java_device_from_game(&mut host, conn, channel, data)
+            self.java_device_from_game(conn, channel, data)
         }
-        self.lan = Some(host);
     }
 
-    /// ServerPlayer.teleport's head: a Java mod that cancels it leaves the guest where it was,
-    /// facing as it did (`old_look`; java_server.rs). True when cancelled.
-    pub(super) fn java_guest_teleport_refused(
-        &mut self,
-        g: &mut Guest,
-        m: &mut PlayerMotion,
-        at: [f64; 3],
-        old_look: [f32; 2],
-        moves: bool,
-    ) -> bool {
-        if g.vehicle.is_none() && moves && {
-            let dim = self.dim.id();
-            self.java_player_teleport(g.uuid, dim, at, [g.yaw, g.pitch], false)
-        } {
-            m.position = Vec3::new(g.position[0], g.position[1], g.position[2]);
-            [g.yaw, g.pitch] = old_look;
-            return true;
+    /// ServerPlayer.teleport's head for guest `i`'s turn, before the hub's record takes it: a
+    /// Java mod that cancels what moved the guest (a pearl, a command) keeps it where it was,
+    /// facing as it did (java_server.rs). True when cancelled.
+    pub(super) fn java_guest_turn_refused(&mut self, i: usize) -> bool {
+        let Some((uuid, vehicle, was)) = self
+            .lan
+            .as_ref()
+            .map(|h| &h.hub.guests[i])
+            .map(|g| (g.uuid, g.vehicle, g.position))
+        else {
+            return false;
+        };
+        let Some(m) = self.player.as_ref() else {
+            return false;
+        };
+        let at = [m.position.x, m.position.y, m.position.z];
+        let moved: f64 = (0..3).map(|k| (at[k] - was[k]).powi(2)).sum();
+        if vehicle.is_some() || !(moved > 0.0001 || m.teleported) {
+            return false;
         }
-        false
+        let (look, dim) = ([self.yaw, self.pitch], self.dim.id());
+        self.java_player_teleport(uuid, dim, at, look, false)
     }
 
     /// Java mods hear the teleport (ServerPlayer.teleport; java_server.rs): what moves the

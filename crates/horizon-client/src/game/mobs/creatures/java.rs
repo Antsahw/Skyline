@@ -22,7 +22,7 @@ impl Game<'_> {
             let mut shot = p.clone();
             let amount = match p.kind {
                 ProjectileKind::Arrow { .. } | ProjectileKind::Trident => {
-                    self.shot_damage(&mut shot, None)
+                    self.shot_damage(&mut shot, None, Who::Mob(id))
                 }
                 ProjectileKind::SmallFireball => 5.0,
                 ProjectileKind::LargeFireball { .. } => 6.0,

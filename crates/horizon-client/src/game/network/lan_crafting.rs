@@ -261,7 +261,7 @@ impl Game<'_> {
             .update(gi, |guest| store_player(menu, guest));
         let guest = &host.hub.guests[gi];
         let (conn, uuid, entity_id) = (guest.conn, guest.uuid, guest.entity_id);
-        self.lan_java_crafted(host, gi, &takes);
+        self.lan_java_crafted(gi, &takes);
         // `ItemStack.onCraftedBy`'s `Stats.ITEM_CRAFTED` count, before the
         // recipe the take used.
         if !crafted_counts.is_empty() {
@@ -1138,7 +1138,7 @@ impl Game<'_> {
         else {
             return false;
         };
-        let modded = play.mod_window == Some(window);
+        let modded = host.play.get(&conn).and_then(|p| p.mod_window) == Some(window);
         // handleContainerClick: broadcastFullState only for a click on an old
         // state, else only what the client got wrong. The whole menu after every
         // click would undo the clicks it has predicted since.

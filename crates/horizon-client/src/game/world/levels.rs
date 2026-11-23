@@ -1278,13 +1278,11 @@ impl Game<'_> {
                 Dim::Overworld | Dim::Extra(_) => 1,
                 Dim::Nether => 2,
                 Dim::End => 3,
-                Dim::Extra(_) => 0,
             });
             let _level_span = horizon_client::spans::guard(match dim.vanilla() {
                 Dim::Overworld | Dim::Extra(_) => "level_overworld",
                 Dim::Nether => "level_the_nether",
                 Dim::End => "level_the_end",
-                Dim::Extra(_) => "level_extra",
             });
             if let Err(e) = self.enter_level(dim) {
                 result = Err(e);

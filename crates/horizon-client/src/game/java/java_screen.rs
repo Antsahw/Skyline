@@ -30,7 +30,7 @@ pub(super) use hud_parts::{HudPart, send_hud_part};
 /// A frame, server to client: `{"window": id, "ops": [...]}`.
 pub(super) const CHANNEL: &str = "horizon:java_screen";
 /// Input, client to server: `{"window": id, "kind": ..., ...}` (HorizonClient.input's).
-pub(super) const INPUT: &str = "horizon:java_screen_input";
+pub(in crate::game) const INPUT: &str = "horizon:java_screen_input";
 /// Server to game: the keys Java mods' key bindings are set to (a JSON array of 26.3's
 /// scancodes), sent once as a player joins. The game then sends those keys while playing on
 /// [`INPUT`] (`{"kind": "bind", "key": scancode, "down": bool}`), as vanilla's keyboard handler
@@ -43,7 +43,7 @@ pub(super) const KEYS_120: &str = "horizon:java120_keys";
 /// Game to server, once as it meets a server's Java mods: the player's own skin where no
 /// server knows it (an offline name's, from the launcher): a byte 1 for slim arms (else 0),
 /// then the 64x64 RGBA rows. Mods that build from a player's skin (3D skin layers) use it.
-pub(super) const OWN_SKIN: &str = "horizon:java_own_skin";
+pub(in crate::game) const OWN_SKIN: &str = "horizon:java_own_skin";
 
 /// Server to game: the Java mods with a settings screen (`[[id, name], ...]`), sent once as a
 /// player joins; the game lists them on its Mods page, and asks for one on [`INPUT`]

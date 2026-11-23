@@ -263,13 +263,12 @@ impl super::super::Game<'_> {
         if conns.is_empty() {
             return;
         }
-        let Some(mut host) = self.lan.take() else {
+        if self.lan.is_none() {
             return;
-        };
+        }
         for conn in conns {
             self.send_java120_frame(conn);
         }
-        self.lan = Some(host);
     }
 
     /// One frame of `conn`'s open screen, drawn now and sent if it changed; a screen whose
