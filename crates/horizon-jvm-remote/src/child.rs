@@ -178,6 +178,15 @@ impl Drop for Listener {
     }
 }
 
+/// The variables that move a process's OpenGL and Vulkan onto a laptop's discrete GPU (NVIDIA
+/// PRIME render offload, Mesa's `DRI_PRIME`).
+const OFFLOAD_VARIABLES: [&str; 4] = [
+    "__NV_PRIME_RENDER_OFFLOAD",
+    "__GLX_VENDOR_LIBRARY_NAME",
+    "__VK_LAYER_NV_optimus",
+    "DRI_PRIME",
+];
+
 /// Starts the child and waits for its hello.
 pub fn spawn(config: &Config) -> Result<Child, String> {
     std::fs::create_dir_all(&config.dir).map_err(|e| format!("{}: {e}", config.dir.display()))?;
@@ -202,6 +211,16 @@ pub fn spawn(config: &Config) -> Result<Child, String> {
                 .args(args)
                 .env("HORIZON_REMOTE_CONNECT", listener.address())
                 .env("HORIZON_REMOTE_RUNTIME", &config.runtime);
+        }
+    }
+    // The runtimes' own OpenGL (a 1.20.1 client's hidden window, drawing mods' items, mobs
+    // and HUDs each tick) stays off the game's GPU: on a laptop the game is offloaded to the
+    // discrete GPU, and a second context on it each tick made the game's frames reach the
+    // screen late (shader animations stuttered, VSync halved the rate). Without the offload
+    // variables OpenGL takes the GPU the display runs on. `HORIZON_JAVA_SAME_GPU=1` keeps them.
+    if std::env::var("HORIZON_JAVA_SAME_GPU").as_deref() != Ok("1") {
+        for name in OFFLOAD_VARIABLES {
+            command.env_remove(name);
         }
     }
     command
