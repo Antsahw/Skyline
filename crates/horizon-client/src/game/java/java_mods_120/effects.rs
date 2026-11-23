@@ -225,7 +225,7 @@ impl Game<'_> {
             };
             self.lan_send_particles(QueuedParticle {
                 dimension,
-                options,
+                options: options.into(),
                 state,
                 at: p.pos,
                 spread: p.spread,

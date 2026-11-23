@@ -67,7 +67,7 @@ impl Game<'_> {
             );
             self.lan_send_particles(super::super::lan_particles::QueuedParticle {
                 dimension: self.dim.id(),
-                options: indicator,
+                options: indicator.into(),
                 state: None,
                 at,
                 spread: [0.1, 0.0, 0.1],

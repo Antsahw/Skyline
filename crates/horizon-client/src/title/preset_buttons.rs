@@ -15,6 +15,7 @@ impl Title {
                     label: String::new(),
                     enabled: true,
                     id: mod_menu::BUTTON_ID,
+                    agent_id: None,
                     icon: None,
                     trailing: None,
                     action: None,
