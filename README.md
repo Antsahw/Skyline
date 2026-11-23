@@ -7,7 +7,7 @@
   <img src="https://img.shields.io/badge/Fabric-1.20.1-8FB8A8" alt="Fabric 1.20.1">
   <img src="https://img.shields.io/badge/status-beta-F0795A" alt="Beta">
   <img src="https://img.shields.io/badge/platform-Linux%20%7C%20Windows-2A2470" alt="Linux and Windows">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-3B2F7E" alt="MIT license"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-LGPL--3.0-3B2F7E" alt="LGPL-3.0 license"></a>
 </p>
 
 <p align="center">
@@ -27,8 +27,8 @@ Two bridges, side by side in the same game:
 
 | | Mods for 26.3 | Mods for 1.20.1 |
 |---|---|---|
-| Folder | `mods-java/` | `mods-java-1.20.1/` |
-| Feature | `java-mods` | `java-mods-120` |
+| Folder | `mods-java/` | `mods-java-1.20.1/` (Fabric), `mods-java-forge-1.20.1/` (Forge) |
+| Feature | `java-mods` (`java-mods-dev` from source) | `java-mods-120` |
 | Runs in | Horizon's own process | a JVM of its own |
 | State | beta, 39 of the top 60 mods play | early: blocks place, tick and break; no mod screens yet |
 
@@ -62,10 +62,19 @@ Then steps 2–4 above. Start a self-built launcher with `HORIZON_LAUNCHER_NO_SE
 ## Run it from source
 
 The launcher above is the easy path for 26.3 mods. This is the developer path, and the only way
-to run **1.20.1** mods today.
+to run **1.20.1** mods (Fabric and Forge) today.
 
-**You need:** a copy of Minecraft: Java Edition you own, Java 25 (a JDK, not just a runtime),
-Rust, and on Linux `libasound2-dev` and `libudev-dev`.
+### Requirements
+
+| What | Why |
+|---|---|
+| Minecraft: Java Edition you own, 26.3 played once in the official launcher | Horizon's resources are built from your install |
+| [Rust](https://rustup.rs) (stable) | builds the game |
+| Java 25 **JDK** (not just a runtime) | runs the 26.3 mods and the Fabric 1.20.1 runtime, builds the bridge's jars |
+| Java 21 or 17 | runs the **Forge** 1.20.1 runtime (its ModLauncher can't read newer classes); found in `/usr/lib/jvm/`, or set `HORIZON_FORGE_JAVA_HOME` |
+| Python 3 | the fetch scripts |
+| Linux: `libasound2-dev`, `libudev-dev` (Debian/Ubuntu names) | audio and controllers |
+| ~30 GB of free disk, 16 GB of RAM recommended | the build, the caches and three JVMs |
 
 **1. Build Horizon's resources from your own Minecraft install.** Nothing here ships Mojang's
 files, so this step reads them off your machine:
@@ -75,41 +84,65 @@ cargo run --release -p horizon-prepare -- --prepare      # writes .local/horizon
 cargo run --release -p horizon-prepare -- sounds         # optional: sounds aren't in --prepare
 ```
 
-Without the second line the game starts fine and says `no sounds in …: they were not copied
-from your Minecraft install`. That's the warning telling you to run it.
+Run `--prepare` again after pulling a new Horizon: when a newer game needs data the old prepare
+didn't write, it stops with `… Missing: re-run horizon-prepare`.
 
-**2. Fetch the 1.20.1 runtime** (skip if you only want 26.3 mods). This downloads Mojang's
-1.20.1 client and the Fabric stack, hash-pinned, into `~/.cache/horizon-120` — outside the repo:
+**2. Fetch and build the 1.20.1 runtimes** (skip if you only want 26.3 mods). This downloads
+Mojang's 1.20.1 client, the Fabric stack and Forge 47.4, hash-pinned, into `~/.cache/horizon-120`,
+outside the repo:
 
 ```sh
-python3 -I tools/java_bridge/fetch120.py
-tools/java_bridge/build120.sh                            # builds the bridge's own Java jar
+python3 -I tools/java_bridge/fetch120.py                 # 1.20.1 client + Fabric
+python3 -I tools/java_bridge/fetch120forge.py            # Forge 1.20.1 (only for Forge mods)
+tools/java_bridge/build120.sh                            # the bridge's Fabric 1.20.1 jar
+tools/java_bridge/build120forge.sh                       # the bridge's Forge 1.20.1 jar
 ```
 
-Re-run `build120.sh` whenever anything under `crates/horizon-jvm/java/` changes.
+Re-run both `build120*.sh` whenever anything under `crates/horizon-jvm/java/` changes.
 
-**3. Put the mods where each bridge looks.** Both folders sit in your game folder — the
-directory you run the game from, or whatever you pass to `--game-dir`:
+**3. Put the mods where each bridge looks.** The folders sit in your game folder: the directory
+you run the game from, or whatever you pass to `--game-dir`:
 
 ```
-mods-java/            Fabric 26.3 jars        (feature java-mods)
-mods-java-1.20.1/     Fabric 1.20.1 jars      (feature java-mods-120)
+mods-java/                 Fabric 26.3 jars
+mods-java-1.20.1/          Fabric 1.20.1 jars
+mods-java-forge-1.20.1/    Forge 1.20.1 jars
 ```
 
 Put each mod's **dependencies** in beside it, exactly as you would for a normal install: Fabric
-API for that version, and anything the mod lists (Fabric Language Kotlin, for instance).
-Libraries bundled *inside* a mod's jar are found on their own — you don't unpack anything.
-An empty folder, or a missing one, simply means that bridge starts nothing.
+API for that version, and anything the mod lists (Fabric Language Kotlin, Architectury, Balm…).
+Libraries bundled *inside* a mod's jar are found on their own; you don't unpack anything.
+An empty folder, or a missing one, simply means that runtime starts nothing.
 
-**4. Build and play.** Both bridges can be on at once:
+**4. Build and play.** The game is the `horizon-client` binary of the `horizon-game` package;
+the bridges are features of the `horizon-client` library:
 
 ```sh
-cargo build --profile fast -p horizon-client --features java-mods,java-mods-120
-./target/fast/horizon-client --resources .local/horizon-client/26.3 --world MyWorld
+HORIZON_JAVA_MODS=1 cargo run --profile fast -p horizon-game --bin horizon-client \
+  --features horizon-client/java-mods-dev,horizon-client/java-mods-120 -- \
+  --resources .local/horizon-client/26.3 --world MyWorld
 ```
 
-Drop either feature if you only want one side. `--profile fast` is optimised and quick to link;
-it's what to play on.
+- `java-mods-dev` with `HORIZON_JAVA_MODS=1` runs the 26.3 mods from `mods-java/` (without the
+  variable, a source build leaves them to the launcher); `java-mods-120` runs both 1.20.1 ones.
+  Drop either feature if you only want one side; with neither, it is plain Horizon.
+- `--profile fast` is optimised and quick to link; it's what to play on. `--release` is slower
+  to build and a little faster.
+- Building only `-p horizon-client` builds the library, not the game: run through
+  `-p horizon-game` as above, or `./target/fast/horizon-client` after a `cargo build` of it.
+
+**Laptops with two GPUs (Linux).** Vulkan already asks for the fast GPU; if it still picks the
+integrated one, start it with NVIDIA's offload variables (or `prime-run`):
+
+```sh
+__NV_PRIME_RENDER_OFFLOAD=1 __VK_LAYER_NV_optimus=NVIDIA_only __GLX_VENDOR_LIBRARY_NAME=nvidia \
+  HORIZON_JAVA_MODS=1 cargo run --profile fast -p horizon-game --bin horizon-client …
+```
+
+The 1.20.1 runtimes' own OpenGL is kept on the display's GPU (`HORIZON_JAVA_SAME_GPU=1` puts it
+on the game's). On NVIDIA with Wayland, Horizon waits for each window image to come back
+before drawing, which avoids a driver crash while recording the screen but costs frames with
+VSync off: `HORIZON_ACQUIRE_FENCE=0` turns that wait off.
 
 **What to expect on the first start.** Each bridge converts your jars into content Horizon can
 load — blocks, items, models, recipes — once per set of jars. That takes a few minutes and is
@@ -121,14 +154,17 @@ runtime then boots in the background, and the game says so:
 1.20.1 mods: their code runs
 ```
 
-Clicks on a 1.20.1 mod's blocks do nothing until that second line appears.
+Clicks on a 1.20.1 mod's blocks do nothing until that second line appears. The conversion
+redoes itself when the jars change, or when a new Skyline changes its format.
 
 The long version of all of this — building the launcher, running both bridges' tests, and what
 to do when a fix seems to do nothing — is in **[docs/skyline-dev.md](docs/skyline-dev.md)**.
 Note the launcher is 26.3 only: 1.20.1 mods are run from source, as above.
 
 **When something goes wrong.** `HORIZON_120_TRACE=1` turns on the 1.20.1 bridge's tracing: what
-it routed, what the mods answered, what shape they gave a block. Delete
+it routed, what the mods answered, what shape they gave a block; `HORIZON_120_TIMING=1` prints
+how long the game waits on the runtimes. `HORIZON_PROFILE=$PWD/prof` records a profile of the
+run (add `HORIZON_GPU_PASS_DETAIL=1` for the GPU's passes), read with `horizon-perf`. Delete
 `.horizon-cache/mod-content` to force the conversion to run again. Report a bug with the mod
 list and the full log.
 
@@ -207,6 +243,6 @@ bridges load: [NOTICE.md](NOTICE.md).
 
 ## Licence
 
-MIT, like both projects before it ([LICENSE](LICENSE)) — the copyright notice stays with the
-code. Mods keep their own licences and are never included: you bring the jars you downloaded.
+LGPL-3.0-or-later, like Horizon since it moved from MIT ([LICENSE](LICENSE); the GPL text
+it builds on is in [LICENSES/](LICENSES)). Code that came under MIT keeps its notice. Mods keep their own licences and are never included: you bring the jars you downloaded.
 No Minecraft code, assets or data are in this repository, and none may be added.

@@ -14,10 +14,11 @@ today; "play with both" means running the binary yourself, which is below.
 | | |
 |---|---|
 | Rust | stable, with the repo's toolchain |
-| Java | **a JDK 25**, not a runtime — both bridges compile Java |
+| Java | **a JDK 25**, not a runtime — both bridges compile Java; plus a **Java 21 or 17** for the Forge 1.20.1 runtime (`/usr/lib/jvm/…`, or `HORIZON_FORGE_JAVA_HOME`) |
+| Python | 3, for the fetch scripts |
 | Linux packages | `libasound2-dev libudev-dev`; the launcher also wants `libxkbcommon-x11-dev` (Fedora: `alsa-lib-devel systemd-devel libxkbcommon-x11-devel`, and `java-25-openjdk-devel`) |
 | Minecraft | your own copy of Java Edition, played once in the official launcher |
-| Disk | ~10 GB for a full build, plus the caches |
+| Disk, RAM | ~30 GB for a full build and the caches; 16 GB of RAM recommended (three JVMs beside the game) |
 
 Point `JAVA_HOME` (or `HORIZON_JAVA_HOME`) at the JDK if it isn't your default.
 
@@ -32,27 +33,38 @@ cargo run --release -p horizon-prepare -- --prepare      # -> .local/horizon-cli
 cargo run --release -p horizon-prepare -- sounds         # optional, not part of --prepare
 ```
 
+Run `--prepare` again after an upstream sync: a newer game that needs data the old prepare
+didn't write stops with `… Missing: re-run horizon-prepare`.
+
 ## 2. The 1.20.1 runtime
 
-Only needed for 1.20.1 mods. Downloads Mojang's 1.20.1 client and the Fabric stack, every file
-pinned by hash, into `~/.cache/horizon-120` — outside the repository:
+Only needed for 1.20.1 mods. Downloads Mojang's 1.20.1 client, the Fabric stack and Forge 47.4,
+every file pinned by hash, into `~/.cache/horizon-120` (`HORIZON_120_CACHE`) — outside the
+repository:
 
 ```sh
-python3 -I tools/java_bridge/fetch120.py
-tools/java_bridge/build120.sh
+python3 -I tools/java_bridge/fetch120.py                 # client + Fabric
+python3 -I tools/java_bridge/fetch120forge.py            # Forge, only for Forge mods
+tools/java_bridge/build120.sh                            # the bridge's Fabric jar
+tools/java_bridge/build120forge.sh                       # the bridge's Forge jar
 ```
 
-`build120.sh` compiles the bridge's own Java side (`crates/horizon-jvm/java/platform120/`).
-**Re-run it after any change under `crates/horizon-jvm/java/`** — a Rust-only rebuild will
+The `build120*.sh` scripts compile the bridge's own Java side (`crates/horizon-jvm/java/platform120/`).
+**Re-run them after any change under `crates/horizon-jvm/java/`** — a Rust-only rebuild will
 happily run yesterday's Java and the symptom looks like your fix doing nothing.
 
 ## 3. Build the game
 
+The game is the `horizon-client` binary of the **`horizon-game`** package; the bridges are
+features of the `horizon-client` library, named through it:
+
 ```sh
-cargo build --profile fast -p horizon-client --features java-mods,java-mods-120
+cargo build --profile fast -p horizon-game --bin horizon-client \
+  --features horizon-client/java-mods-dev,horizon-client/java-mods-120
 ```
 
-Drop either feature for one bridge only. `--profile fast` is optimised and links quickly: it is
+`-p horizon-client` alone builds the library and no binary: `target/fast/horizon-client` then
+stays an older build. Drop either feature for one bridge only. `--profile fast` is optimised and links quickly: it is
 what to play on. Plain `--release` is slower to link for no gameplay gain; `--debug` is far too
 slow to play.
 
@@ -60,11 +72,12 @@ Building both bridges needs a JDK for `horizon-jvm` (26.3, JNI) as well as the 1
 
 ## 4. Mods, both versions at once
 
-Two folders in the game folder — where you run the binary, or `--game-dir`:
+Folders in the game folder — where you run the binary, or `--game-dir`:
 
 ```
-mods-java/            Fabric 26.3 jars
-mods-java-1.20.1/     Fabric 1.20.1 jars
+mods-java/                 Fabric 26.3 jars
+mods-java-1.20.1/          Fabric 1.20.1 jars
+mods-java-forge-1.20.1/    Forge 1.20.1 jars (a JVM of their own, beside Fabric's)
 ```
 
 Each folder needs that version's dependencies beside the mod, exactly as a normal install
@@ -102,7 +115,8 @@ For your own testing, build with `java-mods-dev` instead (everything `java-mods`
 developer's switch) and turn the switch on:
 
 ```sh
-HORIZON_JAVA_MODS=1 cargo run --profile fast -p horizon-client --features java-mods-dev,java-mods-120 -- \
+HORIZON_JAVA_MODS=1 cargo run --profile fast -p horizon-game --bin horizon-client \
+    --features horizon-client/java-mods-dev,horizon-client/java-mods-120 -- \
     --resources .local/horizon-client/26.3 --world MyWorld
 ```
 
