@@ -88,6 +88,9 @@ fn uses_registered_payload_codec(channel: &str, play: bool, clientbound: bool) -
         crate::custom_book::CHANNEL => play || clientbound,
         // Configuration both ways (the capability), play clientbound only.
         crate::viewed_levels::CHANNEL => !play || clientbound,
+        // The Java bridges' own channels, between Horizon's server and its game: their mobs'
+        // meshes run to megabytes a tick, no vanilla client ever sees them.
+        c if c.starts_with("horizon:java120_") || c.starts_with("horizon:java_") => play,
         _ => false,
     }
 }
